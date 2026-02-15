@@ -1,0 +1,86 @@
+<h1 class="text-xl font-bold text-white mb-6">Invites</h1>
+
+<!-- Create invite form -->
+<div class="bg-gray-800 rounded-lg px-4 py-4 mb-6">
+  <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">Generate a New Invite</h2>
+  <%= form_tag server_settings_create_invite_path(@server), method: :post, class: "flex flex-wrap items-end gap-3" do %>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Expire After</label>
+      <select name="expires_in" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-orange-500">
+        <option value="">Never</option>
+        <option value="30m">30 minutes</option>
+        <option value="1h">1 hour</option>
+        <option value="6h">6 hours</option>
+        <option value="12h">12 hours</option>
+        <option value="1d">1 day</option>
+        <option value="7d">7 days</option>
+      </select>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">Max Uses</label>
+      <select name="max_uses" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-orange-500">
+        <option value="">Unlimited</option>
+        <option value="1">1 use</option>
+        <option value="5">5 uses</option>
+        <option value="10">10 uses</option>
+        <option value="25">25 uses</option>
+        <option value="50">50 uses</option>
+        <option value="100">100 uses</option>
+      </select>
+    </div>
+    <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm">
+      Generate Invite
+    </button>
+  <% end %>
+</div>
+
+<!-- Active invites list -->
+<div class="bg-gray-800 rounded-lg overflow-hidden">
+  <div class="px-4 py-3 border-b border-gray-700">
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">Active Invites (<%= @invites.size %>)</h2>
+  </div>
+
+  <% if @invites.any? %>
+    <div class="divide-y divide-gray-700">
+      <% @invites.each do |invite| %>
+        <div class="px-4 py-3 flex items-center justify-between gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-sm text-gray-300 font-mono select-all truncate"><%= request.base_url %>/invite/<%= invite.code %></span>
+              <button type="button" onclick="navigator.clipboard.writeText('<%= request.base_url %>/invite/<%= invite.code %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-orange-400 hover:text-orange-300 text-xs font-semibold shrink-0">Copy</button>
+            </div>
+            <div class="flex items-center gap-3 text-xs text-gray-500">
+              <span>by <%= invite.creator.username %></span>
+              <span><%= time_ago_in_words(invite.created_at) %> ago</span>
+              <span>
+                <% if invite.max_uses %>
+                  <%= invite.uses_count %>/<%= invite.max_uses %> uses
+                <% else %>
+                  <%= invite.uses_count %> uses
+                <% end %>
+              </span>
+              <% if invite.expires_at %>
+                <span>
+                  <% if invite.expired? %>
+                    Expired
+                  <% else %>
+                    expires in <%= time_ago_in_words(invite.expires_at) %>
+                  <% end %>
+                </span>
+              <% else %>
+                <span>Never expires</span>
+              <% end %>
+            </div>
+          </div>
+          <% if invite.creator == current_user || @current_membership.has_permission?("manage_invites") %>
+            <%= button_to "Revoke", server_settings_destroy_invite_path(@server, invite_id: invite.id), method: :delete, class: "text-red-400 hover:text-red-300 text-xs font-semibold cursor-pointer shrink-0", data: { turbo_confirm: "Revoke this invite?" } %>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <div class="px-4 py-8 text-center text-gray-500 text-sm">
+      No active invites. Create one above to invite people to your server.
+    </div>
+  <% end %>
+</div>

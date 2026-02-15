@@ -1,0 +1,35 @@
+<h1 class="text-xl font-bold text-white mb-6">Members (<%= @memberships.count %>)</h1>
+
+<div class="space-y-2">
+  <% @memberships.each do |membership| %>
+    <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
+      <div class="flex items-center">
+        <div class="w-10 h-10 rounded-full bg-orange-600 flex items-center justify-center text-sm font-bold text-white">
+          <%= membership.user.username[0].upcase %>
+        </div>
+        <div class="ml-3">
+          <p class="text-sm text-white font-medium"><%= membership.user.display_name_for(@server) %></p>
+          <p class="text-xs text-gray-500"><%= membership.user.tag %> • Joined <%= membership.joined_at&.strftime("%b %d, %Y") %></p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <span class="text-xs px-2 py-1 rounded-full <%= membership.role&.owner? ? 'bg-yellow-600/20 text-yellow-400' : membership.role&.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
+          <%= membership.role&.name || '@everyone' %>
+        </span>
+        <% if !membership.owner? && @server.owner == current_user %>
+          <div class="flex gap-1">
+            <% admin_role = @server.roles.find_by(name: "Admin") %>
+            <% if membership.role != admin_role %>
+              <%= button_to "⬆ Promote", server_settings_update_member_path(@server, membership), params: { role_id: admin_role&.id }, method: :patch, class: "text-xs text-orange-400 hover:text-orange-300 cursor-pointer" %>
+            <% else %>
+              <% everyone_role = @server.roles.find_by(name: "@everyone") %>
+              <%= button_to "⬇ Demote", server_settings_update_member_path(@server, membership), params: { role_id: everyone_role&.id }, method: :patch, class: "text-xs text-gray-400 hover:text-gray-300 cursor-pointer" %>
+            <% end %>
+            <%= button_to "Kick", server_settings_kick_member_path(@server, membership), method: :delete, data: { turbo_confirm: "Kick #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
+            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: membership.user.public_id }, method: :post, data: { turbo_confirm: "Ban #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>

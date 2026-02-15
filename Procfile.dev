@@ -1,0 +1,4 @@
+web: env RUBY_DEBUG_OPEN=true bin/rails server -b 0.0.0.0 -p 3005
+js: bun run build --watch --hot
+css: bunx @tailwindcss/cli -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/tailwind.css --watch=always
+worker: bundle exec sidekiq

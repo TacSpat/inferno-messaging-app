@@ -1,0 +1,22 @@
+<% mention_count = current_user.notifications.unread.for_server(server.id).count %>
+<% has_unread = server.channels.any? { |ch| ch.unread_for?(current_user) } %>
+<a href="<%= server_channel_path(server, server.channels.ordered.first) %>"
+   data-server-id="<%= server.public_id %>"
+   class="group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all duration-200
+          <%= active ? 'bg-orange-600 rounded-xl' : 'bg-gray-700 hover:bg-orange-600 hover:rounded-xl' %>">
+  <% if server.icon.attached? %>
+    <%= image_tag server.icon, class: 'w-full h-full rounded-inherit object-cover' %>
+  <% else %>
+    <span class="text-white font-semibold text-sm"><%= server.name.split.map(&:first).join[0..1].upcase %></span>
+  <% end %>
+  <% if active %>
+    <div class="absolute left-0 top-1/2 -translate-x-[22px] -translate-y-1/2 w-1 h-10 bg-white rounded-r-full"></div>
+  <% elsif has_unread && mention_count == 0 %>
+    <div class="server-unread-pill absolute left-0 top-1/2 -translate-x-[22px] -translate-y-1/2 w-1 h-2 bg-white rounded-r-full"></div>
+  <% end %>
+  <% if mention_count > 0 %>
+    <div class="mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950">
+      <%= mention_count > 99 ? '99+' : mention_count %>
+    </div>
+  <% end %>
+</a>

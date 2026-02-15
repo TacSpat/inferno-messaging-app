@@ -1,0 +1,36 @@
+<div class="flex items-center justify-center min-h-screen bg-gray-900">
+  <div class="w-full max-w-md bg-gray-800 rounded-lg shadow-xl p-8">
+    <div class="text-center mb-6">
+      <h1 class="text-3xl font-bold text-white">🔥 Inferno</h1>
+      <p class="text-gray-400 mt-1">Welcome back!</p>
+    </div>
+
+    <%= form_for(resource, as: resource_name, url: session_path(resource_name), html: { class: "space-y-4" }) do |f| %>
+      <div>
+        <%= f.label :email, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.email_field :email, autofocus: true, autocomplete: "email", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 text-sm" %>
+      </div>
+
+      <div>
+        <%= f.label :password, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.password_field :password, autocomplete: "current-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 text-sm" %>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <label class="flex items-center">
+          <%= f.check_box :remember_me, class: "rounded bg-gray-900 border-gray-700 text-orange-600 focus:ring-orange-500" %>
+          <span class="ml-2 text-sm text-gray-400">Remember me</span>
+        </label>
+        <%= link_to "Forgot password?", new_password_path(resource_name), class: "text-sm text-orange-400 hover:underline" %>
+      </div>
+
+      <div>
+        <%= f.submit "Log In", class: "w-full bg-orange-600 hover:bg-orange-700 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+      </div>
+    <% end %>
+
+    <p class="text-center text-sm text-gray-400 mt-4">
+      Need an account? <%= link_to "Register", new_registration_path(resource_name), class: "text-orange-400 hover:underline" %>
+    </p>
+  </div>
+</div>
