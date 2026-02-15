@@ -51,6 +51,9 @@ group :development, :test do
 
   # Omakase Ruby styling [https://github.com/rails/rubocop-rails-omakase/]
   gem "rubocop-rails-omakase", require: false
+
+  gem "rspec-rails", "~> 7.1"
+  gem "factory_bot_rails", "~> 6.4"
 end
 
 group :development do
@@ -62,6 +65,11 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
+
+  gem "cucumber-rails", "~> 3.1", require: false
+  gem "database_cleaner-active_record", "~> 2.2"
+  gem "webmock", "~> 3.24"
+  gem "shoulda-matchers", "~> 6.4"
 end
 
 gem "devise", "~> 5.0"
@@ -78,3 +86,7 @@ gem "letter_opener", "~> 1.10", :group => :development
 gem "letter_opener_web", "~> 3.0", :group => :development
 
 gem "paper_trail", "~> 17.0"
+
+gem "nostr_ruby", "~> 0.2"
+gem "rack-attack", "~> 6.7"
+gem "fiddle"

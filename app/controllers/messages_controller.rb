@@ -12,7 +12,7 @@ class MessagesController < ApplicationController
 
     if @message.save
       # Preload associations for rendering to avoid N+1
-      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :role }).call
+      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :roles }).call
       # Broadcast via ActionCable
       ChannelChatChannel.broadcast_to(
         @channel,
@@ -59,7 +59,7 @@ class MessagesController < ApplicationController
     end
     if @message.update(message_params)
       # Preload associations for rendering to avoid N+1
-      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :role }).call
+      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :roles }).call
       ChannelChatChannel.broadcast_to(
         @channel,
         {
@@ -77,6 +77,20 @@ class MessagesController < ApplicationController
   def destroy
     authorize @message
     message_public_id = @message.public_id
+
+    # If shared channel, publish NIP-29 delete event
+    if @channel.shared?
+      event_log = NostrEventLog.find_by(message: @message)
+      if event_log
+        NostrGroupModerationJob.perform_later(
+          :delete_event,
+          channel_id: @channel.id,
+          moderator_id: current_user.id,
+          target_event_id: event_log.event_id
+        )
+      end
+    end
+
     @message.destroy
     ChannelChatChannel.broadcast_to(
       @channel,

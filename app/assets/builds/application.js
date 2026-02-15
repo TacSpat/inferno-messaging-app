@@ -8911,6 +8911,7 @@ class message_form_controller_default extends Controller {
     this.fileList = new DataTransfer;
     this.typingUsers = new Map;
     this._lastTypingSent = 0;
+    this._submitting = false;
     const serverId = document.querySelector("[data-current-server-id]")?.dataset?.currentServerId;
     if (serverId) {
       try {
@@ -9174,17 +9175,21 @@ class message_form_controller_default extends Controller {
         return;
       }
       event.preventDefault();
+      if (this._submitting)
+        return;
       const trimmed = content.trim();
       const fileInput = this.element.querySelector("input[type=file]");
       const hasFiles = fileInput && fileInput.files.length > 0;
       if (!trimmed && !hasFiles)
         return;
+      this._submitting = true;
       const form = event.target.closest("form");
       if (form)
         form.requestSubmit();
     }
   }
   handleSubmit(event) {
+    this._submitting = false;
     if (event.detail.success) {
       this.inputTarget.value = "";
       this.updateHighlight();
@@ -9237,10 +9242,14 @@ class message_form_controller_default extends Controller {
           scrollCtrl.showNewMessageBar();
         } else {
           messagesDiv.insertAdjacentHTML("beforeend", data.html);
+          const allMsgs = messagesDiv.querySelectorAll("[data-message-id]");
+          if (allMsgs.length > 0) {
+            this.applyGrouping(allMsgs[allMsgs.length - 1]);
+          }
           if (scrollCtrl) {
-            const allMsgs = messagesDiv.querySelectorAll("[id^='message_']");
-            if (allMsgs.length > 0) {
-              scrollCtrl.newestMessageIdValue = allMsgs[allMsgs.length - 1].id.replace("message_", "");
+            const allMsgIds = messagesDiv.querySelectorAll("[id^='message_']");
+            if (allMsgIds.length > 0) {
+              scrollCtrl.newestMessageIdValue = allMsgIds[allMsgIds.length - 1].id.replace("message_", "");
             }
           }
         }
@@ -9287,6 +9296,35 @@ class message_form_controller_default extends Controller {
         this._renderTypingIndicator();
         break;
       }
+    }
+  }
+  applyGrouping(messageEl) {
+    const prev = messageEl.previousElementSibling;
+    if (!prev || !prev.dataset.messageId)
+      return;
+    const sameAuthor = messageEl.dataset.authorId === prev.dataset.authorId;
+    const isSystem = messageEl.dataset.systemMessage === "true";
+    const prevIsSystem = prev.dataset.systemMessage === "true";
+    const isReply = messageEl.dataset.isReply === "true";
+    const prevIsReply = prev.dataset.isReply === "true";
+    if (!sameAuthor || isSystem || prevIsSystem || isReply || prevIsReply)
+      return;
+    const ts = new Date(messageEl.dataset.timestamp);
+    const prevTs = new Date(prev.dataset.timestamp);
+    if (ts - prevTs >= 300000)
+      return;
+    messageEl.classList.add("message-grouped");
+    const avatarDiv = messageEl.querySelector(":scope > .shrink-0");
+    if (avatarDiv) {
+      const time = ts.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      avatarDiv.innerHTML = `<span class="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100">${time}</span>`;
+      avatarDiv.className = "shrink-0 mt-0.5 mr-4 w-10 flex items-center justify-center";
+    }
+    const contentDiv = messageEl.querySelector(":scope > .flex-1");
+    if (contentDiv) {
+      const header = contentDiv.querySelector(":scope > .flex.items-baseline");
+      if (header)
+        header.style.display = "none";
     }
   }
   toggleReaction(event) {
@@ -9394,8 +9432,17 @@ class scroll_position_controller_default extends Controller {
     this.newMessageCount = 0;
     this._initializing = true;
     this._lastScrollTop = 0;
+    this._lastAnchorId = null;
     this._loadingOlder = false;
     this._loadingNewer = false;
+    this._onBeforeFrameRender = (e) => {
+      if (e.target.id === "main-content") {
+        const pos = this.element.scrollTop || this._lastScrollTop;
+        if (pos > 0)
+          this._forceSave(pos);
+      }
+    };
+    document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender);
     this._onLinkClick = (e) => {
       const a = e.target.closest("a[href]");
       if (!a)
@@ -9423,59 +9470,20 @@ class scroll_position_controller_default extends Controller {
         window.Turbo.visit(url);
       }
     };
-    document.addEventListener("click", this._onLinkClick);
+    document.addEventListener("click", this._onLinkClick, true);
     const pendingJump = sessionStorage.getItem("jump_to_message");
     if (pendingJump) {
       sessionStorage.removeItem("jump_to_message");
-      this.waitForMessage(pendingJump, (el) => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        this.highlightMessage(el, true);
-        setTimeout(() => {
-          this._initializing = false;
-        }, 500);
-      });
-      return;
-    }
-    const hash = window.location.hash;
-    const messageMatch = hash.match(/^#message[-_]([a-zA-Z0-9]+)$/);
-    if (messageMatch) {
-      history.replaceState(null, "", window.location.pathname + window.location.search);
-      this.waitForMessage(messageMatch[1], (el) => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-        this.highlightMessage(el, true);
-        setTimeout(() => {
-          this._initializing = false;
-        }, 500);
-      });
+      this._jumpToMessage(pendingJump);
     } else {
-      this.waitForContent(() => {
-        const savedAnchor = this.getSavedAnchor();
-        if (savedAnchor) {
-          const el = document.getElementById(`message_${savedAnchor}`);
-          if (el) {
-            el.scrollIntoView({ block: "center" });
-            setTimeout(() => {
-              this._initializing = false;
-            }, 200);
-          } else {
-            this.loadAroundMessage(savedAnchor);
-            return;
-          }
-        } else {
-          const saved = this.getSavedPosition();
-          if (saved !== null && saved > 0) {
-            this.element.scrollTop = saved;
-            if (this.element.scrollTop < saved - 50) {
-              this.scrollToBottom();
-            }
-          } else {
-            this.scrollToBottom();
-          }
-          setTimeout(() => {
-            this._initializing = false;
-          }, 200);
-        }
-      });
+      const hash = window.location.hash;
+      const messageMatch = hash.match(/^#message[-_]([a-zA-Z0-9]+)$/);
+      if (messageMatch) {
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+        this._jumpToMessage(messageMatch[1]);
+      } else {
+        this._restoreScroll();
+      }
     }
     this._onScroll = () => {
       this._lastScrollTop = this.element.scrollTop;
@@ -9504,11 +9512,28 @@ class scroll_position_controller_default extends Controller {
     this.observer = new MutationObserver((mutations) => {
       if (this._initializing || this._suppressObserver)
         return;
-      const hasNewMessages = mutations.some((m) => Array.from(m.addedNodes).some((n) => n.nodeType === 1 && n.id?.startsWith("message_")));
-      if (!hasNewMessages)
+      const newMessages = [];
+      for (const m of mutations) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType === 1 && n.id?.startsWith("message_"))
+            newMessages.push(n);
+        }
+      }
+      if (!newMessages.length)
         return;
-      if (this.isNearBottom()) {
+      const wasNearBottom = this.isNearBottom();
+      if (wasNearBottom) {
         this.scrollToBottom();
+        for (const msg of newMessages) {
+          msg.querySelectorAll("img").forEach((img) => {
+            if (!img.complete) {
+              img.addEventListener("load", () => {
+                if (this.isNearBottom())
+                  this.scrollToBottom();
+              }, { once: true });
+            }
+          });
+        }
       } else {
         this.showNewMessageBar();
       }
@@ -9517,53 +9542,61 @@ class scroll_position_controller_default extends Controller {
     this.element.querySelectorAll("img").forEach((img) => {
       if (!img.complete) {
         img.addEventListener("load", () => {
-          if (!this._initializing && this.isNearBottom())
+          if (this._initializing)
+            return;
+          if (this.isNearBottom()) {
             this.scrollToBottom();
+          } else if (this._restoredAnchorEl?.isConnected) {
+            this._restoredAnchorEl.scrollIntoView({ block: "center" });
+            this._lastScrollTop = this.element.scrollTop;
+          }
         }, { once: true });
       }
     });
   }
-  waitForContent(callback) {
-    const tryRestore = () => {
-      const images = Array.from(this.element.querySelectorAll("img")).filter((i) => !i.complete);
-      if (images.length > 0) {
-        let loaded = 0;
-        let called = false;
-        const done = () => {
-          if (called)
-            return;
-          if (++loaded >= images.length) {
-            called = true;
-            requestAnimationFrame(() => requestAnimationFrame(() => callback()));
-          }
-        };
-        images.forEach((i) => i.addEventListener("load", done, { once: true }));
-        images.forEach((i) => i.addEventListener("error", done, { once: true }));
-        setTimeout(() => {
-          if (!called) {
-            called = true;
-            callback();
-          }
-        }, 2000);
-      } else {
-        requestAnimationFrame(() => requestAnimationFrame(() => callback()));
+  _restoreScroll() {
+    const savedAnchor = this.getSavedAnchor();
+    if (savedAnchor) {
+      const el = document.getElementById(`message_${savedAnchor}`);
+      if (el) {
+        this._restoredAnchorEl = el;
+        el.scrollIntoView({ block: "center" });
+        this._lastScrollTop = this.element.scrollTop;
+        this._finishInit();
+        return;
       }
-    };
-    if (this.element.querySelector("[id^='message_']")) {
-      tryRestore();
-      return;
+      this.clearSavedAnchor();
+      this._lastAnchorId = null;
     }
-    const obs = new MutationObserver((muts, observer) => {
-      if (this.element.querySelector("[id^='message_']")) {
-        observer.disconnect();
-        setTimeout(() => tryRestore(), 50);
-      }
+    const saved = this.getSavedPosition();
+    if (saved !== null && saved > 0) {
+      this.element.scrollTop = saved;
+      this._lastScrollTop = saved;
+    } else {
+      this.scrollToBottom();
+    }
+    this._finishInit();
+  }
+  _jumpToMessage(messageId) {
+    const el = document.getElementById(`message_${messageId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      this._lastScrollTop = this.element.scrollTop;
+      this.highlightMessage(el, true);
+      this._finishInit();
+    } else {
+      this.waitForMessage(messageId, (msgEl) => {
+        msgEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        this._lastScrollTop = this.element.scrollTop;
+        this.highlightMessage(msgEl, true);
+        this._finishInit();
+      });
+    }
+  }
+  _finishInit() {
+    requestAnimationFrame(() => {
+      this._initializing = false;
     });
-    obs.observe(this.element, { childList: true, subtree: true });
-    setTimeout(() => {
-      obs.disconnect();
-      callback();
-    }, 3000);
   }
   highlightMessage(el, afterScroll = false) {
     const doHighlight = () => {
@@ -9586,31 +9619,16 @@ class scroll_position_controller_default extends Controller {
     }
   }
   waitForMessage(messageId, callback, timeoutMs = 5000) {
-    const tryScroll = (el2) => {
-      const images = this.element.querySelectorAll("img:not([complete])");
-      const pending = Array.from(images).filter((img) => !img.complete);
-      if (pending.length > 0) {
-        let loaded = 0;
-        const check = () => {
-          if (++loaded >= pending.length)
-            setTimeout(() => callback(el2), 50);
-        };
-        pending.forEach((img) => img.addEventListener("load", check, { once: true }));
-        setTimeout(() => callback(el2), 1500);
-      } else {
-        setTimeout(() => callback(el2), 100);
-      }
-    };
     const el = document.getElementById(`message_${messageId}`);
     if (el) {
-      tryScroll(el);
+      callback(el);
       return;
     }
     const obs = new MutationObserver((mutations, observer) => {
       const el2 = document.getElementById(`message_${messageId}`);
       if (el2) {
         observer.disconnect();
-        tryScroll(el2);
+        callback(el2);
       }
     });
     obs.observe(this.element, { childList: true, subtree: true });
@@ -9618,21 +9636,27 @@ class scroll_position_controller_default extends Controller {
       obs.disconnect();
       const el2 = document.getElementById(`message_${messageId}`);
       if (el2)
-        tryScroll(el2);
+        callback(el2);
       else
         this.scrollToBottom();
     }, timeoutMs);
   }
-  disconnect() {
+  _forceSave(pos) {
     try {
-      const pos = this.element.scrollTop || this._lastScrollTop;
-      if (pos > 0)
-        this.savePosition(pos);
+      const positions = JSON.parse(sessionStorage.getItem("channel_scroll") || "{}");
+      positions[this.channelIdValue] = pos;
+      sessionStorage.setItem("channel_scroll", JSON.stringify(positions));
+      if (this._lastAnchorId) {
+        sessionStorage.setItem("channel_anchor_" + this.channelIdValue, this._lastAnchorId);
+      }
     } catch {
-      if (this._lastScrollTop > 0)
-        this.savePosition(this._lastScrollTop);
     }
-    document.removeEventListener("click", this._onLinkClick);
+  }
+  disconnect() {
+    if (this._lastScrollTop > 0)
+      this._forceSave(this._lastScrollTop);
+    document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender);
+    document.removeEventListener("click", this._onLinkClick, true);
     if (this._jumpBtn && this._jumpHandler) {
       this._jumpBtn.removeEventListener("click", this._jumpHandler);
     }
@@ -9667,14 +9691,22 @@ class scroll_position_controller_default extends Controller {
   }
   _findAnchorMessage() {
     const messages = this.element.querySelectorAll("[id^='message_']");
-    const containerTop = this.element.getBoundingClientRect().top;
+    const containerRect = this.element.getBoundingClientRect();
+    const centerY = containerRect.top + containerRect.height / 2;
+    let closest = null;
+    let closestDist = Infinity;
     for (const msg of messages) {
       const rect = msg.getBoundingClientRect();
-      if (rect.bottom > containerTop) {
-        return { element: msg, offsetTop: rect.top };
+      if (rect.bottom < containerRect.top || rect.top > containerRect.bottom)
+        continue;
+      const msgCenter = rect.top + rect.height / 2;
+      const dist = Math.abs(msgCenter - centerY);
+      if (dist < closestDist) {
+        closestDist = dist;
+        closest = { element: msg, offsetTop: rect.top };
       }
     }
-    return null;
+    return closest;
   }
   _restoreAnchor(anchor) {
     if (!anchor || !anchor.element.isConnected)
@@ -9867,33 +9899,29 @@ class scroll_position_controller_default extends Controller {
       const positions = JSON.parse(sessionStorage.getItem("channel_scroll") || "{}");
       positions[this.channelIdValue] = pos;
       sessionStorage.setItem("channel_scroll", JSON.stringify(positions));
-      if (this.hasNewerValue) {
+      if (this.isNearBottom() && !this.hasNewerValue) {
+        this.clearSavedAnchor();
+        this._lastAnchorId = null;
+      } else {
         const anchor = this._findAnchorMessage();
         if (anchor) {
-          const anchorId = anchor.element.id.replace("message_", "");
-          const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}");
-          anchors[this.channelIdValue] = anchorId;
-          sessionStorage.setItem("channel_anchors", JSON.stringify(anchors));
+          this._lastAnchorId = anchor.element.id.replace("message_", "");
+          sessionStorage.setItem("channel_anchor_" + this.channelIdValue, this._lastAnchorId);
         }
-      } else {
-        this.clearSavedAnchor();
       }
     } catch {
     }
   }
   getSavedAnchor() {
     try {
-      const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}");
-      return anchors[this.channelIdValue] ?? null;
+      return sessionStorage.getItem("channel_anchor_" + this.channelIdValue) || null;
     } catch {
       return null;
     }
   }
   clearSavedAnchor() {
     try {
-      const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}");
-      delete anchors[this.channelIdValue];
-      sessionStorage.setItem("channel_anchors", JSON.stringify(anchors));
+      sessionStorage.removeItem("channel_anchor_" + this.channelIdValue);
     } catch {
     }
   }
@@ -9963,10 +9991,8 @@ class scroll_position_controller_default extends Controller {
           }
         }, 3000);
       } else {
-        setTimeout(() => {
-          this._suppressObserver = false;
-          this._initializing = false;
-        }, 200);
+        this._suppressObserver = false;
+        this._initializing = false;
       }
     } catch (e) {
       console.error("Failed to load around message:", e);
@@ -10072,10 +10098,10 @@ class server_members_controller_default extends Controller {
       case "member_update":
         this.updateMember(data);
         break;
+      case "roles_updated":
+        this.refreshMemberList();
+        break;
     }
-  }
-  normalizeState(state) {
-    return state === "offline" ? "offline" : "online";
   }
   addMember(data) {
     if (!this.hasListTarget)
@@ -10083,18 +10109,14 @@ class server_members_controller_default extends Controller {
     const existing = this.listTarget.querySelector(`[data-user-id="${data.user_id}"]`);
     if (existing)
       return;
-    this.ensureGroupHeader("online");
-    const header = this.listTarget.querySelector('[data-status-group="online"]');
-    let sibling = header.nextElementSibling;
-    while (sibling && !sibling.hasAttribute("data-status-group")) {
-      sibling = sibling.nextElementSibling;
-    }
-    if (sibling) {
-      sibling.insertAdjacentHTML("beforebegin", data.html);
-    } else {
-      this.listTarget.insertAdjacentHTML("beforeend", data.html);
-    }
-    this.recountGroups();
+    const temp = document.createElement("div");
+    temp.innerHTML = data.html;
+    const memberEl = temp.firstElementChild;
+    if (!memberEl)
+      return;
+    const group = memberEl.getAttribute("data-member-group") || "online";
+    this.insertMemberInGroup(memberEl, group);
+    this.recountAllGroups();
   }
   removeMember(data) {
     if (!this.hasListTarget)
@@ -10102,7 +10124,7 @@ class server_members_controller_default extends Controller {
     const el = this.listTarget.querySelector(`[data-user-id="${data.user_id}"]`);
     if (el) {
       el.remove();
-      this.recountGroups();
+      this.recountAllGroups();
     }
   }
   updatePresence(data) {
@@ -10117,51 +10139,50 @@ class server_members_controller_default extends Controller {
       const colorMap = { online: "bg-green-500", idle: "bg-yellow-500", dnd: "bg-red-500", offline: "bg-gray-500" };
       dot.classList.add(colorMap[data.state] || "bg-gray-500");
     }
-    const group = this.normalizeState(data.state);
-    if (group === "offline") {
+    const isOffline = data.state === "offline" || data.state === "invisible";
+    if (isOffline) {
       el.classList.add("opacity-40");
     } else {
       el.classList.remove("opacity-40");
     }
-    this.moveToGroup(el, group);
-  }
-  ensureGroupHeader(group) {
-    let header = this.listTarget.querySelector(`[data-status-group="${group}"]`);
-    if (header)
-      return header;
-    const label = group === "online" ? "Online" : "Offline";
-    const html = `<h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2" data-status-group="${group}">${label} — 0</h3>`;
-    if (group === "online") {
-      this.listTarget.insertAdjacentHTML("afterbegin", html);
+    let targetGroup;
+    if (isOffline) {
+      targetGroup = "offline";
+      el.setAttribute("data-member-group", "offline");
     } else {
-      this.listTarget.insertAdjacentHTML("beforeend", html);
+      const roleGroup = el.getAttribute("data-role-group") || "online";
+      targetGroup = roleGroup;
+      el.setAttribute("data-member-group", roleGroup);
     }
-    return this.listTarget.querySelector(`[data-status-group="${group}"]`);
-  }
-  moveToGroup(el, group) {
-    this.ensureGroupHeader(group);
-    const header = this.listTarget.querySelector(`[data-status-group="${group}"]`);
-    let sibling = header.nextElementSibling;
-    while (sibling && !sibling.hasAttribute("data-status-group")) {
-      sibling = sibling.nextElementSibling;
-    }
-    if (sibling) {
-      sibling.before(el);
-    } else {
-      this.listTarget.appendChild(el);
-    }
-    this.recountGroups();
+    this.moveMemberToGroup(el, targetGroup);
+    this.recountAllGroups();
   }
   updateMember(data) {
     if (!this.hasListTarget)
       return;
     const el = this.listTarget.querySelector(`[data-user-id="${data.user_id}"]`);
     if (el && data.html) {
-      el.outerHTML = data.html;
+      const temp = document.createElement("div");
+      temp.innerHTML = data.html;
+      const newEl = temp.firstElementChild;
+      if (newEl) {
+        const newGroup = newEl.getAttribute("data-member-group") || "online";
+        el.outerHTML = data.html;
+        const updatedEl = this.listTarget.querySelector(`[data-user-id="${data.user_id}"]`);
+        if (updatedEl) {
+          this.moveMemberToGroup(updatedEl, newGroup);
+        }
+        this.recountAllGroups();
+      }
     }
-    document.querySelectorAll(`[data-author-id="${data.user_id}"] .text-orange-400`).forEach((nameEl) => {
-      if (data.display_name)
-        nameEl.textContent = data.display_name;
+    document.querySelectorAll(`[data-author-id="${data.user_id}"]`).forEach((msgEl) => {
+      const nameSpan = msgEl.querySelector(".font-medium.hover\\:underline");
+      if (nameSpan) {
+        if (data.display_name)
+          nameSpan.textContent = data.display_name;
+        if (data.role_color)
+          nameSpan.style.color = data.role_color;
+      }
     });
     const currentUserId = document.body.dataset.currentUserId;
     if (String(data.user_id) === String(currentUserId)) {
@@ -10176,25 +10197,148 @@ class server_members_controller_default extends Controller {
       }
     }
   }
-  recountGroups() {
-    ["online", "offline"].forEach((state) => {
-      const header = this.listTarget.querySelector(`[data-status-group="${state}"]`);
-      if (!header)
-        return;
-      let count = 0;
-      let sibling = header.nextElementSibling;
-      while (sibling && !sibling.hasAttribute("data-status-group")) {
-        if (sibling.hasAttribute("data-user-id"))
-          count++;
-        sibling = sibling.nextElementSibling;
+  async refreshMemberList() {
+    if (!this.hasListTarget)
+      return;
+    try {
+      const res = await fetch(`/servers/${this.serverIdValue}/members`, {
+        headers: { Accept: "text/html" }
+      });
+      if (res.ok) {
+        const html = await res.text();
+        const temp = document.createElement("div");
+        temp.innerHTML = html;
+        const newList = temp.querySelector("[data-server-members-target='list']");
+        if (newList) {
+          this.listTarget.innerHTML = newList.innerHTML;
+        }
       }
-      if (count === 0) {
+    } catch (err) {
+    }
+  }
+  getAllGroupHeaders() {
+    return Array.from(this.listTarget.querySelectorAll("[data-status-group]"));
+  }
+  getGroupMembers(header) {
+    const members = [];
+    let sibling = header.nextElementSibling;
+    while (sibling && !sibling.hasAttribute("data-status-group")) {
+      if (sibling.hasAttribute("data-user-id"))
+        members.push(sibling);
+      sibling = sibling.nextElementSibling;
+    }
+    return members;
+  }
+  ensureGroupHeader(group) {
+    let header = this.listTarget.querySelector(`[data-status-group="${group}"]`);
+    if (header)
+      return header;
+    const h3 = document.createElement("h3");
+    h3.className = "text-xs font-semibold uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2";
+    h3.setAttribute("data-status-group", group);
+    let position = 0;
+    if (group === "online") {
+      h3.classList.add("text-gray-400");
+      h3.textContent = "Online — 0";
+      const existingOnline = this.listTarget.querySelector('[data-status-group="online"]');
+      position = existingOnline ? parseInt(existingOnline.getAttribute("data-role-position") || "0", 10) : 0;
+    } else if (group === "offline") {
+      h3.classList.add("text-gray-400");
+      h3.textContent = "Offline — 0";
+    } else {
+      h3.style.color = "#9ca3af";
+      h3.textContent = "Role — 0";
+    }
+    h3.setAttribute("data-role-position", String(position));
+    const insertionPoint = this.findInsertionPointForGroup(group, position);
+    if (insertionPoint) {
+      insertionPoint.before(h3);
+    } else {
+      this.listTarget.appendChild(h3);
+    }
+    return h3;
+  }
+  findInsertionPointForGroup(group, position) {
+    const headers = this.getAllGroupHeaders();
+    if (group === "offline") {
+      return null;
+    }
+    const pos = position || 0;
+    for (const h of headers) {
+      const hGroup = h.getAttribute("data-status-group");
+      if (hGroup === "offline")
+        return h;
+      const hPos = parseInt(h.getAttribute("data-role-position") || "0", 10);
+      if (hPos < pos)
+        return h;
+    }
+    const offlineHeader = this.listTarget.querySelector('[data-status-group="offline"]');
+    return offlineHeader || null;
+  }
+  compareMemberOrder(elA, elB) {
+    const posA = parseInt(elA.getAttribute("data-role-position") || "0", 10);
+    const posB = parseInt(elB.getAttribute("data-role-position") || "0", 10);
+    if (posA !== posB)
+      return posB - posA;
+    const nameA = (elA.getAttribute("data-display-name") || "").toLowerCase();
+    const nameB = (elB.getAttribute("data-display-name") || "").toLowerCase();
+    return nameA < nameB ? -1 : nameA > nameB ? 1 : 0;
+  }
+  moveMemberToGroup(el, group) {
+    const header = this.ensureGroupHeader(group);
+    let sibling = header.nextElementSibling;
+    let insertBefore = null;
+    while (sibling && !sibling.hasAttribute("data-status-group")) {
+      if (sibling.hasAttribute("data-user-id") && sibling !== el) {
+        if (this.compareMemberOrder(el, sibling) < 0) {
+          insertBefore = sibling;
+          break;
+        }
+      }
+      sibling = sibling.nextElementSibling;
+    }
+    if (insertBefore) {
+      if (el.nextElementSibling === insertBefore)
+        return;
+      header.parentNode.insertBefore(el, insertBefore);
+    } else {
+      const nextHeader = this.findNextGroupHeader(header);
+      if (nextHeader) {
+        if (el.nextElementSibling === nextHeader)
+          return;
+        header.parentNode.insertBefore(el, nextHeader);
+      } else {
+        this.listTarget.appendChild(el);
+      }
+    }
+  }
+  insertMemberInGroup(el, group) {
+    this.listTarget.appendChild(el);
+    this.moveMemberToGroup(el, group);
+  }
+  findNextGroupHeader(header) {
+    let sibling = header.nextElementSibling;
+    while (sibling) {
+      if (sibling.hasAttribute("data-status-group"))
+        return sibling;
+      sibling = sibling.nextElementSibling;
+    }
+    return null;
+  }
+  recountAllGroups() {
+    const headers = this.getAllGroupHeaders();
+    for (const header of headers) {
+      const members = this.getGroupMembers(header);
+      if (members.length === 0) {
         header.remove();
       } else {
-        const label = state === "online" ? "Online" : "Offline";
-        header.textContent = `${label} — ${count}`;
+        const group = header.getAttribute("data-status-group");
+        const currentText = header.textContent;
+        const dashIdx = currentText.indexOf(" — ");
+        const label = dashIdx >= 0 ? currentText.substring(0, dashIdx).trim() : currentText.trim();
+        header.textContent = `${label} — ${members.length}`;
       }
-    });
+    }
   }
 }
 
@@ -10252,23 +10396,40 @@ class profile_card_controller_default extends Controller {
 class appearance_controller_default extends Controller {
   connect() {
     this.idleTimeout = null;
+    this.pingInterval = null;
     this.isIdle = false;
     this.IDLE_MS = 15 * 60 * 1000;
+    this.PING_MS = 30 * 1000;
     this.subscription = createConsumer3().subscriptions.create({ channel: "AppearanceChannel" }, {
       connected: () => {
         this.startIdleDetection();
+        this.startPing();
         this.updateUserPanelDot("online");
       },
       disconnected: () => {
         this.stopIdleDetection();
+        this.stopPing();
         this.updateUserPanelDot("offline");
       }
     });
   }
   disconnect() {
     this.stopIdleDetection();
+    this.stopPing();
     if (this.subscription)
       this.subscription.unsubscribe();
+  }
+  startPing() {
+    this.stopPing();
+    this.pingInterval = setInterval(() => {
+      this.subscription.perform("ping", { state: this.isIdle ? "idle" : "online" });
+    }, this.PING_MS);
+  }
+  stopPing() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
   }
   startIdleDetection() {
     this.resetIdle();
@@ -10450,6 +10611,8 @@ class notification_badge_controller_default extends Controller {
     document.addEventListener("click", this.closeMenu);
     this._beforeCache = () => this._cleanupForCache();
     document.addEventListener("turbo:before-cache", this._beforeCache);
+    this._onRender = () => this.clearCurrentChannelBadges();
+    document.addEventListener("turbo:render", this._onRender);
   }
   disconnect() {
     if (this.subscription)
@@ -10459,6 +10622,8 @@ class notification_badge_controller_default extends Controller {
     this.closeMenu();
     if (this._beforeCache)
       document.removeEventListener("turbo:before-cache", this._beforeCache);
+    if (this._onRender)
+      document.removeEventListener("turbo:render", this._onRender);
     if (this.sidebarTyping) {
       this.sidebarTyping.forEach((users) => users.forEach((u) => clearTimeout(u.timeout)));
       this.sidebarTyping.clear();
@@ -10467,6 +10632,8 @@ class notification_badge_controller_default extends Controller {
   _cleanupForCache() {
     document.querySelectorAll(".typing-indicator").forEach((el) => el.remove());
     document.querySelectorAll(".server-unread-pill").forEach((el) => el.remove());
+    document.querySelectorAll(".mention-badge").forEach((el) => el.remove());
+    document.querySelectorAll(".home-badge").forEach((el) => el.remove());
     document.querySelectorAll("[data-channel-id][data-unread]").forEach((el) => {
       delete el.dataset.unread;
       const pill = el.querySelector(".unread-pill");
@@ -10847,6 +11014,8 @@ class notification_badge_controller_default extends Controller {
     document.head.appendChild(style);
   }
   handleContextMenu(event) {
+    if (event.target.closest("[data-context-menu]") || event.target.closest("#notif-context-menu"))
+      return;
     const homeEl = event.target.closest("[data-home-button]");
     if (homeEl) {
       event.preventDefault();
@@ -11424,10 +11593,13 @@ class member_context_controller_default extends Controller {
   static values = { serverId: String };
   connect() {
     this.menu = null;
+    this.rolesDropdown = null;
+    this.nicknameModal = null;
     this.boundClose = this.closeMenu.bind(this);
   }
   disconnect() {
     this.closeMenu();
+    this.closeNicknameModal();
   }
   async show(event) {
     event.preventDefault();
@@ -11445,6 +11617,7 @@ class member_context_controller_default extends Controller {
     const html = await response.text();
     this.menu = document.createElement("div");
     this.menu.className = "fixed z-[60]";
+    this.menu.setAttribute("data-context-menu", "member");
     this.menu.innerHTML = html;
     let left = event.clientX;
     let top = event.clientY;
@@ -11455,9 +11628,198 @@ class member_context_controller_default extends Controller {
     this.menu.style.left = `${left}px`;
     this.menu.style.top = `${top}px`;
     document.body.appendChild(this.menu);
+    this.bindMenuActions();
     setTimeout(() => document.addEventListener("click", this.boundClose), 10);
   }
+  bindMenuActions() {
+    if (!this.menu)
+      return;
+    this.menu.querySelectorAll("[data-context-action]").forEach((btn) => {
+      const action = btn.dataset.contextAction;
+      if (action === "showRoles") {
+        btn.addEventListener("click", (e) => this.showRoles(e));
+      } else if (action === "changeNickname") {
+        btn.addEventListener("click", (e) => this.changeNickname(e));
+      }
+    });
+  }
+  showRoles(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.rolesDropdown) {
+      this.rolesDropdown.remove();
+      this.rolesDropdown = null;
+      return;
+    }
+    const btn = event.currentTarget;
+    const memberId = btn.dataset.memberId;
+    const serverId = btn.dataset.serverId;
+    const roles = JSON.parse(btn.dataset.roles || "[]");
+    const memberRoles = JSON.parse(btn.dataset.memberRoles || "[]");
+    if (!this.menu)
+      return;
+    this.rolesDropdown = document.createElement("div");
+    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto";
+    const wrapper = btn.closest(".context-roles-wrapper");
+    const menuRect = this.menu.getBoundingClientRect();
+    const btnRect = wrapper.getBoundingClientRect();
+    let ddLeft = btnRect.right + 4;
+    if (ddLeft + 210 > window.innerWidth) {
+      ddLeft = btnRect.left - 214;
+    }
+    let ddTop = btnRect.top;
+    if (ddTop + 260 > window.innerHeight) {
+      ddTop = window.innerHeight - 264;
+    }
+    this.rolesDropdown.style.position = "fixed";
+    this.rolesDropdown.style.left = `${ddLeft}px`;
+    this.rolesDropdown.style.top = `${ddTop}px`;
+    let html = '<p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Assign Roles</p>';
+    if (roles.length === 0) {
+      html += '<p class="px-3 py-2 text-xs text-gray-500">No roles available</p>';
+    } else {
+      roles.forEach((role) => {
+        const checked = memberRoles.includes(role.id) ? "checked" : "";
+        const escapedName = this.escapeHtml(role.name);
+        html += `<label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
+          <input type="checkbox" value="${role.id}" ${checked}
+                 class="mr-2 accent-orange-500 context-role-checkbox">
+          <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: ${role.color || "#ffffff"}"></span>
+          <span class="text-gray-300 text-sm">${escapedName}</span>
+        </label>`;
+      });
+    }
+    this.rolesDropdown.innerHTML = html;
+    document.body.appendChild(this.rolesDropdown);
+    this.rolesDropdown.querySelectorAll(".context-role-checkbox").forEach((cb) => {
+      cb.addEventListener("change", () => this.handleContextRoleToggle(memberId, serverId));
+    });
+    this.rolesDropdown.addEventListener("click", (e) => e.stopPropagation());
+  }
+  async handleContextRoleToggle(memberId, serverId) {
+    if (!this.rolesDropdown)
+      return;
+    const checkboxes = this.rolesDropdown.querySelectorAll(".context-role-checkbox");
+    const roleIds = Array.from(checkboxes).filter((cb) => cb.checked).map((cb) => cb.value);
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+      const response = await fetch(`/servers/${serverId}/settings/members/${memberId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ role_ids: roleIds })
+      });
+      if (!response.ok)
+        throw new Error("Failed to update roles");
+      this.showToast("Roles updated", "success");
+    } catch (error2) {
+      this.showToast("Failed to update roles", "error");
+    }
+  }
+  changeNickname(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const btn = event.currentTarget;
+    const memberId = btn.dataset.memberId;
+    const serverId = btn.dataset.serverId;
+    const currentNickname = btn.dataset.currentNickname || "";
+    this.closeMenu();
+    this.nicknameModal = document.createElement("div");
+    this.nicknameModal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
+    this.nicknameModal.innerHTML = `
+      <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-sm mx-4 p-5" data-nickname-panel>
+        <h3 class="text-lg font-bold text-white mb-1">Change Nickname</h3>
+        <p class="text-xs text-gray-400 mb-4">Leave empty to reset to display name.</p>
+        <input type="text" value="${this.escapeAttr(currentNickname)}" maxlength="32" placeholder="Enter nickname..."
+               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 mb-4"
+               data-nickname-input>
+        <div class="flex justify-end gap-2">
+          <button class="text-sm text-gray-400 hover:text-white px-4 py-1.5 rounded transition" data-nickname-cancel>Cancel</button>
+          <button class="text-sm bg-orange-600 hover:bg-orange-700 text-white font-semibold px-4 py-1.5 rounded transition" data-nickname-save>Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(this.nicknameModal);
+    const input = this.nicknameModal.querySelector("[data-nickname-input]");
+    input.focus();
+    input.select();
+    this.nicknameModal.addEventListener("click", (e) => {
+      if (!e.target.closest("[data-nickname-panel]")) {
+        this.closeNicknameModal();
+      }
+    });
+    this.nicknameModal.querySelector("[data-nickname-cancel]").addEventListener("click", () => {
+      this.closeNicknameModal();
+    });
+    this.nicknameModal.querySelector("[data-nickname-save]").addEventListener("click", () => {
+      this.saveNickname(memberId, serverId, input.value.trim());
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        this.saveNickname(memberId, serverId, input.value.trim());
+      }
+      if (e.key === "Escape") {
+        this.closeNicknameModal();
+      }
+    });
+  }
+  async saveNickname(memberId, serverId, nickname) {
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+      const response = await fetch(`/servers/${serverId}/settings/members/${memberId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ nickname: nickname || null })
+      });
+      if (!response.ok)
+        throw new Error("Failed to update nickname");
+      this.showToast("Nickname updated", "success");
+      this.closeNicknameModal();
+    } catch (error2) {
+      this.showToast("Failed to update nickname", "error");
+    }
+  }
+  closeNicknameModal() {
+    if (this.nicknameModal) {
+      this.nicknameModal.remove();
+      this.nicknameModal = null;
+    }
+  }
+  escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  escapeAttr(text) {
+    return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+  showToast(message, type) {
+    const toast = document.getElementById("toast");
+    if (!toast)
+      return;
+    toast.textContent = message;
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`;
+    toast.classList.remove("hidden", "opacity-0");
+    setTimeout(() => {
+      toast.classList.add("opacity-0");
+      setTimeout(() => toast.classList.add("hidden"), 300);
+    }, 3000);
+  }
   closeMenu(event) {
+    if (this.rolesDropdown) {
+      if (event && this.rolesDropdown.contains(event.target))
+        return;
+      this.rolesDropdown.remove();
+      this.rolesDropdown = null;
+    }
     if (this.menu) {
       if (event && this.menu.contains(event.target))
         return;
@@ -11523,10 +11885,85 @@ class channel_sidebar_controller_default extends Controller {
     this.subscription = createConsumer3().subscriptions.create({ channel: "ServerChannel", server_id: this.serverIdValue }, {
       received: (data) => this.handleMessage(data)
     });
+    this._channelCache = new Map;
+    this._onChannelClick = this._handleChannelClick.bind(this);
+    this.element.addEventListener("click", this._onChannelClick, true);
+    this._onBeforeFrameRender = (e) => {
+      if (e.target.id !== "main-content")
+        return;
+      const frame = e.target;
+      const currentId = this._getCurrentChannelId(frame);
+      if (currentId && !this._channelCache.has(currentId)) {
+        this._channelCache.set(currentId, frame.innerHTML);
+        this._enforceCacheLimit();
+      }
+    };
+    document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender);
   }
   disconnect() {
     if (this.subscription)
       this.subscription.unsubscribe();
+    this.element.removeEventListener("click", this._onChannelClick, true);
+    document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender);
+    this._channelCache.clear();
+  }
+  _getCurrentChannelId(frame) {
+    const el = frame?.querySelector("[data-current-channel-id]");
+    return el?.dataset.currentChannelId || null;
+  }
+  _enforceCacheLimit() {
+    while (this._channelCache.size > 10) {
+      const oldest = this._channelCache.keys().next().value;
+      this._channelCache.delete(oldest);
+    }
+  }
+  _handleChannelClick(e) {
+    const link = e.target.closest("a[data-channel-id]");
+    if (!link)
+      return;
+    const targetId = link.dataset.channelId;
+    const frame = document.getElementById("main-content");
+    const currentId = this._getCurrentChannelId(frame);
+    if (targetId === currentId) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    if (this._channelCache.has(targetId)) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (currentId && frame) {
+        this._channelCache.set(currentId, frame.innerHTML);
+        this._enforceCacheLimit();
+      }
+      frame.innerHTML = this._channelCache.get(targetId);
+      this._channelCache.delete(targetId);
+      history.pushState({}, "", link.getAttribute("href"));
+    }
+    this._updateActiveChannel(link);
+  }
+  _updateActiveChannel(link) {
+    const active = this.element.querySelector("a[data-channel-id].bg-gray-600");
+    if (active && active !== link) {
+      active.classList.remove("bg-gray-600");
+      if (active.querySelector(".unread-pill") || active.querySelector(".font-bold")) {
+        active.classList.add("hover:bg-gray-700");
+      } else {
+        active.classList.remove("text-white");
+        active.classList.add("text-gray-400", "hover:bg-gray-700", "hover:text-gray-200");
+      }
+    }
+    link.classList.remove("text-gray-400", "hover:bg-gray-700", "hover:text-gray-200");
+    link.classList.add("bg-gray-600", "text-white");
+    const pill = link.querySelector(".unread-pill");
+    if (pill)
+      pill.remove();
+    const nameSpan = link.querySelector(".truncate");
+    if (nameSpan)
+      nameSpan.classList.remove("font-bold");
+    const badge = link.querySelector(".mention-badge");
+    if (badge)
+      badge.remove();
   }
   handleMessage(data) {
     switch (data.type) {
@@ -11556,6 +11993,7 @@ class channel_sidebar_controller_default extends Controller {
   buildChannelHtml(data) {
     const serverId = this.serverIdValue;
     return `<a href="/servers/${serverId}/channels/${data.channel_id}"
+               data-turbo-frame="main-content"
                data-channel-id="${data.channel_id}"
                class="flex items-center px-2 py-1.5 rounded group relative text-gray-400 hover:bg-gray-700 hover:text-gray-200">
               <span class="text-lg mr-1.5 opacity-60">#</span>
@@ -15473,6 +15911,645 @@ class video_player_controller_default extends Controller {
   }
 }
 
+// app/javascript/controllers/nostr_key_export_controller.js
+class nostr_key_export_controller_default extends Controller {
+  static targets = [
+    "copyNpubBtn",
+    "passwordInput",
+    "passwordForm",
+    "keyDisplay",
+    "nsecValue",
+    "error",
+    "encryptedSection",
+    "encryptedPasswordInput",
+    "backupPasswordInput",
+    "encryptedResult",
+    "ncryptsecValue",
+    "encryptedError",
+    "encryptedForm"
+  ];
+  async copyNpub(event) {
+    const value = event.currentTarget.dataset.value;
+    await navigator.clipboard.writeText(value);
+    const btn = this.copyNpubBtnTarget;
+    btn.textContent = "Copied!";
+    setTimeout(() => {
+      btn.textContent = "Copy";
+    }, 2000);
+  }
+  async revealKey() {
+    const password = this.passwordInputTarget.value;
+    if (!password) {
+      this.showError("Please enter your password");
+      return;
+    }
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    try {
+      const response = await fetch("/settings/reveal_nostr_key", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ password })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        this.nsecValueTarget.textContent = data.nsec;
+        this.passwordFormTarget.classList.add("hidden");
+        this.keyDisplayTarget.classList.remove("hidden");
+        this.hideError();
+      } else {
+        this.showError(data.error || "Failed to reveal key");
+      }
+    } catch {
+      this.showError("Network error. Please try again.");
+    }
+  }
+  async copyNsec() {
+    const value = this.nsecValueTarget.textContent;
+    await navigator.clipboard.writeText(value);
+    const btn = this.keyDisplayTarget.querySelector("button");
+    btn.textContent = "Copied!";
+    setTimeout(() => {
+      btn.textContent = "Copy";
+    }, 2000);
+  }
+  async exportEncrypted() {
+    const password = this.encryptedPasswordInputTarget.value;
+    const backupPassword = this.backupPasswordInputTarget.value;
+    if (!password) {
+      this.showEncryptedError("Please enter your account password");
+      return;
+    }
+    if (!backupPassword || backupPassword.length < 8) {
+      this.showEncryptedError("Backup password must be at least 8 characters");
+      return;
+    }
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    try {
+      const response = await fetch("/settings/export_encrypted_key", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ password, backup_password: backupPassword })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        this.ncryptsecValueTarget.textContent = data.ncryptsec;
+        this.encryptedFormTarget.classList.add("hidden");
+        this.encryptedResultTarget.classList.remove("hidden");
+        this.hideEncryptedError();
+      } else {
+        this.showEncryptedError(data.error || "Failed to export key");
+      }
+    } catch {
+      this.showEncryptedError("Network error. Please try again.");
+    }
+  }
+  async copyNcryptsec() {
+    const value = this.ncryptsecValueTarget.textContent;
+    await navigator.clipboard.writeText(value);
+    const btn = this.encryptedResultTarget.querySelector("button");
+    btn.textContent = "Copied!";
+    setTimeout(() => {
+      btn.textContent = "Copy";
+    }, 2000);
+  }
+  showError(message) {
+    this.errorTarget.textContent = message;
+    this.errorTarget.classList.remove("hidden");
+  }
+  hideError() {
+    this.errorTarget.classList.add("hidden");
+  }
+  showEncryptedError(message) {
+    this.encryptedErrorTarget.textContent = message;
+    this.encryptedErrorTarget.classList.remove("hidden");
+  }
+  hideEncryptedError() {
+    this.encryptedErrorTarget.classList.add("hidden");
+  }
+}
+
+// app/javascript/controllers/role_editor_controller.js
+var PERMISSION_GROUPS = {
+  General: {
+    read_messages: "View channels and read messages",
+    read_message_history: "Read message history",
+    create_invite: "Create invite links",
+    change_nickname: "Change their own nickname in this server"
+  },
+  Text: {
+    send_messages: "Send messages in text channels",
+    attach_files: "Upload images and files",
+    send_gifs: "Send GIFs in messages",
+    add_reactions: "Add emoji reactions to messages",
+    mention_everyone: "Use @everyone and @here mentions"
+  },
+  Management: {
+    manage_messages: "Delete or pin other members' messages",
+    manage_channels: "Create, edit, and delete channels",
+    manage_roles: "Create, edit, and reorder roles",
+    manage_invites: "View and revoke invite links",
+    manage_server: "Edit server name, icon, and settings"
+  },
+  Moderation: {
+    kick_members: "Remove members from the server",
+    ban_members: "Permanently ban members"
+  },
+  Dangerous: {
+    administrator: "Full admin access — bypasses all permission checks"
+  }
+};
+
+class role_editor_controller_default extends Controller {
+  static targets = [
+    "rolesData",
+    "roleList",
+    "emptyState",
+    "editorForm",
+    "editorTitle",
+    "deleteBtn",
+    "nameInput",
+    "colorInput",
+    "colorHex",
+    "permissionsSection",
+    "saveBar",
+    "roleName"
+  ];
+  static values = { serverId: String, canManage: Boolean };
+  connect() {
+    this.roles = JSON.parse(this.rolesDataTarget.textContent);
+    this.selectedRoleId = null;
+    this.originalData = null;
+    this.dirty = false;
+    if (this.canManageValue) {
+      this.sortable = sortable_esm_default.create(this.roleListTarget, {
+        animation: 150,
+        ghostClass: "opacity-20",
+        chosenClass: "bg-gray-600",
+        onEnd: () => this.handleReorder()
+      });
+    }
+  }
+  disconnect() {
+    if (this.sortable)
+      this.sortable.destroy();
+  }
+  selectRole(e) {
+    const id = e.currentTarget.dataset.roleId;
+    if (id === this.selectedRoleId)
+      return;
+    if (this.dirty) {
+      if (!confirm("You have unsaved changes. Discard them?"))
+        return;
+    }
+    this.selectedRoleId = id;
+    const role = this.roles.find((r) => r.id === id);
+    if (!role)
+      return;
+    this.originalData = JSON.parse(JSON.stringify(role));
+    this.dirty = false;
+    this.saveBarTarget.classList.add("hidden");
+    this.roleListTarget.querySelectorAll("[data-role-id]").forEach((el) => {
+      el.classList.toggle("bg-gray-600", el.dataset.roleId === id);
+      el.classList.toggle("bg-gray-800", el.dataset.roleId !== id);
+    });
+    this.populateEditor(role);
+  }
+  populateEditor(role) {
+    this.editorFormTarget.classList.remove("hidden");
+    this.emptyStateTarget.classList.add("hidden");
+    this.editorTitleTarget.textContent = role.name;
+    this.roleNameTarget.textContent = role.name;
+    if (role.is_owner || role.is_everyone) {
+      this.deleteBtnTarget.classList.add("hidden");
+    } else {
+      this.deleteBtnTarget.classList.remove("hidden");
+    }
+    this.nameInputTarget.value = role.name;
+    this.colorInputTarget.value = role.color || "#99aab5";
+    this.colorHexTarget.textContent = (role.color || "#99aab5").toUpperCase();
+    const disableDisplay = role.is_everyone || role.is_owner;
+    this.nameInputTarget.disabled = disableDisplay;
+    this.colorInputTarget.disabled = disableDisplay;
+    if (disableDisplay) {
+      this.nameInputTarget.classList.add("opacity-50");
+      this.colorInputTarget.classList.add("opacity-50");
+    } else {
+      this.nameInputTarget.classList.remove("opacity-50");
+      this.colorInputTarget.classList.remove("opacity-50");
+    }
+    const hoistToggle = this.element.querySelector("[data-hoist-toggle]");
+    if (hoistToggle) {
+      if (role.is_everyone || role.is_owner) {
+        hoistToggle.closest("[data-hoist-row]").classList.add("hidden");
+      } else {
+        hoistToggle.closest("[data-hoist-row]").classList.remove("hidden");
+        if (role.hoist) {
+          hoistToggle.classList.remove("bg-gray-600");
+          hoistToggle.classList.add("bg-orange-600");
+          hoistToggle.firstElementChild.classList.remove("translate-x-0.5");
+          hoistToggle.firstElementChild.classList.add("translate-x-5");
+        } else {
+          hoistToggle.classList.remove("bg-orange-600");
+          hoistToggle.classList.add("bg-gray-600");
+          hoistToggle.firstElementChild.classList.remove("translate-x-5");
+          hoistToggle.firstElementChild.classList.add("translate-x-0.5");
+        }
+      }
+    }
+    this.renderPermissions(role);
+  }
+  renderPermissions(role) {
+    const container = this.permissionsSectionTarget;
+    container.innerHTML = "";
+    if (role.is_owner) {
+      container.innerHTML = '<p class="text-sm text-gray-500 italic">The Owner role has all permissions and cannot be edited.</p>';
+      return;
+    }
+    for (const [groupName, perms] of Object.entries(PERMISSION_GROUPS)) {
+      const groupDiv = document.createElement("div");
+      groupDiv.className = "mb-6";
+      const heading = document.createElement("h4");
+      heading.className = "text-xs font-bold text-gray-400 uppercase tracking-wide mb-3";
+      heading.textContent = groupName;
+      groupDiv.appendChild(heading);
+      for (const [key, description] of Object.entries(perms)) {
+        const enabled = role.permissions && role.permissions[key] === true;
+        const row = document.createElement("div");
+        row.className = "flex items-center justify-between py-2 border-b border-gray-700/50";
+        const labelDiv = document.createElement("div");
+        labelDiv.className = "flex-1 mr-4";
+        const label = document.createElement("p");
+        label.className = "text-sm text-white";
+        label.textContent = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+        labelDiv.appendChild(label);
+        const desc = document.createElement("p");
+        desc.className = "text-xs text-gray-500";
+        desc.textContent = description;
+        labelDiv.appendChild(desc);
+        row.appendChild(labelDiv);
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = `relative w-11 h-6 rounded-full transition-colors focus:outline-none ${enabled ? "bg-orange-600" : "bg-gray-600"}`;
+        toggle.dataset.permission = key;
+        toggle.dataset.action = "click->role-editor#togglePermission";
+        const knob = document.createElement("span");
+        knob.className = `block w-5 h-5 bg-white rounded-full shadow transform transition-transform ${enabled ? "translate-x-5" : "translate-x-0.5"}`;
+        toggle.appendChild(knob);
+        row.appendChild(toggle);
+        groupDiv.appendChild(row);
+      }
+      container.appendChild(groupDiv);
+    }
+  }
+  togglePermission(e) {
+    const btn = e.currentTarget;
+    const key = btn.dataset.permission;
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (!role)
+      return;
+    const newVal = !(role.permissions && role.permissions[key] === true);
+    if (!role.permissions)
+      role.permissions = {};
+    role.permissions[key] = newVal;
+    if (newVal) {
+      btn.classList.remove("bg-gray-600");
+      btn.classList.add("bg-orange-600");
+      btn.firstElementChild.classList.remove("translate-x-0.5");
+      btn.firstElementChild.classList.add("translate-x-5");
+    } else {
+      btn.classList.remove("bg-orange-600");
+      btn.classList.add("bg-gray-600");
+      btn.firstElementChild.classList.remove("translate-x-5");
+      btn.firstElementChild.classList.add("translate-x-0.5");
+    }
+    this.markDirty();
+  }
+  toggleHoist(e) {
+    const btn = e.currentTarget;
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (!role)
+      return;
+    role.hoist = !role.hoist;
+    if (role.hoist) {
+      btn.classList.remove("bg-gray-600");
+      btn.classList.add("bg-orange-600");
+      btn.firstElementChild.classList.remove("translate-x-0.5");
+      btn.firstElementChild.classList.add("translate-x-5");
+    } else {
+      btn.classList.remove("bg-orange-600");
+      btn.classList.add("bg-gray-600");
+      btn.firstElementChild.classList.remove("translate-x-5");
+      btn.firstElementChild.classList.add("translate-x-0.5");
+    }
+    this.markDirty();
+  }
+  previewColor() {
+    const color = this.colorInputTarget.value;
+    this.colorHexTarget.textContent = color.toUpperCase();
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (role)
+      role.color = color;
+    const listItem = this.roleListTarget.querySelector(`[data-role-id="${this.selectedRoleId}"]`);
+    if (listItem) {
+      const dot = listItem.querySelector("[data-color-dot]");
+      if (dot)
+        dot.style.backgroundColor = color;
+    }
+    this.markDirty();
+  }
+  updateName() {
+    const name = this.nameInputTarget.value;
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (role)
+      role.name = name;
+    const listItem = this.roleListTarget.querySelector(`[data-role-id="${this.selectedRoleId}"]`);
+    if (listItem) {
+      const nameEl = listItem.querySelector("[data-role-name]");
+      if (nameEl)
+        nameEl.textContent = name;
+    }
+    this.editorTitleTarget.textContent = name;
+    this.roleNameTarget.textContent = name;
+    this.markDirty();
+  }
+  markDirty() {
+    this.dirty = true;
+    this.saveBarTarget.classList.remove("hidden");
+  }
+  resetChanges() {
+    if (!this.originalData)
+      return;
+    const idx = this.roles.findIndex((r) => r.id === this.selectedRoleId);
+    if (idx !== -1) {
+      this.roles[idx] = JSON.parse(JSON.stringify(this.originalData));
+    }
+    this.dirty = false;
+    this.saveBarTarget.classList.add("hidden");
+    this.populateEditor(this.roles[idx]);
+    const listItem = this.roleListTarget.querySelector(`[data-role-id="${this.selectedRoleId}"]`);
+    if (listItem) {
+      const dot = listItem.querySelector("[data-color-dot]");
+      if (dot)
+        dot.style.backgroundColor = this.originalData.color || "#99aab5";
+      const nameEl = listItem.querySelector("[data-role-name]");
+      if (nameEl)
+        nameEl.textContent = this.originalData.name;
+    }
+  }
+  async saveRole() {
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (!role)
+      return;
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const res = await fetch(`/servers/${this.serverIdValue}/roles/${role.id}`, {
+        method: "PATCH",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: role.name,
+          color: role.color,
+          hoist: role.hoist,
+          permissions: role.permissions
+        })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const idx = this.roles.findIndex((r) => r.id === this.selectedRoleId);
+        if (idx !== -1)
+          this.roles[idx] = updated;
+        this.originalData = JSON.parse(JSON.stringify(updated));
+        this.dirty = false;
+        this.saveBarTarget.classList.add("hidden");
+        this.showToast("Role saved!");
+      } else {
+        const data = await res.json();
+        this.showToast(data.error || data.errors?.join(", ") || "Save failed", true);
+      }
+    } catch (err) {
+      this.showToast("Network error", true);
+    }
+  }
+  async createRole() {
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const res = await fetch(`/servers/${this.serverIdValue}/roles`, {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (res.ok) {
+        const role = await res.json();
+        this.roles.push(role);
+        this.appendRoleToList(role);
+        this.selectedRoleId = role.id;
+        this.originalData = JSON.parse(JSON.stringify(role));
+        this.dirty = false;
+        this.saveBarTarget.classList.add("hidden");
+        this.roleListTarget.querySelectorAll("[data-role-id]").forEach((el) => {
+          el.classList.toggle("bg-gray-600", el.dataset.roleId === role.id);
+          el.classList.toggle("bg-gray-800", el.dataset.roleId !== role.id);
+        });
+        this.populateEditor(role);
+        this.showToast("Role created!");
+      } else {
+        const data = await res.json();
+        this.showToast(data.errors?.join(", ") || "Create failed", true);
+      }
+    } catch (err) {
+      this.showToast("Network error", true);
+    }
+  }
+  async deleteRole() {
+    const role = this.roles.find((r) => r.id === this.selectedRoleId);
+    if (!role || role.is_owner || role.is_everyone)
+      return;
+    if (!confirm(`Delete "${role.name}"? Members with this role will be moved to @everyone.`))
+      return;
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const res = await fetch(`/servers/${this.serverIdValue}/roles/${role.id}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" }
+      });
+      if (res.ok) {
+        this.roles = this.roles.filter((r) => r.id !== role.id);
+        const listItem = this.roleListTarget.querySelector(`[data-role-id="${role.id}"]`);
+        if (listItem)
+          listItem.remove();
+        this.selectedRoleId = null;
+        this.originalData = null;
+        this.dirty = false;
+        this.editorFormTarget.classList.add("hidden");
+        this.emptyStateTarget.classList.remove("hidden");
+        this.saveBarTarget.classList.add("hidden");
+        this.showToast("Role deleted!");
+      } else {
+        const data = await res.json();
+        this.showToast(data.error || "Delete failed", true);
+      }
+    } catch (err) {
+      this.showToast("Network error", true);
+    }
+  }
+  async handleReorder() {
+    const items = this.roleListTarget.querySelectorAll("[data-role-id]");
+    const rolesPayload = [];
+    const sortableItems = Array.from(items);
+    const maxPos = sortableItems.length;
+    sortableItems.forEach((el, idx) => {
+      const pos = maxPos - idx;
+      rolesPayload.push({ id: el.dataset.roleId, position: pos });
+      const role = this.roles.find((r) => r.id === el.dataset.roleId);
+      if (role)
+        role.position = pos;
+    });
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const res = await fetch(`/servers/${this.serverIdValue}/reorder_roles`, {
+        method: "PATCH",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({ roles: rolesPayload })
+      });
+      if (res.ok) {
+        this.showToast("Role order saved!");
+      } else {
+        this.showToast("Failed to save order", true);
+      }
+    } catch (err) {
+      this.showToast("Network error", true);
+    }
+  }
+  appendRoleToList(role) {
+    const item = document.createElement("div");
+    item.className = "flex items-center px-3 py-2 rounded cursor-pointer bg-gray-800 hover:bg-gray-700 transition-colors";
+    item.dataset.roleId = role.id;
+    item.dataset.action = "click->role-editor#selectRole";
+    item.innerHTML = `
+      <span class="w-3 h-3 rounded-full mr-3 shrink-0" data-color-dot style="background-color: ${this.escapeHtml(role.color || "#99aab5")}"></span>
+      <span class="flex-1 text-sm text-white truncate" data-role-name>${this.escapeHtml(role.name)}</span>
+      <span class="text-xs text-gray-500 ml-2">${role.member_count}</span>
+    `;
+    const everyoneItem = Array.from(this.roleListTarget.children).find((el) => {
+      const role2 = this.roles.find((r) => r.id === el.dataset.roleId);
+      return role2 && role2.is_everyone;
+    });
+    if (everyoneItem) {
+      this.roleListTarget.insertBefore(item, everyoneItem);
+    } else {
+      this.roleListTarget.appendChild(item);
+    }
+  }
+  escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+  showToast(msg, isError = false) {
+    const toast = document.createElement("div");
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2000);
+  }
+}
+
+// app/javascript/controllers/member_roles_controller.js
+class member_roles_controller_default extends Controller {
+  static values = {
+    serverId: String,
+    membershipId: String,
+    allRoles: Array,
+    currentRoleIds: Array
+  };
+  static targets = ["dropdown", "badges"];
+  connect() {
+    this.boundCloseDropdown = this.closeDropdown.bind(this);
+  }
+  disconnect() {
+    document.removeEventListener("click", this.boundCloseDropdown);
+  }
+  toggle(event) {
+    event.stopPropagation();
+    const dropdown = this.dropdownTarget;
+    const isHidden = dropdown.classList.contains("hidden");
+    if (isHidden) {
+      dropdown.classList.remove("hidden");
+      setTimeout(() => document.addEventListener("click", this.boundCloseDropdown), 10);
+    } else {
+      this.closeDropdown();
+    }
+  }
+  closeDropdown(event) {
+    if (event && this.dropdownTarget.contains(event.target))
+      return;
+    this.dropdownTarget.classList.add("hidden");
+    document.removeEventListener("click", this.boundCloseDropdown);
+  }
+  async toggleRole(event) {
+    event.stopPropagation();
+    const checkboxes = this.dropdownTarget.querySelectorAll("input[type=checkbox]");
+    const roleIds = Array.from(checkboxes).filter((cb) => cb.checked).map((cb) => cb.value);
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+      const response = await fetch(`/servers/${this.serverIdValue}/settings/members/${this.membershipIdValue}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ role_ids: roleIds })
+      });
+      if (!response.ok)
+        throw new Error("Failed to update roles");
+      const data = await response.json();
+      this.updateBadges(data.roles);
+      this.showToast("Roles updated", "success");
+    } catch (error2) {
+      this.showToast("Failed to update roles", "error");
+    }
+  }
+  updateBadges(roles) {
+    const badgesEl = this.badgesTarget;
+    if (!badgesEl)
+      return;
+    if (roles.length === 0) {
+      badgesEl.innerHTML = '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>';
+      return;
+    }
+    badgesEl.innerHTML = roles.map((role) => {
+      const bgClass = role.name === "Admin" ? "bg-red-600/20 text-red-400" : "bg-gray-700 text-gray-400";
+      return `<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full ${bgClass}">
+        <span class="w-2 h-2 rounded-full mr-1" style="background-color: ${role.color || "#ffffff"}"></span>
+        ${this.escapeHtml(role.name)}
+      </span>`;
+    }).join("");
+  }
+  escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text;
+    return div.innerHTML;
+  }
+  showToast(message, type) {
+    const toast = document.getElementById("toast");
+    if (!toast)
+      return;
+    toast.textContent = message;
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`;
+    toast.classList.remove("hidden", "opacity-0");
+    setTimeout(() => {
+      toast.classList.add("opacity-0");
+      setTimeout(() => toast.classList.add("hidden"), 300);
+    }, 3000);
+  }
+}
+
 // app/javascript/application.js
 var application = Application.start();
 application.register("message-form", message_form_controller_default);
@@ -15496,5 +16573,8 @@ application.register("banner-editor", banner_editor_controller_default);
 application.register("dm-message-form", dm_message_form_controller_default);
 application.register("invite-menu", invite_menu_controller_default);
 application.register("video-player", video_player_controller_default);
+application.register("nostr-key-export", nostr_key_export_controller_default);
+application.register("role-editor", role_editor_controller_default);
+application.register("member-roles", member_roles_controller_default);
 
-//# debugId=357ED83490E93C9C64756E2164756E21
+//# debugId=DE1E2D959261D77464756E2164756E21

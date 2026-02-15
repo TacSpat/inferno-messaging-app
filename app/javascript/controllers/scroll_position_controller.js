@@ -19,8 +19,18 @@ export default class extends Controller {
     this.newMessageCount = 0
     this._initializing = true
     this._lastScrollTop = 0
+    this._lastAnchorId = null
     this._loadingOlder = false
     this._loadingNewer = false
+
+    // Save scroll position before turbo frame replaces content (element still in DOM)
+    this._onBeforeFrameRender = (e) => {
+      if (e.target.id === "main-content") {
+        const pos = this.element.scrollTop || this._lastScrollTop
+        if (pos > 0) this._forceSave(pos)
+      }
+    }
+    document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
 
     // Intercept clicks on internal message links
     this._onLinkClick = (e) => {
@@ -28,7 +38,6 @@ export default class extends Controller {
       if (!a) return
       const href = a.getAttribute("href")
       if (!href) return
-      // Match internal message links: /servers/:id/channels/:id#message-XX
       const match = href.match(/(?:https?:\/\/[^\/]+)?\/servers\/([a-zA-Z0-9]+)\/channels\/([a-zA-Z0-9]+)#message[-_]([a-zA-Z0-9]+)/)
       if (!match) return
       e.preventDefault()
@@ -37,95 +46,55 @@ export default class extends Controller {
       const currentEl = document.querySelector("[data-current-channel-id]")
       const currentChannelId = currentEl ? currentEl.dataset.currentChannelId : null
       if (currentChannelId === cId) {
-        // Same channel — just scroll
         const el = document.getElementById(`message_${mId}`)
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" })
           this.highlightMessage(el, true)
         }
       } else {
-        // Different channel — Turbo navigate, then scroll after load
         const url = `/servers/${sId}/channels/${cId}`
-        // Store target message to scroll to after navigation
         sessionStorage.setItem("jump_to_message", mId)
         window.Turbo.visit(url)
       }
     }
-    document.addEventListener("click", this._onLinkClick)
+    document.addEventListener("click", this._onLinkClick, true)
 
-    // Check for pending message jump from cross-channel navigation
+    // --- Restore scroll position immediately (content is already in DOM) ---
+
     const pendingJump = sessionStorage.getItem("jump_to_message")
     if (pendingJump) {
       sessionStorage.removeItem("jump_to_message")
-      this.waitForMessage(pendingJump, (el) => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-        this.highlightMessage(el, true)
-        setTimeout(() => { this._initializing = false }, 500)
-      })
-      return
-    }
-    // Check for #message-XX hash to jump to specific message
-    const hash = window.location.hash
-    const messageMatch = hash.match(/^#message[-_]([a-zA-Z0-9]+)$/)
-    if (messageMatch) {
-      history.replaceState(null, "", window.location.pathname + window.location.search)
-      this.waitForMessage(messageMatch[1], (el) => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" })
-        this.highlightMessage(el, true)
-        setTimeout(() => { this._initializing = false }, 500)
-      })
+      this._jumpToMessage(pendingJump)
     } else {
-      // Wait for messages to be in the DOM before restoring scroll
-      this.waitForContent(() => {
-        const savedAnchor = this.getSavedAnchor()
-        if (savedAnchor) {
-          // Check if anchor is already in the initial DOM
-          const el = document.getElementById(`message_${savedAnchor}`)
-          if (el) {
-            el.scrollIntoView({ block: "center" })
-            setTimeout(() => { this._initializing = false }, 200)
-          } else {
-            // Anchor is deep in history — fetch messages around it
-            this.loadAroundMessage(savedAnchor)
-            return
-          }
-        } else {
-          const saved = this.getSavedPosition()
-          if (saved !== null && saved > 0) {
-            this.element.scrollTop = saved
-            if (this.element.scrollTop < saved - 50) {
-              this.scrollToBottom()
-            }
-          } else {
-            this.scrollToBottom()
-          }
-          setTimeout(() => { this._initializing = false }, 200)
-        }
-      })
+      const hash = window.location.hash
+      const messageMatch = hash.match(/^#message[-_]([a-zA-Z0-9]+)$/)
+      if (messageMatch) {
+        history.replaceState(null, "", window.location.pathname + window.location.search)
+        this._jumpToMessage(messageMatch[1])
+      } else {
+        this._restoreScroll()
+      }
     }
 
-    // Track scroll position continuously (so disconnect has a good value)
+    // Track scroll position continuously
     this._onScroll = () => {
       this._lastScrollTop = this.element.scrollTop
       if (this.isNearBottom()) this.hideNewMessageBar()
-      // Load older messages when near top
       if (this.isNearTop() && !this._initializing) {
         this.loadOlderMessages()
       }
-      // Load newer messages when near bottom and bottom was trimmed
       if (this.isNearBottom() && this.hasNewerValue && !this._initializing) {
         this.loadNewerMessages()
       }
     }
     this.element.addEventListener("scroll", this._onScroll)
 
-    // Save periodically (not on every scroll event)
+    // Save periodically
     this._saveInterval = setInterval(() => {
       this.savePosition(this._lastScrollTop)
     }, 1000)
 
-    // Bind click on the "Jump to Present" / "New message" bar button
-    // (the bar is a sibling of #messages, outside this controller's element)
+    // Bind "Jump to Present" / "New message" bar
     const bar = this.element.parentElement?.querySelector("[data-scroll-position-target=newMessageBar]")
     if (bar) {
       const btn = bar.querySelector("button")
@@ -138,13 +107,28 @@ export default class extends Controller {
 
     this.observer = new MutationObserver((mutations) => {
       if (this._initializing || this._suppressObserver) return
-      const hasNewMessages = mutations.some(m =>
-        Array.from(m.addedNodes).some(n => n.nodeType === 1 && n.id?.startsWith("message_"))
-      )
-      if (!hasNewMessages) return
+      const newMessages = []
+      for (const m of mutations) {
+        for (const n of m.addedNodes) {
+          if (n.nodeType === 1 && n.id?.startsWith("message_")) newMessages.push(n)
+        }
+      }
+      if (!newMessages.length) return
 
-      if (this.isNearBottom()) {
+      const wasNearBottom = this.isNearBottom()
+
+      if (wasNearBottom) {
         this.scrollToBottom()
+        // Bind image load handlers on new messages so we stay at bottom as images load
+        for (const msg of newMessages) {
+          msg.querySelectorAll("img").forEach(img => {
+            if (!img.complete) {
+              img.addEventListener("load", () => {
+                if (this.isNearBottom()) this.scrollToBottom()
+              }, { once: true })
+            }
+          })
+        }
       } else {
         this.showNewMessageBar()
       }
@@ -154,54 +138,69 @@ export default class extends Controller {
     this.element.querySelectorAll("img").forEach(img => {
       if (!img.complete) {
         img.addEventListener("load", () => {
-          if (!this._initializing && this.isNearBottom()) this.scrollToBottom()
+          if (this._initializing) return
+          if (this.isNearBottom()) {
+            this.scrollToBottom()
+          } else if (this._restoredAnchorEl?.isConnected) {
+            // Re-anchor after image loads to prevent drift
+            this._restoredAnchorEl.scrollIntoView({ block: "center" })
+            this._lastScrollTop = this.element.scrollTop
+          }
         }, { once: true })
       }
     })
   }
 
+  // --- Immediate scroll restoration ---
 
-  waitForContent(callback) {
-    const tryRestore = () => {
-      // Wait for images to load so scroll height is stable
-      const images = Array.from(this.element.querySelectorAll("img")).filter(i => !i.complete)
-      if (images.length > 0) {
-        let loaded = 0
-        let called = false
-        const done = () => {
-          if (called) return
-          if (++loaded >= images.length) {
-            called = true
-            // Double rAF ensures layout is complete
-            requestAnimationFrame(() => requestAnimationFrame(() => callback()))
-          }
-        }
-        images.forEach(i => i.addEventListener("load", done, { once: true }))
-        images.forEach(i => i.addEventListener("error", done, { once: true }))
-        setTimeout(() => { if (!called) { called = true; callback() } }, 2000)
-      } else {
-        // Double rAF to ensure layout is settled
-        requestAnimationFrame(() => requestAnimationFrame(() => callback()))
+  _restoreScroll() {
+    const savedAnchor = this.getSavedAnchor()
+    if (savedAnchor) {
+      const el = document.getElementById(`message_${savedAnchor}`)
+      if (el) {
+        this._restoredAnchorEl = el
+        el.scrollIntoView({ block: "center" })
+        this._lastScrollTop = this.element.scrollTop
+        this._finishInit()
+        return
       }
+      // Anchor not in DOM — clear stale anchor, fall through to pixel position
+      this.clearSavedAnchor()
+      this._lastAnchorId = null
     }
 
-    // Check if messages are already in DOM
-    if (this.element.querySelector("[id^='message_']")) {
-      tryRestore()
-      return
+    const saved = this.getSavedPosition()
+    if (saved !== null && saved > 0) {
+      this.element.scrollTop = saved
+      this._lastScrollTop = saved
+    } else {
+      this.scrollToBottom()
     }
-
-    // Wait for messages to appear
-    const obs = new MutationObserver((muts, observer) => {
-      if (this.element.querySelector("[id^='message_']")) {
-        observer.disconnect()
-        // Small delay for remaining DOM to settle
-        setTimeout(() => tryRestore(), 50)
-      }
-    })
-    obs.observe(this.element, { childList: true, subtree: true })
-    setTimeout(() => { obs.disconnect(); callback() }, 3000)
+    this._finishInit()
   }
+
+  _jumpToMessage(messageId) {
+    const el = document.getElementById(`message_${messageId}`)
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" })
+      this._lastScrollTop = this.element.scrollTop
+      this.highlightMessage(el, true)
+      this._finishInit()
+    } else {
+      this.waitForMessage(messageId, (msgEl) => {
+        msgEl.scrollIntoView({ behavior: "smooth", block: "center" })
+        this._lastScrollTop = this.element.scrollTop
+        this.highlightMessage(msgEl, true)
+        this._finishInit()
+      })
+    }
+  }
+
+  _finishInit() {
+    // Single rAF — enough to prevent scroll handler from firing during initial set
+    requestAnimationFrame(() => { this._initializing = false })
+  }
+
   highlightMessage(el, afterScroll = false) {
     const doHighlight = () => {
       el.style.backgroundColor = "rgba(99, 102, 241, 0.3)"
@@ -217,56 +216,52 @@ export default class extends Controller {
       }, 1000)
     }
     if (afterScroll) {
-      // Wait for smooth scroll to finish
       setTimeout(doHighlight, 600)
     } else {
       doHighlight()
     }
   }
 
-  // Wait for an element to appear in the DOM, then call callback
   waitForMessage(messageId, callback, timeoutMs = 5000) {
-    const tryScroll = (el) => {
-      // Wait for any images in/near the message to load first
-      const images = this.element.querySelectorAll("img:not([complete])")
-      const pending = Array.from(images).filter(img => !img.complete)
-      if (pending.length > 0) {
-        let loaded = 0
-        const check = () => { if (++loaded >= pending.length) setTimeout(() => callback(el), 50) }
-        pending.forEach(img => img.addEventListener("load", check, { once: true }))
-        setTimeout(() => callback(el), 1500) // fallback if images slow
-      } else {
-        setTimeout(() => callback(el), 100)
-      }
-    }
     const el = document.getElementById(`message_${messageId}`)
-    if (el) { tryScroll(el); return }
+    if (el) { callback(el); return }
     const obs = new MutationObserver((mutations, observer) => {
       const el = document.getElementById(`message_${messageId}`)
       if (el) {
         observer.disconnect()
-        tryScroll(el)
+        callback(el)
       }
     })
     obs.observe(this.element, { childList: true, subtree: true })
-    // Timeout fallback
     setTimeout(() => {
       obs.disconnect()
       const el = document.getElementById(`message_${messageId}`)
-      if (el) tryScroll(el)
+      if (el) callback(el)
       else this.scrollToBottom()
     }, timeoutMs)
   }
 
-  disconnect() {
-    // Save scroll position — try live element first, fall back to cached
+  // --- Save helpers ---
+
+  // Force save without _initializing guard (for disconnect / frame swap)
+  _forceSave(pos) {
     try {
-      const pos = this.element.scrollTop || this._lastScrollTop
-      if (pos > 0) this.savePosition(pos)
-    } catch {
-      if (this._lastScrollTop > 0) this.savePosition(this._lastScrollTop)
-    }
-    document.removeEventListener("click", this._onLinkClick)
+      const positions = JSON.parse(sessionStorage.getItem("channel_scroll") || "{}")
+      positions[this.channelIdValue] = pos
+      sessionStorage.setItem("channel_scroll", JSON.stringify(positions))
+
+      // Use cached anchor ID (DOM may be detached at disconnect time)
+      if (this._lastAnchorId) {
+        sessionStorage.setItem("channel_anchor_" + this.channelIdValue, this._lastAnchorId)
+      }
+    } catch {}
+  }
+
+  disconnect() {
+    // Always save — use cached value since element may be detached from DOM
+    if (this._lastScrollTop > 0) this._forceSave(this._lastScrollTop)
+    document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
+    document.removeEventListener("click", this._onLinkClick, true)
     if (this._jumpBtn && this._jumpHandler) {
       this._jumpBtn.removeEventListener("click", this._jumpHandler)
     }
@@ -284,7 +279,6 @@ export default class extends Controller {
   jumpToBottom() {
     this.clearSavedAnchor()
     if (this.hasNewerValue) {
-      // Bottom was trimmed — reload the channel to get fresh latest messages
       const serverId = this.serverIdValue
       const channelId = this.channelIdValue
       window.Turbo.visit(`/servers/${serverId}/channels/${channelId}`)
@@ -306,15 +300,21 @@ export default class extends Controller {
 
   _findAnchorMessage() {
     const messages = this.element.querySelectorAll("[id^='message_']")
-    const containerTop = this.element.getBoundingClientRect().top
+    const containerRect = this.element.getBoundingClientRect()
+    const centerY = containerRect.top + containerRect.height / 2
+    let closest = null
+    let closestDist = Infinity
     for (const msg of messages) {
       const rect = msg.getBoundingClientRect()
-      // First message whose bottom is below the container top (visible or partially visible)
-      if (rect.bottom > containerTop) {
-        return { element: msg, offsetTop: rect.top }
+      if (rect.bottom < containerRect.top || rect.top > containerRect.bottom) continue
+      const msgCenter = rect.top + rect.height / 2
+      const dist = Math.abs(msgCenter - centerY)
+      if (dist < closestDist) {
+        closestDist = dist
+        closest = { element: msg, offsetTop: rect.top }
       }
     }
-    return null
+    return closest
   }
 
   _restoreAnchor(anchor) {
@@ -336,12 +336,10 @@ export default class extends Controller {
 
     const anchor = this._findAnchorMessage()
     const toRemove = messages.length - DOM_CAP
-    // Remove from the bottom (newest end)
     for (let i = messages.length - 1; i >= messages.length - toRemove; i--) {
       messages[i].remove()
     }
 
-    // Update newestMessageId to the new last message
     const remaining = this._getMessageElements()
     if (remaining.length > 0) {
       this.newestMessageIdValue = remaining[remaining.length - 1].id.replace("message_", "")
@@ -361,12 +359,10 @@ export default class extends Controller {
 
     const anchor = this._findAnchorMessage()
     const toRemove = messages.length - DOM_CAP
-    // Remove from the top (oldest end)
     for (let i = 0; i < toRemove; i++) {
       messages[i].remove()
     }
 
-    // Update oldestMessageId to the new first message
     const remaining = this._getMessageElements()
     if (remaining.length > 0) {
       this.oldestMessageIdValue = remaining[0].id.replace("message_", "")
@@ -406,38 +402,31 @@ export default class extends Controller {
 
       const anchor = this._findAnchorMessage()
 
-      // Parse and prepend messages
       const template = document.createElement("template")
       template.innerHTML = html
 
       const firstChild = this.element.firstChild
 
-      // Insert all new messages at the top
       while (template.content.firstChild) {
         this.element.insertBefore(template.content.firstChild, firstChild)
       }
 
       this._restoreAnchor(anchor)
 
-      // Update oldest message ID from the newly prepended messages
       const allMessages = this._getMessageElements()
       if (allMessages.length > 0) {
         this.oldestMessageIdValue = allMessages[0].id.replace("message_", "")
       }
 
-      // Use header to determine if there are more
       const hasMore = response.headers.get("X-Has-Older")
       if (hasMore === "false") {
         this.hasOlderValue = false
       }
 
-      // Trim bottom if over cap
       this.trimBottom()
 
-      // Delay unsetting so queued MutationObserver callbacks still see suppress=true
       setTimeout(() => { this._suppressObserver = false }, 0)
 
-      // Bind image load handlers for scroll correction
       this._bindImageLoadHandlers()
     } catch (e) {
       this._suppressObserver = false
@@ -475,7 +464,6 @@ export default class extends Controller {
 
       const anchor = this._findAnchorMessage()
 
-      // Parse and append messages
       const template = document.createElement("template")
       template.innerHTML = html
 
@@ -485,24 +473,20 @@ export default class extends Controller {
 
       this._restoreAnchor(anchor)
 
-      // Update newest message ID
       const allMessages = this._getMessageElements()
       if (allMessages.length > 0) {
         this.newestMessageIdValue = allMessages[allMessages.length - 1].id.replace("message_", "")
       }
 
-      // Use header to determine if there are more
       const hasNewer = response.headers.get("X-Has-Newer")
       if (hasNewer === "false") {
         this.hasNewerValue = false
       }
 
-      // Trim top if over cap
       this.trimTop()
 
       setTimeout(() => { this._suppressObserver = false }, 0)
 
-      // Bind image load handlers for scroll correction
       this._bindImageLoadHandlers()
     } catch (e) {
       this._suppressObserver = false
@@ -556,34 +540,29 @@ export default class extends Controller {
       positions[this.channelIdValue] = pos
       sessionStorage.setItem("channel_scroll", JSON.stringify(positions))
 
-      // Save anchor message ID when in history (bottom trimmed)
-      if (this.hasNewerValue) {
+      // Save single anchor per channel — replaces any previous anchor
+      if (this.isNearBottom() && !this.hasNewerValue) {
+        this.clearSavedAnchor()
+        this._lastAnchorId = null
+      } else {
         const anchor = this._findAnchorMessage()
         if (anchor) {
-          const anchorId = anchor.element.id.replace("message_", "")
-          const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}")
-          anchors[this.channelIdValue] = anchorId
-          sessionStorage.setItem("channel_anchors", JSON.stringify(anchors))
+          this._lastAnchorId = anchor.element.id.replace("message_", "")
+          sessionStorage.setItem("channel_anchor_" + this.channelIdValue, this._lastAnchorId)
         }
-      } else {
-        // Clear anchor when at present
-        this.clearSavedAnchor()
       }
     } catch {}
   }
 
   getSavedAnchor() {
     try {
-      const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}")
-      return anchors[this.channelIdValue] ?? null
+      return sessionStorage.getItem("channel_anchor_" + this.channelIdValue) || null
     } catch { return null }
   }
 
   clearSavedAnchor() {
     try {
-      const anchors = JSON.parse(sessionStorage.getItem("channel_anchors") || "{}")
-      delete anchors[this.channelIdValue]
-      sessionStorage.setItem("channel_anchors", JSON.stringify(anchors))
+      sessionStorage.removeItem("channel_anchor_" + this.channelIdValue)
     } catch {}
   }
 
@@ -616,10 +595,8 @@ export default class extends Controller {
 
       this._suppressObserver = true
 
-      // Replace all content
       this.element.innerHTML = html
 
-      // Update cursors from headers
       this.hasOlderValue = response.headers.get("X-Has-Older") !== "false"
       this.hasNewerValue = response.headers.get("X-Has-Newer") !== "false"
 
@@ -629,15 +606,12 @@ export default class extends Controller {
         this.newestMessageIdValue = allMessages[allMessages.length - 1].id.replace("message_", "")
       }
 
-      // Scroll to the anchor message
       const anchorEl = document.getElementById(`message_${messageId}`)
       if (anchorEl) {
         anchorEl.scrollIntoView({ block: "center" })
       }
 
-      // Wait for images to load before allowing scroll-triggered loads.
-      // Without this, unloaded images make content short, isNearBottom()
-      // returns true, and loadNewerMessages chain-fires to the present.
+      // Brief guard to prevent scroll-triggered loads while images settle
       const images = Array.from(this.element.querySelectorAll("img")).filter(i => !i.complete)
       if (images.length > 0) {
         let loaded = 0
@@ -666,10 +640,8 @@ export default class extends Controller {
           }
         }, 3000)
       } else {
-        setTimeout(() => {
-          this._suppressObserver = false
-          this._initializing = false
-        }, 200)
+        this._suppressObserver = false
+        this._initializing = false
       }
     } catch (e) {
       console.error("Failed to load around message:", e)

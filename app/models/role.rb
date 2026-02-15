@@ -1,15 +1,19 @@
 class Role < ApplicationRecord
   include HasPublicId
+  include InstanceLimits
   belongs_to :server
   has_paper_trail
-  has_many :server_memberships
+  has_many :membership_roles, dependent: :destroy
+  has_many :server_memberships, through: :membership_roles
 
   DEFAULT_PERMISSIONS = {
     send_messages: true,
     read_messages: true,
     read_message_history: true,
     attach_files: true,
+    send_gifs: true,
     add_reactions: true,
+    change_nickname: true,
     create_invite: true,
     mention_everyone: false,
     manage_messages: false,
@@ -40,6 +44,8 @@ class Role < ApplicationRecord
 
   validates :name, presence: true, length: { maximum: 50 }
   validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+  validate :within_role_limit, on: :create
+  validate :no_rename_system_roles, on: :update
 
   scope :ordered, -> { order(position: :desc) }
 
@@ -57,5 +63,27 @@ class Role < ApplicationRecord
 
   def admin?
     permissions&.dig("administrator") == true
+  end
+
+  def everyone?
+    name == "@everyone"
+  end
+
+  def system_role?
+    owner? || everyone?
+  end
+
+  private
+
+  def within_role_limit
+    if server && instance_config.role_limit_reached_for?(server)
+      errors.add(:base, "This server has reached its role limit (#{instance_config.max_roles_per_server})")
+    end
+  end
+
+  def no_rename_system_roles
+    if name_changed? && (owner? || name_was == "@everyone")
+      errors.add(:name, "cannot be changed for system roles")
+    end
   end
 end

@@ -61,7 +61,7 @@
     <div class="mt-8 pt-6 border-t border-gray-700">
       <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">Members (<%= @server.members.count %>)</h3>
       <div class="space-y-2">
-        <% @server.server_memberships.includes(:user, :role).each do |membership| %>
+        <% @server.server_memberships.includes(:membership_roles, :roles, :user).each do |membership| %>
           <div class="flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
             <div class="flex items-center">
               <div class="w-8 h-8 rounded-full bg-orange-600 flex items-center justify-center text-sm font-bold text-white">
@@ -72,10 +72,18 @@
                 <p class="text-xs text-gray-500"><%= membership.user.tag %></p>
               </div>
             </div>
-            <div class="flex items-center gap-2">
-              <span class="text-xs px-2 py-1 rounded-full <%= membership.role&.owner? ? 'bg-yellow-600/20 text-yellow-400' : membership.role&.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
-                <%= membership.role&.name || '@everyone' %>
-              </span>
+            <div class="flex flex-wrap items-center gap-1">
+              <% assigned = membership.roles.sort_by { |r| -r.position } %>
+              <% if assigned.any? %>
+                <% assigned.each do |role| %>
+                  <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full <%= role.owner? ? 'bg-yellow-600/20 text-yellow-400' : role.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
+                    <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                    <%= role.name %>
+                  </span>
+                <% end %>
+              <% else %>
+                <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>
+              <% end %>
             </div>
           </div>
         <% end %>

@@ -19,6 +19,9 @@ module MessagingApp
     # Use Sidekiq for background jobs
     config.active_job.queue_adapter = :sidekiq
 
+    # Instance domain used for NIP-05 identifiers and cross-instance auth
+    config.x.instance_domain = ENV.fetch("INSTANCE_DOMAIN", "localhost")
+
     # Configuration for the application, engines, and railties goes here.
     #
     # These settings can be overridden in specific environments using the files

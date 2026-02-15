@@ -16,6 +16,7 @@ class Message < ApplicationRecord
 
   after_create_commit :create_mention_notifications
   after_create_commit :render_and_cache!
+  after_create_commit :publish_to_nostr_group, if: :in_shared_channel?
   after_update_commit :render_and_cache!, if: :saved_change_to_content?
 
   scope :ordered, -> { order(created_at: :asc) }
@@ -108,7 +109,7 @@ def unfurl_links(html, sync_tenor: true)
       html = html.gsub(/<p>\s*<\/p>/, "")
       # Clean up empty <p> tags left behind
       html = html.gsub(/<p>\s*<\/p>/, "")
-      embeds << %(<a href="#{link_url}" class="mt-2 block border-l-4 border-indigo-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
+      embeds << %(<a href="#{link_url}" data-turbo="false" class="mt-2 block border-l-4 border-indigo-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
     end
   end
 # Collect Discord message link embeds
@@ -249,6 +250,14 @@ end
     files.attached?
   end
 
+  def in_shared_channel?
+    channel&.shared? && !system_message? && !user&.remote?
+  end
+
+  def publish_to_nostr_group
+    NostrGroupPublishJob.perform_later(id)
+  end
+
   def fetch_tenor_og_image(tenor_url)
     fetch_uri = URI.parse(tenor_url)
     3.times do
@@ -308,7 +317,7 @@ end
     content&.scan(/@(\w+)/)&.flatten&.each do |name|
       role = server.roles.find_by("LOWER(name) = ? OR LOWER(name) = ?", "@#{name.downcase}", name.downcase)
       if role
-        server.server_memberships.where(role: role).includes(:user).each do |membership|
+        role.server_memberships.includes(:user).each do |membership|
           unless notified_ids.include?(membership.user_id)
             Notification.create(user: membership.user, server: server, channel: channel, message: self, notification_type: :role_mention)
             notified_ids << membership.user_id

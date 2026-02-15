@@ -24,6 +24,9 @@ import BannerEditorController from "./controllers/banner_editor_controller"
 import DmMessageFormController from "./controllers/dm_message_form_controller"
 import InviteMenuController from "./controllers/invite_menu_controller"
 import VideoPlayerController from "./controllers/video_player_controller"
+import NostrKeyExportController from "./controllers/nostr_key_export_controller"
+import RoleEditorController from "./controllers/role_editor_controller"
+import MemberRolesController from "./controllers/member_roles_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -46,4 +49,7 @@ application.register("banner-editor", BannerEditorController)
 application.register("dm-message-form", DmMessageFormController)
 application.register("invite-menu", InviteMenuController)
 application.register("video-player", VideoPlayerController)
+application.register("nostr-key-export", NostrKeyExportController)
+application.register("role-editor", RoleEditorController)
+application.register("member-roles", MemberRolesController)
 // rebuild trigger

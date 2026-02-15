@@ -8,6 +8,38 @@ Rails.application.routes.draw do
 
   get "users/check_email", to: "home#check_email", as: :users_check_email
 
+  # Instance administration
+  namespace :admin do
+    resource :instance_config, only: [:show, :update] do
+      post :emergency_lockdown
+      post :lift_lockdown
+    end
+    resources :instance_blocklists, only: [:create, :destroy]
+    resources :relay_connections, only: [:create, :destroy] do
+      member do
+        post :toggle
+      end
+    end
+    resources :moderation_reports, only: [:index, :show] do
+      member do
+        post :review
+      end
+    end
+  end
+
+  # NIP-05 Nostr identity verification
+  get "/.well-known/nostr.json", to: "nostr/well_known#show", as: :nostr_well_known
+  get "/.well-known/instance.json", to: "nostr/instance_metadata#show", as: :instance_metadata
+
+  # Cross-instance Nostr authentication
+  # Remote instance side: initiate auth + receive callback
+  get  "auth/nostr",          to: "nostr/auth#new",      as: :nostr_auth
+  get  "auth/nostr/callback", to: "nostr/auth#callback",  as: :nostr_auth_callback
+
+  # Home instance side: sign challenge for remote instance
+  get  "auth/nostr/sign",     to: "nostr/signing#show",   as: :nostr_auth_sign
+  post "auth/nostr/sign",     to: "nostr/signing#create"
+
   get "up" => "rails/health#show", as: :rails_health_check
 
   authenticated :user do
@@ -28,10 +60,13 @@ Rails.application.routes.draw do
         get :older_messages
         get :newer_messages
         get :around_messages
+        post :bridge, controller: "shared_channels"
+        delete :unbridge, controller: "shared_channels"
       end
     end
     resources :categories, only: [:new, :create, :edit, :update, :destroy]
     patch :reorder_channels, to: "channel_reorder#update"
+    patch :reorder_roles, to: "roles#reorder"
     delete "channels/:id/quick_delete", to: "channel_reorder#destroy_channel", as: :quick_delete_channel
     delete "categories/:id/quick_delete", to: "channel_reorder#destroy_category", as: :quick_delete_category
     resources :members, only: [:index, :update, :destroy], controller: "server_members" do
@@ -97,6 +132,9 @@ Rails.application.routes.draw do
   # Blocks
   resources :blocks, only: [:create, :destroy]
 
+  # Moderation reports (user-facing)
+  resources :moderation_reports, only: [:create]
+
   # Notifications
   post "notifications/mark_read", to: "notifications#mark_read"
   post "notifications/mark_dm_read", to: "notifications#mark_dm_read"
@@ -105,5 +143,7 @@ Rails.application.routes.draw do
   # User settings (modal sections)
   get "settings/:section", to: "settings#show", as: :settings_section
   patch "settings/profile", to: "settings#update_profile", as: :settings_profile
+  post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
+  post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
   resource :profile, only: [:show, :edit, :update]
 end

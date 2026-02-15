@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -99,7 +99,11 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.datetime "updated_at", null: false
     t.bigint "category_id"
     t.string "public_id", limit: 12, null: false
+    t.boolean "shared", default: false
+    t.string "nostr_group_id"
+    t.string "nostr_relay_url"
     t.index ["category_id"], name: "index_channels_on_category_id"
+    t.index ["nostr_group_id"], name: "index_channels_on_nostr_group_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
     t.index ["server_id"], name: "index_channels_on_server_id"
   end
@@ -137,6 +141,44 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.index ["user_id"], name: "index_friendships_on_user_id"
   end
 
+  create_table "instance_blocklists", force: :cascade do |t|
+    t.string "domain", null: false
+    t.text "reason"
+    t.bigint "blocked_by_id", null: false
+    t.datetime "blocked_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["blocked_by_id"], name: "index_instance_blocklists_on_blocked_by_id"
+    t.index ["domain"], name: "index_instance_blocklists_on_domain", unique: true
+  end
+
+  create_table "instance_configs", force: :cascade do |t|
+    t.string "instance_name", default: "Inferno Chat"
+    t.text "instance_description"
+    t.integer "max_users", default: 0
+    t.integer "max_servers_per_user", default: 5
+    t.integer "max_servers", default: 0
+    t.integer "max_channels_per_server", default: 50
+    t.integer "max_categories_per_server", default: 20
+    t.integer "max_members_per_server", default: 0
+    t.integer "max_roles_per_server", default: 25
+    t.integer "max_upload_size_mb", default: 25
+    t.integer "max_storage_per_user_mb", default: 0
+    t.string "pruning_strategy", default: "none"
+    t.integer "message_retention_days", default: 0
+    t.integer "attachment_retention_days", default: 0
+    t.boolean "keep_pinned_messages", default: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "federation_mode", default: "open", null: false
+    t.boolean "lockdown_enabled", default: false, null: false
+    t.string "instance_relay_url"
+    t.boolean "lockdown_remote_auth", default: false, null: false
+    t.boolean "lockdown_remote_joins", default: false, null: false
+    t.boolean "lockdown_local_signups", default: false, null: false
+    t.boolean "lockdown_invite_creation", default: false, null: false
+  end
+
   create_table "invites", force: :cascade do |t|
     t.string "code", null: false
     t.bigint "server_id", null: false
@@ -151,6 +193,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.index ["creator_id"], name: "index_invites_on_creator_id"
     t.index ["server_id", "active"], name: "index_invites_on_server_id_and_active"
     t.index ["server_id"], name: "index_invites_on_server_id"
+  end
+
+  create_table "membership_roles", force: :cascade do |t|
+    t.bigint "server_membership_id", null: false
+    t.bigint "role_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["role_id"], name: "index_membership_roles_on_role_id"
+    t.index ["server_membership_id", "role_id"], name: "index_membership_roles_on_server_membership_id_and_role_id", unique: true
   end
 
   create_table "messages", force: :cascade do |t|
@@ -172,6 +223,59 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.index ["parent_id"], name: "index_messages_on_parent_id"
     t.index ["public_id"], name: "index_messages_on_public_id", unique: true
     t.index ["user_id"], name: "index_messages_on_user_id"
+  end
+
+  create_table "moderation_reports", force: :cascade do |t|
+    t.bigint "reporter_id", null: false
+    t.string "reported_pubkey", null: false
+    t.string "reported_event_id"
+    t.string "report_type", null: false
+    t.text "reason"
+    t.string "status", default: "open", null: false
+    t.bigint "reviewed_by_id"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["reported_pubkey"], name: "index_moderation_reports_on_reported_pubkey"
+    t.index ["reporter_id"], name: "index_moderation_reports_on_reporter_id"
+    t.index ["reviewed_by_id"], name: "index_moderation_reports_on_reviewed_by_id"
+    t.index ["status"], name: "index_moderation_reports_on_status"
+  end
+
+  create_table "nip05_caches", force: :cascade do |t|
+    t.string "identifier", null: false
+    t.string "public_key", null: false
+    t.datetime "verified_at", null: false
+    t.datetime "expires_at", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["identifier"], name: "index_nip05_caches_on_identifier", unique: true
+    t.index ["public_key"], name: "index_nip05_caches_on_public_key"
+  end
+
+  create_table "nostr_auth_challenges", force: :cascade do |t|
+    t.string "nonce", null: false
+    t.string "requesting_domain", null: false
+    t.string "callback_url", null: false
+    t.datetime "expires_at", null: false
+    t.boolean "used", default: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["nonce"], name: "index_nostr_auth_challenges_on_nonce", unique: true
+  end
+
+  create_table "nostr_event_logs", force: :cascade do |t|
+    t.string "event_id", null: false
+    t.integer "kind", null: false
+    t.string "pubkey", null: false
+    t.bigint "message_id"
+    t.bigint "channel_id"
+    t.string "direction", null: false
+    t.datetime "event_created_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["channel_id"], name: "index_nostr_event_logs_on_channel_id"
+    t.index ["event_id"], name: "index_nostr_event_logs_on_event_id", unique: true
+    t.index ["message_id"], name: "index_nostr_event_logs_on_message_id"
   end
 
   create_table "notifications", force: :cascade do |t|
@@ -203,6 +307,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.index ["user_id"], name: "index_reactions_on_user_id"
   end
 
+  create_table "relay_connections", force: :cascade do |t|
+    t.string "url", null: false
+    t.string "status", default: "active"
+    t.datetime "last_connected_at"
+    t.datetime "last_error_at"
+    t.text "last_error_message"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["url"], name: "index_relay_connections_on_url", unique: true
+  end
+
+  create_table "remote_users", force: :cascade do |t|
+    t.string "nostr_public_key", null: false
+    t.string "home_instance", null: false
+    t.string "display_name"
+    t.string "avatar_url"
+    t.text "bio"
+    t.string "username"
+    t.datetime "last_verified_at"
+    t.string "public_id", limit: 12
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["home_instance"], name: "index_remote_users_on_home_instance"
+    t.index ["nostr_public_key"], name: "index_remote_users_on_nostr_public_key", unique: true
+    t.index ["public_id"], name: "index_remote_users_on_public_id", unique: true
+  end
+
   create_table "roles", force: :cascade do |t|
     t.string "name"
     t.string "color"
@@ -213,6 +344,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "public_id", limit: 12, null: false
+    t.boolean "hoist", default: false, null: false
     t.index ["public_id"], name: "index_roles_on_public_id", unique: true
     t.index ["server_id"], name: "index_roles_on_server_id"
   end
@@ -220,14 +352,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
   create_table "server_memberships", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "server_id", null: false
-    t.bigint "role_id"
     t.string "nickname"
     t.datetime "joined_at"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "public_id", limit: 12, null: false
     t.index ["public_id"], name: "index_server_memberships_on_public_id", unique: true
-    t.index ["role_id"], name: "index_server_memberships_on_role_id"
     t.index ["server_id"], name: "index_server_memberships_on_server_id"
     t.index ["user_id", "server_id"], name: "index_server_memberships_on_user_id_and_server_id", unique: true
     t.index ["user_id"], name: "index_server_memberships_on_user_id"
@@ -275,9 +405,18 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
     t.integer "banner_offset_y"
     t.string "profile_color_2"
     t.string "public_id", limit: 12, null: false
+    t.string "nostr_public_key"
+    t.text "nostr_encrypted_private_key"
+    t.boolean "instance_admin", default: false, null: false
+    t.boolean "remote", default: false, null: false
+    t.bigint "remote_user_detail_id"
+    t.datetime "nostr_profile_published_at"
+    t.datetime "nostr_contacts_published_at"
     t.index ["confirmation_token"], name: "index_users_on_confirmation_token", unique: true
     t.index ["email"], name: "index_users_on_email", unique: true
+    t.index ["nostr_public_key"], name: "index_users_on_nostr_public_key", unique: true
     t.index ["public_id"], name: "index_users_on_public_id", unique: true
+    t.index ["remote_user_detail_id"], name: "index_users_on_remote_user_detail_id"
     t.index ["reset_password_token"], name: "index_users_on_reset_password_token", unique: true
     t.index ["username", "discriminator"], name: "index_users_on_username_and_discriminator", unique: true
   end
@@ -308,12 +447,19 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
   add_foreign_key "conversation_participants", "users"
   add_foreign_key "friendships", "users"
   add_foreign_key "friendships", "users", column: "friend_id"
+  add_foreign_key "instance_blocklists", "users", column: "blocked_by_id"
   add_foreign_key "invites", "servers"
   add_foreign_key "invites", "users", column: "creator_id"
+  add_foreign_key "membership_roles", "roles"
+  add_foreign_key "membership_roles", "server_memberships"
   add_foreign_key "messages", "channels"
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "messages", column: "parent_id"
   add_foreign_key "messages", "users"
+  add_foreign_key "moderation_reports", "users", column: "reporter_id"
+  add_foreign_key "moderation_reports", "users", column: "reviewed_by_id"
+  add_foreign_key "nostr_event_logs", "channels"
+  add_foreign_key "nostr_event_logs", "messages"
   add_foreign_key "notifications", "channels"
   add_foreign_key "notifications", "messages"
   add_foreign_key "notifications", "servers"
@@ -321,9 +467,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_14_220957) do
   add_foreign_key "reactions", "messages"
   add_foreign_key "reactions", "users"
   add_foreign_key "roles", "servers"
-  add_foreign_key "server_memberships", "roles"
   add_foreign_key "server_memberships", "servers"
   add_foreign_key "server_memberships", "users"
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
+  add_foreign_key "users", "remote_users", column: "remote_user_detail_id"
 end

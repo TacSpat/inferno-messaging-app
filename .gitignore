@@ -32,3 +32,14 @@
 
 # Ignore master key for decrypting credentials and more.
 /config/master.key
+/config/credentials/*.key
+
+# Ignore node modules.
+/node_modules/
+
+# Ignore debug/REPL history.
+.byebug_history
+.irb_history
+
+# Ignore coverage reports.
+/coverage/

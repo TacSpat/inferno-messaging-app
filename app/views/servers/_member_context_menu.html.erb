@@ -5,6 +5,7 @@
 <% can_ban = my_membership&.has_permission?("ban_members") || my_membership&.owner? %>
 <% is_self = member == current_user %>
 <% is_owner = server.owner == member %>
+<% can_edit_member = can_manage || is_self %>
 
 <div class="w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 px-1.5 text-sm">
   <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
@@ -46,22 +47,37 @@
         Add Friend
       <% end %>
     <% end %>
+  <% end %>
 
-    <% if can_manage && !is_owner %>
-      <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
-              data-action="click->member-context#showRoles" data-member-id="<%= membership&.public_id %>">
-        Roles
-      </button>
+  <% if can_edit_member %>
+    <div class="border-t border-gray-700 my-1"></div>
+
+    <% if can_manage %>
+      <% non_system_roles = server.roles.where.not("permissions @> ?", { owner: true }.to_json).where.not(name: "@everyone").ordered %>
+      <div class="relative context-roles-wrapper">
+        <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+                data-context-action="showRoles"
+                data-member-id="<%= membership&.public_id %>"
+                data-server-id="<%= server.public_id %>"
+                data-roles="<%= non_system_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
+                data-member-roles="<%= membership&.roles&.reject(&:owner?)&.map(&:public_id)&.to_json %>">
+          <span>Roles</span>
+          <svg class="w-3 h-3 ml-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
+      </div>
     <% end %>
 
-    <% if can_manage && !is_owner %>
-      <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
-              data-action="click->member-context#changeNickname" data-member-id="<%= membership&.public_id %>">
-        Change Nickname
-      </button>
-    <% end %>
+    <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+            data-context-action="changeNickname"
+            data-member-id="<%= membership&.public_id %>"
+            data-server-id="<%= server.public_id %>"
+            data-current-nickname="<%= membership&.nickname %>">
+      Change Nickname
+    </button>
+  <% end %>
 
-    <% if can_kick && !is_owner %>
+  <% if !is_self && !is_owner %>
+    <% if can_kick %>
       <div class="border-t border-gray-700 my-1"></div>
       <%= button_to "Kick #{member.username}",
             server_settings_kick_member_path(server, membership),
@@ -70,7 +86,7 @@
             data: { turbo_confirm: "Kick #{member.username} from #{server.name}?" } %>
     <% end %>
 
-    <% if can_ban && !is_owner %>
+    <% if can_ban %>
       <%= button_to "Ban #{member.username}",
             server_settings_create_ban_path(server, user_id: member.public_id),
             method: :post,

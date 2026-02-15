@@ -296,7 +296,93 @@ Power users can take control of their keys:
 
 ---
 
-## 9. Security Considerations
+## 9. Instance Scaling & Resource Limits
+
+### Horizontal Scaling
+
+A single Inferno Chat instance (one domain) can run across multiple machines:
+
+```
+                    ┌─────────────────────┐
+                    │   Load Balancer      │
+                    │  (nginx / HAProxy)   │
+                    └────┬───────┬─────────┘
+                         │       │
+                  ┌──────┴──┐ ┌──┴──────┐
+                  │  Puma 1  │ │  Puma 2  │   ← stateless, scale out freely
+                  └────┬─────┘ └──┬──────┘
+                       │          │
+                  ┌────┴──────────┴────┐
+                  │   Redis Cluster    │   ← ActionCable pub/sub + Sidekiq queues
+                  └────┬──────────┬────┘
+                       │          │
+                ┌──────┴──┐ ┌────┴──────┐
+                │Sidekiq 1│ │ Sidekiq 2 │   ← job workers, scale out freely
+                └─────────┘ └───────────┘
+
+                  ┌────────────────────┐
+                  │  PostgreSQL Primary │
+                  ├────────────────────┤
+                  │  Read Replica 1    │   ← Rails multi-DB (built-in since 6.0)
+                  │  Read Replica 2    │
+                  └────────────────────┘
+
+                  ┌────────────────────┐
+                  │  S3 / MinIO        │   ← Active Storage, scales infinitely
+                  └────────────────────┘
+```
+
+**Works out of the box:**
+- **Puma** — stateless web servers behind a load balancer
+- **Sidekiq** — multiple workers sharing a Redis queue
+- **Active Storage** — swap local disk for S3/MinIO
+- **ActionCable** — Redis adapter for pub/sub across Puma instances
+
+**With configuration only:**
+- **Read replicas** — Rails `connects_to` in `database.yml`
+- **Connection pooling** — PgBouncer in front of PostgreSQL
+
+**For very large instances:**
+- **Database sharding** — Rails 6.1+ built-in shard support; natural shard key is `server_id` since most queries are server-scoped
+
+### Instance Resource Limits
+
+Instance admins configure limits via the admin UI (`/admin/instance_config`):
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `max_users` | 0 (unlimited) | Total user registrations |
+| `max_servers` | 0 (unlimited) | Total servers on instance |
+| `max_servers_per_user` | 5 | Servers a user can create |
+| `max_channels_per_server` | 50 | Channels per server |
+| `max_categories_per_server` | 20 | Categories per server |
+| `max_members_per_server` | 0 (unlimited) | Members per server |
+| `max_roles_per_server` | 25 | Roles per server |
+| `max_upload_size_mb` | 25 | Per-file upload limit |
+| `max_storage_per_user_mb` | 0 (unlimited) | Total storage per user |
+
+Limits are enforced at model creation time via validations. When a limit is reached, the user sees a clear error message.
+
+### Message Pruning
+
+Configurable via admin UI with three strategies:
+
+- **None** — keep everything forever (default)
+- **Time-based** — delete messages older than N days
+- **Storage-based** — prune attachments first (free storage), then prune message text
+
+Additional options:
+- Separate retention periods for messages vs attachments (attachments are storage-expensive, text is cheap)
+- Pinned messages can be excluded from pruning
+- Pruning runs as a Sidekiq job (`PruneMessagesJob`), triggered via `rake maintenance:prune` on a cron schedule
+
+### Instance Discovery
+
+Each instance exposes `/.well-known/instance.json` with its name, description, limits, and current usage. This lets users browse instances and pick one based on capacity and community before joining.
+
+---
+
+## 10. Security Considerations
 
 ### Challenge Replay Prevention
 - Auth challenges include a nonce, timestamp, and the requesting relay/instance URL.

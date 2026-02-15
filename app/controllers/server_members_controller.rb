@@ -4,7 +4,8 @@ class ServerMembersController < ApplicationController
   before_action :ensure_member!
 
   def index
-    @members = @server.members.includes(:server_memberships, avatar_attachment: :blob)
+    current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current) if current_user.offline?
+    @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
 
     respond_to do |format|
       format.html do

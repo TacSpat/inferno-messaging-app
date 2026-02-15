@@ -1,6 +1,7 @@
+<% grouped = local_assigns[:grouped] %>
 <% if message.system_message? %>
   <!-- System message (welcome, join, etc.) -->
-  <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>">
+  <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>" data-system-message="true">
     <svg class="w-4 h-4 text-green-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
     </svg>
@@ -10,17 +11,24 @@
     <span class="ml-2 text-xs text-gray-500"><%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %></span>
   </div>
 <% else %>
-  <div id="message_<%= message.public_id %>" class="flex items-start py-0.5 px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>">
-    <!-- Avatar -->
-    <div class="shrink-0 mt-0.5 mr-4">
-      <% if message.user.avatar.attached? %>
-        <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
-      <% else %>
-        <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
-          <%= message.user.username[0].upcase %>
-        </div>
-      <% end %>
-    </div>
+  <div id="message_<%= message.public_id %>" class="flex items-start py-0.5 px-2 group hover:bg-gray-680 rounded relative<%= ' message-grouped' if grouped %>" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>"<%= ' data-is-reply="true"'.html_safe if message.parent %>>
+    <% if grouped %>
+      <!-- Hover timestamp spacer (same width as avatar) -->
+      <div class="shrink-0 mt-0.5 mr-4 w-10 flex items-center justify-center">
+        <span class="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100"><%= message.created_at.strftime("%l:%M %p").strip %></span>
+      </div>
+    <% else %>
+      <!-- Avatar -->
+      <div class="shrink-0 mt-0.5 mr-4">
+        <% if message.user.avatar.attached? %>
+          <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
+        <% else %>
+          <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
+            <%= message.user.username[0].upcase %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
 
     <!-- Content -->
     <div class="flex-1 min-w-0">
@@ -32,17 +40,19 @@
         </div>
       <% end %>
 
-      <div class="flex items-baseline">
-        <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= message.user.role_color_for(server) %>">
-          <%= message.user.display_name_for(server) %>
-        </span>
-        <span class="ml-2 text-xs text-gray-500">
-          <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
-        </span>
-        <% if message.edited? %>
-          <span class="ml-1 text-xs text-gray-500">(edited)</span>
-        <% end %>
-      </div>
+      <% unless grouped %>
+        <div class="flex items-baseline">
+          <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= message.user.role_color_for(server) %>">
+            <%= message.user.display_name_for(server) %>
+          </span>
+          <span class="ml-2 text-xs text-gray-500">
+            <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
+          </span>
+          <% if message.edited? %>
+            <span class="ml-1 text-xs text-gray-500">(edited)</span>
+          <% end %>
+        </div>
+      <% end %>
       <div class="text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>">
         <%= message.rendered_content %>
       </div>
@@ -67,7 +77,7 @@
     <audio controls preload="metadata" src="<%= url_for(file) %>" class="h-8"></audio>
   </div>
 <% else %>
-              <a href="<%= url_for(file) %>" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
+              <a href="<%= url_for(file) %>" data-turbo-frame="_top" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
                 <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
                 <span class="text-sm text-blue-400"><%= file.filename %></span>
               </a>

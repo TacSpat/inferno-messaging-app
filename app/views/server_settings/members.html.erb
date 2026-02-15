@@ -13,21 +13,48 @@
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <span class="text-xs px-2 py-1 rounded-full <%= membership.role&.owner? ? 'bg-yellow-600/20 text-yellow-400' : membership.role&.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
-          <%= membership.role&.name || '@everyone' %>
-        </span>
-        <% if !membership.owner? && @server.owner == current_user %>
-          <div class="flex gap-1">
-            <% admin_role = @server.roles.find_by(name: "Admin") %>
-            <% if membership.role != admin_role %>
-              <%= button_to "⬆ Promote", server_settings_update_member_path(@server, membership), params: { role_id: admin_role&.id }, method: :patch, class: "text-xs text-orange-400 hover:text-orange-300 cursor-pointer" %>
-            <% else %>
-              <% everyone_role = @server.roles.find_by(name: "@everyone") %>
-              <%= button_to "⬇ Demote", server_settings_update_member_path(@server, membership), params: { role_id: everyone_role&.id }, method: :patch, class: "text-xs text-gray-400 hover:text-gray-300 cursor-pointer" %>
+        <div class="flex flex-wrap gap-1" data-member-roles-target="badges" data-membership-id="<%= membership.public_id %>">
+          <% assigned = membership.roles.sort_by { |r| -r.position } %>
+          <% if assigned.any? %>
+            <% assigned.each do |role| %>
+              <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full <%= role.owner? ? 'bg-yellow-600/20 text-yellow-400' : role.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
+                <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                <%= role.name %>
+              </span>
             <% end %>
+          <% else %>
+            <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>
+          <% end %>
+        </div>
+        <% if @current_membership&.admin? %>
+          <div class="relative" data-controller="member-roles"
+               data-member-roles-server-id-value="<%= @server.public_id %>"
+               data-member-roles-membership-id-value="<%= membership.public_id %>"
+               data-member-roles-all-roles-value="<%= @all_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
+               data-member-roles-current-role-ids-value="<%= membership.roles.reject(&:owner?).map(&:public_id).to_json %>">
+            <button class="text-xs text-orange-400 hover:text-orange-300 cursor-pointer"
+                    data-action="click->member-roles#toggle">
+              Manage Roles
+            </button>
+            <div class="absolute right-0 top-8 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl py-2 z-50 hidden"
+                 data-member-roles-target="dropdown">
+              <p class="px-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase">Assign Roles</p>
+              <% @all_roles.reject(&:everyone?).each do |role| %>
+                <label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
+                  <input type="checkbox" value="<%= role.public_id %>"
+                         class="mr-2 accent-orange-500"
+                         data-action="change->member-roles#toggleRole"
+                         <%= 'checked' if membership.roles.include?(role) %>>
+                  <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                  <span class="text-sm text-gray-300"><%= role.name %></span>
+                </label>
+              <% end %>
+            </div>
+          </div>
+          <% unless membership.owner? %>
             <%= button_to "Kick", server_settings_kick_member_path(@server, membership), method: :delete, data: { turbo_confirm: "Kick #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
             <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: membership.user.public_id }, method: :post, data: { turbo_confirm: "Ban #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
-          </div>
+          <% end %>
         <% end %>
       </div>
     </div>

@@ -36,6 +36,6 @@ class ServerPolicy < ApplicationPolicy
   def member_has_permission?(permission)
     return false unless membership
     return true if record.owner == user # Owner always has everything
-    membership.role&.has_permission?(permission) || false
+    membership.has_permission?(permission)
   end
 end
