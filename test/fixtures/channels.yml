@@ -1,0 +1,19 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  name: MyString
+  topic: MyText
+  position: 1
+  channel_type: 1
+  nsfw: false
+  permissions_overrides: 
+  server: one
+
+two:
+  name: MyString
+  topic: MyText
+  position: 1
+  channel_type: 1
+  nsfw: false
+  permissions_overrides: 
+  server: two

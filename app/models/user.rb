@@ -1,0 +1,130 @@
+class User < ApplicationRecord
+  include HasPublicId
+  devise :database_authenticatable, :registerable,
+         :recoverable, :rememberable, :validatable,
+         :confirmable
+
+  # Profile
+  has_one_attached :avatar
+  has_one_attached :banner
+
+  # Servers
+  has_many :server_memberships, dependent: :destroy
+  has_many :servers, through: :server_memberships
+  has_many :owned_servers, class_name: "Server", foreign_key: :owner_id, dependent: :nullify
+
+  # Invites
+  has_many :created_invites, class_name: "Invite", foreign_key: :creator_id, dependent: :destroy
+
+  # Messages
+  has_many :messages, dependent: :nullify
+
+  # Friends
+  has_many :friendships, dependent: :destroy
+  has_many :accepted_friendships, -> { accepted }, class_name: "Friendship"
+  has_many :friends, through: :accepted_friendships, source: :friend
+  has_many :pending_friend_requests, -> { pending }, class_name: "Friendship", foreign_key: :friend_id
+  has_many :sent_friend_requests, -> { pending }, class_name: "Friendship"
+
+  # Blocks
+  has_many :blocks, foreign_key: :blocker_id, dependent: :destroy
+  has_many :blocked_users, through: :blocks, source: :blocked
+
+  # Conversations
+  has_many :conversation_participants, dependent: :destroy
+  has_many :conversations, through: :conversation_participants
+
+  # Notifications
+  has_many :notifications, dependent: :destroy
+
+  # Channel reads
+  has_many :channel_reads, dependent: :destroy
+
+  # Validations
+  validates :username, presence: true, length: { minimum: 2, maximum: 32 }
+  validates :discriminator, presence: true,
+            format: { with: /\A\d{4}\z/, message: "must be 4 digits" }
+  validates :discriminator, uniqueness: { scope: :username, message: "is taken for this username" }
+  validates :display_name, length: { maximum: 32 }, allow_blank: true
+  validates :bio, length: { maximum: 500 }, allow_blank: true
+  validates :status, length: { maximum: 128 }, allow_blank: true
+
+  # Online state
+  enum :online_state, { offline: 0, online: 1, idle: 2, dnd: 3, invisible: 4 }
+
+  # Callbacks
+  before_validation :assign_discriminator, on: :create
+  before_validation :default_display_name, on: :create
+  after_update_commit :broadcast_profile_update, if: :profile_changed?
+
+  # Full tag like "Tac#0420"
+  def tag
+    "#{username}##{discriminator}"
+  end
+
+  # Display name cascade: server nickname > display_name > username
+  def display_name_for(server = nil)
+    if server
+      membership = if server_memberships.loaded?
+        server_memberships.find { |sm| sm.server_id == server.id }
+      else
+        server_memberships.find_by(server: server)
+      end
+      return membership.nickname if membership&.nickname.present?
+    end
+    display_name.presence || username
+  end
+
+  def blocked?(user)
+    blocks.exists?(blocked_id: user.id)
+  end
+
+  def friends_with?(user)
+    friendships.accepted.exists?(friend_id: user.id)
+  end
+
+
+  def role_color_for(server)
+    return "#ffffff" unless server
+    membership = if server_memberships.loaded?
+      server_memberships.find { |sm| sm.server_id == server.id }
+    else
+      server_memberships.find_by(server: server)
+    end
+    return "#ffffff" unless membership&.role
+    membership.role.color || "#ffffff"
+  end
+  private
+
+  def profile_changed?
+    saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio? || saved_change_to_status? || saved_change_to_status_emoji?
+  end
+
+  def broadcast_profile_update
+    servers.each do |server|
+      html = ApplicationController.render(
+        partial: "servers/member_item",
+        locals: { member: self, server: server }
+      )
+      ServerChannel.broadcast_to(server, {
+        type: "member_update",
+        user_id: public_id,
+        html: html,
+        display_name: display_name_for(server),
+        username: username,
+        tag: tag
+      })
+    end
+  end
+
+  def assign_discriminator
+    return if discriminator.present? && discriminator != "0000"
+    taken = User.where(username: username).pluck(:discriminator)
+    available = ("0001".."9999").to_a - taken
+    self.discriminator = available.sample || "0000"
+  end
+
+  def default_display_name
+    self.display_name = username if display_name.blank?
+  end
+end

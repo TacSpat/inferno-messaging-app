@@ -1,0 +1,99 @@
+<div class="flex items-center justify-center min-h-screen bg-gray-900">
+  <div class="w-full max-w-2xl bg-gray-800 rounded-lg shadow-xl p-8">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-white">Server Settings</h1>
+      <%= link_to "✕", server_channel_path(@server, @server.channels.ordered.first), class: "text-gray-400 hover:text-white text-xl" %>
+    </div>
+
+    <%= form_with model: @server, html: { multipart: true }, class: "space-y-6" do |f| %>
+      <% if @server.errors.any? %>
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-4">
+          <% @server.errors.full_messages.each do |msg| %>
+            <p class="text-sm text-red-300"><%= msg %></p>
+          <% end %>
+        </div>
+      <% end %>
+
+      <!-- Server Icon -->
+      <div>
+        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">Server Icon</label>
+        <div class="flex items-center gap-4">
+          <div class="w-20 h-20 rounded-2xl bg-gray-700 flex items-center justify-center text-2xl font-bold text-white overflow-hidden">
+            <% if @server.icon.attached? %>
+              <%= image_tag @server.icon, class: "w-full h-full object-cover" %>
+            <% else %>
+              <%= @server.name.split.map(&:first).join[0..1].upcase %>
+            <% end %>
+          </div>
+          <%= f.file_field :icon, accept: "image/*", class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-orange-600 file:text-white hover:file:bg-orange-700 file:cursor-pointer" %>
+        </div>
+      </div>
+
+      <!-- Server Name -->
+      <div>
+        <%= f.label :name, "Server Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm" %>
+      </div>
+
+      <!-- Description -->
+      <div>
+        <%= f.label :description, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm resize-none", placeholder: "What's this server about?" %>
+      </div>
+
+      <!-- Invite Code -->
+      <div>
+        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Invite Link</label>
+        <div class="flex items-center bg-gray-900 border border-gray-700 rounded px-3 py-2">
+          <span class="text-sm text-gray-400 flex-1"><%= request.base_url %>/invite/<%= @server.invites.active_invites.first&.code %></span>
+          <button type="button" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent.trim())" class="text-orange-400 hover:text-orange-300 text-xs font-semibold ml-2">Copy</button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center justify-between pt-4 border-t border-gray-700">
+        <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-400 hover:text-gray-200" %>
+        <%= f.submit "Save Changes", class: "bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+      </div>
+    <% end %>
+
+    <!-- Members section -->
+    <div class="mt-8 pt-6 border-t border-gray-700">
+      <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">Members (<%= @server.members.count %>)</h3>
+      <div class="space-y-2">
+        <% @server.server_memberships.includes(:user, :role).each do |membership| %>
+          <div class="flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
+            <div class="flex items-center">
+              <div class="w-8 h-8 rounded-full bg-orange-600 flex items-center justify-center text-sm font-bold text-white">
+                <%= membership.user.username[0].upcase %>
+              </div>
+              <div class="ml-3">
+                <p class="text-sm text-white font-medium"><%= membership.user.display_name_for(@server) %></p>
+                <p class="text-xs text-gray-500"><%= membership.user.tag %></p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs px-2 py-1 rounded-full <%= membership.role&.owner? ? 'bg-yellow-600/20 text-yellow-400' : membership.role&.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
+                <%= membership.role&.name || '@everyone' %>
+              </span>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <!-- Danger zone -->
+    <% if @server.owner == current_user %>
+      <div class="mt-8 pt-6 border-t border-gray-700">
+        <h3 class="text-sm font-semibold text-red-400 mb-3">Danger Zone</h3>
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-300">Delete Server</p>
+            <p class="text-xs text-gray-500">This action cannot be undone.</p>
+          </div>
+          <%= button_to "Delete Server", server_path(@server), method: :delete, data: { turbo_confirm: "Are you sure you want to delete #{@server.name}? This cannot be undone." }, class: "bg-red-600 hover:bg-red-700 text-white text-sm font-medium px-4 py-2 rounded transition cursor-pointer" %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

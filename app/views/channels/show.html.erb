@@ -1,0 +1,131 @@
+<!-- Wrap everything in the message-form controller so hover buttons can reach it -->
+<div data-controller="message-form emoji-picker mention-autocomplete" data-message-form-channel-id-value="<%= @channel.public_id %>" data-mention-autocomplete-server-id-value="<%= @server.public_id %>" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>" class="flex flex-col flex-1 min-h-0">
+
+<!-- Channel header -->
+<div class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
+  <!-- Hamburger menu (mobile only) -->
+  <button type="button" class="md:hidden text-gray-400 hover:text-white mr-2 p-1" data-action="click->mobile-nav#toggleSidebar">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+  </button>
+
+  <span class="text-gray-400 text-xl mr-2">#</span>
+  <h1 class="font-semibold text-white"><%= @channel.name %></h1>
+  <% if @channel.topic.present? %>
+    <div class="mx-4 w-px h-6 bg-gray-600 hidden sm:block"></div>
+    <p class="text-sm text-gray-400 truncate hidden sm:block"><%= @channel.topic %></p>
+  <% end %>
+
+  <div class="flex-1"></div>
+
+  <!-- Member list toggle (mobile only) -->
+  <button type="button" class="lg:hidden text-gray-400 hover:text-white p-1" data-action="click->mobile-nav#toggleMembers">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+  </button>
+</div>
+
+<!-- Messages area -->
+<div id="messages"
+     class="flex-1 overflow-y-auto px-4 py-4 space-y-0.5 relative"
+     data-controller="scroll-position image-preview"
+     data-scroll-position-channel-id-value="<%= @channel.public_id %>"
+     data-scroll-position-server-id-value="<%= @server.public_id %>"
+     data-scroll-position-oldest-message-id-value="<%= @messages.any? ? @messages.first.public_id : '' %>"
+     data-scroll-position-has-older-value="<%= @has_older %>"
+     data-scroll-position-newest-message-id-value="<%= @messages.any? ? @messages.last.public_id : '' %>"
+     data-scroll-position-has-newer-value="false">
+  <% if @messages.empty? %>
+    <div class="flex flex-col items-center justify-center h-full text-center">
+      <div class="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-3xl mb-4">#</div>
+      <h2 class="text-2xl font-bold text-white">Welcome to #<%= @channel.name %>!</h2>
+      <p class="text-gray-400 mt-1">This is the start of the #<%= @channel.name %> channel.</p>
+    </div>
+  <% else %>
+    <% @messages.each do |message| %>
+      <%= render partial: "messages/message", locals: { message: message, server: @server } %>
+    <% end %>
+  <% end %>
+</div>
+
+<!-- New messages bar -->
+<div data-scroll-position-target="newMessageBar" class="hidden">
+  <button class="w-full bg-orange-600 hover:bg-orange-700 text-white text-sm py-1.5 px-4 flex items-center justify-center gap-2 cursor-pointer transition">
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+    <span data-count>New message</span>
+  </button>
+</div>
+
+<!-- Typing indicator -->
+<div id="typing-indicator" class="px-4 h-6 text-xs text-gray-400"></div>
+
+<!-- Message input -->
+<div class="px-2 sm:px-4 pb-4 mt-auto shrink-0 relative">
+  <!-- Mention autocomplete popup -->
+  <div data-mention-autocomplete-target="popup" class="hidden absolute bottom-full left-0 right-0 mb-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl py-1 z-50 max-h-48 overflow-y-auto"></div>
+
+  <!-- Reply bar -->
+  <div data-message-form-target="replyBar" class="hidden bg-gray-700 rounded-t-lg px-4 py-2 flex items-center text-sm border-b border-gray-600">
+    <span class="text-gray-400 mr-1">Replying to</span>
+    <span data-message-form-target="replyAuthor" class="text-orange-400 font-medium mr-2"></span>
+    <span data-message-form-target="replyPreview" class="text-gray-400 truncate flex-1"></span>
+    <button type="button" class="text-gray-400 hover:text-gray-200 ml-2 shrink-0" data-action="click->message-form#clearReply">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <!-- File preview area -->
+  <div data-message-form-target="filePreview" class="hidden bg-gray-700 px-4 py-2 flex flex-wrap border-b border-gray-600"></div>
+
+  <%= form_with model: @message, url: channel_messages_path(@channel), html: { multipart: true, class: "relative" }, data: { action: "turbo:submit-end->message-form#handleSubmit" } do |f| %>
+    <%= f.hidden_field :parent_id, data: { message_form_target: "parentId" } %>
+    <div class="flex items-center bg-gray-600 rounded-lg px-2 sm:px-4">
+      <!-- File upload -->
+      <label class="text-gray-400 hover:text-gray-200 mr-2 sm:mr-3 shrink-0 cursor-pointer p-1">
+        <%= f.file_field :files, multiple: true, class: "hidden", accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.md,.gif", data: { action: "change->message-form#handleFileSelect" } %>
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      </label>
+
+      <div class="flex-1 relative">
+        <div data-message-form-target="highlight" class="absolute inset-0 py-3 text-base sm:text-sm whitespace-pre-wrap break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
+        <%= f.text_area :content,
+            placeholder: "Message ##{@channel.name}",
+            class: "w-full bg-transparent text-transparent caret-white placeholder-gray-400 py-3 resize-none outline-none text-base sm:text-sm max-h-48 relative z-10",
+            rows: 1,
+            data: { action: "keydown->mention-autocomplete#onKeydown keydown->message-form#handleKeydown input->mention-autocomplete#onInput input->message-form#autoResize input->message-form#updateHighlight input->message-form#sendTyping", message_form_target: "input", emoji_picker_target: "input", mention_autocomplete_target: "input" } %>
+      </div>
+
+      <!-- Emoji button -->
+      <div class="relative">
+        <button type="button" class="text-gray-400 hover:text-gray-200 mx-1 sm:mx-2 shrink-0 p-1" data-action="click->emoji-picker#toggle">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        </button>
+        <!-- Emoji panel -->
+        <div data-emoji-picker-target="panel" class="hidden absolute bottom-12 right-0 w-[calc(100vw-1rem)] sm:w-80 max-h-72 bg-gray-800 border border-gray-700 rounded-lg shadow-xl overflow-y-auto p-3 z-50 -right-2 sm:right-0">
+          <% EmojiHelper::EMOJIS.each do |category, emojis| %>
+            <div class="mb-2">
+              <p class="text-xs font-semibold text-gray-400 uppercase mb-1"><%= category %></p>
+              <div class="flex flex-wrap gap-0.5">
+                <% emojis.each do |emoji| %>
+                  <button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-action="click->emoji-picker#select" data-emoji="<%= emoji %>"><%= emoji %></button>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <button type="submit" class="text-gray-400 hover:text-orange-500 ml-1 shrink-0 p-1">
+        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+      </button>
+    </div>
+  <% end %>
+</div>
+
+<!-- Drag-and-drop overlay -->
+<div data-message-form-target="dropzone" class="hidden fixed inset-0 bg-gray-900/80 z-50 flex items-center justify-center pointer-events-auto">
+  <div class="border-2 border-dashed border-orange-500 rounded-2xl p-12 text-center">
+    <svg class="w-16 h-16 text-orange-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+    <p class="text-xl text-white font-semibold">Drop files to upload</p>
+  </div>
+</div>
+
+</div>

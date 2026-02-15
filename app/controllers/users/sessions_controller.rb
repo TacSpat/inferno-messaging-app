@@ -1,0 +1,38 @@
+class Users::SessionsController < Devise::SessionsController
+  before_action :redirect_if_authenticated, only: [:new, :create]
+  before_action :set_no_cache, only: [:new]
+
+  def create
+    session[:pending_invite_code] = params[:invite] if params[:invite].present?
+    super
+  end
+
+  protected
+
+  def after_sign_in_path_for(resource)
+    if session[:pending_invite_code].present?
+      invite = Invite.find_by(code: session.delete(:pending_invite_code))
+      if invite&.usable?
+        server = invite.server
+        unless resource.servers.include?(server)
+          invite.increment_uses!
+          server.server_memberships.create!(user: resource)
+        end
+        return server_channel_path(server, server.channels.ordered.first)
+      end
+    end
+    super
+  end
+
+  private
+
+  def redirect_if_authenticated
+    redirect_to authenticated_root_path if user_signed_in?
+  end
+
+  def set_no_cache
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+  end
+end

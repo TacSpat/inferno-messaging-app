@@ -1,0 +1,15 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  user: one
+  server: one
+  role: one
+  nickname: MyString
+  joined_at: 2026-02-13 17:20:13
+
+two:
+  user: two
+  server: two
+  role: two
+  nickname: MyString
+  joined_at: 2026-02-13 17:20:13

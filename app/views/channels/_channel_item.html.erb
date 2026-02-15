@@ -1,0 +1,17 @@
+<% unread = channel.unread_for?(current_user) %>
+<% mention_count = current_user.notifications.unread.for_channel(channel.id).count %>
+<a href="<%= server_channel_path(server, channel) %>"
+   data-channel-id="<%= channel.public_id %>"
+   class="flex items-center px-2 py-1.5 rounded group relative
+          <%= active ? 'bg-gray-600 text-white' : (unread ? 'text-white hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200') %>">
+  <% if unread && !active %>
+    <div class="unread-pill absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 bg-gray-300 rounded-r-full"></div>
+  <% end %>
+  <span class="text-lg mr-1.5 opacity-60">#</span>
+  <span class="truncate text-sm flex-1 <%= unread ? 'font-bold' : 'font-medium' %>"><%= channel.name %></span>
+  <% if mention_count > 0 %>
+    <div class="mention-badge ml-auto min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0">
+      <%= mention_count > 99 ? '99+' : mention_count %>
+    </div>
+  <% end %>
+</a>

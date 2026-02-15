@@ -1,0 +1,22 @@
+<turbo-frame id="member-list">
+  <div class="py-4 px-2" data-server-members-target="list">
+    <% online_members = members.select { |m| m.online_state.present? && m.online_state != "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
+    <% offline_members = members.select { |m| m.online_state.blank? || m.online_state == "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
+    <% if online_members.any? %>
+      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-2" data-status-group="online">
+        Online — <%= online_members.count %>
+      </h3>
+      <% online_members.each do |member| %>
+        <%= render partial: "servers/member_item", locals: { member: member, server: server } %>
+      <% end %>
+    <% end %>
+    <% if offline_members.any? %>
+      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 px-2" data-status-group="offline">
+        Offline — <%= offline_members.count %>
+      </h3>
+      <% offline_members.each do |member| %>
+        <%= render partial: "servers/member_item", locals: { member: member, server: server } %>
+      <% end %>
+    <% end %>
+  </div>
+</turbo-frame>

@@ -1,0 +1,29 @@
+<%
+  status_color = case member.online_state
+                 when "online" then "bg-green-500"
+                 when "idle" then "bg-yellow-500"
+                 when "dnd" then "bg-red-500"
+                 else "bg-gray-500"
+                 end
+  is_offline = member.offline? || member.invisible?
+%>
+<div class="flex items-center py-1.5 px-2 rounded hover:bg-gray-700 cursor-pointer group <%= 'opacity-40' if is_offline %>"
+     data-user-id="<%= member.public_id %>"
+     data-action="click->profile-card#show contextmenu->member-context#show">
+  <div class="relative">
+    <% if member.avatar.attached? %>
+      <%= image_tag member.avatar, class: "w-8 h-8 rounded-full object-cover" %>
+    <% else %>
+      <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= member.profile_color || '#2b2d31' %>">
+        <%= member.username[0].upcase %>
+      </div>
+    <% end %>
+    <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-800 <%= status_color %>"></div>
+  </div>
+  <div class="ml-2 flex-1 min-w-0">
+    <span class="text-sm truncate block" style="color: <%= member.role_color_for(server) %>"><%= member.display_name_for(server) %></span>
+    <% if member.status.present? %>
+      <span class="text-xs text-gray-500 truncate block"><%= member.status_emoji %> <%= member.status %></span>
+    <% end %>
+  </div>
+</div>

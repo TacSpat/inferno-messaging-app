@@ -1,0 +1,61 @@
+class Role < ApplicationRecord
+  include HasPublicId
+  belongs_to :server
+  has_paper_trail
+  has_many :server_memberships
+
+  DEFAULT_PERMISSIONS = {
+    send_messages: true,
+    read_messages: true,
+    read_message_history: true,
+    attach_files: true,
+    add_reactions: true,
+    create_invite: true,
+    mention_everyone: false,
+    manage_messages: false,
+    manage_channels: false,
+    manage_roles: false,
+    manage_invites: false,
+    manage_server: false,
+    kick_members: false,
+    ban_members: false,
+    administrator: false
+  }.freeze
+
+  ADMIN_PERMISSIONS = DEFAULT_PERMISSIONS.merge(
+    mention_everyone: true,
+    manage_messages: true,
+    manage_channels: true,
+    manage_invites: true,
+    manage_roles: true,
+    kick_members: true,
+    ban_members: true,
+    administrator: true
+  ).freeze
+
+  OWNER_PERMISSIONS = ADMIN_PERMISSIONS.merge(
+    manage_server: true,
+    owner: true  # Can never be revoked, only transferred
+  ).freeze
+
+  validates :name, presence: true, length: { maximum: 50 }
+  validates :position, numericality: { only_integer: true, greater_than_or_equal_to: 0 }
+
+  scope :ordered, -> { order(position: :desc) }
+
+  def has_permission?(permission)
+    # Owner has everything
+    return true if permissions&.dig("owner") == true
+    # Admin has almost everything (except owner-only stuff like manage_server)
+    return true if permissions&.dig("administrator") == true && permission.to_s != "owner"
+    permissions&.dig(permission.to_s) == true
+  end
+
+  def owner?
+    permissions&.dig("owner") == true
+  end
+
+  def admin?
+    permissions&.dig("administrator") == true
+  end
+end

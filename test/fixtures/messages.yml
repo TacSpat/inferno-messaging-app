@@ -1,0 +1,17 @@
+# Read about fixtures at https://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  content: MyText
+  edited_at: 2026-02-13 17:20:15
+  pinned: false
+  user: one
+  channel: one
+  parent: one
+
+two:
+  content: MyText
+  edited_at: 2026-02-13 17:20:15
+  pinned: false
+  user: two
+  channel: two
+  parent: two

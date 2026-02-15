@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html class="h-full bg-gray-900">
+  <head>
+    <title>Inferno</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
+    <%= action_cable_meta_tag %>
+    <style>
+      /* Mobile sidebar transitions */
+      @media (max-width: 767px) {
+        .mobile-server-rail {
+          position: fixed;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          z-index: 70;
+          transform: translateX(-100%);
+          transition: transform 0.25s ease;
+        }
+        .mobile-server-rail.mobile-sidebar-open {
+          transform: translateX(0);
+        }
+        .mobile-channel-sidebar {
+          position: fixed;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          z-index: 60;
+          transform: translateX(-100%);
+          transition: transform 0.25s ease;
+        }
+        .mobile-channel-sidebar.mobile-sidebar-open {
+          transform: translateX(72px);
+        }
+        .mobile-member-sidebar {
+          position: fixed !important;
+          right: 0;
+          top: 0;
+          bottom: 0;
+          z-index: 60;
+          transform: translateX(100%);
+          transition: transform 0.25s ease;
+          display: block !important;
+        }
+        .mobile-member-sidebar.mobile-members-open {
+          transform: translateX(0);
+        }
+        .mobile-backdrop {
+          position: fixed;
+          inset: 0;
+          background: rgba(0,0,0,0.6);
+          z-index: 50;
+          transition: opacity 0.25s ease;
+        }
+        /* Settings modal mobile */
+        .settings-sidebar-mobile {
+          display: none !important;
+        }
+        .settings-back-btn {
+          display: flex !important;
+        }
+      }
+      @media (min-width: 768px) {
+        .settings-back-btn {
+          display: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body class="h-full overflow-hidden text-gray-100" <% if user_signed_in? %>data-controller="appearance notification-badge" data-current-user-id="<%= current_user.public_id %>"<% end %>>
+    <% if notice %><div class="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
+    <% if alert %><div class="fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
+
+    <% if user_signed_in? && @server&.persisted? %>
+      <div class="flex h-full" data-controller="mobile-nav">
+        <!-- Mobile backdrop -->
+        <div data-mobile-nav-target="backdrop" data-action="click->mobile-nav#closeAll" class="mobile-backdrop hidden md:hidden"></div>
+
+        <!-- Server rail -->
+        <%= render "shared/server_rail", active_server: @server %>
+
+        <!-- Channel sidebar -->
+        <aside data-mobile-nav-target="channelSidebar" class="hidden md:flex flex-col w-60 bg-gray-800 shrink-0 mobile-channel-sidebar">
+          <!-- Server name header -->
+          <div class="relative" data-controller="dropdown">
+            <div class="flex items-center justify-between px-4 h-12 border-b border-gray-900 shadow-sm cursor-pointer hover:bg-gray-700" data-action="click->dropdown#toggle">
+              <h2 class="font-semibold text-white truncate"><%= @server.name %></h2>
+              <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </div>
+            <!-- Dropdown menu -->
+            <div data-dropdown-target="menu" class="hidden absolute left-2 right-2 top-12 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 py-1.5 px-1.5">
+              <% membership = current_user.server_memberships.find_by(server: @server) %>
+              <% if membership&.has_permission?("manage_channels") %>
+                <%= link_to new_server_channel_path(@server), class: "flex items-center px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded" do %>
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                  Create Channel
+                <% end %>
+                <%= link_to new_server_category_path(@server), class: "flex items-center px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded" do %>
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>
+                  Create Category
+                <% end %>
+              <% end %>
+              <% if membership&.has_permission?("manage_server") %>
+                <%= link_to server_settings_overview_path(@server), class: "flex items-center px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded" do %>
+                  <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                  Server Settings
+                <% end %>
+              <% end %>
+              <div class="border-t border-gray-700 my-1"></div>
+              <% if @server.owner != current_user %>
+                <%= button_to "Leave Server", leave_server_path(@server), method: :delete, class: "flex items-center w-full px-2.5 py-1.5 text-sm text-red-400 hover:bg-red-600/20 rounded cursor-pointer", data: { turbo_confirm: "Leave #{@server.name}?" } %>
+              <% end %>
+              <% if membership&.has_permission?("create_invite") %>
+                <div data-controller="invite-menu" data-invite-menu-base-url-value="<%= request.base_url %>" data-invite-menu-server-id-value="<%= @server.public_id %>">
+                  <button type="button" data-action="invite-menu#toggle" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                    Invite People
+                  </button>
+                  <div data-invite-menu-target="panel" class="hidden mt-1 bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-2">
+                    <% active_invite = @server.invites.active_invites.first %>
+                    <% if active_invite %>
+                      <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
+                        <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono truncate flex-1 select-all"><%= request.base_url %>/invite/<%= active_invite.code %></span>
+                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-orange-400 hover:text-orange-300 text-xs font-semibold shrink-0 cursor-pointer">Copy</button>
+                      </div>
+                    <% else %>
+                      <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
+                        <span data-invite-menu-target="linkText" class="text-xs text-gray-500 italic truncate flex-1">No active invite</span>
+                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-orange-400 hover:text-orange-300 text-xs font-semibold shrink-0 cursor-pointer hidden">Copy</button>
+                      </div>
+                    <% end %>
+                    <button type="button" data-invite-menu-target="generateBtn" data-action="invite-menu#generate" class="w-full text-center text-xs text-orange-400 hover:text-orange-300 font-semibold py-1 cursor-pointer">
+                      Create New Invite
+                    </button>
+                  </div>
+                </div>
+              <% end %>
+            </div>
+          </div>
+
+
+          <!-- Channels list -->
+          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>">
+            <%# Uncategorized channels first %>
+            <% @server.channels.uncategorized.text.ordered.each do |channel| %>
+              <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel) } %>
+            <% end %>
+
+            <%# Categorized channels %>
+            <% @server.categories.ordered.each do |category| %>
+              <%= render partial: "categories/category", locals: { category: category, server: @server } %>
+            <% end %>
+          </div>
+
+          <!-- User panel (bottom) -->
+          <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: #1a1b1e;">
+            <div class="relative">
+              <% if current_user.avatar.attached? %>
+                <%= image_tag current_user.avatar, class: "w-8 h-8 rounded-full object-cover" %>
+              <% else %>
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= current_user.profile_color || '#2b2d31' %>">
+                  <%= current_user.username[0].upcase %>
+                </div>
+              <% end %>
+              <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-900 bg-gray-500" data-user-status-dot></div>
+            </div>
+            <div class="ml-2 flex-1 min-w-0">
+              <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>
+              <p class="text-xs text-gray-400 truncate"><%= current_user.tag %></p>
+            </div>
+            <button onclick="document.dispatchEvent(new CustomEvent('open-settings'))" class="text-gray-400 hover:text-gray-200 p-1 cursor-pointer">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            </button>
+          </div>
+        </aside>
+
+        <!-- Main content -->
+        <main class="flex-1 flex flex-col min-w-0 bg-gray-700">
+          <%= yield %>
+        </main>
+
+        <!-- Members sidebar (right) -->
+        <% if defined?(@members) && @members %>
+          <aside id="member-sidebar" data-mobile-nav-target="memberSidebar" class="w-60 bg-gray-800 border-l border-gray-900 overflow-y-auto shrink-0 hidden lg:block mobile-member-sidebar"
+                 data-controller="server-members profile-card member-context"
+                 data-server-members-server-id-value="<%= @server.public_id %>" data-profile-card-server-id-value="<%= @server.public_id %>" data-member-context-server-id-value="<%= @server.public_id %>">
+            <div class="py-4 px-2" data-server-members-target="list">
+<% online_members = @members.select { |m| m.online_state.present? && m.online_state != "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
+<% offline_members = @members.select { |m| m.online_state.blank? || m.online_state == "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
+<% if online_members.any? %>
+  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-2" data-status-group="online">
+    Online — <%= online_members.count %>
+  </h3>
+  <% online_members.each do |member| %>
+    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
+  <% end %>
+<% end %>
+<% if offline_members.any? %>
+  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 px-2" data-status-group="offline">
+    Offline — <%= offline_members.count %>
+  </h3>
+  <% offline_members.each do |member| %>
+    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
+  <% end %>
+<% end %>
+            </div>
+          </aside>
+        <% end %>
+      </div>
+    <% elsif user_signed_in? && @dm_layout %>
+      <div class="flex h-full" data-controller="mobile-nav">
+        <!-- Mobile backdrop -->
+        <div data-mobile-nav-target="backdrop" data-action="click->mobile-nav#closeAll" class="mobile-backdrop hidden md:hidden"></div>
+
+        <!-- Server rail -->
+        <%= render "shared/server_rail" %>
+
+        <!-- DM sidebar -->
+        <%= render "conversations/dm_sidebar" %>
+
+        <!-- Main content -->
+        <main class="flex-1 flex flex-col min-w-0 bg-gray-700">
+          <%= yield %>
+        </main>
+      </div>
+    <% else %>
+      <%= yield %>
+    <% end %>
+  <% if user_signed_in? %>
+    <%= render "shared/settings_modal" %>
+    <% end %>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+<% membership = server.server_memberships.find_by(user: member) %>
+<% my_membership = server.server_memberships.find_by(user: current_user) %>
+<% can_manage = my_membership&.has_permission?("manage_roles") || my_membership&.owner? %>
+<% can_kick = my_membership&.has_permission?("kick_members") || my_membership&.owner? %>
+<% can_ban = my_membership&.has_permission?("ban_members") || my_membership&.owner? %>
+<% is_self = member == current_user %>
+<% is_owner = server.owner == member %>
+
+<div class="w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 px-1.5 text-sm">
+  <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+          data-action="click->profile-card#show" data-profile-card-user-id-param="<%= member.public_id %>">
+    Profile
+  </button>
+  <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+          onclick="navigator.clipboard.writeText('@<%= member.username %>')">
+    Mention
+  </button>
+
+  <% unless is_self %>
+    <div class="border-t border-gray-700 my-1"></div>
+
+    <%= button_to conversations_path(user_id: member.public_id), method: :post, class: "flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer text-left" do %>
+      Message
+    <% end %>
+
+    <% if current_user.friends_with?(member) %>
+      <% friendship = current_user.friendships.find_by(friend: member) %>
+      <%= button_to friendship_path(friendship), method: :delete,
+            class: "flex items-center w-full px-2.5 py-1.5 text-red-400 hover:bg-red-600/20 rounded cursor-pointer text-left",
+            data: { turbo_confirm: "Remove #{member.display_name.presence || member.username} from your friends?" } do %>
+        Remove Friend
+      <% end %>
+    <% elsif current_user.sent_friend_requests.find_by(friend: member) %>
+      <button class="flex items-center w-full px-2.5 py-1.5 text-gray-500 rounded cursor-default" disabled>
+        Friend Request Sent
+      </button>
+    <% elsif current_user.pending_friend_requests.find_by(user: member) %>
+      <% request = current_user.pending_friend_requests.find_by(user: member) %>
+      <%= button_to accept_friendship_path(request), method: :post,
+            class: "flex items-center w-full px-2.5 py-1.5 text-green-400 hover:bg-green-600/20 rounded cursor-pointer text-left" do %>
+        Accept Friend Request
+      <% end %>
+    <% else %>
+      <%= button_to friendships_path(user_id: member.public_id), method: :post,
+            class: "flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer text-left" do %>
+        Add Friend
+      <% end %>
+    <% end %>
+
+    <% if can_manage && !is_owner %>
+      <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+              data-action="click->member-context#showRoles" data-member-id="<%= membership&.public_id %>">
+        Roles
+      </button>
+    <% end %>
+
+    <% if can_manage && !is_owner %>
+      <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+              data-action="click->member-context#changeNickname" data-member-id="<%= membership&.public_id %>">
+        Change Nickname
+      </button>
+    <% end %>
+
+    <% if can_kick && !is_owner %>
+      <div class="border-t border-gray-700 my-1"></div>
+      <%= button_to "Kick #{member.username}",
+            server_settings_kick_member_path(server, membership),
+            method: :delete,
+            class: "flex items-center w-full px-2.5 py-1.5 text-red-400 hover:bg-red-600/20 rounded cursor-pointer text-left",
+            data: { turbo_confirm: "Kick #{member.username} from #{server.name}?" } %>
+    <% end %>
+
+    <% if can_ban && !is_owner %>
+      <%= button_to "Ban #{member.username}",
+            server_settings_create_ban_path(server, user_id: member.public_id),
+            method: :post,
+            class: "flex items-center w-full px-2.5 py-1.5 text-red-400 hover:bg-red-600/20 rounded cursor-pointer text-left",
+            data: { turbo_confirm: "Ban #{member.username} from #{server.name}?" } %>
+    <% end %>
+  <% end %>
+
+  <div class="border-t border-gray-700 my-1"></div>
+  <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
+          onclick="navigator.clipboard.writeText('<%= member.public_id %>')">
+    Copy User ID
+  </button>
+</div>

@@ -1,0 +1,45 @@
+<h1 class="text-xl font-bold text-white mb-6">Audit Log</h1>
+
+<% if @versions.empty? %>
+  <p class="text-gray-400 text-sm">No audit log entries yet.</p>
+<% else %>
+  <div class="space-y-1">
+    <% @versions.each do |version| %>
+      <% user = version.whodunnit.present? ? User.find_by(id: version.whodunnit) : nil %>
+      <% action_label, action_color, icon = audit_action_display(version) %>
+      <div class="bg-gray-800 rounded-lg px-4 py-3 hover:bg-gray-750">
+        <div class="flex items-start gap-3">
+          <!-- Action icon -->
+          <div class="mt-0.5 w-8 h-8 rounded-full flex items-center justify-center shrink-0 <%= action_color %>">
+            <%= icon %>
+          </div>
+
+          <div class="flex-1 min-w-0">
+            <p class="text-sm text-gray-200">
+              <span class="font-semibold text-white"><%= user&.username || "System" %><span class="text-gray-500 font-normal">#<%= user&.discriminator || "0000" %></span></span>
+              <span class="text-gray-400"><%= action_label %></span>
+            </p>
+
+            <% if version.event == "update" && version.changeset.present? %>
+              <div class="mt-1 space-y-0.5">
+                <% version.changeset.each do |attr, (old_val, new_val)| %>
+                  <% next if %w[updated_at created_at].include?(attr) %>
+                  <p class="text-xs text-gray-500">
+                    <span class="text-gray-400"><%= attr.humanize %></span>:
+                    <span class="text-red-400 line-through"><%= old_val.to_s.truncate(50) %></span>
+                    → <span class="text-green-400"><%= new_val.to_s.truncate(50) %></span>
+                  </p>
+                <% end %>
+              </div>
+            <% end %>
+
+            <p class="text-xs text-gray-500 mt-1">
+              <%= time_ago_in_words(version.created_at) %> ago
+              · <%= version.created_at.strftime("%b %d, %Y %l:%M %p") %>
+            </p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+  </div>
+<% end %>

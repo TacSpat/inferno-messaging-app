@@ -1,0 +1,27 @@
+<h1 class="text-xl font-bold text-white mb-6">Roles</h1>
+
+<div class="space-y-2">
+  <% @roles.each do |role| %>
+    <div class="bg-gray-800 rounded-lg px-4 py-3">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center">
+          <div class="w-3 h-3 rounded-full mr-3 <%= role.owner? ? 'bg-yellow-400' : role.admin? ? 'bg-red-400' : 'bg-gray-500' %>"></div>
+          <div>
+            <p class="text-sm text-white font-medium"><%= role.name %></p>
+            <p class="text-xs text-gray-500">Position: <%= role.position %> • <%= @server.server_memberships.where(role: role).count %> members</p>
+          </div>
+        </div>
+        <% unless role.owner? || role.name == "@everyone" %>
+          <%= link_to "Edit", edit_server_role_path(@server, role), class: "text-xs text-orange-400 hover:text-orange-300" %>
+        <% end %>
+      </div>
+      <div class="mt-2 flex flex-wrap gap-1">
+        <% role.permissions&.each do |perm, enabled| %>
+          <span class="text-xs px-2 py-0.5 rounded-full <%= enabled ? 'bg-green-900/50 text-green-400' : 'bg-gray-700 text-gray-500' %>">
+            <%= perm.humanize %>
+          </span>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>

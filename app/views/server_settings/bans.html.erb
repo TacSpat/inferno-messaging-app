@@ -1,0 +1,25 @@
+<h1 class="text-xl font-bold text-white mb-6">Bans</h1>
+
+<% if @bans.empty? %>
+  <p class="text-gray-400 text-sm">No banned users.</p>
+<% else %>
+  <div class="space-y-2">
+    <% @bans.each do |ban| %>
+      <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
+        <div class="flex items-center">
+          <div class="w-10 h-10 rounded-full bg-gray-600 flex items-center justify-center text-sm font-bold text-white">
+            <%= ban.user.username[0].upcase %>
+          </div>
+          <div class="ml-3">
+            <p class="text-sm text-white font-medium"><%= ban.user.tag %></p>
+            <p class="text-xs text-gray-500">
+              Banned by <%= ban.banned_by.username %> • <%= ban.created_at.strftime("%b %d, %Y") %>
+              <% if ban.reason.present? %> • "<%= ban.reason %>"<% end %>
+            </p>
+          </div>
+        </div>
+        <%= button_to "Unban", server_settings_destroy_ban_path(@server, ban_id: ban.id), method: :delete, data: { turbo_confirm: "Unban #{ban.user.username}?" }, class: "text-xs text-green-400 hover:text-green-300 cursor-pointer" %>
+      </div>
+    <% end %>
+  </div>
+<% end %>
