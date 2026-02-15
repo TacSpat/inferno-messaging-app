@@ -8,6 +8,8 @@ class Friendship < ApplicationRecord
   validate :not_self
   validate :not_blocked
 
+  after_commit :publish_nostr_contacts, if: :should_publish_contacts?
+
   # Accept a friend request (creates the reverse record too)
   def accept!
     transaction do
@@ -29,5 +31,13 @@ class Friendship < ApplicationRecord
        Block.exists?(blocker_id: user_id, blocked_id: friend_id)
       errors.add(:friend, "is blocked")
     end
+  end
+
+  def should_publish_contacts?
+    accepted? && !user.remote? && user.nostr_public_key.present?
+  end
+
+  def publish_nostr_contacts
+    NostrPublishJob.perform_later(user_id, :contacts)
   end
 end

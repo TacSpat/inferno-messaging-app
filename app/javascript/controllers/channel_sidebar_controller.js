@@ -11,10 +11,105 @@ export default class extends Controller {
         received: (data) => this.handleMessage(data)
       }
     )
+
+    this._channelCache = new Map()
+
+    // Use capture phase so we fire before Turbo's bubble-phase handler
+    this._onChannelClick = this._handleChannelClick.bind(this)
+    this.element.addEventListener("click", this._onChannelClick, true)
+
+    // Cache current channel content before Turbo replaces it (non-cached navigations)
+    this._onBeforeFrameRender = (e) => {
+      if (e.target.id !== "main-content") return
+      const frame = e.target
+      const currentId = this._getCurrentChannelId(frame)
+      if (currentId && !this._channelCache.has(currentId)) {
+        this._channelCache.set(currentId, frame.innerHTML)
+        this._enforceCacheLimit()
+      }
+    }
+    document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
   }
 
   disconnect() {
     if (this.subscription) this.subscription.unsubscribe()
+    this.element.removeEventListener("click", this._onChannelClick, true)
+    document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
+    this._channelCache.clear()
+  }
+
+  _getCurrentChannelId(frame) {
+    const el = frame?.querySelector("[data-current-channel-id]")
+    return el?.dataset.currentChannelId || null
+  }
+
+  _enforceCacheLimit() {
+    while (this._channelCache.size > 10) {
+      const oldest = this._channelCache.keys().next().value
+      this._channelCache.delete(oldest)
+    }
+  }
+
+  _handleChannelClick(e) {
+    const link = e.target.closest("a[data-channel-id]")
+    if (!link) return
+
+    const targetId = link.dataset.channelId
+    const frame = document.getElementById("main-content")
+    const currentId = this._getCurrentChannelId(frame)
+
+    // Same channel — no-op
+    if (targetId === currentId) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+
+    // If target is cached: prevent Turbo fetch, restore from cache
+    if (this._channelCache.has(targetId)) {
+      e.preventDefault()
+      e.stopPropagation()
+
+      // Cache current channel first
+      if (currentId && frame) {
+        this._channelCache.set(currentId, frame.innerHTML)
+        this._enforceCacheLimit()
+      }
+
+      // Restore cached channel
+      frame.innerHTML = this._channelCache.get(targetId)
+      this._channelCache.delete(targetId)
+
+      // Update URL
+      history.pushState({}, "", link.getAttribute("href"))
+    }
+    // Non-cached: turbo:before-frame-render will cache current content automatically
+
+    // Always update active channel styling
+    this._updateActiveChannel(link)
+  }
+
+  _updateActiveChannel(link) {
+    const active = this.element.querySelector("a[data-channel-id].bg-gray-600")
+    if (active && active !== link) {
+      active.classList.remove("bg-gray-600")
+      if (active.querySelector(".unread-pill") || active.querySelector(".font-bold")) {
+        active.classList.add("hover:bg-gray-700")
+      } else {
+        active.classList.remove("text-white")
+        active.classList.add("text-gray-400", "hover:bg-gray-700", "hover:text-gray-200")
+      }
+    }
+
+    link.classList.remove("text-gray-400", "hover:bg-gray-700", "hover:text-gray-200")
+    link.classList.add("bg-gray-600", "text-white")
+
+    const pill = link.querySelector(".unread-pill")
+    if (pill) pill.remove()
+    const nameSpan = link.querySelector(".truncate")
+    if (nameSpan) nameSpan.classList.remove("font-bold")
+    const badge = link.querySelector(".mention-badge")
+    if (badge) badge.remove()
   }
 
   handleMessage(data) {
@@ -46,6 +141,7 @@ export default class extends Controller {
   buildChannelHtml(data) {
     const serverId = this.serverIdValue
     return `<a href="/servers/${serverId}/channels/${data.channel_id}"
+               data-turbo-frame="main-content"
                data-channel-id="${data.channel_id}"
                class="flex items-center px-2 py-1.5 rounded group relative text-gray-400 hover:bg-gray-700 hover:text-gray-200">
               <span class="text-lg mr-1.5 opacity-60">#</span>

@@ -1,5 +1,6 @@
 class Server < ApplicationRecord
   include HasPublicId
+  include InstanceLimits
   belongs_to :owner, class_name: "User"
   belongs_to :welcome_channel, class_name: "Channel", optional: true
   has_paper_trail
@@ -13,6 +14,8 @@ class Server < ApplicationRecord
   has_one_attached :icon
 
   validates :name, presence: true, length: { maximum: 100 }
+  validate :within_instance_server_limit, on: :create
+  validate :within_user_server_limit, on: :create
 
   after_create :create_defaults
 
@@ -47,6 +50,18 @@ class Server < ApplicationRecord
 
   private
 
+  def within_instance_server_limit
+    if instance_config.server_limit_reached?
+      errors.add(:base, "This instance has reached its server limit")
+    end
+  end
+
+  def within_user_server_limit
+    if owner && instance_config.server_limit_reached_for?(owner)
+      errors.add(:base, "You have reached the maximum number of servers you can create (#{instance_config.max_servers_per_user})")
+    end
+  end
+
   def create_defaults
     everyone_role = roles.create!(name: "@everyone", position: 0, color: "#ffffff", permissions: Role::DEFAULT_PERMISSIONS)
     admin_role = roles.create!(name: "Admin", position: 10, color: "#ffffff", permissions: Role::ADMIN_PERMISSIONS)
@@ -58,7 +73,8 @@ class Server < ApplicationRecord
     # Set welcome channel to #general
     update_column(:welcome_channel_id, general.id)
 
-    server_memberships.create!(user: owner, role: owner_role, joined_at: Time.current)
+    membership = server_memberships.create!(user: owner, joined_at: Time.current)
+    membership.roles << owner_role
     invites.create!(creator: owner)
   end
 end

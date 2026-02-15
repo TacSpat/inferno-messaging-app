@@ -4,18 +4,22 @@ import { createConsumer } from "@rails/actioncable"
 export default class extends Controller {
   connect() {
     this.idleTimeout = null
+    this.pingInterval = null
     this.isIdle = false
     this.IDLE_MS = 15 * 60 * 1000 // 15 minutes
+    this.PING_MS = 30 * 1000 // 30 seconds
 
     this.subscription = createConsumer().subscriptions.create(
       { channel: "AppearanceChannel" },
       {
         connected: () => {
           this.startIdleDetection()
+          this.startPing()
           this.updateUserPanelDot("online")
         },
         disconnected: () => {
           this.stopIdleDetection()
+          this.stopPing()
           this.updateUserPanelDot("offline")
         }
       }
@@ -24,7 +28,22 @@ export default class extends Controller {
 
   disconnect() {
     this.stopIdleDetection()
+    this.stopPing()
     if (this.subscription) this.subscription.unsubscribe()
+  }
+
+  startPing() {
+    this.stopPing()
+    this.pingInterval = setInterval(() => {
+      this.subscription.perform("ping", { state: this.isIdle ? "idle" : "online" })
+    }, this.PING_MS)
+  }
+
+  stopPing() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval)
+      this.pingInterval = null
+    }
   }
 
   startIdleDetection() {

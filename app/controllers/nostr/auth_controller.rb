@@ -1,0 +1,161 @@
+module Nostr
+  class AuthController < ApplicationController
+    skip_before_action :verify_authenticity_token, only: [:callback]
+
+    # GET /auth/nostr?home_instance=home.chat
+    # Start the remote auth flow: generate challenge, redirect to home instance
+    def new
+      home_instance = params[:home_instance]&.strip&.downcase
+
+      if home_instance.blank?
+        redirect_to root_path, alert: "Home instance is required."
+        return
+      end
+
+      # Check federation mode
+      config = InstanceConfig.current
+      if config.federation_closed?
+        redirect_to root_path, alert: "This instance does not accept remote authentication."
+        return
+      end
+
+      if config.remote_auth_blocked?
+        redirect_to root_path, alert: "Remote authentication is currently disabled."
+        return
+      end
+
+      # Check blocklist
+      if InstanceBlocklist.blocked?(home_instance)
+        redirect_to root_path, alert: "Authentication from #{home_instance} is not allowed."
+        return
+      end
+
+      # Create challenge
+      challenge = NostrAuthChallenge.create!(
+        nonce: SecureRandom.hex(32),
+        requesting_domain: request.host,
+        callback_url: nostr_auth_callback_url,
+        expires_at: 5.minutes.from_now
+      )
+
+      # Redirect to home instance's signing endpoint
+      home_signing_url = "https://#{home_instance}/auth/nostr/sign?" + {
+        challenge: challenge.nonce,
+        callback: challenge.callback_url,
+        requesting_domain: request.host
+      }.to_query
+
+      redirect_to home_signing_url, allow_other_host: true
+    end
+
+    # GET /auth/nostr/callback?event=<base64-encoded-signed-event>
+    # Receive the signed challenge from home instance, verify, create session
+    def callback
+      event_param = params[:event]
+      if event_param.blank?
+        redirect_to root_path, alert: "Missing authentication event."
+        return
+      end
+
+      # Decode the event
+      begin
+        event_json = Base64.urlsafe_decode64(event_param)
+        event_data = JSON.parse(event_json)
+      rescue StandardError
+        redirect_to root_path, alert: "Invalid authentication event format."
+        return
+      end
+
+      # Extract challenge nonce from event tags
+      challenge_tag = (event_data["tags"] || []).find { |t| t[0] == "challenge" }
+      unless challenge_tag
+        redirect_to root_path, alert: "Authentication event missing challenge."
+        return
+      end
+
+      nonce = challenge_tag[1]
+
+      # Find and validate the challenge
+      challenge = NostrAuthChallenge.valid_for_nonce(nonce).first
+      unless challenge
+        redirect_to root_path, alert: "Invalid or expired authentication challenge."
+        return
+      end
+
+      # Verify the signed event
+      begin
+        verified_event = NostrEventService.verify_auth_event(
+          event_data,
+          expected_challenge: nonce
+        )
+      rescue NostrEventService::InvalidSignature, NostrEventService::InvalidEvent => e
+        Rails.logger.warn("Nostr auth verification failed: #{e.message}")
+        redirect_to root_path, alert: "Authentication verification failed."
+        return
+      end
+
+      pubkey = verified_event["pubkey"]
+
+      # Verify pubkey via NIP-05 lookup against home instance
+      relay_tag = (verified_event["tags"] || []).find { |t| t[0] == "relay" }
+      home_instance = extract_home_instance(relay_tag&.dig(1))
+
+      if home_instance.present?
+        # Check blocklist again with the verified home instance
+        if InstanceBlocklist.blocked?(home_instance)
+          redirect_to root_path, alert: "Authentication from #{home_instance} is not allowed."
+          return
+        end
+
+        nip05_verified = verify_nip05(pubkey, home_instance)
+        unless nip05_verified
+          Rails.logger.warn("NIP-05 verification failed for pubkey #{pubkey} on #{home_instance}")
+          # Don't block — NIP-05 is optional, but log it
+        end
+      end
+
+      # Consume the challenge (one-time use)
+      challenge.consume!
+
+      # Find or create remote user + shadow user
+      remote_user = RemoteUser.find_or_create_from_auth(
+        public_key: pubkey,
+        home_instance: home_instance || "unknown",
+        username: params[:username],
+        display_name: params[:display_name]
+      )
+
+      remote_user.reload
+      shadow_user = remote_user.shadow_user
+
+      # Sign in the shadow user via Devise
+      sign_in(shadow_user)
+
+      redirect_to root_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
+    end
+
+    private
+
+    def extract_home_instance(relay_url)
+      return nil if relay_url.blank?
+      uri = URI.parse(relay_url)
+      uri.host
+    rescue URI::InvalidURIError
+      nil
+    end
+
+    def verify_nip05(pubkey, home_instance)
+      # Try to find the user's NIP-05 identifier on the home instance
+      # We don't know their username, so we check cached NIP-05 entries
+      cached = Nip05Cache.valid.find_by(public_key: pubkey)
+      if cached
+        cached_domain = cached.identifier.split("@").last
+        return cached_domain == home_instance
+      end
+
+      # No cache hit — we can't verify without knowing the username
+      # The home instance will be trusted based on the signed challenge
+      true
+    end
+  end
+end

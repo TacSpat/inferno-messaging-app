@@ -189,25 +189,73 @@
           <aside id="member-sidebar" data-mobile-nav-target="memberSidebar" class="w-60 bg-gray-800 border-l border-gray-900 overflow-y-auto shrink-0 hidden lg:block mobile-member-sidebar"
                  data-controller="server-members profile-card member-context"
                  data-server-members-server-id-value="<%= @server.public_id %>" data-profile-card-server-id-value="<%= @server.public_id %>" data-member-context-server-id-value="<%= @server.public_id %>">
+            <%
+              online_members = @members.reject { |m| m.offline? || m.invisible? }
+              offline_members = @members.select { |m| m.offline? || m.invisible? }
+              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("permissions @> ?", { owner: true }.to_json).ordered.to_a
+              everyone_role = @server.roles.find_by(name: "@everyone")
+              everyone_position = everyone_role&.position || 0
+              role_groups = {}
+              ungrouped_online = []
+              online_members.each do |member|
+                membership = member.server_memberships.find { |sm| sm.server_id == @server.id }
+                hoisted = membership&.top_hoisted_role
+                if hoisted
+                  (role_groups[hoisted.id] ||= []) << member
+                else
+                  ungrouped_online << member
+                end
+              end
+              sort_fn = ->(m) {
+                ms = m.server_memberships.find { |sm| sm.server_id == @server.id }
+                [-(ms&.top_role&.position || 0), m.display_name_for(@server).downcase]
+              }
+              role_groups.each_value { |list| list.sort_by!(&sort_fn) }
+              ungrouped_online.sort_by!(&sort_fn)
+              offline_members.sort_by!(&sort_fn)
+              sections = []
+              hoisted_roles.each do |role|
+                group_members = role_groups[role.id]
+                next unless group_members&.any?
+                sections << { type: :role, role: role, members: group_members, position: role.position }
+              end
+              if ungrouped_online.any?
+                sections << { type: :online, members: ungrouped_online, position: everyone_position }
+              end
+              sections.sort_by! { |s| -s[:position] }
+            %>
             <div class="py-4 px-2" data-server-members-target="list">
-<% online_members = @members.select { |m| m.online_state.present? && m.online_state != "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
-<% offline_members = @members.select { |m| m.online_state.blank? || m.online_state == "offline" }.sort_by { |m| m.display_name.presence || m.username } %>
-<% if online_members.any? %>
-  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 px-2" data-status-group="online">
-    Online — <%= online_members.count %>
-  </h3>
-  <% online_members.each do |member| %>
-    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
-  <% end %>
-<% end %>
-<% if offline_members.any? %>
-  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 px-2" data-status-group="offline">
-    Offline — <%= offline_members.count %>
-  </h3>
-  <% offline_members.each do |member| %>
-    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
-  <% end %>
-<% end %>
+              <% sections.each do |section| %>
+                <% if section[:type] == :role %>
+                  <h3 class="text-xs font-semibold uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2"
+                      style="color: <%= section[:role].color.presence || '#9ca3af' %>"
+                      data-status-group="role:<%= section[:role].public_id %>"
+                      data-role-position="<%= section[:role].position %>">
+                    <%= section[:role].name %> — <%= section[:members].count %>
+                  </h3>
+                  <% section[:members].each do |member| %>
+                    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
+                  <% end %>
+                <% else %>
+                  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2"
+                      data-status-group="online"
+                      data-role-position="<%= everyone_position %>">
+                    Online — <%= section[:members].count %>
+                  </h3>
+                  <% section[:members].each do |member| %>
+                    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
+                  <% end %>
+                <% end %>
+              <% end %>
+              <% if offline_members.any? %>
+                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 px-2"
+                    data-status-group="offline">
+                  Offline — <%= offline_members.count %>
+                </h3>
+                <% offline_members.each do |member| %>
+                  <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
+                <% end %>
+              <% end %>
             </div>
           </aside>
         <% end %>

@@ -24,6 +24,38 @@ class SettingsController < ApplicationController
     end
   end
 
+  def reveal_nostr_key
+    if current_user.valid_password?(params[:password])
+      render json: { nsec: current_user.nsec }
+    else
+      render json: { error: "Incorrect password" }, status: :unprocessable_entity
+    end
+  end
+
+  def export_encrypted_key
+    unless current_user.valid_password?(params[:password])
+      render json: { error: "Incorrect password" }, status: :unprocessable_entity
+      return
+    end
+
+    backup_password = params[:backup_password]
+    if backup_password.blank? || backup_password.length < 8
+      render json: { error: "Backup password must be at least 8 characters" }, status: :unprocessable_entity
+      return
+    end
+
+    ncryptsec = Nip49Service.encrypt(
+      current_user.nostr_private_key,
+      backup_password,
+      log_n: 16,
+      key_security: 0x02
+    )
+
+    render json: { ncryptsec: ncryptsec }
+  rescue => e
+    render json: { error: "Encryption failed: #{e.message}" }, status: :internal_server_error
+  end
+
   private
 
   def profile_params

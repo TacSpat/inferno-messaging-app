@@ -1,3 +1,4 @@
+<%= turbo_frame_tag "main-content", class: "flex flex-col flex-1 min-h-0", data: { turbo_action: "advance" } do %>
 <!-- Wrap everything in the message-form controller so hover buttons can reach it -->
 <div data-controller="message-form emoji-picker mention-autocomplete" data-message-form-channel-id-value="<%= @channel.public_id %>" data-mention-autocomplete-server-id-value="<%= @server.public_id %>" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>" class="flex flex-col flex-1 min-h-0">
 
@@ -40,8 +41,17 @@
       <p class="text-gray-400 mt-1">This is the start of the #<%= @channel.name %> channel.</p>
     </div>
   <% else %>
+    <% previous_message = nil %>
     <% @messages.each do |message| %>
-      <%= render partial: "messages/message", locals: { message: message, server: @server } %>
+      <% grouped = previous_message &&
+                   previous_message.user_id == message.user_id &&
+                   !message.system_message? &&
+                   !previous_message.system_message? &&
+                   message.parent_id.nil? &&
+                   previous_message.parent_id.nil? &&
+                   (message.created_at - previous_message.created_at) < 300 %>
+      <%= render partial: "messages/message", locals: { message: message, server: @server, grouped: grouped } %>
+      <% previous_message = message %>
     <% end %>
   <% end %>
 </div>
@@ -75,7 +85,7 @@
   <!-- File preview area -->
   <div data-message-form-target="filePreview" class="hidden bg-gray-700 px-4 py-2 flex flex-wrap border-b border-gray-600"></div>
 
-  <%= form_with model: @message, url: channel_messages_path(@channel), html: { multipart: true, class: "relative" }, data: { action: "turbo:submit-end->message-form#handleSubmit" } do |f| %>
+  <%= form_with model: @message, url: channel_messages_path(@channel), html: { multipart: true, class: "relative" }, data: { turbo_frame: "_top", action: "turbo:submit-end->message-form#handleSubmit" } do |f| %>
     <%= f.hidden_field :parent_id, data: { message_form_target: "parentId" } %>
     <div class="flex items-center bg-gray-600 rounded-lg px-2 sm:px-4">
       <!-- File upload -->
@@ -129,3 +139,4 @@
 </div>
 
 </div>
+<% end %>

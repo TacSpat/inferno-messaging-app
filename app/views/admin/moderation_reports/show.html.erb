@@ -1,0 +1,131 @@
+<div class="h-full overflow-y-auto bg-gray-900 text-gray-100">
+  <div class="max-w-3xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Report #<%= @report.id %></h1>
+        <p class="text-sm text-gray-400 mt-1">
+          Submitted <%= time_ago_in_words(@report.created_at) %> ago by <%= @report.reporter.username %>
+        </p>
+      </div>
+      <%= link_to "Back to Reports", admin_moderation_reports_path, class: "text-sm text-gray-400 hover:text-white transition" %>
+    </div>
+
+    <!-- Report Details -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6">
+      <div class="grid grid-cols-2 gap-4 mb-4">
+        <div>
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Type</p>
+          <span class="text-sm font-semibold px-2 py-0.5 rounded
+            <%= case @report.report_type
+                when 'spam' then 'bg-yellow-900 text-yellow-300'
+                when 'illegal' then 'bg-red-900 text-red-300'
+                when 'impersonation' then 'bg-purple-900 text-purple-300'
+                when 'harassment' then 'bg-orange-900 text-orange-300'
+                else 'bg-gray-700 text-gray-300'
+                end %>">
+            <%= @report.report_type.capitalize %>
+          </span>
+        </div>
+        <div>
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
+          <span class="text-sm font-medium px-2 py-1 rounded
+            <%= case @report.status
+                when 'open' then 'bg-blue-900 text-blue-300'
+                when 'reviewed' then 'bg-gray-700 text-gray-300'
+                when 'dismissed' then 'bg-gray-700 text-gray-400'
+                when 'actioned' then 'bg-green-900 text-green-300'
+                end %>">
+            <%= @report.status.capitalize %>
+          </span>
+          <% if @report.reviewed_by %>
+            <span class="text-xs text-gray-500 ml-2">by <%= @report.reviewed_by.username %></span>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Reported Pubkey</p>
+        <p class="text-sm text-white font-mono bg-gray-900 rounded px-3 py-2"><%= @report.reported_pubkey %></p>
+      </div>
+
+      <% if @report.reported_event_id.present? %>
+        <div class="mb-4">
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Reported Event ID</p>
+          <p class="text-sm text-white font-mono bg-gray-900 rounded px-3 py-2"><%= @report.reported_event_id %></p>
+        </div>
+      <% end %>
+
+      <% if @report.reason.present? %>
+        <div>
+          <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Reason</p>
+          <p class="text-sm text-gray-300 bg-gray-900 rounded px-3 py-2"><%= @report.reason %></p>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Reported User Info -->
+    <% if @remote_user %>
+      <div class="bg-gray-800 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-semibold text-white mb-3">Reported User</h2>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Username</p>
+            <p class="text-sm text-white"><%= @remote_user.username || "Unknown" %></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Home Instance</p>
+            <p class="text-sm text-white"><%= @remote_user.home_instance %></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Display Name</p>
+            <p class="text-sm text-white"><%= @remote_user.display_name || "—" %></p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Last Verified</p>
+            <p class="text-sm text-white"><%= @remote_user.last_verified_at ? time_ago_in_words(@remote_user.last_verified_at) + " ago" : "Never" %></p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Related Reports -->
+    <% if @related_reports.any? %>
+      <div class="bg-gray-800 rounded-lg p-6 mb-6">
+        <h2 class="text-lg font-semibold text-white mb-3">Other Reports for This Pubkey</h2>
+        <div class="space-y-2">
+          <% @related_reports.each do |r| %>
+            <%= link_to admin_moderation_report_path(r), class: "flex items-center justify-between bg-gray-900 rounded px-3 py-2 hover:bg-gray-750 transition" do %>
+              <span class="text-sm text-gray-300">#<%= r.id %> — <%= r.report_type.capitalize %></span>
+              <span class="text-xs text-gray-500"><%= time_ago_in_words(r.created_at) %> ago</span>
+            <% end %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
+    <!-- Actions -->
+    <% if @report.open? %>
+      <div class="bg-gray-800 rounded-lg p-6">
+        <h2 class="text-lg font-semibold text-white mb-4">Actions</h2>
+        <div class="flex flex-wrap gap-3">
+          <%= button_to "Mark Reviewed", review_admin_moderation_report_path(@report),
+              params: { status: "reviewed" }, method: :post,
+              class: "bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+
+          <%= button_to "Dismiss", review_admin_moderation_report_path(@report),
+              params: { status: "dismissed" }, method: :post,
+              class: "bg-gray-600 hover:bg-gray-500 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+
+          <%= form_with url: review_admin_moderation_report_path(@report), method: :post, class: "inline-flex items-center gap-2" do |f| %>
+            <%= f.hidden_field :status, value: "actioned" %>
+            <label class="flex items-center gap-1 text-sm text-gray-300">
+              <%= f.check_box :publish_to_relays, class: "w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-indigo-500" %>
+              Publish NIP-56
+            </label>
+            <%= f.submit "Action & Resolve", class: "bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  </div>
+</div>

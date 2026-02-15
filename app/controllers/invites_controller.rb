@@ -18,6 +18,12 @@ class InvitesController < ApplicationController
       return
     end
 
+    # Block remote users from joining if remote joins are locked down
+    if current_user.remote? && InstanceConfig.current.remote_joins_blocked?
+      redirect_to root_path, alert: "Remote user joins are currently disabled."
+      return
+    end
+
     if current_user.servers.include?(@server)
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else

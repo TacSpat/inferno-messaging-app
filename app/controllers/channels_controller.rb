@@ -5,11 +5,13 @@ class ChannelsController < ApplicationController
   before_action :ensure_member!
 
   def show
-    @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :role }, reactions: {}, files_attachments: :blob)
+    # Ensure current user appears online (WebSocket reconnects after page render)
+    current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current) if current_user.offline?
+    @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
                         .ordered.last(50)
     @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
     @message = Message.new
-    @members = @server.members.includes(:server_memberships, avatar_attachment: :blob)
+    @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
     current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
     ChannelRead.upsert(
       { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
@@ -22,7 +24,7 @@ class ChannelsController < ApplicationController
     return head :bad_request unless before_message
 
     @messages = @channel.messages
-                  .includes(user: { avatar_attachment: :blob, server_memberships: :role }, reactions: {}, files_attachments: :blob)
+                  .includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
                   .where("messages.created_at < ?", before_message.created_at)
                   .ordered.last(50)
     @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
@@ -41,7 +43,7 @@ class ChannelsController < ApplicationController
     return head :bad_request unless after_message
 
     @messages = @channel.messages
-                  .includes(user: { avatar_attachment: :blob, server_memberships: :role }, reactions: {}, files_attachments: :blob)
+                  .includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
                   .where("messages.created_at > ?", after_message.created_at)
                   .ordered.first(50)
     @has_newer = @messages.any? && @channel.messages.where("created_at > ?", @messages.last.created_at).exists?
@@ -59,7 +61,7 @@ class ChannelsController < ApplicationController
     around_message = @channel.messages.find_by(public_id: params[:around])
     return head :bad_request unless around_message
 
-    includes_list = { user: { avatar_attachment: :blob, server_memberships: :role }, reactions: {}, files_attachments: :blob }
+    includes_list = { user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob }
 
     before_msgs = @channel.messages.includes(includes_list)
                     .where("messages.created_at <= ?", around_message.created_at)

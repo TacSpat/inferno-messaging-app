@@ -44,13 +44,18 @@
         </div>
       <% end %>
       <% membership = server.server_memberships.find_by(user: member) %>
-      <% if membership&.role && membership.role.position > 0 %>
+      <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+      <% if visible_roles.any? %>
         <div class="border-t border-white/10 pt-2">
           <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
-            <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= membership.role.color || '#ffffff' %>"></span>
-            <%= membership.role.name %>
-          </span>
+          <div class="flex flex-wrap gap-1">
+            <% visible_roles.each do |role| %>
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
+                <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                <%= role.name %>
+              </span>
+            <% end %>
+          </div>
         </div>
       <% end %>
       <div class="border-t border-white/10 pt-2">

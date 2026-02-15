@@ -2,7 +2,7 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [:invites, :create_invite, :destroy_invite]
+  before_action :ensure_permission!, except: [:invites, :create_invite, :destroy_invite, :update_member]
   before_action :ensure_invite_permission!, only: [:invites, :create_invite, :destroy_invite]
   layout "server_settings"
 
@@ -22,14 +22,61 @@ class ServerSettingsController < ApplicationController
   end
 
   def members
-    @memberships = @server.server_memberships.includes(user: { avatar_attachment: :blob }, role: {}).order(joined_at: :desc)
+    @memberships = @server.server_memberships.includes(:membership_roles, :roles, user: { avatar_attachment: :blob }).order(joined_at: :desc)
+    @all_roles = @server.roles.where.not("permissions @> ?", { owner: true }.to_json).ordered
   end
 
   def update_member
     membership = @server.server_memberships.find_by!(public_id: params[:id])
-    role = @server.roles.find_by!(public_id: params[:role_id])
-    membership.update!(role: role)
-    redirect_to server_settings_members_path(@server), notice: "#{membership.user.username} is now #{role.name}."
+    is_self = membership.user == current_user
+
+    # Handle nickname update
+    if params.key?(:nickname)
+      # Self can change own nickname, admins/manage_roles can change anyone's
+      unless is_self || @current_membership&.admin? || @current_membership&.has_permission?("manage_roles")
+        return respond_to do |format|
+          format.json { render json: { error: "Permission denied" }, status: :forbidden }
+          format.html { redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission." }
+        end
+      end
+      nickname = params[:nickname].presence
+      membership.update!(nickname: nickname)
+      broadcast_member_update(membership)
+      return respond_to do |format|
+        format.json { render json: { success: true, nickname: membership.nickname, display_name: membership.user.display_name_for(@server) } }
+        format.html { redirect_to server_settings_members_path(@server), notice: "Nickname updated." }
+      end
+    end
+
+    # Handle role update — requires admin or manage_roles
+    unless @current_membership&.admin? || @current_membership&.has_permission?("manage_roles")
+      return respond_to do |format|
+        format.json { render json: { error: "Permission denied" }, status: :forbidden }
+        format.html { redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission." }
+      end
+    end
+
+    role_ids = Array(params[:role_ids])
+    roles = @server.roles.where(public_id: role_ids).reject(&:owner?)
+
+    # Owner role cannot be removed from the server owner
+    owner_role = membership.roles.find(&:owner?)
+    roles << owner_role if owner_role
+
+    membership.roles = roles
+    broadcast_member_update(membership)
+
+    respond_to do |format|
+      format.json do
+        render json: {
+          success: true,
+          roles: membership.roles.ordered.map { |r| { id: r.public_id, name: r.name, color: r.color, position: r.position } }
+        }
+      end
+      format.html do
+        redirect_to server_settings_members_path(@server), notice: "Roles updated for #{membership.user.username}."
+      end
+    end
   end
 
   def kick_member
@@ -49,6 +96,14 @@ class ServerSettingsController < ApplicationController
   end
 
   def create_invite
+    if InstanceConfig.current.invite_creation_blocked?
+      respond_to do |format|
+        format.html { redirect_to server_settings_invites_path(@server), alert: "Invite creation is currently disabled." }
+        format.json { render json: { error: "Invite creation disabled" }, status: :forbidden }
+      end
+      return
+    end
+
     expires_at = case params[:expires_in]
     when "30m" then 30.minutes.from_now
     when "1h"  then 1.hour.from_now
@@ -133,6 +188,25 @@ class ServerSettingsController < ApplicationController
     unless @current_membership&.has_permission?("create_invite") || @current_membership&.has_permission?("manage_invites") || @current_membership&.admin?
       redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
     end
+  end
+
+  def broadcast_member_update(membership)
+    user = membership.user.reload
+    html = render_to_string(
+      partial: "servers/member_item",
+      locals: { member: user, server: @server },
+      layout: false,
+      formats: [:html]
+    )
+    ServerChannel.broadcast_to(@server, {
+      type: "member_update",
+      user_id: user.public_id,
+      html: html,
+      display_name: user.display_name_for(@server),
+      username: user.username,
+      tag: user.tag,
+      role_color: user.role_color_for(@server)
+    })
   end
 
   def server_params

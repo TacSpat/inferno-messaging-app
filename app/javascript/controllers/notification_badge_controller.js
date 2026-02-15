@@ -23,6 +23,10 @@ export default class extends Controller {
     // Clean up dynamic badges before Turbo caches the page snapshot
     this._beforeCache = () => this._cleanupForCache()
     document.addEventListener("turbo:before-cache", this._beforeCache)
+
+    // Clear badges for the current channel on every Turbo render (channel switch)
+    this._onRender = () => this.clearCurrentChannelBadges()
+    document.addEventListener("turbo:render", this._onRender)
   }
 
   disconnect() {
@@ -31,6 +35,7 @@ export default class extends Controller {
     document.removeEventListener("click", this.closeMenu)
     this.closeMenu()
     if (this._beforeCache) document.removeEventListener("turbo:before-cache", this._beforeCache)
+    if (this._onRender) document.removeEventListener("turbo:render", this._onRender)
     if (this.sidebarTyping) {
       this.sidebarTyping.forEach(users => users.forEach(u => clearTimeout(u.timeout)))
       this.sidebarTyping.clear()
@@ -41,6 +46,10 @@ export default class extends Controller {
     // Remove all JS-added dynamic indicators so the Turbo cache snapshot is clean
     document.querySelectorAll(".typing-indicator").forEach(el => el.remove())
     document.querySelectorAll(".server-unread-pill").forEach(el => el.remove())
+    // Remove all mention badges (red notification dots) from channels and servers
+    document.querySelectorAll(".mention-badge").forEach(el => el.remove())
+    // Remove home badge
+    document.querySelectorAll(".home-badge").forEach(el => el.remove())
     // Revert JS-added unread styling on channels
     document.querySelectorAll("[data-channel-id][data-unread]").forEach(el => {
       delete el.dataset.unread
@@ -433,6 +442,9 @@ export default class extends Controller {
   // ---- Context Menus ----
 
   handleContextMenu(event) {
+    // Ignore right-clicks inside existing context menus or popups
+    if (event.target.closest("[data-context-menu]") || event.target.closest("#notif-context-menu")) return
+
     // Home/DM button
     const homeEl = event.target.closest("[data-home-button]")
     if (homeEl) {

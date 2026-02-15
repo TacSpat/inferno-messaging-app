@@ -1,8 +1,12 @@
 class User < ApplicationRecord
   include HasPublicId
+  include HasNostrIdentity
   devise :database_authenticatable, :registerable,
          :recoverable, :rememberable, :validatable,
          :confirmable
+
+  # Remote user detail (for shadow users)
+  belongs_to :remote_user_detail, class_name: "RemoteUser", optional: true
 
   # Profile
   has_one_attached :avatar
@@ -49,6 +53,10 @@ class User < ApplicationRecord
   validates :bio, length: { maximum: 500 }, allow_blank: true
   validates :status, length: { maximum: 128 }, allow_blank: true
 
+  # Scopes
+  scope :local, -> { where(remote: false) }
+  scope :remote_users, -> { where(remote: true) }
+
   # Online state
   enum :online_state, { offline: 0, online: 1, idle: 2, dnd: 3, invisible: 4 }
 
@@ -56,6 +64,7 @@ class User < ApplicationRecord
   before_validation :assign_discriminator, on: :create
   before_validation :default_display_name, on: :create
   after_update_commit :broadcast_profile_update, if: :profile_changed?
+  after_update_commit :publish_nostr_profile, if: :nostr_profile_changed?
 
   # Full tag like "Tac#0420"
   def tag
@@ -91,13 +100,21 @@ class User < ApplicationRecord
     else
       server_memberships.find_by(server: server)
     end
-    return "#ffffff" unless membership&.role
-    membership.role.color || "#ffffff"
+    return "#ffffff" unless membership
+    membership.top_role&.color || "#ffffff"
   end
   private
 
   def profile_changed?
     saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio? || saved_change_to_status? || saved_change_to_status_emoji?
+  end
+
+  def nostr_profile_changed?
+    !remote? && nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
+  end
+
+  def publish_nostr_profile
+    NostrPublishJob.perform_later(id, :profile)
   end
 
   def broadcast_profile_update
@@ -112,7 +129,8 @@ class User < ApplicationRecord
         html: html,
         display_name: display_name_for(server),
         username: username,
-        tag: tag
+        tag: tag,
+        role_color: role_color_for(server)
       })
     end
   end

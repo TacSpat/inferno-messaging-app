@@ -1,21 +1,25 @@
 class ServerMembership < ApplicationRecord
   include HasPublicId
+  include InstanceLimits
   belongs_to :user
   has_paper_trail
   belongs_to :server
-  belongs_to :role, optional: true
+  has_many :membership_roles, dependent: :destroy
+  has_many :roles, through: :membership_roles
 
   validates :user_id, uniqueness: { scope: :server_id }
+  validate :within_member_limit, on: :create
 
   before_create :set_joined_at
-  before_create :assign_default_role
   after_create :send_welcome_message
   after_create_commit :broadcast_member_join
   after_destroy_commit :broadcast_member_leave
 
   def has_permission?(permission)
     return true if server.owner == user
-    role&.has_permission?(permission) || false
+    everyone_role = server.roles.find_by(name: "@everyone")
+    return true if everyone_role&.has_permission?(permission)
+    roles.any? { |r| r.has_permission?(permission) }
   end
 
   def owner?
@@ -23,17 +27,21 @@ class ServerMembership < ApplicationRecord
   end
 
   def admin?
-    owner? || role&.admin?
+    owner? || roles.any?(&:admin?)
+  end
+
+  def top_role
+    roles.ordered.first
+  end
+
+  def top_hoisted_role
+    roles.select { |r| r.hoist? && r.name != "New Role" && !r.owner? }.max_by(&:position)
   end
 
   private
 
   def set_joined_at
     self.joined_at ||= Time.current
-  end
-
-  def assign_default_role
-    self.role ||= server.roles.find_by(name: "@everyone")
   end
 
   def send_welcome_message
@@ -59,5 +67,11 @@ class ServerMembership < ApplicationRecord
       user_id: user.public_id,
       member_count: server.members.count
     })
+  end
+
+  def within_member_limit
+    if server && instance_config.member_limit_reached_for?(server)
+      errors.add(:base, "This server has reached its member limit (#{instance_config.max_members_per_server})")
+    end
   end
 end

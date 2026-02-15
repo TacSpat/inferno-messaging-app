@@ -6,9 +6,18 @@
                  else "bg-gray-500"
                  end
   is_offline = member.offline? || member.invisible?
+  membership = member.server_memberships.find { |sm| sm.server_id == server.id }
+  hoisted = membership&.top_hoisted_role
+  top_position = membership&.top_role&.position || 0
+  role_group = hoisted ? "role:#{hoisted.public_id}" : "online"
+  member_group = is_offline ? "offline" : role_group
 %>
 <div class="flex items-center py-1.5 px-2 rounded hover:bg-gray-700 cursor-pointer group <%= 'opacity-40' if is_offline %>"
      data-user-id="<%= member.public_id %>"
+     data-member-group="<%= member_group %>"
+     data-role-group="<%= role_group %>"
+     data-role-position="<%= top_position %>"
+     data-display-name="<%= member.display_name_for(server).downcase %>"
      data-action="click->profile-card#show contextmenu->member-context#show">
   <div class="relative">
     <% if member.avatar.attached? %>
@@ -22,7 +31,7 @@
   </div>
   <div class="ml-2 flex-1 min-w-0">
     <span class="text-sm truncate block" style="color: <%= member.role_color_for(server) %>"><%= member.display_name_for(server) %></span>
-    <% if member.status.present? %>
+    <% if member.status.present? && !is_offline %>
       <span class="text-xs text-gray-500 truncate block"><%= member.status_emoji %> <%= member.status %></span>
     <% end %>
   </div>

@@ -1,6 +1,7 @@
 <% unread = channel.unread_for?(current_user) %>
 <% mention_count = current_user.notifications.unread.for_channel(channel.id).count %>
 <a href="<%= server_channel_path(server, channel) %>"
+   data-turbo-frame="main-content"
    data-channel-id="<%= channel.public_id %>"
    class="flex items-center px-2 py-1.5 rounded group relative
           <%= active ? 'bg-gray-600 text-white' : (unread ? 'text-white hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200') %>">

@@ -16,6 +16,7 @@ export default class extends Controller {
     this.fileList = new DataTransfer()
     this.typingUsers = new Map()
     this._lastTypingSent = 0
+    this._submitting = false
 
     // Remember last visited channel per server
     const serverId = document.querySelector("[data-current-server-id]")?.dataset?.currentServerId
@@ -297,16 +298,19 @@ export default class extends Controller {
         return
       }
       event.preventDefault()
+      if (this._submitting) return
       const trimmed = content.trim()
       const fileInput = this.element.querySelector("input[type=file]")
       const hasFiles = fileInput && fileInput.files.length > 0
       if (!trimmed && !hasFiles) return
+      this._submitting = true
       const form = event.target.closest("form")
       if (form) form.requestSubmit()
     }
   }
 
   handleSubmit(event) {
+    this._submitting = false
     if (event.detail.success) {
       this.inputTarget.value = ""
       this.updateHighlight()
@@ -363,11 +367,16 @@ export default class extends Controller {
           scrollCtrl.showNewMessageBar()
         } else {
           messagesDiv.insertAdjacentHTML("beforeend", data.html)
+          // Apply grouping to the newly inserted message
+          const allMsgs = messagesDiv.querySelectorAll("[data-message-id]")
+          if (allMsgs.length > 0) {
+            this.applyGrouping(allMsgs[allMsgs.length - 1])
+          }
           // Update newestMessageId on the scroll controller
           if (scrollCtrl) {
-            const allMsgs = messagesDiv.querySelectorAll("[id^='message_']")
-            if (allMsgs.length > 0) {
-              scrollCtrl.newestMessageIdValue = allMsgs[allMsgs.length - 1].id.replace("message_", "")
+            const allMsgIds = messagesDiv.querySelectorAll("[id^='message_']")
+            if (allMsgIds.length > 0) {
+              scrollCtrl.newestMessageIdValue = allMsgIds[allMsgIds.length - 1].id.replace("message_", "")
             }
           }
         }
@@ -408,6 +417,43 @@ export default class extends Controller {
         this._renderTypingIndicator()
         break
       }
+    }
+  }
+
+  // --- Message grouping ---
+
+  applyGrouping(messageEl) {
+    const prev = messageEl.previousElementSibling
+    if (!prev || !prev.dataset.messageId) return
+
+    const sameAuthor = messageEl.dataset.authorId === prev.dataset.authorId
+    const isSystem = messageEl.dataset.systemMessage === "true"
+    const prevIsSystem = prev.dataset.systemMessage === "true"
+    const isReply = messageEl.dataset.isReply === "true"
+    const prevIsReply = prev.dataset.isReply === "true"
+
+    if (!sameAuthor || isSystem || prevIsSystem || isReply || prevIsReply) return
+
+    const ts = new Date(messageEl.dataset.timestamp)
+    const prevTs = new Date(prev.dataset.timestamp)
+    if ((ts - prevTs) >= 300000) return // 5 minutes
+
+    // Apply grouped styling
+    messageEl.classList.add("message-grouped")
+
+    // Replace avatar with hover timestamp spacer
+    const avatarDiv = messageEl.querySelector(":scope > .shrink-0")
+    if (avatarDiv) {
+      const time = ts.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+      avatarDiv.innerHTML = `<span class="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100">${time}</span>`
+      avatarDiv.className = "shrink-0 mt-0.5 mr-4 w-10 flex items-center justify-center"
+    }
+
+    // Hide the username/timestamp header line
+    const contentDiv = messageEl.querySelector(":scope > .flex-1")
+    if (contentDiv) {
+      const header = contentDiv.querySelector(":scope > .flex.items-baseline")
+      if (header) header.style.display = "none"
     }
   }
 

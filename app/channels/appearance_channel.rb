@@ -7,7 +7,14 @@ class AppearanceChannel < ApplicationCable::Channel
   end
 
   def unsubscribed
-    AppearanceOfflineJob.set(wait: 5.seconds).perform_later(current_user.id)
+    # Wait long enough for a client ping cycle (30s) to distinguish
+    # a brief WebSocket drop from actually leaving the page
+    AppearanceOfflineJob.set(wait: 45.seconds).perform_later(current_user.id)
+  end
+
+  def ping(data = {})
+    state = data["state"] == "idle" ? :idle : :online
+    current_user.update_columns(online_state: User.online_states[state], online_at: Time.current)
   end
 
   def away
