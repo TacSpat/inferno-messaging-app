@@ -126,14 +126,24 @@ module Nostr
         public_key: pubkey,
         home_instance: home_instance || "unknown",
         username: params[:username],
-        display_name: params[:display_name]
+        display_name: params[:display_name],
+        profile_color: params[:profile_color],
+        discriminator: params[:discriminator]
       )
+
+      # Store federation token for API access to home instance
+      if params[:federation_token].present?
+        remote_user.update!(federation_token: params[:federation_token])
+      end
 
       remote_user.reload
       shadow_user = remote_user.shadow_user
 
       # Sign in the shadow user via Devise
       sign_in(shadow_user)
+
+      # Enqueue background profile sync from home instance
+      FederationProfileSyncJob.perform_later(remote_user.id)
 
       # Auto-create relay connection for home instance
       if params[:home_relay].present?

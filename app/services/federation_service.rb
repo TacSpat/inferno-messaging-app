@@ -46,7 +46,50 @@ class FederationService
     ref
   end
 
+  # Fetch a user's profile from their home instance
+  def self.fetch_remote_profile(home_instance:, pubkey:, token: nil)
+    fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}", token: token)
+  end
+
+  # Fetch a user's server list from their home instance
+  def self.fetch_remote_servers(home_instance:, pubkey:, token: nil)
+    fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/servers", token: token)
+  end
+
+  # Fetch a user's conversation list from their home instance
+  def self.fetch_remote_conversations(home_instance:, pubkey:, token: nil)
+    fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/conversations", token: token)
+  end
+
+  # Fetch a user's GIF collections from their home instance
+  def self.fetch_remote_gif_collections(home_instance:, pubkey:, token: nil)
+    fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/gif_collections", token: token)
+  end
+
   private
+
+  def self.fetch_federation_json(home_instance, path, token: nil)
+    protocol = Rails.env.development? ? "http" : "https"
+    requesting_instance = Rails.application.config.x.instance_domain
+    url = "#{protocol}://#{home_instance}#{path}?requesting_instance=#{CGI.escape(requesting_instance)}"
+
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = 5
+    http.read_timeout = 10
+
+    request = Net::HTTP::Get.new(uri.request_uri)
+    request["X-Federation-Token"] = token if token.present?
+    response = http.request(request)
+
+    return nil unless response.code.to_i == 200
+
+    JSON.parse(response.body)
+  rescue StandardError => e
+    Rails.logger.warn("Federation fetch failed for #{home_instance}#{path}: #{e.message}")
+    nil
+  end
 
   def self.build_create_server_event(user:, instance_url:, name:, description:)
     content = { name: name, description: description, username: user.username }.to_json

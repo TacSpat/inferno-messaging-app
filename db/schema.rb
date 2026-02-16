@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_15_130000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_16_080002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -354,6 +354,23 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_130000) do
     t.index ["url"], name: "index_relay_connections_on_url", unique: true
   end
 
+  create_table "remote_conversation_references", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "remote_instance_url", null: false
+    t.string "remote_conversation_id", null: false
+    t.string "kind", default: "direct"
+    t.string "name"
+    t.string "other_username"
+    t.string "other_display_name"
+    t.string "other_avatar_url"
+    t.string "other_profile_color"
+    t.datetime "last_message_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "remote_instance_url", "remote_conversation_id"], name: "idx_remote_conv_refs_unique", unique: true
+    t.index ["user_id"], name: "index_remote_conversation_references_on_user_id"
+  end
+
   create_table "remote_server_references", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.string "remote_instance_url", null: false
@@ -379,6 +396,15 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_130000) do
     t.string "public_id", limit: 12
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "banner_url"
+    t.string "profile_color"
+    t.string "profile_color_2"
+    t.integer "banner_offset_y"
+    t.string "status"
+    t.string "status_emoji"
+    t.string "discriminator", limit: 4
+    t.datetime "last_profile_sync_at"
+    t.text "federation_token"
     t.index ["home_instance"], name: "index_remote_users_on_home_instance"
     t.index ["nostr_public_key"], name: "index_remote_users_on_nostr_public_key", unique: true
     t.index ["public_id"], name: "index_remote_users_on_public_id", unique: true
@@ -585,6 +611,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_130000) do
   add_foreign_key "notifications", "users"
   add_foreign_key "reactions", "messages"
   add_foreign_key "reactions", "users"
+  add_foreign_key "remote_conversation_references", "users"
   add_foreign_key "remote_server_references", "users"
   add_foreign_key "roles", "servers"
   add_foreign_key "server_emojis", "servers"

@@ -34,6 +34,10 @@ Rails.application.routes.draw do
   # Federation API (cross-instance server creation)
   namespace :federation do
     post :create_server, to: "servers#create"
+    get "profiles/:pubkey", to: "profiles#show", as: :federation_profile
+    get "profiles/:pubkey/servers", to: "profiles#servers", as: :federation_profile_servers
+    get "profiles/:pubkey/conversations", to: "profiles#conversations", as: :federation_profile_conversations
+    get "profiles/:pubkey/gif_collections", to: "profiles#gif_collections", as: :federation_profile_gif_collections
   end
 
   # Cross-instance Nostr authentication
@@ -56,6 +60,7 @@ Rails.application.routes.draw do
 
   # Tenor API proxy & GIF collections
   namespace :api do
+    post "federation_sync", to: "federation_sync#create"
     get "tenor/search", to: "tenor#search"
     get "tenor/trending", to: "tenor#trending"
     get "tenor/categories", to: "tenor#categories"

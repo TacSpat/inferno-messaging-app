@@ -67,6 +67,7 @@ class ConversationsController < ApplicationController
 
   def set_dm_layout
     @dm_layout = true
+    @remote_conversations = current_user.remote_conversation_references.ordered
   end
 
   def set_conversation

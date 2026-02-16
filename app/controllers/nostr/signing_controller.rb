@@ -28,12 +28,22 @@ module Nostr
       # Base64 encode the event for URL transport
       encoded_event = Base64.urlsafe_encode64(JSON.generate(signed_event))
 
+      # Generate federation token for the requesting instance
+      federation_token = FederationTokenService.generate(
+        pubkey: current_user.nostr_public_key,
+        requesting_instance: requesting_domain
+      )
+
       # Build callback URL with the signed event and optional profile info
       callback_params = {
         event: encoded_event,
         username: current_user.username,
         display_name: current_user.display_name,
-        home_relay: InstanceConfig.current.instance_relay_url
+        home_relay: InstanceConfig.current.instance_relay_url,
+        home_instance: Rails.application.config.x.instance_domain,
+        profile_color: current_user.profile_color,
+        discriminator: current_user.discriminator,
+        federation_token: federation_token
       }
 
       separator = callback.include?("?") ? "&" : "?"
