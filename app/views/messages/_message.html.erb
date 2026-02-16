@@ -1,7 +1,7 @@
 <% grouped = local_assigns[:grouped] %>
 <% if message.system_message? %>
   <!-- System message (welcome, join, etc.) -->
-  <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>" data-system-message="true">
+  <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-2 sm:px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>" data-system-message="true">
     <svg class="w-4 h-4 text-green-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
     </svg>
@@ -11,15 +11,35 @@
     <span class="ml-2 text-xs text-gray-500"><%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %></span>
   </div>
 <% else %>
-  <div id="message_<%= message.public_id %>" class="flex items-start py-0.5 px-2 group hover:bg-gray-680 rounded relative<%= ' message-grouped' if grouped %>" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>"<%= ' data-is-reply="true"'.html_safe if message.parent %>>
+  <div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative<%= ' message-grouped' if grouped %>" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>"<%= ' data-is-reply="true"'.html_safe if message.parent %>>
     <% if grouped %>
-      <!-- Hover timestamp spacer (same width as avatar) -->
-      <div class="shrink-0 mt-0.5 mr-4 w-10 flex items-center justify-center">
+      <!-- Grouped: hover timestamp spacer (desktop only) -->
+      <div class="hidden sm:flex shrink-0 mt-0.5 mr-4 w-10 items-center justify-center">
         <span class="text-[10px] text-gray-500 opacity-0 group-hover:opacity-100"><%= message.created_at.strftime("%l:%M %p").strip %></span>
       </div>
     <% else %>
-      <!-- Avatar -->
-      <div class="shrink-0 mt-0.5 mr-4">
+      <!-- Mobile: avatar + name inline row -->
+      <div class="flex items-center mb-0.5 sm:hidden">
+        <% if message.user.avatar.attached? %>
+          <%= image_tag message.user.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
+        <% else %>
+          <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
+            <%= message.user.username[0].upcase %>
+          </div>
+        <% end %>
+        <span class="ml-2 font-medium text-sm truncate" style="color: <%= message.user.role_color_for(server) %>">
+          <%= message.user.display_name_for(server) %>
+        </span>
+        <span class="ml-2 text-xs text-gray-500 shrink-0">
+          <%= message.created_at.strftime("%l:%M %p").strip %>
+        </span>
+        <% if message.edited? %>
+          <span class="ml-1 text-xs text-gray-500 shrink-0">(edited)</span>
+        <% end %>
+      </div>
+
+      <!-- Desktop: avatar column -->
+      <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
         <% if message.user.avatar.attached? %>
           <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
         <% else %>
@@ -41,7 +61,8 @@
       <% end %>
 
       <% unless grouped %>
-        <div class="flex items-baseline">
+        <!-- Desktop name/timestamp -->
+        <div class="hidden sm:flex items-baseline">
           <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= message.user.role_color_for(server) %>">
             <%= message.user.display_name_for(server) %>
           </span>
@@ -63,11 +84,11 @@
           <% message.files.each do |file| %>
             <% if file.content_type&.start_with?("image/") %>
               <div data-attachment-id="<%= file.id %>" class="inline-block">
-              <%= image_tag url_for(file), class: "max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", loading: "lazy", data: { preview_src: url_for(file), preview_filename: file.filename.to_s } %>
+              <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", loading: "lazy", data: { preview_src: url_for(file), preview_filename: file.filename.to_s }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
               </div>
 <% elsif file.content_type&.start_with?("video/") %>
               <div class="inline-block relative rounded-lg overflow-hidden" data-controller="video-player">
-                <video preload="metadata" class="max-w-lg max-h-96 block" src="<%= url_for(file) %>"
+                <video preload="metadata" class="max-w-full sm:max-w-lg max-h-96 block" src="<%= url_for(file) %>"
                        data-video-player-target="video" data-video-src="<%= url_for(file) %>"
                        data-video-filename="<%= file.filename %>"></video>
               </div>

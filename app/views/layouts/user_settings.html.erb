@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html class="h-full bg-gray-900">
+  <head>
+    <title>User Settings - Inferno</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
+  </head>
+  <body class="h-full overflow-hidden text-gray-100">
+    <% if notice %><div class="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
+    <% if alert %><div class="fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
+
+    <div class="flex h-full" data-controller="settings-sidebar">
+      <!-- Mobile sidebar backdrop -->
+      <div data-settings-sidebar-target="backdrop" class="hidden fixed inset-0 bg-black/50 z-40 md:hidden" data-action="click->settings-sidebar#close"></div>
+      <!-- Settings sidebar -->
+      <div data-settings-sidebar-target="sidebar" class="hidden md:block w-56 shrink-0 bg-gray-800 overflow-y-auto fixed top-0 left-0 bottom-0 z-50 md:relative md:z-auto">
+        <nav class="py-8 px-4">
+          <!-- Mobile close button -->
+          <button type="button" class="md:hidden flex items-center text-gray-400 hover:text-white mb-4 px-2" data-action="click->settings-sidebar#close">
+            <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+            Back
+          </button>
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2">User Settings</h3>
+
+          <div class="space-y-0.5 mb-4">
+            <%= link_to "My Account", user_settings_account_path,
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'my_account' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <%= link_to "Profile", user_settings_profile_path,
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'profile' || action_name == 'update_profile' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <%= link_to "Appearance", user_settings_appearance_path,
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'appearance' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+          </div>
+
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">App Settings</h3>
+          <div class="space-y-0.5 mb-4">
+            <%= link_to "Notifications", user_settings_notifications_path,
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'notifications' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <%= link_to "Keybinds", user_settings_keybinds_path,
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'keybinds' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+          </div>
+
+          <% if current_user.instance_admin? %>
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Administration</h3>
+            <div class="space-y-0.5 mb-4">
+              <%= link_to "Instance Settings", admin_instance_config_path,
+                  class: "block px-2 py-1.5 rounded text-sm text-gray-400 hover:bg-gray-700 hover:text-gray-200", data: { turbo: false } %>
+            </div>
+          <% end %>
+
+          <div class="border-t border-gray-700 mt-4 pt-4">
+            <%= button_to "Log Out", destroy_user_session_path, method: :delete,
+                class: "flex items-center w-full px-2 py-1.5 rounded text-sm text-red-400 hover:bg-red-600/20 cursor-pointer" %>
+          </div>
+        </nav>
+      </div>
+
+      <!-- Settings content -->
+      <div class="flex-1 overflow-y-auto">
+        <!-- Mobile header -->
+        <div class="md:hidden flex items-center px-4 h-12 border-b border-gray-700 shrink-0">
+          <button type="button" class="text-gray-400 hover:text-white mr-3 p-1" data-action="click->settings-sidebar#open">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <span class="font-semibold text-white text-sm capitalize"><%= action_name.tr('_', ' ') %></span>
+          <div class="flex-1"></div>
+          <%= link_to root_path, class: "flex items-center justify-center w-8 h-8 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          <% end %>
+        </div>
+
+        <div class="py-4 sm:py-8 px-4 sm:px-10">
+          <!-- Close button (desktop) -->
+          <div class="hidden md:flex justify-end mb-4">
+            <%= link_to root_path, class: "flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            <% end %>
+          </div>
+          <%= yield %>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

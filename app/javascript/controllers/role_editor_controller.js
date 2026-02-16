@@ -15,6 +15,13 @@ const PERMISSION_GROUPS = {
     add_reactions: "Add emoji reactions to messages",
     mention_everyone: "Use @everyone and @here mentions"
   },
+  Expression: {
+    send_custom_emojis: "Use custom server emojis in messages",
+    send_custom_stickers: "Use custom server stickers in messages",
+    create_emojis: "Upload custom emojis to the server",
+    create_stickers: "Upload custom stickers to the server",
+    manage_emojis: "Delete emojis and stickers uploaded by others"
+  },
   Management: {
     manage_messages: "Delete or pin other members' messages",
     manage_channels: "Create, edit, and delete channels",

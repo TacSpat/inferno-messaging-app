@@ -8940,6 +8940,14 @@ class message_form_controller_default extends Controller {
     };
     document.addEventListener("inferno:reply", this._replyHandler);
     document.addEventListener("inferno:react", this._reactHandler);
+    this._measureEmojiWidth();
+    this._replaceEmojisWithPUA();
+    this.updateHighlight();
+    this._emojiMapReady = () => {
+      this._replaceEmojisWithPUA();
+      this.updateHighlight();
+    };
+    document.addEventListener("inferno:emoji-map-ready", this._emojiMapReady);
   }
   disconnect() {
     this.subscription?.unsubscribe();
@@ -8947,6 +8955,8 @@ class message_form_controller_default extends Controller {
     this.teardownDragAndDrop();
     this.teardownPaste();
     this.teardownFileIntercept();
+    if (this._emojiMapReady)
+      document.removeEventListener("inferno:emoji-map-ready", this._emojiMapReady);
     if (this._replyHandler)
       document.removeEventListener("inferno:reply", this._replyHandler);
     if (this._reactHandler)
@@ -8960,6 +8970,8 @@ class message_form_controller_default extends Controller {
     this._pasteHandler = (e) => {
       const items = e.clipboardData?.items;
       if (!items)
+        return;
+      if (e.clipboardData.types.includes("text/plain") || e.clipboardData.types.includes("text/html"))
         return;
       const files = [];
       for (const item of items) {
@@ -8986,9 +8998,19 @@ class message_form_controller_default extends Controller {
     if (!form)
       return;
     this._fileInterceptHandler = (event) => {
-      if (this.fileList.files.length > 0) {
-        const body = event.detail.fetchOptions.body;
-        if (body instanceof FormData) {
+      const body = event.detail.fetchOptions.body;
+      if (body instanceof FormData) {
+        const content = body.get("message[content]");
+        if (content && window._emojiReverse) {
+          body.set("message[content]", content.replace(/\u2003([\uE000-\uF8FF])/g, (m, ch, offset, str) => {
+            const name = window._emojiReverse[ch];
+            if (!name)
+              return m;
+            const next = str[offset + m.length];
+            return `:${name}:` + (next === " " ? " " : "");
+          }));
+        }
+        if (this.fileList.files.length > 0) {
           body.delete("message[files][]");
           for (const file of this.fileList.files) {
             body.append("message[files][]", file);
@@ -9168,6 +9190,8 @@ class message_form_controller_default extends Controller {
     el.innerHTML = text;
   }
   handleKeydown(event) {
+    if (this._handleEmojiKeydown(event))
+      return;
     if (event.key === "Enter" && !event.shiftKey) {
       const content = this.inputTarget.value;
       const backtickCount = (content.match(/`{3}/g) || []).length;
@@ -9205,6 +9229,7 @@ class message_form_controller_default extends Controller {
     }
   }
   autoResize() {
+    this._replaceEmojisWithPUA();
     this.updateHighlight();
     const input = this.inputTarget;
     input.style.height = "auto";
@@ -9408,11 +9433,121 @@ class message_form_controller_default extends Controller {
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>');
     html = html.replace(/`([^`]+)`/g, '<span class="text-orange-300 bg-gray-700/50 rounded px-0.5">`$1`</span>');
     html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-orange-300">$1</span>');
+    if (window._emojiReverse && window._emojiMap) {
+      html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {
+        const name = window._emojiReverse[ch];
+        if (name && window._emojiMap[name]) {
+          const w = this._emojiCharWidth || 20;
+          return `<img src="${window._emojiMap[name]}" style="display:inline;height:${w}px;width:${w}px;object-fit:contain;vertical-align:middle;pointer-events:none">`;
+        }
+        return _;
+      });
+    }
     if (html.endsWith(`
 `))
       html += "&nbsp;";
     this.highlightTarget.innerHTML = html;
     this.highlightTarget.scrollTop = this.inputTarget.scrollTop;
+  }
+  _measureEmojiWidth() {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const cs = getComputedStyle(this.inputTarget);
+    ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+    this._emojiCharWidth = ctx.measureText(" ").width;
+  }
+  _replaceEmojisWithPUA() {
+    if (!window._emojiPUA || !window._emojiMap)
+      return;
+    const input = this.inputTarget;
+    const val = input.value;
+    if (!val.includes(":"))
+      return;
+    const selStart = input.selectionStart;
+    const selEnd = input.selectionEnd;
+    let newVal = "";
+    let i = 0;
+    let newStart = selStart;
+    let newEnd = selEnd;
+    while (i < val.length) {
+      if (val[i] === ":") {
+        const rest = val.substring(i + 1);
+        const match = rest.match(/^([a-z0-9_]+):/);
+        if (match && window._emojiPUA[match[1]]) {
+          const fullLen = match[0].length + 1;
+          const mEnd = i + fullLen;
+          const replacement = " " + window._emojiPUA[match[1]];
+          const reduction = fullLen - 2;
+          newVal += replacement;
+          if (selStart >= mEnd)
+            newStart -= reduction;
+          else if (selStart > i)
+            newStart = newVal.length;
+          if (selEnd >= mEnd)
+            newEnd -= reduction;
+          else if (selEnd > i)
+            newEnd = newVal.length;
+          i = mEnd;
+          continue;
+        }
+      }
+      newVal += val[i];
+      i++;
+    }
+    if (newVal === val)
+      return;
+    input.value = newVal;
+    input.selectionStart = Math.max(0, newStart);
+    input.selectionEnd = Math.max(0, newEnd);
+  }
+  _handleEmojiKeydown(event) {
+    if (!window._emojiReverse)
+      return false;
+    const input = this.inputTarget;
+    const val = input.value;
+    const pos = input.selectionStart;
+    if (pos !== input.selectionEnd)
+      return false;
+    if (event.key === "Backspace") {
+      if (pos >= 2 && val[pos - 2] === " " && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault();
+        input.value = val.substring(0, pos - 2) + val.substring(pos);
+        input.selectionStart = input.selectionEnd = pos - 2;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    } else if (event.key === "Delete") {
+      if (pos <= val.length - 2 && val[pos] === " " && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault();
+        input.value = val.substring(0, pos) + val.substring(pos + 2);
+        input.selectionStart = input.selectionEnd = pos;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    } else if (event.key === "ArrowLeft" && !event.shiftKey) {
+      if (pos >= 2 && val[pos - 2] === " " && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos - 2;
+        return true;
+      }
+      if (pos >= 1 && val[pos - 1] === " " && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos - 1;
+        return true;
+      }
+    } else if (event.key === "ArrowRight" && !event.shiftKey) {
+      if (pos <= val.length - 2 && val[pos] === " " && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos + 2;
+        return true;
+      }
+      if (pos > 0 && val[pos - 1] === " " && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos + 1;
+        return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -9487,6 +9622,8 @@ class scroll_position_controller_default extends Controller {
     }
     this._onScroll = () => {
       this._lastScrollTop = this.element.scrollTop;
+      if (!this.isNearBottom())
+        this._keepingBottom = false;
       if (this.isNearBottom())
         this.hideNewMessageBar();
       if (this.isNearTop() && !this._initializing) {
@@ -9556,6 +9693,13 @@ class scroll_position_controller_default extends Controller {
   }
   _restoreScroll() {
     const savedAnchor = this.getSavedAnchor();
+    if (savedAnchor === "__bottom__") {
+      this.scrollToBottom();
+      this._lastAnchorId = "__bottom__";
+      this._keepAtBottom();
+      this._finishInit();
+      return;
+    }
     if (savedAnchor) {
       const el = document.getElementById(`message_${savedAnchor}`);
       if (el) {
@@ -9572,8 +9716,13 @@ class scroll_position_controller_default extends Controller {
     if (saved !== null && saved > 0) {
       this.element.scrollTop = saved;
       this._lastScrollTop = saved;
+      if (this.isNearBottom()) {
+        this.scrollToBottom();
+        this._lastAnchorId = "__bottom__";
+      }
     } else {
       this.scrollToBottom();
+      this._lastAnchorId = "__bottom__";
     }
     this._finishInit();
   }
@@ -9596,6 +9745,18 @@ class scroll_position_controller_default extends Controller {
   _finishInit() {
     requestAnimationFrame(() => {
       this._initializing = false;
+      this._eagerLoadVisibleImages();
+    });
+  }
+  _eagerLoadVisibleImages() {
+    const rect = this.element.getBoundingClientRect();
+    this.element.querySelectorAll('img[loading="lazy"]').forEach((img) => {
+      if (img.complete)
+        return;
+      const imgRect = img.getBoundingClientRect();
+      if (imgRect.bottom >= rect.top - 200 && imgRect.top <= rect.bottom + 200) {
+        img.loading = "eager";
+      }
     });
   }
   highlightMessage(el, afterScroll = false) {
@@ -9666,6 +9827,30 @@ class scroll_position_controller_default extends Controller {
     } catch {
     }
     clearInterval(this._saveInterval);
+  }
+  _keepAtBottom() {
+    this._keepingBottom = true;
+    const snap = () => {
+      if (this._keepingBottom)
+        this.scrollToBottom();
+    };
+    this.element.querySelectorAll("img, iframe, video").forEach((el) => {
+      if (el.tagName === "IMG" && !el.complete) {
+        el.addEventListener("load", snap, { once: true });
+      } else if (el.tagName === "IFRAME") {
+        el.addEventListener("load", snap, { once: true });
+      } else if (el.tagName === "VIDEO") {
+        el.addEventListener("loadedmetadata", snap, { once: true });
+      }
+    });
+    let count = 0;
+    const tick = () => {
+      if (!this._keepingBottom || count++ >= 8)
+        return;
+      this.scrollToBottom();
+      setTimeout(tick, 250);
+    };
+    setTimeout(tick, 250);
   }
   scrollToBottom() {
     this.element.scrollTop = this.element.scrollHeight;
@@ -9900,8 +10085,8 @@ class scroll_position_controller_default extends Controller {
       positions[this.channelIdValue] = pos;
       sessionStorage.setItem("channel_scroll", JSON.stringify(positions));
       if (this.isNearBottom() && !this.hasNewerValue) {
-        this.clearSavedAnchor();
-        this._lastAnchorId = null;
+        this._lastAnchorId = "__bottom__";
+        sessionStorage.setItem("channel_anchor_" + this.channelIdValue, "__bottom__");
       } else {
         const anchor = this._findAnchorMessage();
         if (anchor) {
@@ -10015,36 +10200,1069 @@ class toast_controller_default extends Controller {
   }
 }
 
-// app/javascript/controllers/emoji_picker_controller.js
-class emoji_picker_controller_default extends Controller {
-  static targets = ["panel", "input"];
+// app/javascript/controllers/unified_picker_controller.js
+var EMOJI_CATEGORIES = {
+  Smileys: ["\uD83D\uDE00", "\uD83D\uDE03", "\uD83D\uDE04", "\uD83D\uDE01", "\uD83D\uDE06", "\uD83D\uDE05", "\uD83E\uDD23", "\uD83D\uDE02", "\uD83D\uDE42", "\uD83D\uDE43", "\uD83D\uDE09", "\uD83D\uDE0A", "\uD83D\uDE07", "\uD83E\uDD70", "\uD83D\uDE0D", "\uD83E\uDD29", "\uD83D\uDE18", "\uD83D\uDE17", "\uD83D\uDE1A", "\uD83D\uDE19", "\uD83E\uDD72", "\uD83D\uDE0B", "\uD83D\uDE1B", "\uD83D\uDE1C", "\uD83E\uDD2A", "\uD83D\uDE1D", "\uD83E\uDD11", "\uD83E\uDD17", "\uD83E\uDD2D", "\uD83E\uDD2B", "\uD83E\uDD14", "\uD83E\uDEE1", "\uD83E\uDD10", "\uD83E\uDD28", "\uD83D\uDE10", "\uD83D\uDE11", "\uD83D\uDE36", "\uD83E\uDEE5", "\uD83D\uDE0F", "\uD83D\uDE12", "\uD83D\uDE44", "\uD83D\uDE2C", "\uD83E\uDD25", "\uD83D\uDE0C", "\uD83D\uDE14", "\uD83D\uDE2A", "\uD83E\uDD24", "\uD83D\uDE34", "\uD83D\uDE37", "\uD83E\uDD12", "\uD83E\uDD15", "\uD83E\uDD22", "\uD83E\uDD2E", "\uD83E\uDD75", "\uD83E\uDD76", "\uD83E\uDD74", "\uD83D\uDE35", "\uD83E\uDD2F", "\uD83E\uDD20", "\uD83E\uDD73", "\uD83E\uDD78", "\uD83D\uDE0E", "\uD83E\uDD13", "\uD83E\uDDD0", "\uD83D\uDE21", "\uD83D\uDE20", "\uD83E\uDD2C", "\uD83D\uDE08", "\uD83D\uDC7F", "\uD83D\uDC80", "\uD83D\uDCA9", "\uD83E\uDD21", "\uD83D\uDC7B", "\uD83D\uDC7D", "\uD83E\uDD16"],
+  Gestures: ["\uD83D\uDC4D", "\uD83D\uDC4E", "\uD83D\uDC4A", "✊", "\uD83E\uDD1B", "\uD83E\uDD1C", "\uD83D\uDC4F", "\uD83D\uDE4C", "\uD83D\uDC50", "\uD83E\uDD32", "\uD83E\uDD1D", "\uD83D\uDE4F", "✌️", "\uD83E\uDD1E", "\uD83E\uDD1F", "\uD83E\uDD18", "\uD83D\uDC4C", "\uD83E\uDD0C", "\uD83E\uDD0F", "\uD83D\uDC48", "\uD83D\uDC49", "\uD83D\uDC46", "\uD83D\uDC47", "☝️", "✋", "\uD83E\uDD1A", "\uD83D\uDD90️", "\uD83D\uDD96", "\uD83D\uDC4B", "\uD83E\uDD19", "\uD83D\uDCAA", "\uD83E\uDDBE", "\uD83D\uDD95"],
+  Hearts: ["❤️", "\uD83E\uDDE1", "\uD83D\uDC9B", "\uD83D\uDC9A", "\uD83D\uDC99", "\uD83D\uDC9C", "\uD83D\uDDA4", "\uD83E\uDD0D", "\uD83E\uDD0E", "\uD83D\uDC94", "❤️‍\uD83D\uDD25", "❤️‍\uD83E\uDE79", "\uD83D\uDC95", "\uD83D\uDC9E", "\uD83D\uDC93", "\uD83D\uDC97", "\uD83D\uDC96", "\uD83D\uDC98", "\uD83D\uDC9D", "\uD83D\uDC9F"],
+  Objects: ["\uD83D\uDD25", "⭐", "\uD83C\uDF1F", "✨", "\uD83D\uDCAB", "\uD83C\uDF89", "\uD83C\uDF8A", "\uD83C\uDF88", "\uD83C\uDF81", "\uD83C\uDFC6", "\uD83E\uDD47", "\uD83C\uDFAE", "\uD83C\uDFAF", "\uD83C\uDFB2", "\uD83D\uDD2E", "\uD83D\uDC8E", "\uD83D\uDCB0", "\uD83D\uDCA1", "\uD83D\uDCCC", "\uD83D\uDCCE", "✏️", "\uD83D\uDCDD", "\uD83D\uDCBB", "⌨️", "\uD83D\uDDA5️", "\uD83D\uDCF1", "☎️", "\uD83D\uDCF7", "\uD83C\uDFB5", "\uD83C\uDFB6", "\uD83C\uDFB8", "\uD83C\uDFB9", "\uD83C\uDF55", "\uD83C\uDF54", "\uD83C\uDF7A", "\uD83C\uDF77", "☕"]
+};
+var FREQUENTLY_USED_KEY = "unified_picker_frequently_used";
+var LAST_TAB_KEY = "unified_picker_last_tab";
+var MAX_FREQUENT = 24;
+
+class unified_picker_controller_default extends Controller {
+  static targets = ["panel", "input", "content", "searchInput", "tabGifs", "tabStickers", "tabEmoji"];
+  static values = {
+    serverId: String,
+    canSendGifs: { type: Boolean, default: true },
+    canSendCustomEmojis: { type: Boolean, default: true },
+    canSendCustomStickers: { type: Boolean, default: true },
+    serverName: String,
+    userServers: String
+  };
+  connect() {
+    this.activeTab = localStorage.getItem(LAST_TAB_KEY) || "emoji";
+    this.searchQuery = "";
+    this.tenorPos = "";
+    this.tenorLoading = false;
+    this.serverEmojisCache = {};
+    this.serverStickersCache = {};
+    this.userCollections = [];
+    this.userFavoriteIds = new Set;
+    this.collapsedSections = JSON.parse(localStorage.getItem("picker_collapsed") || "{}");
+    this.frequentlyUsed = JSON.parse(localStorage.getItem(FREQUENTLY_USED_KEY) || "[]");
+    this.gifSubView = null;
+    this.currentCollectionFavorites = null;
+    this.boundClose = this.closeOnClickOutside.bind(this);
+    document.addEventListener("mousedown", this.boundClose);
+    this.debounceTimer = null;
+    this.boundDismissCtxOnClick = (e) => {
+      const menu = document.getElementById("gif-context-menu");
+      if (!menu || !menu.contains(e.target))
+        this.dismissContextMenu();
+    };
+    this.boundDismissCtxOnKey = (e) => {
+      if (e.key === "Escape")
+        this.dismissContextMenu();
+    };
+    this.boundDismissCtxOnScroll = () => this.dismissContextMenu();
+    this.boundOnFavoritesChanged = (e) => {
+      if (e.detail.source === "picker")
+        return;
+      const { gifId, favorited } = e.detail;
+      if (favorited) {
+        this.userFavoriteIds.add(gifId);
+      } else {
+        this.userFavoriteIds.delete(gifId);
+      }
+      this.currentCollectionFavorites = null;
+      this._cachedCollectionId = null;
+      if (this.activeTab === "gifs" && this.gifSubView && this.gifSubView !== "_trending" && !this.panelTarget.classList.contains("hidden")) {
+        this.loadCollectionGifs(this.gifSubView, this.searchQuery);
+      }
+    };
+    document.addEventListener("gif-favorites-changed", this.boundOnFavoritesChanged);
+    this._eagerLoadEmojiMap();
+  }
+  async _eagerLoadEmojiMap() {
+    if (window._emojiMap && Object.keys(window._emojiMap).length > 0)
+      return;
+    const serverIds = [];
+    if (this.hasServerIdValue && this.serverIdValue) {
+      serverIds.push(this.serverIdValue);
+    }
+    if (this.hasUserServersValue && this.userServersValue) {
+      try {
+        const servers = JSON.parse(this.userServersValue);
+        servers.forEach((s) => {
+          if (!serverIds.includes(String(s.id)))
+            serverIds.push(String(s.id));
+        });
+      } catch (e) {
+      }
+    }
+    for (const serverId of serverIds) {
+      await this.fetchServerEmojis(serverId);
+    }
+    document.dispatchEvent(new CustomEvent("inferno:emoji-map-ready"));
+  }
+  disconnect() {
+    document.removeEventListener("mousedown", this.boundClose);
+    document.removeEventListener("gif-favorites-changed", this.boundOnFavoritesChanged);
+    if (this.debounceTimer)
+      clearTimeout(this.debounceTimer);
+    this.dismissContextMenu();
+  }
   toggle() {
-    this.panelTarget.classList.toggle("hidden");
+    const panel = this.panelTarget;
+    const wasHidden = panel.classList.contains("hidden");
+    panel.classList.toggle("hidden");
+    if (wasHidden) {
+      this.updateTabStyles();
+      this.renderCurrentTab();
+      if (this.hasSearchInputTarget)
+        this.searchInputTarget.focus();
+    }
   }
   close() {
     this.panelTarget.classList.add("hidden");
   }
-  select(event) {
+  closeOnClickOutside(event) {
+    if (this.panelTarget.contains(event.target))
+      return;
+    const toggleBtn = this.panelTarget.parentElement;
+    if (toggleBtn && toggleBtn.contains(event.target))
+      return;
+    const ctxMenu = document.getElementById("gif-context-menu");
+    if (ctxMenu && ctxMenu.contains(event.target))
+      return;
+    if (!this.panelTarget.classList.contains("hidden")) {
+      this.close();
+    }
+  }
+  switchTab(event) {
+    const tab = event.currentTarget.dataset.tab;
+    if (this.activeTab === tab)
+      return;
+    this.activeTab = tab;
+    localStorage.setItem(LAST_TAB_KEY, tab);
+    this.searchQuery = "";
+    this.tenorPos = "";
+    this.gifSubView = null;
+    this.currentCollectionFavorites = null;
+    if (this.hasSearchInputTarget)
+      this.searchInputTarget.value = "";
+    this.updateTabStyles();
+    this.renderCurrentTab();
+  }
+  updateTabStyles() {
+    const tabs = { gifs: this.tabGifsTarget, stickers: this.tabStickersTarget, emoji: this.tabEmojiTarget };
+    Object.entries(tabs).forEach(([name, el]) => {
+      if (name === this.activeTab) {
+        el.classList.add("text-white", "border-orange-500");
+        el.classList.remove("text-gray-400", "border-transparent");
+      } else {
+        el.classList.remove("text-white", "border-orange-500");
+        el.classList.add("text-gray-400", "border-transparent");
+      }
+    });
+  }
+  onSearch(event) {
+    const query = event.target.value.trim();
+    if (this.debounceTimer)
+      clearTimeout(this.debounceTimer);
+    this.debounceTimer = setTimeout(() => {
+      this.searchQuery = query;
+      this.tenorPos = "";
+      this.renderCurrentTab();
+    }, this.activeTab === "gifs" ? 400 : 150);
+  }
+  clearSearch() {
+    this.searchQuery = "";
+    if (this.hasSearchInputTarget)
+      this.searchInputTarget.value = "";
+  }
+  renderCurrentTab() {
+    switch (this.activeTab) {
+      case "gifs":
+        this.renderGifsTab();
+        break;
+      case "stickers":
+        this.renderStickersTab();
+        break;
+      case "emoji":
+        this.renderEmojiTab();
+        break;
+    }
+  }
+  async renderGifsTab() {
+    const content = this.contentTarget;
+    if (!this.canSendGifsValue) {
+      content.innerHTML = `<div class="flex items-center justify-center h-32 text-gray-500 text-sm">You don't have permission to send GIFs</div>`;
+      return;
+    }
+    await this.loadUserFavoriteIds();
+    if (this.gifSubView) {
+      if (this.gifSubView === "_trending") {
+        if (this.searchQuery) {
+          this.showLoading();
+          await this.searchTenor(this.searchQuery);
+        } else {
+          this.showLoading();
+          await this.loadTrending();
+        }
+      } else {
+        await this.loadCollectionGifs(this.gifSubView, this.searchQuery);
+      }
+      return;
+    }
+    if (this.searchQuery) {
+      this.showLoading();
+      await this.searchTenor(this.searchQuery);
+    } else {
+      await this.renderGifHome();
+    }
+  }
+  showLoading() {
+    this.contentTarget.innerHTML = `<div class="flex items-center justify-center h-32 text-gray-500 text-sm"><svg class="w-5 h-5 animate-spin mr-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>Loading...</div>`;
+  }
+  async renderGifHome() {
+    const content = this.contentTarget;
+    try {
+      const resp = await fetch("/api/gif_collections");
+      if (resp.ok) {
+        const data = await resp.json();
+        this.userCollections = data.collections;
+      }
+    } catch (e) {
+    }
+    let html = `<div class="grid grid-cols-2 gap-2 p-1">`;
+    const favCollection = this.userCollections.find((c) => c.name === "Favorites");
+    html += this.collectionTile("Favorites", favCollection?.favorites_count || 0, favCollection?.id || "default", "\uD83D\uDD25");
+    html += this.collectionTile("Trending GIFs", "", "_trending", "\uD83D\uDCC8");
+    this.userCollections.filter((c) => c.name !== "Favorites").forEach((c) => {
+      html += this.collectionTile(c.name, c.favorites_count, c.id, c.icon || "\uD83D\uDCC1", true);
+    });
+    html += `</div>`;
+    content.innerHTML = html;
+  }
+  collectionTile(name, count, id, icon, deletable = false) {
+    const actions = deletable ? "click->unified-picker#openCollection contextmenu->unified-picker#showCollectionContextMenu" : "click->unified-picker#openCollection";
+    const iconHtml = icon && (icon.startsWith("http") || icon.startsWith("/")) ? `<img src="${this.escapeAttr(icon)}" class="w-7 h-7 object-contain mb-1" loading="lazy">` : `<span class="text-2xl mb-1">${icon}</span>`;
+    return `<button type="button" class="flex flex-col items-center justify-center bg-gray-700 hover:bg-gray-600 rounded-lg p-3 cursor-pointer transition text-center" data-action="${actions}" data-collection-id="${id}" data-collection-name="${this.escapeAttr(name)}">
+      ${iconHtml}
+      <span class="text-white text-xs font-medium truncate w-full">${this.escapeHtml(name)}</span>
+      ${count !== "" ? `<span class="text-gray-400 text-xs">${count}</span>` : ""}
+    </button>`;
+  }
+  async openCollection(event) {
+    const id = event.currentTarget.dataset.collectionId;
+    this.gifSubView = id;
+    this.clearSearch();
+    this.showLoading();
+    if (id === "_trending") {
+      await this.loadTrending();
+    } else {
+      await this.loadCollectionGifs(id);
+    }
+  }
+  goBackToGifHome() {
+    this.gifSubView = null;
+    this.currentCollectionFavorites = null;
+    this.tenorPos = "";
+    this.clearSearch();
+    this.renderGifHome();
+  }
+  async loadTrending() {
+    try {
+      const resp = await fetch(`/api/tenor/trending?pos=${this.tenorPos}`);
+      if (!resp.ok)
+        throw new Error;
+      const data = await resp.json();
+      this.renderGifGrid(data.results, data.next, true);
+    } catch (e) {
+      this.contentTarget.innerHTML = `<div class="text-center text-gray-500 text-sm py-8">Failed to load trending GIFs</div>`;
+    }
+  }
+  async loadCollectionGifs(collectionId, filterQuery) {
+    if (!this.currentCollectionFavorites || this._cachedCollectionId !== collectionId) {
+      const url = collectionId === "default" ? "/api/gif_favorites" : `/api/gif_favorites?collection_id=${collectionId}`;
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok)
+          throw new Error;
+        const data = await resp.json();
+        this.currentCollectionFavorites = data.favorites.map((f) => ({
+          id: f.tenor_gif_id,
+          favoriteId: f.id,
+          url: f.tenor_url,
+          preview_url: f.preview_url,
+          gif_url: f.gif_url,
+          description: f.description || ""
+        }));
+        this._cachedCollectionId = collectionId;
+      } catch (e) {
+        this.contentTarget.innerHTML = `<div class="text-center text-gray-500 text-sm py-8">Failed to load favorites</div>`;
+        return;
+      }
+    }
+    let results = this.currentCollectionFavorites;
+    if (filterQuery) {
+      const q = filterQuery.toLowerCase();
+      results = results.filter((f) => f.description.toLowerCase().includes(q) || f.url.toLowerCase().includes(q));
+    }
+    this.renderGifGrid(results, "", true);
+  }
+  async searchTenor(query) {
+    if (this.tenorLoading)
+      return;
+    this.tenorLoading = true;
+    try {
+      const resp = await fetch(`/api/tenor/search?q=${encodeURIComponent(query)}&pos=${this.tenorPos}`);
+      if (!resp.ok)
+        throw new Error;
+      const data = await resp.json();
+      this.renderGifGrid(data.results, data.next, !this.tenorPos);
+      this.tenorLoading = false;
+    } catch (e) {
+      this.contentTarget.innerHTML = `<div class="text-center text-gray-500 text-sm py-8">Failed to search GIFs</div>`;
+      this.tenorLoading = false;
+    }
+  }
+  renderGifGrid(results, nextPos, replace = false) {
+    const content = this.contentTarget;
+    let backBtn = `<button type="button" class="flex items-center gap-1 text-gray-400 hover:text-white text-xs mb-2 px-1 cursor-pointer" data-action="click->unified-picker#goBackToGifHome"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg> Back</button>`;
+    let html = results.map((gif) => {
+      const previewUrl = gif.preview_url || gif.gif_url;
+      const favAttr = gif.favoriteId ? ` data-favorite-id="${this.escapeAttr(gif.favoriteId)}"` : "";
+      const actions = gif.favoriteId ? "click->unified-picker#selectGif contextmenu->unified-picker#showContextMenu" : "click->unified-picker#selectGif";
+      const isFav = this.userFavoriteIds.has(gif.id);
+      const iconClass = isFav ? "text-orange-500" : "text-white/80";
+      const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"';
+      const saveBtn = `<button type="button" class="gif-picker-save absolute top-1 left-1 z-10 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center cursor-pointer" data-action="click->unified-picker#togglePickerFavorite:stop:prevent" data-tenor-gif-id="${this.escapeAttr(gif.id)}"><svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg></button>`;
+      return `<div class="gif-grid-item relative cursor-pointer rounded overflow-hidden hover:ring-2 hover:ring-orange-500 transition" data-action="${actions}" data-gif-url="${this.escapeAttr(gif.url)}" data-tenor-gif-id="${this.escapeAttr(gif.id)}"${favAttr} data-preview-url="${this.escapeAttr(gif.preview_url || "")}" data-full-gif-url="${this.escapeAttr(gif.gif_url || "")}"><img src="${this.escapeAttr(previewUrl)}" alt="${this.escapeAttr(gif.description || "GIF")}" class="w-full h-auto" loading="lazy">${saveBtn}</div>`;
+    }).join("");
+    if (results.length === 0) {
+      html = `<div class="text-center text-gray-500 text-sm py-8">No GIFs found</div>`;
+    }
+    if (replace) {
+      const showBack = this.gifSubView || this.searchQuery;
+      content.innerHTML = (showBack ? backBtn : "") + `<div class="grid grid-cols-2 gap-1 p-1">${html}</div>`;
+    } else {
+      const grid = content.querySelector(".grid");
+      if (grid)
+        grid.insertAdjacentHTML("beforeend", html);
+    }
+    if (nextPos && results.length > 0) {
+      this.tenorPos = nextPos;
+      const loadMore = document.createElement("button");
+      loadMore.type = "button";
+      loadMore.className = "w-full py-2 text-center text-gray-400 hover:text-white text-xs cursor-pointer";
+      loadMore.textContent = "Load more...";
+      loadMore.addEventListener("click", () => {
+        loadMore.remove();
+        if (this.searchQuery) {
+          this.searchTenor(this.searchQuery);
+        } else {
+          this.loadTrending();
+        }
+      });
+      content.appendChild(loadMore);
+    }
+  }
+  selectGif(event) {
+    const el = event.currentTarget;
+    const gifUrl = el.dataset.gifUrl;
+    if (!gifUrl)
+      return;
+    const input = this.inputTarget;
+    input.value = gifUrl;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const form = input.closest("form");
+    if (form)
+      form.requestSubmit();
+    this.close();
+  }
+  async togglePickerFavorite(event) {
+    const btn = event.currentTarget;
+    const gifId = btn.dataset.tenorGifId;
+    if (!gifId)
+      return;
+    const gifEl = btn.closest(".gif-grid-item");
+    const tenorUrl = gifEl?.dataset.gifUrl || "";
+    const gifUrl = gifEl?.dataset.fullGifUrl || "";
+    const previewUrl = gifEl?.dataset.previewUrl || "";
+    try {
+      const resp = await fetch("/api/gif_favorites/toggle", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this.csrfToken() },
+        body: JSON.stringify({
+          tenor_gif_id: gifId,
+          tenor_url: tenorUrl,
+          gif_url: gifUrl,
+          preview_url: previewUrl,
+          description: ""
+        })
+      });
+      if (!resp.ok)
+        throw new Error;
+      const data = await resp.json();
+      if (data.favorited) {
+        this.userFavoriteIds.add(gifId);
+      } else {
+        this.userFavoriteIds.delete(gifId);
+      }
+      const isFav = data.favorited;
+      const iconClass = isFav ? "text-orange-500" : "text-white/80";
+      const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"';
+      btn.innerHTML = `<svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg>`;
+      this.currentCollectionFavorites = null;
+      this._cachedCollectionId = null;
+      document.dispatchEvent(new CustomEvent("gif-favorites-changed", { detail: { gifId, favorited: data.favorited, source: "picker" } }));
+      if (!data.favorited) {
+        const isDefaultFavorites = this.gifSubView === "default" || this.userCollections.find((c) => c.id === this.gifSubView)?.name === "Favorites";
+        if (isDefaultFavorites)
+          this.renderCurrentTab();
+      }
+    } catch (e) {
+      console.error("Failed to toggle favorite:", e);
+    }
+  }
+  async renderStickersTab() {
+    const content = this.contentTarget;
+    if (!this.canSendGifsValue || !this.canSendCustomStickersValue) {
+      content.innerHTML = `<div class="flex items-center justify-center h-32 text-gray-500 text-sm">You don't have permission to send stickers</div>`;
+      return;
+    }
+    const servers = this.getUserServers();
+    let html = "";
+    for (const server of servers) {
+      const stickers = await this.fetchServerStickers(server.id);
+      const filtered = this.searchQuery ? stickers.filter((s) => s.name.toLowerCase().includes(this.searchQuery.toLowerCase())) : stickers;
+      if (filtered.length === 0 && this.searchQuery)
+        continue;
+      const collapsed = this.collapsedSections[`sticker_${server.id}`];
+      html += this.collapsibleSection(`sticker_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
+        if (filtered.length === 0)
+          return `<div class="text-gray-500 text-xs px-2 py-1">No stickers yet</div>`;
+        return `<div class="grid grid-cols-3 gap-1">${filtered.map((s) => `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-orange-500 transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`).join("")}</div>`;
+      });
+    }
+    if (!html) {
+      html = `<div class="text-center text-gray-500 text-sm py-8">No stickers available</div>`;
+    }
+    content.innerHTML = html;
+  }
+  selectSticker(event) {
+    const el = event.currentTarget;
+    const url = el.dataset.stickerUrl;
+    if (!url)
+      return;
+    const input = this.inputTarget;
+    input.value = url;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const form = input.closest("form");
+    if (form)
+      form.requestSubmit();
+    this.close();
+  }
+  async renderEmojiTab() {
+    const content = this.contentTarget;
+    let html = "";
+    if (this.frequentlyUsed.length > 0 && !this.searchQuery) {
+      const collapsed = this.collapsedSections["freq_emoji"];
+      html += this.collapsibleSection("freq_emoji", "\uD83D\uDD50 Frequently Used", collapsed, () => {
+        return `<div class="flex flex-wrap gap-0.5">${this.frequentlyUsed.map((e) => {
+          if (e.type === "custom") {
+            return `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.url || "")}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`;
+          }
+          return `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectEmoji" data-emoji="${e.emoji}">${e.emoji}</button>`;
+        }).join("")}</div>`;
+      });
+    }
+    if (this.canSendCustomEmojisValue) {
+      const servers = this.getUserServers();
+      for (const server of servers) {
+        const emojis = await this.fetchServerEmojis(server.id);
+        const filtered = this.searchQuery ? emojis.filter((e) => e.name.toLowerCase().includes(this.searchQuery.toLowerCase())) : emojis;
+        if (filtered.length === 0)
+          continue;
+        const collapsed = this.collapsedSections[`emoji_${server.id}`];
+        html += this.collapsibleSection(`emoji_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
+          return `<div class="flex flex-wrap gap-0.5">${filtered.map((e) => `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`).join("")}</div>`;
+        });
+      }
+    }
+    Object.entries(EMOJI_CATEGORIES).forEach(([category, emojis]) => {
+      const filtered = this.searchQuery ? emojis.filter((e) => e.includes(this.searchQuery)) : emojis;
+      if (filtered.length === 0 && this.searchQuery)
+        return;
+      const collapsed = this.collapsedSections[`cat_${category}`];
+      html += this.collapsibleSection(`cat_${category}`, category, collapsed, () => {
+        return `<div class="flex flex-wrap gap-0.5">${filtered.map((emoji) => `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectEmoji" data-emoji="${emoji}">${emoji}</button>`).join("")}</div>`;
+      });
+    });
+    if (!html) {
+      html = `<div class="text-center text-gray-500 text-sm py-8">No matches found</div>`;
+    }
+    content.innerHTML = html;
+  }
+  selectEmoji(event) {
     const emoji = event.currentTarget.dataset.emoji;
+    this.trackFrequentlyUsed({ type: "standard", emoji });
     const input = this.inputTarget;
     const start2 = input.selectionStart;
     const end = input.selectionEnd;
     input.value = input.value.substring(0, start2) + emoji + input.value.substring(end);
     input.selectionStart = input.selectionEnd = start2 + emoji.length;
     input.focus();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
     this.close();
   }
-  closeOnClickOutside(event) {
-    if (!this.element.contains(event.target)) {
-      this.close();
+  selectCustomEmoji(event) {
+    const name = event.currentTarget.dataset.emojiName;
+    const url = event.currentTarget.dataset.emojiUrl;
+    this.trackFrequentlyUsed({ type: "custom", name, url });
+    const input = this.inputTarget;
+    const text = `:${name}:`;
+    const start2 = input.selectionStart;
+    const end = input.selectionEnd;
+    input.value = input.value.substring(0, start2) + text + input.value.substring(end);
+    input.selectionStart = input.selectionEnd = start2 + text.length;
+    input.focus();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    this.close();
+  }
+  collapsibleSection(key, title, collapsed, contentFn) {
+    const chevron = collapsed ? `<svg class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>` : `<svg class="w-3 h-3 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>`;
+    return `<div class="mb-2">
+      <button type="button" class="flex items-center gap-1 w-full px-1 py-1 text-xs font-semibold text-gray-400 uppercase hover:text-gray-200 cursor-pointer" data-action="click->unified-picker#toggleSection" data-section-key="${key}">
+        ${chevron}
+        <span>${title}</span>
+      </button>
+      <div class="${collapsed ? "hidden" : ""}" data-section-content="${key}">
+        ${collapsed ? "" : contentFn()}
+      </div>
+    </div>`;
+  }
+  toggleSection(event) {
+    const key = event.currentTarget.dataset.sectionKey;
+    this.collapsedSections[key] = !this.collapsedSections[key];
+    localStorage.setItem("picker_collapsed", JSON.stringify(this.collapsedSections));
+    this.renderCurrentTab();
+  }
+  trackFrequentlyUsed(entry) {
+    this.frequentlyUsed = this.frequentlyUsed.filter((e) => {
+      if (entry.type === "standard")
+        return e.emoji !== entry.emoji;
+      return e.name !== entry.name;
+    });
+    this.frequentlyUsed.unshift(entry);
+    this.frequentlyUsed = this.frequentlyUsed.slice(0, MAX_FREQUENT);
+    localStorage.setItem(FREQUENTLY_USED_KEY, JSON.stringify(this.frequentlyUsed));
+  }
+  getUserServers() {
+    try {
+      return JSON.parse(this.userServersValue || "[]");
+    } catch (e) {
+      return [];
     }
   }
+  async fetchServerEmojis(serverId) {
+    if (this.serverEmojisCache[serverId])
+      return this.serverEmojisCache[serverId];
+    try {
+      const resp = await fetch(`/servers/${serverId}/emojis`, { headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const data = await resp.json();
+        this.serverEmojisCache[serverId] = data.emojis;
+        if (!window._emojiMap)
+          window._emojiMap = {};
+        if (!window._emojiPUA) {
+          window._emojiPUA = {};
+          window._emojiReverse = {};
+          window._nextPUA = 57344;
+        }
+        data.emojis.forEach((e) => {
+          window._emojiMap[e.name] = e.image_url;
+          if (!window._emojiPUA[e.name]) {
+            const ch = String.fromCodePoint(window._nextPUA++);
+            window._emojiPUA[e.name] = ch;
+            window._emojiReverse[ch] = e.name;
+          }
+        });
+        try {
+          localStorage.setItem("_emojiMap", JSON.stringify(window._emojiMap));
+          localStorage.setItem("_emojiPUA", JSON.stringify(window._emojiPUA));
+          localStorage.setItem("_emojiReverse", JSON.stringify(window._emojiReverse));
+          localStorage.setItem("_nextPUA", String(window._nextPUA));
+        } catch (e) {
+        }
+        return data.emojis;
+      }
+    } catch (e) {
+    }
+    return [];
+  }
+  async fetchServerStickers(serverId) {
+    if (this.serverStickersCache[serverId])
+      return this.serverStickersCache[serverId];
+    try {
+      const resp = await fetch(`/servers/${serverId}/stickers`, { headers: { Accept: "application/json" } });
+      if (resp.ok) {
+        const data = await resp.json();
+        this.serverStickersCache[serverId] = data.stickers;
+        return data.stickers;
+      }
+    } catch (e) {
+    }
+    return [];
+  }
+  async loadUserFavoriteIds() {
+    if (this.userFavoriteIds.size > 0)
+      return;
+    try {
+      const resp = await fetch("/api/gif_favorites?default=1");
+      if (resp.ok) {
+        const data = await resp.json();
+        this.userFavoriteIds = new Set(data.favorites.map((f) => f.tenor_gif_id));
+      }
+    } catch (e) {
+    }
+  }
+  showContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const gifEl = event.currentTarget;
+    const favoriteId = gifEl.dataset.favoriteId;
+    if (!favoriteId)
+      return;
+    const gifData = (this.currentCollectionFavorites || []).find((f) => f.favoriteId === favoriteId);
+    if (!gifData)
+      return;
+    this.dismissContextMenu();
+    const menu = document.createElement("div");
+    menu.id = "gif-context-menu";
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[180px] text-sm";
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    const otherCollections = this.userCollections.filter((c) => {
+      if (c.id === this.gifSubView)
+        return false;
+      if (c.name === "Favorites" && this.userFavoriteIds.has(gifData.id))
+        return false;
+      return true;
+    });
+    if (otherCollections.length > 0) {
+      const header = document.createElement("div");
+      header.className = "px-3 py-1.5 text-gray-400 text-xs uppercase font-semibold";
+      header.textContent = "Add to";
+      menu.appendChild(header);
+      otherCollections.forEach((c) => {
+        const item = document.createElement("button");
+        item.type = "button";
+        item.className = "w-full text-left px-3 py-1.5 text-gray-200 hover:bg-gray-700 cursor-pointer flex items-center gap-2";
+        item.innerHTML = `<span>${c.name === "Favorites" ? "\uD83D\uDD25" : "\uD83D\uDCC1"}</span> ${this.escapeHtml(c.name)}`;
+        item.addEventListener("click", () => this.addToCollection(gifData, c.id));
+        menu.appendChild(item);
+      });
+    }
+    const divider = document.createElement("div");
+    divider.className = "border-t border-gray-600 my-1";
+    menu.appendChild(divider);
+    const newCollBtn = document.createElement("button");
+    newCollBtn.type = "button";
+    newCollBtn.className = "w-full text-left px-3 py-1.5 text-gray-200 hover:bg-gray-700 cursor-pointer flex items-center gap-2";
+    newCollBtn.innerHTML = `<span>➕</span> New Collection...`;
+    newCollBtn.addEventListener("click", () => this.showNewCollectionInput(menu, gifData));
+    menu.appendChild(newCollBtn);
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 cursor-pointer flex items-center gap-2";
+    removeBtn.innerHTML = `<span>\uD83D\uDDD1️</span> Remove`;
+    removeBtn.addEventListener("click", () => this.removeFromFavorites(favoriteId, gifData.id));
+    menu.appendChild(removeBtn);
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+    }
+    setTimeout(() => {
+      document.addEventListener("mousedown", this.boundDismissCtxOnClick);
+      document.addEventListener("keydown", this.boundDismissCtxOnKey);
+      this.contentTarget.addEventListener("scroll", this.boundDismissCtxOnScroll);
+    }, 0);
+  }
+  dismissContextMenu() {
+    const menu = document.getElementById("gif-context-menu");
+    if (menu)
+      menu.remove();
+    document.removeEventListener("mousedown", this.boundDismissCtxOnClick);
+    document.removeEventListener("keydown", this.boundDismissCtxOnKey);
+    if (this.hasContentTarget) {
+      this.contentTarget.removeEventListener("scroll", this.boundDismissCtxOnScroll);
+    }
+  }
+  async showNewCollectionInput(menu, gifData) {
+    menu.innerHTML = "";
+    let selectedIcon = "\uD83D\uDCC1";
+    const wrapper = document.createElement("div");
+    wrapper.className = "p-2 w-[220px]";
+    const row = document.createElement("div");
+    row.className = "flex items-center gap-1.5 mb-2";
+    const iconBtn = document.createElement("button");
+    iconBtn.type = "button";
+    iconBtn.className = "w-8 h-8 rounded bg-gray-700 hover:bg-gray-600 flex items-center justify-center text-lg cursor-pointer shrink-0 border border-gray-600";
+    iconBtn.innerHTML = selectedIcon;
+    row.appendChild(iconBtn);
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "flex-1 min-w-0 bg-gray-700 text-white text-sm rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-orange-500";
+    input.placeholder = "Collection name";
+    row.appendChild(input);
+    wrapper.appendChild(row);
+    const gridLabel = document.createElement("div");
+    gridLabel.className = "text-gray-400 text-xs mb-1";
+    gridLabel.textContent = "Icon";
+    wrapper.appendChild(gridLabel);
+    const grid = document.createElement("div");
+    grid.className = "max-h-[140px] overflow-y-auto rounded bg-gray-900/50 p-1";
+    const selectIcon = (icon, html) => {
+      selectedIcon = icon;
+      iconBtn.innerHTML = html;
+    };
+    const makeEmojiBtn = (emoji) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "w-7 h-7 flex items-center justify-center hover:bg-gray-600 rounded cursor-pointer text-base";
+      btn.textContent = emoji;
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selectIcon(emoji, emoji);
+      });
+      return btn;
+    };
+    const makeCustomBtn = (url, name) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "w-7 h-7 flex items-center justify-center hover:bg-gray-600 rounded cursor-pointer";
+      btn.title = `:${name}:`;
+      btn.innerHTML = `<img src="${this.escapeAttr(url)}" class="w-5 h-5 object-contain" loading="lazy">`;
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        selectIcon(url, `<img src="${this.escapeAttr(url)}" class="w-5 h-5 object-contain">`);
+      });
+      return btn;
+    };
+    const servers = this.getUserServers();
+    for (const server of servers) {
+      const emojis = await this.fetchServerEmojis(server.id);
+      if (emojis.length === 0)
+        continue;
+      const label = document.createElement("div");
+      label.className = "text-gray-500 text-[10px] uppercase font-semibold px-0.5 pt-1 pb-0.5";
+      label.textContent = server.name;
+      grid.appendChild(label);
+      const serverGrid = document.createElement("div");
+      serverGrid.className = "flex flex-wrap gap-0.5";
+      emojis.forEach((e) => serverGrid.appendChild(makeCustomBtn(e.image_url, e.name)));
+      grid.appendChild(serverGrid);
+    }
+    Object.entries(EMOJI_CATEGORIES).forEach(([category, emojis]) => {
+      const label = document.createElement("div");
+      label.className = "text-gray-500 text-[10px] uppercase font-semibold px-0.5 pt-1 pb-0.5";
+      label.textContent = category;
+      grid.appendChild(label);
+      const catGrid = document.createElement("div");
+      catGrid.className = "flex flex-wrap gap-0.5";
+      emojis.forEach((e) => catGrid.appendChild(makeEmojiBtn(e)));
+      grid.appendChild(catGrid);
+    });
+    wrapper.appendChild(grid);
+    const submit = async () => {
+      const name = input.value.trim();
+      if (!name)
+        return;
+      input.disabled = true;
+      await this.createCollectionAndAdd(name, gifData, selectedIcon);
+    };
+    input.addEventListener("keydown", async (e) => {
+      if (e.key === "Enter")
+        await submit();
+      if (e.key === "Escape")
+        this.dismissContextMenu();
+    });
+    const createBtn = document.createElement("button");
+    createBtn.type = "button";
+    createBtn.className = "w-full mt-2 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-medium rounded cursor-pointer transition";
+    createBtn.textContent = "Create";
+    createBtn.addEventListener("click", submit);
+    wrapper.appendChild(createBtn);
+    menu.appendChild(wrapper);
+    requestAnimationFrame(() => input.focus());
+  }
+  async addToCollection(gifData, collectionId) {
+    this.dismissContextMenu();
+    try {
+      const resp = await fetch("/api/gif_favorites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this.csrfToken() },
+        body: JSON.stringify({ gif_favorite: {
+          collection_id: collectionId,
+          tenor_gif_id: gifData.id,
+          tenor_url: gifData.url,
+          preview_url: gifData.preview_url,
+          gif_url: gifData.gif_url,
+          description: gifData.description
+        } })
+      });
+      if (!resp.ok)
+        throw new Error;
+    } catch (e) {
+      console.error("Failed to add GIF to collection:", e);
+    }
+  }
+  async removeFromFavorites(favoriteId, tenorGifId) {
+    this.dismissContextMenu();
+    try {
+      const resp = await fetch(`/api/gif_favorites/${favoriteId}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": this.csrfToken() }
+      });
+      if (!resp.ok)
+        throw new Error;
+      const isDefaultFavorites = this.gifSubView === "default" || this.userCollections.find((c) => c.id === this.gifSubView)?.name === "Favorites";
+      if (isDefaultFavorites && tenorGifId) {
+        this.userFavoriteIds.delete(tenorGifId);
+        document.dispatchEvent(new CustomEvent("gif-favorites-changed", {
+          detail: { gifId: tenorGifId, favorited: false, source: "picker" }
+        }));
+      }
+      this.invalidateAndRefresh();
+    } catch (e) {
+      console.error("Failed to remove GIF:", e);
+    }
+  }
+  async createCollectionAndAdd(name, gifData, icon) {
+    this.dismissContextMenu();
+    try {
+      const createResp = await fetch("/api/gif_collections", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this.csrfToken() },
+        body: JSON.stringify({ gif_collection: { name, icon } })
+      });
+      if (!createResp.ok)
+        throw new Error;
+      const { id: newCollectionId } = await createResp.json();
+      const addResp = await fetch("/api/gif_favorites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": this.csrfToken() },
+        body: JSON.stringify({ gif_favorite: {
+          collection_id: newCollectionId,
+          tenor_gif_id: gifData.id,
+          tenor_url: gifData.url,
+          preview_url: gifData.preview_url,
+          gif_url: gifData.gif_url,
+          description: gifData.description
+        } })
+      });
+      if (!addResp.ok)
+        throw new Error;
+      this.userCollections.push({ id: newCollectionId, name, icon, favorites_count: 1 });
+    } catch (e) {
+      console.error("Failed to create collection:", e);
+    }
+  }
+  showCollectionContextMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const tileEl = event.currentTarget;
+    const collectionId = tileEl.dataset.collectionId;
+    const collectionName = tileEl.dataset.collectionName;
+    if (!collectionId)
+      return;
+    this.dismissContextMenu();
+    const menu = document.createElement("div");
+    menu.id = "gif-context-menu";
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px] text-sm";
+    menu.style.left = `${event.clientX}px`;
+    menu.style.top = `${event.clientY}px`;
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 cursor-pointer flex items-center gap-2";
+    deleteBtn.innerHTML = `<span>\uD83D\uDDD1️</span> Delete Collection`;
+    deleteBtn.addEventListener("click", () => this.deleteCollection(collectionId));
+    menu.appendChild(deleteBtn);
+    document.body.appendChild(menu);
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+      menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+    }
+    if (rect.bottom > window.innerHeight) {
+      menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+    }
+    setTimeout(() => {
+      document.addEventListener("mousedown", this.boundDismissCtxOnClick);
+      document.addEventListener("keydown", this.boundDismissCtxOnKey);
+    }, 0);
+  }
+  async deleteCollection(collectionId) {
+    this.dismissContextMenu();
+    try {
+      const resp = await fetch(`/api/gif_collections/${collectionId}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": this.csrfToken() }
+      });
+      if (!resp.ok)
+        throw new Error;
+      this.userCollections = this.userCollections.filter((c) => c.id !== collectionId);
+      this.renderGifHome();
+    } catch (e) {
+      console.error("Failed to delete collection:", e);
+    }
+  }
+  invalidateAndRefresh() {
+    this.currentCollectionFavorites = null;
+    this._cachedCollectionId = null;
+    this.renderCurrentTab();
+  }
+  csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.content : "";
+  }
+  escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+  escapeAttr(str) {
+    return (str || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}
+
+// app/javascript/controllers/gif_save_controller.js
+class gif_save_controller_default extends Controller {
   connect() {
-    this.boundClose = this.closeOnClickOutside.bind(this);
-    document.addEventListener("click", this.boundClose);
+    this.loadFavorites();
+    this.stampAllButtons();
+    this.setupGifVisibility();
+    this.observer = new MutationObserver(() => {
+      this.stampAllButtons();
+      this.observeGifs();
+    });
+    this.observer.observe(this.element, { childList: true, subtree: true });
+    this.boundOnFavoritesChanged = (e) => {
+      if (e.detail.source === "message-stream")
+        return;
+      const { gifId, favorited } = e.detail;
+      if (favorited) {
+        this.favoritedIds.add(gifId);
+      } else {
+        this.favoritedIds.delete(gifId);
+      }
+      this.element.querySelectorAll(`[data-tenor-gif-id="${gifId}"] .gif-save-btn`).forEach((btn) => {
+        btn.innerHTML = this.fireIcon(favorited);
+      });
+    };
+    document.addEventListener("gif-favorites-changed", this.boundOnFavoritesChanged);
   }
   disconnect() {
-    document.removeEventListener("click", this.boundClose);
+    if (this.observer)
+      this.observer.disconnect();
+    if (this.gifVisibilityObserver)
+      this.gifVisibilityObserver.disconnect();
+    document.removeEventListener("gif-favorites-changed", this.boundOnFavoritesChanged);
+  }
+  setupGifVisibility() {
+    this.gifVisibilityObserver = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        const img = entry.target;
+        if (entry.isIntersecting) {
+          if (img.dataset.gifOrigSrc) {
+            img.src = img.dataset.gifOrigSrc;
+            delete img.dataset.gifOrigSrc;
+          }
+        } else {
+          if (img.complete && img.src && !img.dataset.gifOrigSrc) {
+            img.dataset.gifOrigSrc = img.src;
+            const w = img.naturalWidth || img.offsetWidth;
+            const h = img.naturalHeight || img.offsetHeight;
+            img.src = `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'%3E%3Crect width='100%25' height='100%25' fill='%23374151'/%3E%3C/svg%3E`;
+          }
+        }
+      });
+    }, { root: this.element, rootMargin: "200px 0px" });
+    this.observeGifs();
+  }
+  observeGifs() {
+    this.element.querySelectorAll("[data-tenor-gif-id] img:not([data-gif-observed])").forEach((img) => {
+      img.dataset.gifObserved = "1";
+      this.gifVisibilityObserver.observe(img);
+    });
+    this.element.querySelectorAll("[data-animated-gif]:not([data-gif-observed])").forEach((img) => {
+      img.dataset.gifObserved = "1";
+      this.gifVisibilityObserver.observe(img);
+    });
+  }
+  async loadFavorites() {
+    try {
+      const resp = await fetch("/api/gif_favorites?default=1");
+      if (resp.ok) {
+        const data = await resp.json();
+        this.favoritedIds = new Set(data.favorites.map((f) => f.tenor_gif_id));
+        this.element.querySelectorAll("[data-tenor-gif-id][data-gif-save-attached] .gif-save-btn").forEach((btn) => {
+          const gifId = btn.closest("[data-tenor-gif-id]").dataset.tenorGifId;
+          btn.innerHTML = this.fireIcon(this.favoritedIds.has(gifId));
+        });
+      }
+    } catch (e) {
+      this.favoritedIds = new Set;
+    }
+  }
+  stampAllButtons() {
+    this.element.querySelectorAll("[data-tenor-gif-id]:not([data-gif-save-attached])").forEach((gifEl) => {
+      gifEl.dataset.gifSaveAttached = "1";
+      const btn = document.createElement("button");
+      btn.className = "gif-save-btn absolute top-2 left-2 z-10 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center cursor-pointer";
+      btn.type = "button";
+      const gifId = gifEl.dataset.tenorGifId;
+      const isFav = this.favoritedIds && this.favoritedIds.has(gifId);
+      btn.innerHTML = this.fireIcon(isFav);
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggleFavorite(gifEl, btn);
+      });
+      if (getComputedStyle(gifEl).position === "static") {
+        gifEl.style.position = "relative";
+      }
+      gifEl.appendChild(btn);
+    });
+  }
+  async toggleFavorite(gifEl, btn) {
+    const gifId = gifEl.dataset.tenorGifId;
+    const tenorUrl = gifEl.dataset.tenorUrl || "";
+    const gifUrl = gifEl.dataset.gifUrl || "";
+    const previewUrl = gifEl.dataset.previewUrl || "";
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    try {
+      const resp = await fetch("/api/gif_favorites/toggle", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({
+          tenor_gif_id: gifId,
+          tenor_url: tenorUrl,
+          gif_url: gifUrl,
+          preview_url: previewUrl,
+          description: ""
+        })
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.favorited) {
+          this.favoritedIds.add(gifId);
+        } else {
+          this.favoritedIds.delete(gifId);
+        }
+        btn.innerHTML = this.fireIcon(data.favorited);
+        document.dispatchEvent(new CustomEvent("gif-favorites-changed", { detail: { gifId, favorited: data.favorited, source: "message-stream" } }));
+      }
+    } catch (e) {
+      console.error("Failed to toggle GIF favorite:", e);
+    }
+  }
+  fireIcon(filled) {
+    if (filled) {
+      return `<svg class="w-5 h-5 text-orange-500" fill="currentColor" viewBox="0 0 24 24"><path d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg>`;
+    }
+    return `<svg class="w-5 h-5 text-white/80" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg>`;
   }
 }
 
@@ -11416,9 +12634,18 @@ class notification_badge_controller_default extends Controller {
   async deleteMessage(messageId, skipConfirm = false) {
     if (!skipConfirm && !await this.showConfirm("Delete Message", "Are you sure you want to delete this message? This cannot be undone."))
       return;
-    const channelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId;
     const csrf = document.querySelector("meta[name=csrf-token]")?.content;
-    await fetch(`/channels/${channelId}/messages/${messageId}`, {
+    const channelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId;
+    const conversationId = document.querySelector("[data-dm-message-form-conversation-id-value]")?.dataset?.dmMessageFormConversationIdValue;
+    let url;
+    if (channelId) {
+      url = `/channels/${channelId}/messages/${messageId}`;
+    } else if (conversationId) {
+      url = `/conversations/${conversationId}/dm_messages/${messageId}`;
+    } else {
+      return;
+    }
+    await fetch(url, {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrf }
     });
@@ -14406,100 +15633,6 @@ class channel_reorder_controller_default extends Controller {
   }
 }
 
-// app/javascript/controllers/settings_modal_controller.js
-class settings_modal_controller_default extends Controller {
-  static targets = ["overlay", "content", "nav"];
-  connect() {
-    this.handleEsc = (e) => {
-      if (e.key === "Escape")
-        this.close();
-    };
-    this.handleOpen = () => this.open();
-    document.addEventListener("keydown", this.handleEsc);
-    document.addEventListener("open-settings", this.handleOpen);
-  }
-  disconnect() {
-    document.removeEventListener("keydown", this.handleEsc);
-    document.removeEventListener("open-settings", this.handleOpen);
-  }
-  open() {
-    this.overlayTarget.classList.remove("hidden");
-    document.body.classList.add("overflow-hidden");
-    this.loadSection("my-account");
-  }
-  close() {
-    this.overlayTarget.classList.add("hidden");
-    document.body.classList.remove("overflow-hidden");
-  }
-  closeOnBackdrop(e) {
-    if (e.target === this.overlayTarget)
-      this.close();
-  }
-  showNav() {
-    const sidebar = this.overlayTarget.querySelector(".settings-sidebar-mobile");
-    if (sidebar) {
-      sidebar.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;";
-    }
-  }
-  async navigate(e) {
-    e.preventDefault();
-    const section = e.currentTarget.dataset.section;
-    const sidebar = this.overlayTarget.querySelector(".settings-sidebar-mobile");
-    if (sidebar && window.innerWidth < 768) {
-      sidebar.style.cssText = "";
-    }
-    this.loadSection(section);
-  }
-  async loadSection(section) {
-    this.navTarget.querySelectorAll("[data-section]").forEach((el) => {
-      el.classList.toggle("bg-gray-700", el.dataset.section === section);
-      el.classList.toggle("text-white", el.dataset.section === section);
-    });
-    try {
-      const res = await fetch(`/settings/${section}`, {
-        headers: { Accept: "text/html", "X-Requested-With": "XMLHttpRequest" }
-      });
-      if (res.ok) {
-        this.contentTarget.innerHTML = await res.text();
-      }
-    } catch (err) {
-      console.error("Failed to load settings section:", err);
-    }
-  }
-  async submitForm(e) {
-    console.log("[settings-modal] submitForm triggered");
-    e.preventDefault();
-    const form = e.target;
-    const formData = new FormData(form);
-    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
-    try {
-      const res = await fetch(form.action, {
-        method: "PATCH",
-        body: formData,
-        headers: {
-          "X-CSRF-Token": csrf,
-          "X-Requested-With": "XMLHttpRequest"
-        }
-      });
-      const html = await res.text();
-      this.contentTarget.innerHTML = html;
-      if (res.ok) {
-        this.showToast("Changes saved!");
-        setTimeout(() => window.location.assign(window.location.pathname), 1000);
-      }
-    } catch (err) {
-      console.error("Save failed:", err);
-    }
-  }
-  showToast(msg) {
-    const toast = document.createElement("div");
-    toast.className = "fixed bottom-6 right-6 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium";
-    toast.textContent = msg;
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
-  }
-}
-
 // app/javascript/controllers/image_preview_controller.js
 class image_preview_controller_default extends Controller {
   connect() {
@@ -14545,16 +15678,180 @@ class image_preview_controller_default extends Controller {
   openLightbox(src, filename) {
     const overlay = document.createElement("div");
     overlay.id = "image-lightbox";
-    overlay.className = "fixed inset-0 z-[200] bg-black/80 flex items-center justify-center cursor-zoom-out";
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay || e.target.tagName !== "IMG")
-        overlay.remove();
-    });
+    overlay.className = "fixed inset-0 z-[200] bg-black/80 flex items-center justify-center";
+    overlay.style.touchAction = "none";
     const container = document.createElement("div");
     container.className = "relative max-w-[90vw] max-h-[90vh] flex flex-col items-center";
+    const imgWrap = document.createElement("div");
+    imgWrap.style.cssText = "overflow:hidden;display:flex;align-items:center;justify-content:center;max-width:90vw;max-height:85vh;";
     const img = document.createElement("img");
     img.src = src;
     img.className = "max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl";
+    img.style.cssText = "transform-origin:center center;transition:transform 0.2s ease;cursor:zoom-in;touch-action:none;";
+    img.draggable = false;
+    let scale = 1, tx = 0, ty = 0;
+    let pinchStartDist = 0, pinchStartScale = 1;
+    let lastTap = 0;
+    let isPanning = false, panStartX = 0, panStartY = 0, panStartTx = 0, panStartTy = 0;
+    const applyTransform = (animate) => {
+      img.style.transition = animate ? "transform 0.2s ease" : "none";
+      img.style.transform = `translate(${tx}px,${ty}px) scale(${scale})`;
+      img.style.cursor = scale > 1 ? "grab" : "zoom-in";
+    };
+    const clampPan = () => {
+      if (scale <= 1) {
+        tx = 0;
+        ty = 0;
+        return;
+      }
+      const rect = imgWrap.getBoundingClientRect();
+      const imgW = img.naturalWidth ? Math.min(img.naturalWidth, rect.width) : rect.width;
+      const imgH = img.naturalHeight ? Math.min(img.naturalHeight, rect.height) : rect.height;
+      const maxTx = Math.max(0, (imgW * scale - rect.width) / 2);
+      const maxTy = Math.max(0, (imgH * scale - rect.height) / 2);
+      tx = Math.max(-maxTx, Math.min(maxTx, tx));
+      ty = Math.max(-maxTy, Math.min(maxTy, ty));
+    };
+    const resetZoom = () => {
+      scale = 1;
+      tx = 0;
+      ty = 0;
+      applyTransform(true);
+    };
+    let isTouch = false;
+    const toggleZoom = (clientX, clientY) => {
+      if (scale > 1) {
+        resetZoom();
+      } else {
+        const rect = img.getBoundingClientRect();
+        const ox = clientX - (rect.left + rect.width / 2);
+        const oy = clientY - (rect.top + rect.height / 2);
+        scale = 3;
+        tx = -ox * (scale - 1);
+        ty = -oy * (scale - 1);
+        clampPan();
+        applyTransform(true);
+      }
+    };
+    let mouseDidDrag = false;
+    let mouseIsDown = false;
+    let mousePanStartX = 0, mousePanStartY = 0, mousePanStartTx = 0, mousePanStartTy = 0;
+    img.addEventListener("mousedown", (e) => {
+      if (isTouch || e.button !== 0)
+        return;
+      mouseIsDown = true;
+      mouseDidDrag = false;
+      if (scale > 1) {
+        mousePanStartX = e.clientX;
+        mousePanStartY = e.clientY;
+        mousePanStartTx = tx;
+        mousePanStartTy = ty;
+        img.style.cursor = "grabbing";
+        e.preventDefault();
+      }
+    });
+    document.addEventListener("mousemove", (e) => {
+      if (!mouseIsDown || isTouch)
+        return;
+      if (scale > 1) {
+        const dx = e.clientX - mousePanStartX;
+        const dy = e.clientY - mousePanStartY;
+        if (Math.abs(dx) > 3 || Math.abs(dy) > 3)
+          mouseDidDrag = true;
+        tx = mousePanStartTx + dx;
+        ty = mousePanStartTy + dy;
+        clampPan();
+        applyTransform(false);
+      }
+    });
+    document.addEventListener("mouseup", () => {
+      if (mouseIsDown && scale > 1)
+        img.style.cursor = "grab";
+      mouseIsDown = false;
+    });
+    let touchDidPan = false;
+    img.addEventListener("click", (e) => {
+      if (isTouch)
+        return;
+      e.stopPropagation();
+      if (mouseDidDrag) {
+        mouseDidDrag = false;
+        return;
+      }
+      toggleZoom(e.clientX, e.clientY);
+    });
+    img.addEventListener("touchstart", (e) => {
+      isTouch = true;
+      touchDidPan = false;
+      if (e.touches.length === 1) {
+        const now3 = Date.now();
+        if (now3 - lastTap < 300) {
+          e.preventDefault();
+          toggleZoom(e.touches[0].clientX, e.touches[0].clientY);
+          lastTap = 0;
+          return;
+        }
+        lastTap = now3;
+        if (scale > 1) {
+          isPanning = true;
+          panStartX = e.touches[0].clientX;
+          panStartY = e.touches[0].clientY;
+          panStartTx = tx;
+          panStartTy = ty;
+          img.style.cursor = "grabbing";
+        }
+      } else if (e.touches.length === 2) {
+        e.preventDefault();
+        isPanning = false;
+        const d = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+        pinchStartDist = d;
+        pinchStartScale = scale;
+      }
+    }, { passive: false });
+    img.addEventListener("touchmove", (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        touchDidPan = true;
+        const d = Math.hypot(e.touches[1].clientX - e.touches[0].clientX, e.touches[1].clientY - e.touches[0].clientY);
+        scale = Math.max(1, Math.min(8, pinchStartScale * (d / pinchStartDist)));
+        clampPan();
+        applyTransform(false);
+      } else if (e.touches.length === 1 && isPanning) {
+        e.preventDefault();
+        touchDidPan = true;
+        tx = panStartTx + (e.touches[0].clientX - panStartX);
+        ty = panStartTy + (e.touches[0].clientY - panStartY);
+        clampPan();
+        applyTransform(false);
+      }
+    }, { passive: false });
+    img.addEventListener("touchend", (e) => {
+      isPanning = false;
+      if (scale <= 1)
+        resetZoom();
+    });
+    imgWrap.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? 0.8 : 1.25;
+      scale = Math.max(1, Math.min(8, scale * delta));
+      if (scale <= 1) {
+        resetZoom();
+        return;
+      }
+      clampPan();
+      applyTransform(false);
+    }, { passive: false });
+    overlay.addEventListener("click", (e) => {
+      if (mouseDidDrag || touchDidPan) {
+        mouseDidDrag = false;
+        touchDidPan = false;
+        return;
+      }
+      if (e.target === overlay) {
+        cleanup();
+        overlay.remove();
+      }
+    });
     const bar = document.createElement("div");
     bar.className = "flex items-center gap-3 mt-3";
     if (filename) {
@@ -14570,20 +15867,25 @@ class image_preview_controller_default extends Controller {
     downloadBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Download';
     bar.appendChild(downloadBtn);
     const closeBtn = document.createElement("button");
-    closeBtn.className = "absolute -top-2 -right-2 w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-white border border-gray-600 cursor-pointer";
+    closeBtn.className = "absolute -top-2 -right-2 w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-white border border-gray-600 cursor-pointer z-10";
     closeBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>';
-    closeBtn.addEventListener("click", () => overlay.remove());
+    closeBtn.addEventListener("click", () => {
+      cleanup();
+      overlay.remove();
+    });
+    imgWrap.appendChild(img);
     container.appendChild(closeBtn);
-    container.appendChild(img);
+    container.appendChild(imgWrap);
     container.appendChild(bar);
     overlay.appendChild(container);
     document.body.appendChild(overlay);
     const escHandler = (e) => {
       if (e.key === "Escape") {
+        cleanup();
         overlay.remove();
-        document.removeEventListener("keydown", escHandler);
       }
     };
+    const cleanup = () => document.removeEventListener("keydown", escHandler);
     document.addEventListener("keydown", escHandler);
   }
   showContextMenu(x, y, src, filename) {
@@ -14694,6 +15996,14 @@ class mobile_nav_controller_default extends Controller {
   connect() {
     this.sidebarOpen = false;
     this.membersOpen = false;
+    this._onFrameRender = () => {
+      if (this.sidebarOpen || this.membersOpen)
+        this.closeAll();
+    };
+    document.addEventListener("turbo:before-frame-render", this._onFrameRender);
+  }
+  disconnect() {
+    document.removeEventListener("turbo:before-frame-render", this._onFrameRender);
   }
   toggleSidebar() {
     this.sidebarOpen = !this.sidebarOpen;
@@ -15100,6 +16410,14 @@ class dm_message_form_controller_default extends Controller {
       this.inputTarget.focus();
     };
     document.addEventListener("inferno:reply", this._replyHandler);
+    this._measureEmojiWidth();
+    this._replaceEmojisWithPUA();
+    this.updateHighlight();
+    this._emojiMapReady = () => {
+      this._replaceEmojisWithPUA();
+      this.updateHighlight();
+    };
+    document.addEventListener("inferno:emoji-map-ready", this._emojiMapReady);
   }
   disconnect() {
     this.subscription?.unsubscribe();
@@ -15107,6 +16425,8 @@ class dm_message_form_controller_default extends Controller {
     this.teardownDragAndDrop();
     this.teardownPaste();
     this.teardownFileIntercept();
+    if (this._emojiMapReady)
+      document.removeEventListener("inferno:emoji-map-ready", this._emojiMapReady);
     if (this._replyHandler)
       document.removeEventListener("inferno:reply", this._replyHandler);
   }
@@ -15114,6 +16434,8 @@ class dm_message_form_controller_default extends Controller {
     this._pasteHandler = (e) => {
       const items = e.clipboardData?.items;
       if (!items)
+        return;
+      if (e.clipboardData.types.includes("text/plain") || e.clipboardData.types.includes("text/html"))
         return;
       const files = [];
       for (const item of items) {
@@ -15140,9 +16462,19 @@ class dm_message_form_controller_default extends Controller {
     if (!form)
       return;
     this._fileInterceptHandler = (event) => {
-      if (this.fileList.files.length > 0) {
-        const body = event.detail.fetchOptions.body;
-        if (body instanceof FormData) {
+      const body = event.detail.fetchOptions.body;
+      if (body instanceof FormData) {
+        const content = body.get("message[content]");
+        if (content && window._emojiReverse) {
+          body.set("message[content]", content.replace(/\u2003([\uE000-\uF8FF])/g, (m, ch, offset, str) => {
+            const name = window._emojiReverse[ch];
+            if (!name)
+              return m;
+            const next = str[offset + m.length];
+            return `:${name}:` + (next === " " ? " " : "");
+          }));
+        }
+        if (this.fileList.files.length > 0) {
           body.delete("message[files][]");
           for (const file of this.fileList.files) {
             body.append("message[files][]", file);
@@ -15271,6 +16603,8 @@ class dm_message_form_controller_default extends Controller {
     this.replyBarTarget.classList.add("hidden");
   }
   handleKeydown(event) {
+    if (this._handleEmojiKeydown(event))
+      return;
     if (event.key === "Enter" && !event.shiftKey) {
       const content = this.inputTarget.value;
       const backtickCount = (content.match(/`{3}/g) || []).length;
@@ -15303,6 +16637,7 @@ class dm_message_form_controller_default extends Controller {
     }
   }
   autoResize() {
+    this._replaceEmojisWithPUA();
     this.updateHighlight();
     const input = this.inputTarget;
     input.style.height = "auto";
@@ -15335,8 +16670,10 @@ class dm_message_form_controller_default extends Controller {
         const welcome = messagesDiv.querySelector(".text-center");
         if (welcome)
           welcome.remove();
+        const nearBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < 150;
         messagesDiv.insertAdjacentHTML("beforeend", data.html);
-        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        if (nearBottom)
+          messagesDiv.scrollTop = messagesDiv.scrollHeight;
         break;
       case "update_message":
         const existing = document.getElementById(`message_${data.message_id}`);
@@ -15377,11 +16714,121 @@ class dm_message_form_controller_default extends Controller {
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>');
     html = html.replace(/`([^`]+)`/g, '<span class="text-orange-300 bg-gray-700/50 rounded px-0.5">`$1`</span>');
     html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-orange-300">$1</span>');
+    if (window._emojiReverse && window._emojiMap) {
+      html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {
+        const name = window._emojiReverse[ch];
+        if (name && window._emojiMap[name]) {
+          const w = this._emojiCharWidth || 20;
+          return `<img src="${window._emojiMap[name]}" style="display:inline;height:${w}px;width:${w}px;object-fit:contain;vertical-align:middle;pointer-events:none">`;
+        }
+        return _;
+      });
+    }
     if (html.endsWith(`
 `))
       html += "&nbsp;";
     this.highlightTarget.innerHTML = html;
     this.highlightTarget.scrollTop = this.inputTarget.scrollTop;
+  }
+  _measureEmojiWidth() {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const cs = getComputedStyle(this.inputTarget);
+    ctx.font = `${cs.fontSize} ${cs.fontFamily}`;
+    this._emojiCharWidth = ctx.measureText(" ").width;
+  }
+  _replaceEmojisWithPUA() {
+    if (!window._emojiPUA || !window._emojiMap)
+      return;
+    const input = this.inputTarget;
+    const val = input.value;
+    if (!val.includes(":"))
+      return;
+    const selStart = input.selectionStart;
+    const selEnd = input.selectionEnd;
+    let newVal = "";
+    let i = 0;
+    let newStart = selStart;
+    let newEnd = selEnd;
+    while (i < val.length) {
+      if (val[i] === ":") {
+        const rest = val.substring(i + 1);
+        const match = rest.match(/^([a-z0-9_]+):/);
+        if (match && window._emojiPUA[match[1]]) {
+          const fullLen = match[0].length + 1;
+          const mEnd = i + fullLen;
+          const replacement = " " + window._emojiPUA[match[1]];
+          const reduction = fullLen - 2;
+          newVal += replacement;
+          if (selStart >= mEnd)
+            newStart -= reduction;
+          else if (selStart > i)
+            newStart = newVal.length;
+          if (selEnd >= mEnd)
+            newEnd -= reduction;
+          else if (selEnd > i)
+            newEnd = newVal.length;
+          i = mEnd;
+          continue;
+        }
+      }
+      newVal += val[i];
+      i++;
+    }
+    if (newVal === val)
+      return;
+    input.value = newVal;
+    input.selectionStart = Math.max(0, newStart);
+    input.selectionEnd = Math.max(0, newEnd);
+  }
+  _handleEmojiKeydown(event) {
+    if (!window._emojiReverse)
+      return false;
+    const input = this.inputTarget;
+    const val = input.value;
+    const pos = input.selectionStart;
+    if (pos !== input.selectionEnd)
+      return false;
+    if (event.key === "Backspace") {
+      if (pos >= 2 && val[pos - 2] === " " && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault();
+        input.value = val.substring(0, pos - 2) + val.substring(pos);
+        input.selectionStart = input.selectionEnd = pos - 2;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    } else if (event.key === "Delete") {
+      if (pos <= val.length - 2 && val[pos] === " " && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault();
+        input.value = val.substring(0, pos) + val.substring(pos + 2);
+        input.selectionStart = input.selectionEnd = pos;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      }
+    } else if (event.key === "ArrowLeft" && !event.shiftKey) {
+      if (pos >= 2 && val[pos - 2] === " " && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos - 2;
+        return true;
+      }
+      if (pos >= 1 && val[pos - 1] === " " && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos - 1;
+        return true;
+      }
+    } else if (event.key === "ArrowRight" && !event.shiftKey) {
+      if (pos <= val.length - 2 && val[pos] === " " && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos + 2;
+        return true;
+      }
+      if (pos > 0 && val[pos - 1] === " " && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault();
+        input.selectionStart = input.selectionEnd = pos + 1;
+        return true;
+      }
+    }
+    return false;
   }
 }
 
@@ -15906,6 +17353,20 @@ class video_player_controller_default extends Controller {
         cursor: pointer;
         border: none;
       }
+      /* Fullscreen: center and scale video */
+      [data-controller="video-player"]:fullscreen {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+      }
+      [data-controller="video-player"]:fullscreen video {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -16048,6 +17509,13 @@ var PERMISSION_GROUPS = {
     send_gifs: "Send GIFs in messages",
     add_reactions: "Add emoji reactions to messages",
     mention_everyone: "Use @everyone and @here mentions"
+  },
+  Expression: {
+    send_custom_emojis: "Use custom server emojis in messages",
+    send_custom_stickers: "Use custom server stickers in messages",
+    create_emojis: "Upload custom emojis to the server",
+    create_stickers: "Upload custom stickers to the server",
+    manage_emojis: "Delete emojis and stickers uploaded by others"
   },
   Management: {
     manage_messages: "Delete or pin other members' messages",
@@ -16550,12 +18018,831 @@ class member_roles_controller_default extends Controller {
   }
 }
 
+// app/javascript/controllers/server_rail_controller.js
+class server_rail_controller_default extends Controller {
+  static targets = ["list", "folderList"];
+  connect() {
+    this.sortables = [];
+    this.folderMenu = null;
+    this.boundCloseMenu = this.closeFolderMenu.bind(this);
+    this.boundKeydown = this.handleKeydown.bind(this);
+    this.dragOverTarget = null;
+    this.folderCreationReady = false;
+    this.folderCreationTimer = null;
+    if (this.hasListTarget) {
+      this.initMainSortable();
+      this.initFolderSortables();
+    }
+    this.freezeGifs();
+  }
+  disconnect() {
+    this.sortables.forEach((s) => s.destroy());
+    this.sortables = [];
+    this.closeFolderMenu();
+    clearTimeout(this.folderCreationTimer);
+  }
+  initMainSortable() {
+    const sortable = sortable_esm_default.create(this.listTarget, {
+      animation: 150,
+      ghostClass: "opacity-20",
+      dragClass: "shadow-lg",
+      draggable: "[data-rail-item], [data-server-id]",
+      fallbackOnBody: true,
+      swapThreshold: 0.65,
+      group: "rail",
+      onStart: () => this.onDragStart(),
+      onEnd: (evt) => this.handleMainDrop(evt),
+      onMove: (evt) => this.handleDragMove(evt),
+      onAdd: (evt) => {
+        evt.item.setAttribute("data-rail-item", "server");
+      }
+    });
+    this.sortables.push(sortable);
+  }
+  initFolderSortables() {
+    this.element.querySelectorAll("[data-folder-server-list]").forEach((list) => {
+      this.initSingleFolderSortable(list);
+    });
+  }
+  initSingleFolderSortable(list) {
+    if (list._sortableInitialized)
+      return;
+    const sortable = sortable_esm_default.create(list, {
+      animation: 150,
+      ghostClass: "opacity-20",
+      dragClass: "shadow-lg",
+      draggable: "[data-server-id]",
+      fallbackOnBody: true,
+      swapThreshold: 0.65,
+      group: "rail",
+      onEnd: () => this.saveOrder(),
+      onAdd: (evt) => this.handleFolderAdd(evt),
+      onRemove: (evt) => this.handleFolderRemove(evt)
+    });
+    this.sortables.push(sortable);
+    list._sortableInitialized = true;
+  }
+  onDragStart() {
+    this.dragOverTarget = null;
+    this.folderCreationReady = false;
+    clearTimeout(this.folderCreationTimer);
+  }
+  handleDragMove(evt) {
+    const dragged = evt.dragged;
+    const related = evt.related;
+    if (!dragged || !related) {
+      this.clearFolderCreationState();
+      return true;
+    }
+    if (dragged.dataset.railItem === "folder" || related.dataset.railItem === "folder") {
+      this.clearFolderCreationState();
+      return true;
+    }
+    if (!dragged.dataset.serverId || !related.dataset.serverId) {
+      this.clearFolderCreationState();
+      return true;
+    }
+    if (related.closest("[data-folder-server-list]")) {
+      this.clearFolderCreationState();
+      return true;
+    }
+    if (this.dragOverTarget === related)
+      return true;
+    this.clearFolderCreationState();
+    related.classList.add("folder-drop-target");
+    this.dragOverTarget = related;
+    this.folderCreationTimer = setTimeout(() => {
+      this.folderCreationReady = true;
+      if (this.dragOverTarget) {
+        this.dragOverTarget.classList.remove("folder-drop-target");
+        this.dragOverTarget.classList.add("folder-drop-ready");
+      }
+    }, 500);
+    return true;
+  }
+  clearFolderCreationState() {
+    clearTimeout(this.folderCreationTimer);
+    this.folderCreationReady = false;
+    if (this.dragOverTarget) {
+      this.dragOverTarget.classList.remove("folder-drop-target", "folder-drop-ready");
+      this.dragOverTarget = null;
+    }
+    this.element.querySelectorAll(".folder-drop-target, .folder-drop-ready").forEach((el) => {
+      el.classList.remove("folder-drop-target", "folder-drop-ready");
+    });
+  }
+  async handleMainDrop(evt) {
+    const shouldCreateFolder = this.folderCreationReady;
+    const target = this.dragOverTarget;
+    this.clearFolderCreationState();
+    const dragged = evt.item;
+    if (shouldCreateFolder && target && dragged.dataset.serverId && target.dataset.serverId && dragged !== target && !dragged.dataset.folderId && !target.dataset.folderId) {
+      await this.createFolder(dragged.dataset.serverId, target.dataset.serverId, dragged, target);
+      return;
+    }
+    this.saveOrder();
+  }
+  async createFolder(serverId1, serverId2, el1, el2) {
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const response = await fetch("/server_folders", {
+        method: "POST",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          server_folder: { name: "Folder" },
+          server_ids: [serverId1, serverId2]
+        })
+      });
+      if (!response.ok)
+        return this.saveOrder();
+      const data = await response.json();
+      const temp = document.createElement("div");
+      temp.innerHTML = data.html;
+      const folderEl = temp.firstElementChild;
+      el1.replaceWith(folderEl);
+      el2.remove();
+      const newFolderList = folderEl.querySelector("[data-folder-server-list]");
+      if (newFolderList) {
+        this.initSingleFolderSortable(newFolderList);
+      }
+      this.freezeGifs();
+      this.saveOrder();
+    } catch (e) {
+      this.saveOrder();
+    }
+  }
+  handleFolderAdd(evt) {
+    const folderEl = evt.to.closest("[data-folder-id]");
+    if (folderEl)
+      this.updateFolderIcons(folderEl);
+    this.saveOrder();
+  }
+  handleFolderRemove(evt) {
+    const folderEl = evt.from.closest("[data-folder-id]");
+    if (!folderEl)
+      return;
+    const serverList = folderEl.querySelector("[data-folder-server-list]");
+    if (serverList && serverList.children.length === 0) {
+      const folderId = folderEl.dataset.folderId;
+      folderEl.remove();
+      this.deleteFolder(folderId, false);
+    } else {
+      this.updateFolderIcons(folderEl);
+    }
+    this.saveOrder();
+  }
+  updateFolderIcons(folderEl) {
+    const serverList = folderEl.querySelector("[data-folder-server-list]");
+    if (!serverList)
+      return;
+    const servers = Array.from(serverList.children).filter((el) => el.dataset.serverId);
+    const offsets = [
+      { x: -4, y: -4 },
+      { x: 6, y: -2 },
+      { x: 1, y: 6 }
+    ];
+    folderEl.querySelectorAll("[data-folder-icons]").forEach((container) => {
+      const folderColor = container.dataset.folderColor || "#4f545c";
+      container.style.backgroundColor = folderColor;
+      container.innerHTML = "";
+      servers.slice(0, 3).forEach((serverEl, i) => {
+        const offset = offsets[i];
+        const mini = document.createElement("div");
+        mini.className = "absolute w-5 h-5 rounded-md overflow-hidden border border-gray-800";
+        mini.style.transform = `translate(${offset.x}px, ${offset.y}px)`;
+        mini.style.zIndex = 3 - i;
+        const frozenCanvas = serverEl.querySelector("[data-gif-freeze]");
+        const img = serverEl.querySelector("img:not(.gif-animated)");
+        if (frozenCanvas && frozenCanvas.width > 0) {
+          const miniImg = document.createElement("img");
+          try {
+            miniImg.src = frozenCanvas.toDataURL();
+          } catch (e) {
+            miniImg.src = "";
+          }
+          miniImg.className = "w-full h-full object-cover";
+          mini.appendChild(miniImg);
+        } else if (img) {
+          const miniImg = document.createElement("img");
+          miniImg.src = img.src;
+          miniImg.className = "w-full h-full object-cover";
+          mini.appendChild(miniImg);
+        } else {
+          const span = serverEl.querySelector("span.text-white");
+          const initials = span ? span.textContent.trim() : "?";
+          const div = document.createElement("div");
+          div.className = "w-full h-full bg-gray-600 flex items-center justify-center";
+          div.innerHTML = `<span class="text-white text-[6px] font-bold">${this.escapeAttr(initials)}</span>`;
+          mini.appendChild(div);
+        }
+        container.appendChild(mini);
+      });
+    });
+  }
+  toggleFolder(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const folderEl = event.currentTarget.closest("[data-folder-id]");
+    if (!folderEl)
+      return;
+    const collapsed = folderEl.dataset.collapsed === "true";
+    const collapsedView = folderEl.querySelector("[data-folder-collapsed-view]");
+    const expandedView = folderEl.querySelector("[data-folder-expanded-view]");
+    const container = folderEl.querySelector("[data-folder-server-container]");
+    if (collapsed) {
+      folderEl.dataset.collapsed = "false";
+      collapsedView.classList.add("hidden");
+      if (container)
+        container.classList.add("folder-grid-collapsed");
+      expandedView.classList.remove("hidden");
+      if (container) {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            container.classList.remove("folder-grid-collapsed");
+          });
+        });
+      }
+      const serverList = folderEl.querySelector("[data-folder-server-list]");
+      if (serverList)
+        this.initSingleFolderSortable(serverList);
+    } else {
+      if (container) {
+        container.classList.add("folder-grid-collapsed");
+        setTimeout(() => {
+          folderEl.dataset.collapsed = "true";
+          collapsedView.classList.remove("hidden");
+          expandedView.classList.add("hidden");
+        }, 300);
+      } else {
+        folderEl.dataset.collapsed = "true";
+        collapsedView.classList.remove("hidden");
+        expandedView.classList.add("hidden");
+      }
+    }
+    const folderId = folderEl.dataset.folderId;
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    fetch(`/server_folders/${folderId}/toggle_collapse`, {
+      method: "PATCH",
+      headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" }
+    });
+  }
+  showFolderMenu(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    this.closeFolderMenu();
+    const folderEl = event.currentTarget.closest("[data-folder-id]");
+    if (!folderEl)
+      return;
+    const folderId = folderEl.dataset.folderId;
+    const folderNameEl = folderEl.querySelector("[data-folder-name]");
+    const currentName = folderNameEl ? folderNameEl.textContent.trim() : "Folder";
+    this.folderMenu = document.createElement("div");
+    this.folderMenu.className = "fixed z-[60] w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-600 py-1.5 text-sm";
+    let left = event.clientX;
+    let top = event.clientY;
+    if (left + 192 > window.innerWidth)
+      left = window.innerWidth - 196;
+    if (top + 100 > window.innerHeight)
+      top = window.innerHeight - 104;
+    this.folderMenu.style.left = `${left}px`;
+    this.folderMenu.style.top = `${top}px`;
+    const currentColor = folderEl.querySelector("[data-folder-color]")?.dataset.folderColor || "#4f545c";
+    this.folderMenu.innerHTML = `
+      <button data-menu-action="rename" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Rename Folder</button>
+      <button data-menu-action="color" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Folder Color</button>
+      <button data-menu-action="delete" class="w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 hover:text-red-300 transition">Delete Folder</button>
+    `;
+    document.body.appendChild(this.folderMenu);
+    this.folderMenu.querySelector("[data-menu-action='rename']").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.showRenameInput(folderId, currentName, folderEl);
+    });
+    this.folderMenu.querySelector("[data-menu-action='color']").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.showColorPicker(folderId, currentColor, folderEl);
+    });
+    this.folderMenu.querySelector("[data-menu-action='delete']").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.deleteFolder(folderId, true);
+      this.closeFolderMenu();
+    });
+    setTimeout(() => {
+      document.addEventListener("click", this.boundCloseMenu);
+      document.addEventListener("keydown", this.boundKeydown);
+    }, 10);
+  }
+  showRenameInput(folderId, currentName, folderEl) {
+    if (!this.folderMenu)
+      return;
+    this.folderMenu.innerHTML = `
+      <div class="px-3 py-2">
+        <label class="text-[10px] text-gray-500 uppercase font-semibold mb-1 block">Folder Name</label>
+        <input type="text" value="${this.escapeAttr(currentName)}" maxlength="50"
+               class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-orange-500"
+               data-rename-input>
+        <button class="mt-2 w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold py-1 rounded transition" data-rename-save>Save</button>
+      </div>
+    `;
+    const input = this.folderMenu.querySelector("[data-rename-input]");
+    input.focus();
+    input.select();
+    const save2 = () => this.renameFolder(folderId, input.value.trim(), folderEl);
+    this.folderMenu.querySelector("[data-rename-save]").addEventListener("click", (e) => {
+      e.stopPropagation();
+      save2();
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        save2();
+      }
+      if (e.key === "Escape") {
+        this.closeFolderMenu();
+      }
+    });
+    input.addEventListener("click", (e) => e.stopPropagation());
+  }
+  showColorPicker(folderId, currentColor, folderEl) {
+    if (!this.folderMenu)
+      return;
+    const presets = [
+      { color: "#4f545c", label: "Gray" },
+      { color: "#5865f2", label: "Blurple" },
+      { color: "#57f287", label: "Green" },
+      { color: "#fee75c", label: "Yellow" },
+      { color: "#eb459e", label: "Pink" },
+      { color: "#ed4245", label: "Red" },
+      { color: "#f47b67", label: "Orange" },
+      { color: "#9b59b6", label: "Purple" }
+    ];
+    const swatchesHtml = presets.map((p) => {
+      const ring = p.color.toLowerCase() === currentColor.toLowerCase() ? "ring-2 ring-white" : "";
+      return `<button data-color-swatch="${p.color}" title="${p.label}" class="w-8 h-8 rounded-full ${ring} hover:scale-110 transition-transform" style="background-color: ${p.color}"></button>`;
+    }).join("");
+    this.folderMenu.innerHTML = `
+      <div class="px-3 py-2">
+        <label class="text-[10px] text-gray-500 uppercase font-semibold mb-2 block">Folder Color</label>
+        <div class="grid grid-cols-4 gap-2 mb-2">${swatchesHtml}</div>
+        <div class="flex items-center gap-2">
+          <input type="color" value="${currentColor}" class="w-8 h-8 rounded cursor-pointer border-0 p-0 bg-transparent" data-custom-color>
+          <span class="text-xs text-gray-400">Custom</span>
+        </div>
+      </div>
+    `;
+    const applyColor = (color) => this.applyFolderColor(folderId, color, folderEl);
+    this.folderMenu.querySelectorAll("[data-color-swatch]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        applyColor(btn.dataset.colorSwatch);
+      });
+    });
+    const customInput = this.folderMenu.querySelector("[data-custom-color]");
+    customInput.addEventListener("input", (e) => {
+      e.stopPropagation();
+      applyColor(customInput.value);
+    });
+    customInput.addEventListener("click", (e) => e.stopPropagation());
+  }
+  async applyFolderColor(folderId, color, folderEl) {
+    folderEl.querySelectorAll("[data-folder-icons]").forEach((container) => {
+      container.style.backgroundColor = color;
+      container.dataset.folderColor = color;
+    });
+    const serverBg = folderEl.querySelector("[data-folder-server-bg]");
+    if (serverBg) {
+      serverBg.style.backgroundColor = color + "30";
+      serverBg.dataset.folderServerBg = color;
+    }
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      await fetch(`/server_folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({ server_folder: { color } })
+      });
+    } catch (e) {
+    }
+    this.closeFolderMenu();
+  }
+  async renameFolder(folderId, newName, folderEl) {
+    if (!newName)
+      return;
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    try {
+      const response = await fetch(`/server_folders/${folderId}`, {
+        method: "PATCH",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify({ server_folder: { name: newName } })
+      });
+      if (response.ok) {
+        folderEl.querySelectorAll("[data-folder-name]").forEach((el) => {
+          el.textContent = newName;
+        });
+      }
+    } catch (e) {
+    }
+    this.closeFolderMenu();
+  }
+  async deleteFolder(folderId, moveServersToDom) {
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    if (moveServersToDom) {
+      const folderEl = this.element.querySelector(`[data-folder-id="${folderId}"]`);
+      if (folderEl) {
+        const serverList = folderEl.querySelector("[data-folder-server-list]");
+        if (serverList) {
+          Array.from(serverList.children).forEach((serverEl) => {
+            serverEl.setAttribute("data-rail-item", "server");
+            this.listTarget.insertBefore(serverEl, folderEl);
+          });
+        }
+        folderEl.remove();
+      }
+    }
+    try {
+      await fetch(`/server_folders/${folderId}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" }
+      });
+    } catch (e) {
+    }
+    this.saveOrder();
+  }
+  async saveOrder() {
+    const items = [];
+    let position = 0;
+    Array.from(this.listTarget.children).forEach((child) => {
+      if (child.dataset.folderId) {
+        const folderServers = [];
+        const serverList = child.querySelector("[data-folder-server-list]");
+        if (serverList) {
+          Array.from(serverList.children).forEach((serverEl, idx) => {
+            if (serverEl.dataset.serverId) {
+              folderServers.push({ id: serverEl.dataset.serverId, position: idx });
+            }
+          });
+        }
+        items.push({ type: "folder", id: child.dataset.folderId, position: position++, servers: folderServers });
+      } else if (child.dataset.serverId) {
+        items.push({ type: "server", id: child.dataset.serverId, position: position++ });
+      }
+    });
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    await fetch("/reorder_servers", {
+      method: "PATCH",
+      headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+      body: JSON.stringify({ items })
+    });
+  }
+  closeFolderMenu(event) {
+    if (this.folderMenu) {
+      if (event && this.folderMenu.contains(event.target))
+        return;
+      this.folderMenu.remove();
+      this.folderMenu = null;
+    }
+    document.removeEventListener("click", this.boundCloseMenu);
+    document.removeEventListener("keydown", this.boundKeydown);
+  }
+  handleKeydown(event) {
+    if (event.key === "Escape") {
+      this.closeFolderMenu();
+    }
+  }
+  freezeGifs() {
+    this.element.querySelectorAll(".server-icon-gif, .folder-mini-gif").forEach((el) => {
+      const img = el.querySelector("[data-gif-src]");
+      const canvas = el.querySelector("[data-gif-freeze]");
+      if (!img || !canvas)
+        return;
+      const draw = () => {
+        canvas.width = img.naturalWidth || 48;
+        canvas.height = img.naturalHeight || 48;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      };
+      if (img.complete && img.naturalWidth > 0) {
+        draw();
+      } else {
+        img.addEventListener("load", draw, { once: true });
+      }
+    });
+  }
+  escapeAttr(text) {
+    return text.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  }
+}
+
+// app/javascript/controllers/message_actions_controller.js
+class message_actions_controller_default extends Controller {
+  connect() {
+    this._onContextMenu = this._onContextMenu.bind(this);
+    this._dismiss = this._dismiss.bind(this);
+    this._isTouchDevice = false;
+    this._onFirstTouch = () => {
+      this._isTouchDevice = true;
+    };
+    this.element.addEventListener("touchstart", this._onFirstTouch, { passive: true, once: false });
+    this.element.addEventListener("contextmenu", this._onContextMenu);
+  }
+  disconnect() {
+    this.element.removeEventListener("contextmenu", this._onContextMenu);
+    this.element.removeEventListener("touchstart", this._onFirstTouch);
+    this._removeSheet();
+  }
+  _onContextMenu(e) {
+    if (!this._isTouchDevice)
+      return;
+    const msgEl = e.target.closest("[data-message-id]");
+    if (!msgEl || msgEl.dataset.systemMessage)
+      return;
+    const interactive = e.target.closest("a, button, video, audio, input, textarea");
+    if (interactive)
+      return;
+    e.preventDefault();
+    if (navigator.vibrate)
+      navigator.vibrate(30);
+    this._showSheet(msgEl);
+  }
+  _showSheet(msgEl) {
+    this._removeSheet();
+    const messageId = msgEl.dataset.messageId;
+    const authorEl = msgEl.querySelector("[style*='color:']");
+    const authorName = authorEl?.textContent?.trim() || "Unknown";
+    const contentEl = msgEl.querySelector(".message-content");
+    const rawContent = contentEl?.dataset?.rawContent || contentEl?.textContent?.trim() || "";
+    const preview = rawContent.replace(/```\w*\n?/g, "").replace(/```/g, "").trim().slice(0, 80);
+    const isDM = !!document.querySelector("[data-controller*='dm-message-form']");
+    const backdrop = document.createElement("div");
+    backdrop.className = "fixed inset-0 bg-black/50 z-[100]";
+    backdrop.addEventListener("click", this._dismiss);
+    const sheet = document.createElement("div");
+    sheet.className = "fixed bottom-0 left-0 right-0 z-[101] bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-700";
+    sheet.innerHTML = `
+      <div class="w-10 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-2"></div>
+      <div class="px-4 pb-2">
+        <p class="text-xs text-gray-400 truncate mb-3">${this._escapeHtml(preview)}</p>
+      </div>
+      <div class="px-2 pb-6 space-y-1">
+        <button data-sheet-action="reply" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+          <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+          Reply
+        </button>
+        ${isDM ? "" : `<button data-sheet-action="react" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+          <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Add Reaction
+        </button>`}
+        <button data-sheet-action="copy" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+          <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          Copy Text
+        </button>
+      </div>
+    `;
+    sheet.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-sheet-action]");
+      if (!btn)
+        return;
+      const action = btn.dataset.sheetAction;
+      if (action === "reply") {
+        document.dispatchEvent(new CustomEvent("inferno:reply", {
+          detail: { messageId, authorName, preview },
+          bubbles: true
+        }));
+      } else if (action === "react") {
+        document.dispatchEvent(new CustomEvent("inferno:react", {
+          detail: { messageId },
+          bubbles: true
+        }));
+      } else if (action === "copy") {
+        navigator.clipboard?.writeText(rawContent).catch(() => {
+        });
+      }
+      this._dismiss();
+    });
+    document.body.appendChild(backdrop);
+    document.body.appendChild(sheet);
+    this._backdrop = backdrop;
+    this._sheet = sheet;
+    document.body.style.overflow = "hidden";
+  }
+  _dismiss() {
+    this._removeSheet();
+  }
+  _removeSheet() {
+    if (this._backdrop) {
+      this._backdrop.remove();
+      this._backdrop = null;
+    }
+    if (this._sheet) {
+      this._sheet.remove();
+      this._sheet = null;
+    }
+    document.body.style.overflow = "";
+  }
+  _escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+}
+
+// app/javascript/controllers/settings_sidebar_controller.js
+class settings_sidebar_controller_default extends Controller {
+  static targets = ["sidebar", "backdrop"];
+  open() {
+    this.sidebarTarget.classList.remove("hidden");
+    if (this.hasBackdropTarget)
+      this.backdropTarget.classList.remove("hidden");
+  }
+  close() {
+    this.sidebarTarget.classList.add("hidden");
+    if (this.hasBackdropTarget)
+      this.backdropTarget.classList.add("hidden");
+  }
+}
+
+// app/javascript/controllers/dirty_form_controller.js
+class dirty_form_controller_default extends Controller {
+  static targets = ["saveBar"];
+  connect() {
+    this._snapshot = this._captureState();
+    this._onChange = this._checkDirty.bind(this);
+    this.element.addEventListener("input", this._onChange);
+    this.element.addEventListener("change", this._onChange);
+  }
+  disconnect() {
+    this.element.removeEventListener("input", this._onChange);
+    this.element.removeEventListener("change", this._onChange);
+  }
+  reset() {
+    const elements = this.element.elements;
+    for (let i = 0;i < elements.length; i++) {
+      const el = elements[i];
+      if (!el.name || !(el.name in this._snapshot))
+        continue;
+      if (el.type === "checkbox") {
+        el.checked = this._snapshot[el.name];
+      } else {
+        el.value = this._snapshot[el.name];
+      }
+    }
+    this._checkDirty();
+  }
+  _captureState() {
+    const state = {};
+    const elements = this.element.elements;
+    for (let i = 0;i < elements.length; i++) {
+      const el = elements[i];
+      if (!el.name)
+        continue;
+      if (el.type === "checkbox") {
+        state[el.name] = el.checked;
+      } else {
+        state[el.name] = el.value;
+      }
+    }
+    return state;
+  }
+  _checkDirty() {
+    const current = this._captureState();
+    let dirty = false;
+    for (const key in this._snapshot) {
+      if (this._snapshot[key] !== current[key]) {
+        dirty = true;
+        break;
+      }
+    }
+    if (this.hasSaveBarTarget) {
+      if (dirty) {
+        this.saveBarTarget.style.display = "";
+        requestAnimationFrame(() => {
+          this.saveBarTarget.style.opacity = "1";
+          this.saveBarTarget.style.transform = "translateY(0)";
+        });
+      } else {
+        this.saveBarTarget.style.opacity = "0";
+        this.saveBarTarget.style.transform = "translateY(100%)";
+        setTimeout(() => {
+          if (!this._isDirty())
+            this.saveBarTarget.style.display = "none";
+        }, 200);
+      }
+    }
+  }
+  _isDirty() {
+    const current = this._captureState();
+    for (const key in this._snapshot) {
+      if (this._snapshot[key] !== current[key])
+        return true;
+    }
+    return false;
+  }
+}
+
+// app/javascript/controllers/frame_loading_controller.js
+class frame_loading_controller_default extends Controller {
+  connect() {
+    this._onBeforeFetch = this._handleBeforeFetch.bind(this);
+    document.addEventListener("turbo:before-fetch-request", this._onBeforeFetch);
+  }
+  disconnect() {
+    document.removeEventListener("turbo:before-fetch-request", this._onBeforeFetch);
+  }
+  _handleBeforeFetch(e) {
+    if (e.target.id !== "main-content")
+      return;
+    const method = e.detail?.fetchOptions?.method;
+    if (method && method.toUpperCase() !== "GET")
+      return;
+    this._showSkeleton(e.target);
+  }
+  _showSkeleton(frame) {
+    const msgs = Array.from({ length: 6 }, (_, i) => {
+      const nameW = ["w-20", "w-28", "w-24", "w-32", "w-20", "w-36"][i];
+      const lineW = ["w-64 sm:w-80", "w-48 sm:w-64", "w-56 sm:w-72", "w-40 sm:w-56", "w-72 sm:w-96", "w-44 sm:w-60"][i];
+      return `<div class="flex items-start gap-3 px-4">
+        <div class="w-10 h-10 bg-gray-600 rounded-full shrink-0"></div>
+        <div class="space-y-2 flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <div class="h-3.5 bg-gray-600 rounded ${nameW}"></div>
+            <div class="h-3 bg-gray-600/40 rounded w-10"></div>
+          </div>
+          <div class="h-3.5 bg-gray-600/30 rounded ${lineW} max-w-full"></div>
+        </div>
+      </div>`;
+    }).join("");
+    frame.innerHTML = `
+      <div class="flex flex-col flex-1 min-h-0 animate-pulse">
+        <div class="flex items-center h-12 px-4 border-b border-gray-900 shrink-0">
+          <div class="w-5 h-5 bg-gray-600 rounded mr-2"></div>
+          <div class="h-4 bg-gray-600 rounded w-28"></div>
+        </div>
+        <div class="flex-1 overflow-hidden flex flex-col justify-end py-4 space-y-5">
+          ${msgs}
+        </div>
+        <div class="px-4 pb-4 pt-2">
+          <div class="h-11 bg-gray-600/30 rounded-lg"></div>
+        </div>
+      </div>`;
+  }
+}
+
 // app/javascript/application.js
 var application = Application.start();
+setConfirmMethod((message) => {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
+    overlay.innerHTML = `
+      <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-md mx-4 overflow-hidden">
+        <div class="px-5 pt-5 pb-4">
+          <h3 class="text-lg font-semibold text-white mb-2">Are you sure?</h3>
+          <p class="text-sm text-gray-300">${message.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+        </div>
+        <div class="flex justify-end gap-3 px-5 py-4 bg-gray-850 bg-gray-900/50">
+          <button data-action="cancel" class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:underline cursor-pointer">Cancel</button>
+          <button data-action="confirm" class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded transition cursor-pointer">Confirm</button>
+        </div>
+      </div>
+    `;
+    const cleanup = (result) => {
+      overlay.remove();
+      resolve(result);
+    };
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay)
+        cleanup(false);
+    });
+    overlay.querySelector('[data-action="cancel"]').addEventListener("click", () => cleanup(false));
+    overlay.querySelector('[data-action="confirm"]').addEventListener("click", () => cleanup(true));
+    document.addEventListener("keydown", function handler(e) {
+      if (e.key === "Escape") {
+        document.removeEventListener("keydown", handler);
+        cleanup(false);
+      }
+      if (e.key === "Enter") {
+        document.removeEventListener("keydown", handler);
+        cleanup(true);
+      }
+    });
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-action="confirm"]').focus();
+  });
+});
+try {
+  const stored = localStorage.getItem("_emojiMap");
+  if (stored) {
+    window._emojiMap = JSON.parse(stored);
+    window._emojiPUA = JSON.parse(localStorage.getItem("_emojiPUA") || "{}");
+    window._emojiReverse = JSON.parse(localStorage.getItem("_emojiReverse") || "{}");
+    window._nextPUA = parseInt(localStorage.getItem("_nextPUA") || "0") || 57344;
+  }
+} catch (e) {
+}
 application.register("message-form", message_form_controller_default);
 application.register("scroll-position", scroll_position_controller_default);
 application.register("toast", toast_controller_default);
-application.register("emoji-picker", emoji_picker_controller_default);
+application.register("unified-picker", unified_picker_controller_default);
+application.register("gif-save", gif_save_controller_default);
 application.register("dropdown", dropdown_controller_default);
 application.register("server-members", server_members_controller_default);
 application.register("profile-card", profile_card_controller_default);
@@ -16566,7 +18853,6 @@ application.register("member-context", member_context_controller_default);
 application.register("category-collapse", category_collapse_controller_default);
 application.register("channel-sidebar", channel_sidebar_controller_default);
 application.register("channel-reorder", channel_reorder_controller_default);
-application.register("settings-modal", settings_modal_controller_default);
 application.register("image-preview", image_preview_controller_default);
 application.register("mobile-nav", mobile_nav_controller_default);
 application.register("banner-editor", banner_editor_controller_default);
@@ -16576,5 +18862,10 @@ application.register("video-player", video_player_controller_default);
 application.register("nostr-key-export", nostr_key_export_controller_default);
 application.register("role-editor", role_editor_controller_default);
 application.register("member-roles", member_roles_controller_default);
+application.register("server-rail", server_rail_controller_default);
+application.register("message-actions", message_actions_controller_default);
+application.register("settings-sidebar", settings_sidebar_controller_default);
+application.register("dirty-form", dirty_form_controller_default);
+application.register("frame-loading", frame_loading_controller_default);
 
-//# debugId=DE1E2D959261D77464756E2164756E21
+//# debugId=DAFE62EC2392F2C764756E2164756E21

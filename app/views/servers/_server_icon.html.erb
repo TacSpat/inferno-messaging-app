@@ -1,11 +1,19 @@
 <% mention_count = current_user.notifications.unread.for_server(server.id).count %>
 <% has_unread = server.channels.any? { |ch| ch.unread_for?(current_user) } %>
-<a href="<%= server_channel_path(server, server.channels.ordered.first) %>"
-   data-server-id="<%= server.public_id %>"
-   class="group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all duration-200
-          <%= active ? 'bg-orange-600 rounded-xl' : 'bg-gray-700 hover:bg-orange-600 hover:rounded-xl' %>">
+<% is_gif = server.icon.attached? && server.icon.content_type == "image/gif" %>
+<% icon_classes = "group relative flex items-center justify-center w-12 h-12 rounded-2xl overflow-hidden transition-all duration-200 cursor-pointer #{active ? 'bg-orange-600 rounded-xl' : 'bg-gray-700 hover:bg-orange-600 hover:rounded-xl'}#{ ' server-icon-gif' if is_gif}" %>
+<% if active %>
+<div class="<%= icon_classes %>">
+<% else %>
+<a href="<%= server_channel_path(server, server.channels.ordered.first) %>" class="<%= icon_classes %>">
+<% end %>
   <% if server.icon.attached? %>
-    <%= image_tag server.icon, class: 'w-full h-full rounded-inherit object-cover' %>
+    <% if is_gif %>
+      <canvas class="gif-static w-full h-full object-cover absolute inset-0" data-gif-freeze></canvas>
+      <%= image_tag server.icon, class: 'gif-animated w-full h-full object-cover absolute inset-0', data: { gif_src: true } %>
+    <% else %>
+      <%= image_tag server.icon, class: 'w-full h-full object-cover' %>
+    <% end %>
   <% else %>
     <span class="text-white font-semibold text-sm"><%= server.name.split.map(&:first).join[0..1].upcase %></span>
   <% end %>
@@ -19,4 +27,4 @@
       <%= mention_count > 99 ? '99+' : mention_count %>
     </div>
   <% end %>
-</a>
+<% if active %></div><% else %></a><% end %>

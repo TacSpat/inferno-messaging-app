@@ -11,6 +11,8 @@ class Server < ApplicationRecord
   has_many :roles, dependent: :destroy
   has_many :invites, dependent: :destroy
   has_many :bans, dependent: :destroy
+  has_many :server_emojis, dependent: :destroy
+  has_many :server_stickers, dependent: :destroy
   has_one_attached :icon
 
   validates :name, presence: true, length: { maximum: 100 }

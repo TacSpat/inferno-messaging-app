@@ -53,6 +53,8 @@ class Message < ApplicationRecord
     )
     html = markdown.render(content)
     html = render_mentions(html)
+    html = render_custom_emojis(html)
+    html = enlarge_emoji_only(html)
     html = unfurl_videos(html)
     html = unfurl_images(html)
     html = unfurl_links(html, sync_tenor: sync_tenor)
@@ -154,13 +156,13 @@ embeds << %(<div class="mt-2 max-w-sm rounded-lg overflow-hidden border border-g
       # Synchronous fetch for immediate display (fallback/uncached path)
       gif_src = fetch_tenor_og_image(tenor_url)
       if gif_src
-        embeds << %(<div class="mt-2 inline-block"><img src="#{gif_src}" alt="GIF" class="max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif"></div>)
+        embeds << %(<div class="mt-2 inline-block relative group/gif" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}" data-gif-url="#{gif_src}" data-preview-url="#{gif_src}"><img src="#{gif_src}" alt="GIF" class="max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-animated-gif data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif"></div>)
       else
         embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-blue-400 text-sm">View GIF on Tenor</span></a>)
       end
     else
       # Placeholder for async path (new messages — TenorUnfurlJob resolves later)
-      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-blue-400 text-sm">Loading GIF...</span></a></div>)
+      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-blue-400 text-sm">Loading GIF...</span></a></div>)
     end
   end
 
@@ -335,6 +337,56 @@ end
         message_id: public_id
       })
     end
+  end
+
+  def render_custom_emojis(html)
+    # Find all :emoji_name: patterns (not inside code blocks)
+    emoji_names = html.scan(/:([a-z0-9_]+):/).flatten.uniq
+    return html if emoji_names.empty?
+
+    # For channel messages, use the channel's server; for DMs, use the sender's servers
+    if channel&.server
+      emojis = channel.server.server_emojis.where(name: emoji_names).includes(image_attachment: :blob)
+    else
+      emojis = ServerEmoji.where(server_id: user.servers.select(:id), name: emoji_names).includes(image_attachment: :blob)
+    end
+    return html if emojis.empty?
+
+    # Deduplicate by name (first match wins)
+    seen = {}
+    emojis.each do |emoji|
+      next unless emoji.image.attached?
+      next if seen[emoji.name]
+      seen[emoji.name] = true
+      img_url = Rails.application.routes.url_helpers.rails_blob_path(emoji.image, only_path: true)
+      img_tag = %(<img src="#{img_url}" alt=":#{emoji.name}:" title=":#{emoji.name}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
+      html = html.gsub(/:#{Regexp.escape(emoji.name)}:/, img_tag)
+    end
+
+    html
+  end
+
+  # If a message contains only emoji (Unicode or custom <img>), enlarge them
+  EMOJI_REGEX = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}\u{231A}-\u{231B}\u{23E9}-\u{23F3}\u{23F8}-\u{23FA}\u{25AA}-\u{25AB}\u{25B6}\u{25C0}\u{25FB}-\u{25FE}\u{2934}-\u{2935}\u{2B05}-\u{2B07}\u{2B1B}-\u{2B1C}\u{2B50}\u{2B55}\u{3030}\u{303D}\u{3297}\u{3299}]/
+
+  def enlarge_emoji_only(html)
+    # Strip wrapping <p> tags and whitespace
+    stripped = html.gsub(/<\/?p>/, "").strip
+    # Remove custom emoji <img> tags to check remaining text
+    without_imgs = stripped.gsub(/<img[^>]*class="inline-block[^>]*>/, "")
+    # Remove Unicode emojis and variation selectors
+    without_emojis = without_imgs.gsub(EMOJI_REGEX, "").gsub(/[\s\uFE0F]/, "")
+    # If nothing remains, it's emoji-only
+    if without_emojis.empty? && stripped.length > 0
+      # Count emojis (max 10 to qualify for big display)
+      emoji_count = stripped.scan(EMOJI_REGEX).length + stripped.scan(/<img[^>]*class="inline-block/).length
+      if emoji_count > 0 && emoji_count <= 10
+        # Enlarge custom emoji images
+        enlarged = stripped.gsub(/style="height:1\.375em;width:auto"/, 'style="height:3.5rem;width:auto"')
+        return %(<p class="emoji-only">#{enlarged}</p>)
+      end
+    end
+    html
   end
 
   def render_mentions(html)

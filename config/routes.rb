@@ -49,7 +49,28 @@ Rails.application.routes.draw do
     root "devise/sessions#new"
   end
 
+  # Tenor API proxy & GIF collections
+  namespace :api do
+    get "tenor/search", to: "tenor#search"
+    get "tenor/trending", to: "tenor#trending"
+    get "tenor/categories", to: "tenor#categories"
+    resources :gif_collections, only: [:index, :create, :update, :destroy]
+    resources :gif_favorites, only: [:index, :create, :update, :destroy] do
+      collection do
+        post :toggle
+      end
+    end
+  end
+
+  # Server folders
+  resources :server_folders, only: [:create, :update, :destroy] do
+    member do
+      patch :toggle_collapse
+    end
+  end
+
   # Servers
+  patch :reorder_servers, to: "servers#reorder_servers"
   resources :servers, only: [:new, :create, :edit, :update, :destroy] do
     member do
       post :join
@@ -76,6 +97,8 @@ Rails.application.routes.draw do
       end
     end
     resources :roles, except: [:show]
+    resources :emojis, only: [:index, :create, :destroy], controller: "server_emojis"
+    resources :stickers, only: [:index, :create, :destroy], controller: "server_stickers"
   end
 
   # Server settings (separate namespace for cleaner route names)
@@ -94,6 +117,8 @@ Rails.application.routes.draw do
     get "bans", to: "server_settings#bans", as: :bans
     post "bans", to: "server_settings#create_ban", as: :create_ban
     delete "bans", to: "server_settings#destroy_ban", as: :destroy_ban
+    get "emojis", to: "server_settings#emojis", as: :emojis
+    get "stickers", to: "server_settings#stickers", as: :stickers
   end
 
   # Mentions autocomplete
@@ -139,10 +164,14 @@ Rails.application.routes.draw do
   post "notifications/mark_read", to: "notifications#mark_read"
   post "notifications/mark_dm_read", to: "notifications#mark_dm_read"
 
-  # User profile
-  # User settings (modal sections)
-  get "settings/:section", to: "settings#show", as: :settings_section
+  # User settings (full-page layout with sidebar)
+  get "settings", to: redirect("/settings/account")
+  get "settings/account", to: "settings#my_account", as: :user_settings_account
+  get "settings/profile", to: "settings#profile", as: :user_settings_profile
   patch "settings/profile", to: "settings#update_profile", as: :settings_profile
+  get "settings/appearance", to: "settings#appearance", as: :user_settings_appearance
+  get "settings/notifications", to: "settings#notifications", as: :user_settings_notifications
+  get "settings/keybinds", to: "settings#keybinds", as: :user_settings_keybinds
   post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
   post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
   resource :profile, only: [:show, :edit, :update]

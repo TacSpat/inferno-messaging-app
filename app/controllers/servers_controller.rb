@@ -53,6 +53,36 @@ class ServersController < ApplicationController
     end
   end
 
+  def reorder_servers
+    items = params.require(:items)
+    memberships = current_user.server_memberships.includes(:server).index_by { |m| m.server.public_id }
+    folders = current_user.server_folders.index_by(&:public_id)
+
+    ActiveRecord::Base.transaction do
+      items.each do |entry|
+        pos = entry[:position].to_i
+        if entry[:type] == "folder"
+          folder = folders[entry[:id]]
+          next unless folder
+          folder.update_column(:position, pos)
+
+          # Update servers inside this folder
+          (entry[:servers] || []).each do |server_entry|
+            membership = memberships[server_entry[:id]]
+            next unless membership
+            membership.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
+          end
+        else
+          membership = memberships[entry[:id]]
+          next unless membership
+          membership.update_columns(position: pos, server_folder_id: nil)
+        end
+      end
+    end
+
+    head :ok
+  end
+
   private
 
   def set_server

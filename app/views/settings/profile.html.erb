@@ -1,10 +1,10 @@
 <h2 class="text-xl font-bold text-white mb-6">Profile</h2>
 
-<div class="flex gap-8" data-controller="banner-editor">
+<div class="flex flex-col lg:flex-row gap-8" data-controller="banner-editor">
   <!-- Form (left) -->
   <div class="flex-1">
     <%= form_with model: @user, url: settings_profile_path, method: :patch,
-        html: { multipart: true, data: { action: "submit->settings-modal#submitForm" } },
+        html: { multipart: true },
         class: "space-y-5" do |f| %>
 
       <% if @user.errors.any? %>

@@ -527,6 +527,20 @@ export default class extends Controller {
         cursor: pointer;
         border: none;
       }
+      /* Fullscreen: center and scale video */
+      [data-controller="video-player"]:fullscreen {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #000;
+      }
+      [data-controller="video-player"]:fullscreen video {
+        max-width: 100% !important;
+        max-height: 100vh !important;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+      }
     `
     document.head.appendChild(style)
   }

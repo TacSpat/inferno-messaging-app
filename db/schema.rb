@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -139,6 +139,37 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
     t.index ["friend_id"], name: "index_friendships_on_friend_id"
     t.index ["user_id", "friend_id"], name: "index_friendships_on_user_id_and_friend_id", unique: true
     t.index ["user_id"], name: "index_friendships_on_user_id"
+  end
+
+  create_table "gif_collections", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "name", limit: 50, null: false
+    t.integer "position", default: 0
+    t.string "public_id", limit: 12, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "icon", limit: 255
+    t.index ["public_id"], name: "index_gif_collections_on_public_id", unique: true
+    t.index ["user_id", "name"], name: "index_gif_collections_on_user_id_and_name", unique: true
+    t.index ["user_id"], name: "index_gif_collections_on_user_id"
+  end
+
+  create_table "gif_favorites", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "gif_collection_id", null: false
+    t.string "tenor_gif_id", null: false
+    t.string "tenor_url", null: false
+    t.string "preview_url", null: false
+    t.string "gif_url", null: false
+    t.string "description", limit: 100
+    t.integer "position", default: 0
+    t.string "public_id", limit: 12, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["gif_collection_id"], name: "index_gif_favorites_on_gif_collection_id"
+    t.index ["public_id"], name: "index_gif_favorites_on_public_id", unique: true
+    t.index ["user_id", "gif_collection_id", "tenor_gif_id"], name: "index_gif_favorites_on_user_collection_tenor", unique: true
+    t.index ["user_id"], name: "index_gif_favorites_on_user_id"
   end
 
   create_table "instance_blocklists", force: :cascade do |t|
@@ -349,6 +380,33 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
     t.index ["server_id"], name: "index_roles_on_server_id"
   end
 
+  create_table "server_emojis", force: :cascade do |t|
+    t.bigint "server_id", null: false
+    t.bigint "creator_id", null: false
+    t.string "name", limit: 32, null: false
+    t.string "public_id", limit: 12, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["creator_id"], name: "index_server_emojis_on_creator_id"
+    t.index ["public_id"], name: "index_server_emojis_on_public_id", unique: true
+    t.index ["server_id", "name"], name: "index_server_emojis_on_server_id_and_name", unique: true
+    t.index ["server_id"], name: "index_server_emojis_on_server_id"
+  end
+
+  create_table "server_folders", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "name", limit: 50, default: "Folder", null: false
+    t.integer "position", default: 0, null: false
+    t.string "public_id", limit: 12, null: false
+    t.boolean "collapsed", default: true, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.string "color", limit: 7, default: "#4f545c"
+    t.index ["public_id"], name: "index_server_folders_on_public_id", unique: true
+    t.index ["user_id", "position"], name: "index_server_folders_on_user_id_and_position"
+    t.index ["user_id"], name: "index_server_folders_on_user_id"
+  end
+
   create_table "server_memberships", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "server_id", null: false
@@ -357,10 +415,27 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.string "public_id", limit: 12, null: false
+    t.integer "position", default: 0, null: false
+    t.bigint "server_folder_id"
     t.index ["public_id"], name: "index_server_memberships_on_public_id", unique: true
+    t.index ["server_folder_id"], name: "index_server_memberships_on_server_folder_id"
     t.index ["server_id"], name: "index_server_memberships_on_server_id"
     t.index ["user_id", "server_id"], name: "index_server_memberships_on_user_id_and_server_id", unique: true
     t.index ["user_id"], name: "index_server_memberships_on_user_id"
+  end
+
+  create_table "server_stickers", force: :cascade do |t|
+    t.bigint "server_id", null: false
+    t.bigint "creator_id", null: false
+    t.string "name", limit: 50, null: false
+    t.string "description", limit: 100
+    t.string "public_id", limit: 12, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["creator_id"], name: "index_server_stickers_on_creator_id"
+    t.index ["public_id"], name: "index_server_stickers_on_public_id", unique: true
+    t.index ["server_id", "name"], name: "index_server_stickers_on_server_id_and_name", unique: true
+    t.index ["server_id"], name: "index_server_stickers_on_server_id"
   end
 
   create_table "servers", force: :cascade do |t|
@@ -447,6 +522,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
   add_foreign_key "conversation_participants", "users"
   add_foreign_key "friendships", "users"
   add_foreign_key "friendships", "users", column: "friend_id"
+  add_foreign_key "gif_collections", "users"
+  add_foreign_key "gif_favorites", "gif_collections"
+  add_foreign_key "gif_favorites", "users"
   add_foreign_key "instance_blocklists", "users", column: "blocked_by_id"
   add_foreign_key "invites", "servers"
   add_foreign_key "invites", "users", column: "creator_id"
@@ -467,8 +545,14 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_060300) do
   add_foreign_key "reactions", "messages"
   add_foreign_key "reactions", "users"
   add_foreign_key "roles", "servers"
+  add_foreign_key "server_emojis", "servers"
+  add_foreign_key "server_emojis", "users", column: "creator_id"
+  add_foreign_key "server_folders", "users"
+  add_foreign_key "server_memberships", "server_folders"
   add_foreign_key "server_memberships", "servers"
   add_foreign_key "server_memberships", "users"
+  add_foreign_key "server_stickers", "servers"
+  add_foreign_key "server_stickers", "users", column: "creator_id"
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
   add_foreign_key "users", "remote_users", column: "remote_user_detail_id"

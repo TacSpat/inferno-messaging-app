@@ -4,8 +4,11 @@ class ServerMembership < ApplicationRecord
   belongs_to :user
   has_paper_trail
   belongs_to :server
+  belongs_to :server_folder, optional: true
   has_many :membership_roles, dependent: :destroy
   has_many :roles, through: :membership_roles
+
+  scope :ordered, -> { order(position: :asc, joined_at: :asc) }
 
   validates :user_id, uniqueness: { scope: :server_id }
   validate :within_member_limit, on: :create

@@ -14,6 +14,8 @@
       /* Mobile sidebar transitions */
       @media (max-width: 767px) {
         .mobile-server-rail {
+          display: flex !important;
+          flex-direction: column;
           position: fixed;
           left: 0;
           top: 0;
@@ -26,6 +28,8 @@
           transform: translateX(0);
         }
         .mobile-channel-sidebar {
+          display: flex !important;
+          flex-direction: column;
           position: fixed;
           left: 0;
           top: 0;
@@ -56,18 +60,6 @@
           background: rgba(0,0,0,0.6);
           z-index: 50;
           transition: opacity 0.25s ease;
-        }
-        /* Settings modal mobile */
-        .settings-sidebar-mobile {
-          display: none !important;
-        }
-        .settings-back-btn {
-          display: flex !important;
-        }
-      }
-      @media (min-width: 768px) {
-        .settings-back-btn {
-          display: none !important;
         }
       }
     </style>
@@ -173,14 +165,14 @@
               <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>
               <p class="text-xs text-gray-400 truncate"><%= current_user.tag %></p>
             </div>
-            <button onclick="document.dispatchEvent(new CustomEvent('open-settings'))" class="text-gray-400 hover:text-gray-200 p-1 cursor-pointer">
+            <%= link_to user_settings_account_path, class: "text-gray-400 hover:text-gray-200 p-1", data: { turbo: false } do %>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-            </button>
+            <% end %>
           </div>
         </aside>
 
         <!-- Main content -->
-        <main class="flex-1 flex flex-col min-w-0 bg-gray-700">
+        <main class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading">
           <%= yield %>
         </main>
 
@@ -272,15 +264,12 @@
         <%= render "conversations/dm_sidebar" %>
 
         <!-- Main content -->
-        <main class="flex-1 flex flex-col min-w-0 bg-gray-700">
+        <main class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading">
           <%= yield %>
         </main>
       </div>
     <% else %>
       <%= yield %>
-    <% end %>
-  <% if user_signed_in? %>
-    <%= render "shared/settings_modal" %>
     <% end %>
   </body>
 </html>
