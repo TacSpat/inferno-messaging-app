@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_15_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -102,6 +102,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
     t.boolean "shared", default: false
     t.string "nostr_group_id"
     t.string "nostr_relay_url"
+    t.integer "voice_bitrate", default: 64000
+    t.integer "voice_user_limit", default: 0
+    t.boolean "video_enabled", default: false
     t.index ["category_id"], name: "index_channels_on_category_id"
     t.index ["nostr_group_id"], name: "index_channels_on_nostr_group_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
@@ -208,6 +211,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
     t.boolean "lockdown_remote_joins", default: false, null: false
     t.boolean "lockdown_local_signups", default: false, null: false
     t.boolean "lockdown_invite_creation", default: false, null: false
+    t.boolean "voice_enabled", default: false, null: false
+    t.integer "max_voice_participants_per_channel", default: 25
   end
 
   create_table "invites", force: :cascade do |t|
@@ -347,6 +352,20 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["url"], name: "index_relay_connections_on_url", unique: true
+  end
+
+  create_table "remote_server_references", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "remote_instance_url", null: false
+    t.string "remote_server_id", null: false
+    t.string "invite_code"
+    t.string "name"
+    t.string "icon_url"
+    t.integer "position", default: 0
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "remote_instance_url", "remote_server_id"], name: "idx_remote_server_refs_unique", unique: true
+    t.index ["user_id"], name: "index_remote_server_references_on_user_id"
   end
 
   create_table "remote_users", force: :cascade do |t|
@@ -506,6 +525,28 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
     t.index ["item_type", "item_id"], name: "index_versions_on_item_type_and_item_id"
   end
 
+  create_table "voice_states", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "channel_id", null: false
+    t.bigint "server_id", null: false
+    t.boolean "self_mute", default: false, null: false
+    t.boolean "self_deaf", default: false, null: false
+    t.boolean "server_mute", default: false, null: false
+    t.boolean "server_deaf", default: false, null: false
+    t.boolean "video_on", default: false, null: false
+    t.boolean "screen_share_on", default: false, null: false
+    t.string "session_id", null: false
+    t.string "public_id", limit: 12, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["channel_id"], name: "index_voice_states_on_channel_id"
+    t.index ["public_id"], name: "index_voice_states_on_public_id", unique: true
+    t.index ["server_id"], name: "index_voice_states_on_server_id"
+    t.index ["session_id"], name: "index_voice_states_on_session_id", unique: true
+    t.index ["user_id", "server_id"], name: "index_voice_states_on_user_id_and_server_id", unique: true
+    t.index ["user_id"], name: "index_voice_states_on_user_id"
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "bans", "servers"
@@ -544,6 +585,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
   add_foreign_key "notifications", "users"
   add_foreign_key "reactions", "messages"
   add_foreign_key "reactions", "users"
+  add_foreign_key "remote_server_references", "users"
   add_foreign_key "roles", "servers"
   add_foreign_key "server_emojis", "servers"
   add_foreign_key "server_emojis", "users", column: "creator_id"
@@ -556,4 +598,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_15_110002) do
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
   add_foreign_key "users", "remote_users", column: "remote_user_detail_id"
+  add_foreign_key "voice_states", "channels"
+  add_foreign_key "voice_states", "servers"
+  add_foreign_key "voice_states", "users"
 end

@@ -4,6 +4,7 @@ class SettingsController < ApplicationController
 
   def my_account
     @user = current_user
+    @remote_server_references = current_user.remote_server_references.ordered
   end
 
   def profile

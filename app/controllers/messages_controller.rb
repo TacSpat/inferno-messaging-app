@@ -110,6 +110,8 @@ class MessagesController < ApplicationController
   end
 
   def message_params
-    params.require(:message).permit(:content, :parent_id, files: [])
+    permitted = params.require(:message).permit(:content, :parent_id, files: [])
+    permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
+    permitted
   end
 end

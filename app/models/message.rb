@@ -249,7 +249,7 @@ end
   private
 
   def has_files?
-    files.attached?
+    files.attached? || files.any?
   end
 
   def in_shared_channel?

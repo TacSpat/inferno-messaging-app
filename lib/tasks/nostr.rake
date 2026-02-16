@@ -54,6 +54,21 @@ namespace :nostr do
     puts "\nDone. Jobs queued for processing."
   end
 
+  desc "Generate a Nostr keypair for the instance (paste output into .env)"
+  task generate_instance_keypair: :environment do
+    private_key = Nostr::Key.generate_private_key
+    public_key = Nostr::Key.get_public_key(private_key)
+
+    puts ""
+    puts "Add these to your .env file:"
+    puts ""
+    puts "NOSTR_INSTANCE_PRIVATE_KEY=#{private_key}"
+    puts "NOSTR_INSTANCE_PUBLIC_KEY=#{public_key}"
+    puts ""
+    puts "Public key (npub): #{Nostr::Bech32.encode_npub(public_key)}"
+    puts ""
+  end
+
   desc "Sync allowed pubkeys to strfry relay config file"
   task sync_strfry_pubkeys: :environment do
     output_path = ENV.fetch("STRFRY_PUBKEYS_FILE", "/etc/strfry/allowed_pubkeys.txt")

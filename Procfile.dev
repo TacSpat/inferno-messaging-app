@@ -2,3 +2,4 @@ web: env RUBY_DEBUG_OPEN=true bin/rails server -b 0.0.0.0 -p 3005
 js: bun run build --watch --hot
 css: bunx @tailwindcss/cli -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/tailwind.css --watch=always
 worker: bundle exec sidekiq
+relay: docker run --rm --name strfry-dev -p 7777:7777 --ulimit nofile=1000000:1000000 -v $PWD/config/strfry.conf:/etc/strfry.conf -v strfry_data:/app/strfry-db dockurr/strfry

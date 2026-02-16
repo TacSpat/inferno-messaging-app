@@ -8,12 +8,10 @@ class ServersController < ApplicationController
   end
 
   def create
-    @server = Server.new(server_params)
-    @server.owner = current_user
-    if @server.save
-      redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
+    if params[:instance_url].present? && params[:instance_url] != "local"
+      create_remote_server
     else
-      render :new, status: :unprocessable_entity
+      create_local_server
     end
   end
 
@@ -84,6 +82,30 @@ class ServersController < ApplicationController
   end
 
   private
+
+  def create_local_server
+    @server = Server.new(server_params)
+    @server.owner = current_user
+    if @server.save
+      redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
+    else
+      render :new, status: :unprocessable_entity
+    end
+  end
+
+  def create_remote_server
+    ref = FederationService.create_remote_server(
+      user: current_user,
+      instance_url: params[:instance_url],
+      name: params[:server][:name],
+      description: params[:server][:description]
+    )
+    redirect_to root_path, notice: "Server \"#{ref.name}\" created on #{ref.instance_domain}!"
+  rescue FederationService::FederationError => e
+    @server = Server.new(server_params)
+    flash.now[:alert] = "Failed to create remote server: #{e.message}"
+    render :new, status: :unprocessable_entity
+  end
 
   def set_server
     @server = Server.find_by!(public_id: params[:id])

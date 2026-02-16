@@ -20,6 +20,8 @@ servers:
 proxy:
   ssl: true
   host: app.example.com
+  # To also serve the relay subdomain, add a second proxy rule or use
+  # a separate nginx/caddy config that forwards wss://relay.example.com → strfry:7777
 
 # Credentials for your image host.
 registry:
@@ -35,10 +37,23 @@ registry:
 env:
   secret:
     - RAILS_MASTER_KEY
+    - NOSTR_INSTANCE_PRIVATE_KEY
+    - NOSTR_INSTANCE_PUBLIC_KEY
+    - LIVEKIT_API_KEY
+    - LIVEKIT_API_SECRET
   clear:
     # Run the Solid Queue Supervisor inside the web server's Puma process to do jobs.
     # When you start using multiple servers, you should split out job processing to a dedicated machine.
     SOLID_QUEUE_IN_PUMA: true
+
+    # Instance domain — used for NIP-05, cross-instance auth, allowed hosts, and mailer
+    INSTANCE_DOMAIN: app.example.com
+
+    # Nostr relay URL — advertised in instance metadata for federation
+    INSTANCE_RELAY_URL: wss://relay.example.com
+
+    # LiveKit voice server
+    LIVEKIT_URL: wss://your-livekit-instance.livekit.cloud
 
     # Set number of processes dedicated to Solid Queue (default: 1)
     # JOB_CONCURRENCY: 3
@@ -91,23 +106,28 @@ builder:
 # ssh:
 #   user: app
 
-# Use accessory services (secrets come from .kamal/secrets).
-# accessories:
+# Accessory services (secrets come from .kamal/secrets).
+accessories:
+  strfry:
+    image: dockurr/strfry
+    host: 192.168.0.1
+    # Expose only to localhost — reverse proxy handles public access
+    port: "127.0.0.1:7777:7777"
+    options:
+      ulimit: "nofile=1000000:1000000"
+    files:
+      - config/strfry.conf:/etc/strfry.conf
+    directories:
+      - strfry_data:/app/strfry-db
 #   db:
-#     image: mysql:8.0
+#     image: postgres:16
 #     host: 192.168.0.2
-#     # Change to 3306 to expose port to the world instead of just local network.
-#     port: "127.0.0.1:3306:3306"
+#     port: "127.0.0.1:5432:5432"
 #     env:
-#       clear:
-#         MYSQL_ROOT_HOST: '%'
 #       secret:
-#         - MYSQL_ROOT_PASSWORD
-#     files:
-#       - config/mysql/production.cnf:/etc/mysql/my.cnf
-#       - db/production.sql:/docker-entrypoint-initdb.d/setup.sql
+#         - POSTGRES_PASSWORD
 #     directories:
-#       - data:/var/lib/mysql
+#       - postgres_data:/var/lib/postgresql/data
 #   redis:
 #     image: redis:7.0
 #     host: 192.168.0.2

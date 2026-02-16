@@ -3,8 +3,13 @@ class ApplicationController < ActionController::Base
 
   before_action :configure_permitted_parameters, if: :devise_controller?
   before_action :set_paper_trail_whodunnit
+  before_action :set_current_voice_state
 
   protected
+
+  def set_current_voice_state
+    @current_voice_state = current_user&.voice_states&.includes(:channel)&.first
+  end
 
   def configure_permitted_parameters
     devise_parameter_sanitizer.permit(:sign_up, keys: [:username, :display_name])

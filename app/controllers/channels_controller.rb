@@ -7,16 +7,25 @@ class ChannelsController < ApplicationController
   def show
     # Ensure current user appears online (WebSocket reconnects after page render)
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current) if current_user.offline?
-    @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
-                        .ordered.last(50)
-    @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
-    @message = Message.new
+
     @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
-    current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
-    ChannelRead.upsert(
-      { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
-      unique_by: [:user_id, :channel_id]
-    )
+    @current_membership = current_user.server_memberships.find_by(server: @server)
+
+    if @channel.voice?
+      @voice_states = @channel.voice_states.includes(user: { avatar_attachment: :blob })
+      @current_voice_state = current_user.voice_states.find_by(server: @server)
+      render :show_voice
+    else
+      @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
+                          .ordered.last(50)
+      @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
+      @message = Message.new
+      current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
+      ChannelRead.upsert(
+        { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
+        unique_by: [:user_id, :channel_id]
+      )
+    end
   end
 
   def older_messages

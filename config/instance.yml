@@ -1,0 +1,57 @@
+# Instance configuration — CLI/YAML alternative to admin UI settings.
+#
+# Values here are applied via: rails instance:configure
+#
+# Any value left blank or commented out will not overwrite existing DB settings.
+# This file is safe to commit — no secrets. Sensitive values belong in .env only.
+
+default: &default
+  # --- Identity ---
+  instance_name: "Inferno Chat"
+  instance_description: ""
+
+  # --- Federation / Nostr ---
+  # Your canonical relay URL — advertised in instance metadata and NIP-05 hints.
+  instance_relay_url: ""
+
+  # Relay connections to publish events to (array of ws:// or wss:// URLs).
+  # These are the working relays your instance actually connects to.
+  relay_connections:
+    # - ws://localhost:7777
+
+  # Federation mode: open, allowlist, or closed
+  federation_mode: "open"
+
+  # --- Limits ---
+  max_users: 0              # 0 = unlimited
+  max_servers: 0
+  max_servers_per_user: 5
+  max_channels_per_server: 50
+  max_categories_per_server: 20
+  max_members_per_server: 0
+  max_roles_per_server: 25
+  max_upload_size_mb: 25
+  max_storage_per_user_mb: 0
+
+  # --- Voice ---
+  voice_enabled: false
+  max_voice_participants_per_channel: 25
+
+  # --- Pruning ---
+  pruning_strategy: "none"  # none, time_based, storage_based
+  message_retention_days: 0
+  attachment_retention_days: 0
+  keep_pinned_messages: true
+
+development:
+  <<: *default
+  instance_relay_url: "ws://localhost:7777"
+  relay_connections:
+    - ws://localhost:7777
+  voice_enabled: true
+
+test:
+  <<: *default
+
+production:
+  <<: *default

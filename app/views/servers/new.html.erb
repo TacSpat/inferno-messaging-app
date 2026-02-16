@@ -6,6 +6,23 @@
     </div>
 
     <%= form_with model: @server, url: servers_path, class: "space-y-4" do |f| %>
+      <% if current_user.nostr_public_key.present? %>
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Instance</label>
+          <select name="instance_url" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500">
+            <option value="local">This instance (<%= Rails.application.config.x.instance_domain %>)</option>
+            <% RelayConnection.active.each do |relay| %>
+              <% begin %>
+                <% relay_host = URI.parse(relay.url.gsub(/^wss?:\/\//, "https://")).host %>
+                <option value="https://<%= relay_host %>"><%= relay_host %></option>
+              <% rescue URI::InvalidURIError %>
+              <% end %>
+            <% end %>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">Choose which instance will host this server</p>
+        </div>
+      <% end %>
+
       <div>
         <%= f.label :name, "Server Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
         <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-orange-500 text-sm", placeholder: "My Awesome Server" %>

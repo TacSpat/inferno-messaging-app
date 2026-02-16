@@ -43,6 +43,12 @@ class User < ApplicationRecord
   has_many :gif_collections, dependent: :destroy
   has_many :gif_favorites, dependent: :destroy
 
+  # Remote server references (servers on other instances)
+  has_many :remote_server_references, dependent: :destroy
+
+  # Voice
+  has_many :voice_states, dependent: :destroy
+
   # Notifications
   has_many :notifications, dependent: :destroy
 
@@ -87,6 +93,11 @@ class User < ApplicationRecord
       return membership.nickname if membership&.nickname.present?
     end
     display_name.presence || username
+  end
+
+  def home_instance_domain
+    return nil unless remote?
+    remote_user_detail&.home_instance
   end
 
   def blocked?(user)
