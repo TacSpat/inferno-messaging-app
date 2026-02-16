@@ -30,6 +30,20 @@ export default class extends Controller {
       this.inputTarget.focus()
     }
     document.addEventListener("inferno:reply", this._replyHandler)
+
+    // Measure emoji placeholder width for pixel-perfect overlay
+    this._measureEmojiWidth()
+
+    // Render any existing emoji content (e.g. after page refresh)
+    this._replaceEmojisWithPUA()
+    this.updateHighlight()
+
+    // Re-render when emoji maps load asynchronously
+    this._emojiMapReady = () => {
+      this._replaceEmojisWithPUA()
+      this.updateHighlight()
+    }
+    document.addEventListener("inferno:emoji-map-ready", this._emojiMapReady)
   }
 
   disconnect() {
@@ -38,6 +52,7 @@ export default class extends Controller {
     this.teardownDragAndDrop()
     this.teardownPaste()
     this.teardownFileIntercept()
+    if (this._emojiMapReady) document.removeEventListener("inferno:emoji-map-ready", this._emojiMapReady)
     if (this._replyHandler) document.removeEventListener("inferno:reply", this._replyHandler)
   }
 
@@ -47,6 +62,8 @@ export default class extends Controller {
     this._pasteHandler = (e) => {
       const items = e.clipboardData?.items
       if (!items) return
+      // If clipboard has text, it's a copy-paste (not a screenshot) — let browser handle it
+      if (e.clipboardData.types.includes("text/plain") || e.clipboardData.types.includes("text/html")) return
       const files = []
       for (const item of items) {
         if (item.kind === "file" && item.type.startsWith("image/")) {
@@ -74,9 +91,20 @@ export default class extends Controller {
     const form = this.element.querySelector("form")
     if (!form) return
     this._fileInterceptHandler = (event) => {
-      if (this.fileList.files.length > 0) {
-        const body = event.detail.fetchOptions.body
-        if (body instanceof FormData) {
+      const body = event.detail.fetchOptions.body
+      if (body instanceof FormData) {
+        // Convert emoji placeholders (em-space + PUA) back to :name: before sending
+        const content = body.get("message[content]")
+        if (content && window._emojiReverse) {
+          body.set("message[content]", content.replace(/\u2003([\uE000-\uF8FF])/g, (m, ch, offset, str) => {
+            const name = window._emojiReverse[ch]
+            if (!name) return m
+            const next = str[offset + m.length]
+            return `:${name}:` + (next === '\u2003' ? ' ' : '')
+          }))
+        }
+        // Inject DataTransfer files
+        if (this.fileList.files.length > 0) {
           body.delete("message[files][]")
           for (const file of this.fileList.files) {
             body.append("message[files][]", file)
@@ -219,6 +247,7 @@ export default class extends Controller {
   // --- Input handling ---
 
   handleKeydown(event) {
+    if (this._handleEmojiKeydown(event)) return
     if (event.key === "Enter" && !event.shiftKey) {
       const content = this.inputTarget.value
       const backtickCount = (content.match(/`{3}/g) || []).length
@@ -249,6 +278,7 @@ export default class extends Controller {
   }
 
   autoResize() {
+    this._replaceEmojisWithPUA()
     this.updateHighlight()
     const input = this.inputTarget
     input.style.height = "auto"
@@ -282,8 +312,9 @@ export default class extends Controller {
       case "new_message":
         const welcome = messagesDiv.querySelector(".text-center")
         if (welcome) welcome.remove()
+        const nearBottom = (messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight) < 150
         messagesDiv.insertAdjacentHTML("beforeend", data.html)
-        messagesDiv.scrollTop = messagesDiv.scrollHeight
+        if (nearBottom) messagesDiv.scrollTop = messagesDiv.scrollHeight
         break
       case "update_message":
         const existing = document.getElementById(`message_${data.message_id}`)
@@ -323,8 +354,120 @@ export default class extends Controller {
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
     html = html.replace(/`([^`]+)`/g, '<span class="text-orange-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
     html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-orange-300">$1</span>')
+    // Replace emoji placeholders (em-space + PUA char) with inline images
+    if (window._emojiReverse && window._emojiMap) {
+      html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {
+        const name = window._emojiReverse[ch]
+        if (name && window._emojiMap[name]) {
+          const w = this._emojiCharWidth || 20
+          return `<img src="${window._emojiMap[name]}" style="display:inline;height:${w}px;width:${w}px;object-fit:contain;vertical-align:middle;pointer-events:none">`
+        }
+        return _
+      })
+    }
     if (html.endsWith("\n")) html += "&nbsp;"
     this.highlightTarget.innerHTML = html
     this.highlightTarget.scrollTop = this.inputTarget.scrollTop
+  }
+
+  // Measure exact pixel width of emoji placeholder chars in the textarea font
+  _measureEmojiWidth() {
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')
+    const cs = getComputedStyle(this.inputTarget)
+    ctx.font = `${cs.fontSize} ${cs.fontFamily}`
+    this._emojiCharWidth = ctx.measureText('\u2003\uE000').width
+  }
+
+  // Replace :emoji_name: with em-space + PUA char (2 chars ≈ 1em width)
+  _replaceEmojisWithPUA() {
+    if (!window._emojiPUA || !window._emojiMap) return
+    const input = this.inputTarget
+    const val = input.value
+    if (!val.includes(':')) return
+
+    const selStart = input.selectionStart
+    const selEnd = input.selectionEnd
+    let newVal = ''
+    let i = 0
+    let newStart = selStart
+    let newEnd = selEnd
+
+    while (i < val.length) {
+      if (val[i] === ':') {
+        const rest = val.substring(i + 1)
+        const match = rest.match(/^([a-z0-9_]+):/)
+        if (match && window._emojiPUA[match[1]]) {
+          const fullLen = match[0].length + 1
+          const mEnd = i + fullLen
+          const replacement = '\u2003' + window._emojiPUA[match[1]]
+          const reduction = fullLen - 2
+          newVal += replacement
+          if (selStart >= mEnd) newStart -= reduction
+          else if (selStart > i) newStart = newVal.length
+          if (selEnd >= mEnd) newEnd -= reduction
+          else if (selEnd > i) newEnd = newVal.length
+          i = mEnd
+          continue
+        }
+      }
+      newVal += val[i]
+      i++
+    }
+
+    if (newVal === val) return
+    input.value = newVal
+    input.selectionStart = Math.max(0, newStart)
+    input.selectionEnd = Math.max(0, newEnd)
+  }
+
+  // Treat em-space + PUA pairs as atomic units for navigation
+  _handleEmojiKeydown(event) {
+    if (!window._emojiReverse) return false
+    const input = this.inputTarget
+    const val = input.value
+    const pos = input.selectionStart
+    if (pos !== input.selectionEnd) return false
+
+    if (event.key === 'Backspace') {
+      if (pos >= 2 && val[pos - 2] === '\u2003' && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault()
+        input.value = val.substring(0, pos - 2) + val.substring(pos)
+        input.selectionStart = input.selectionEnd = pos - 2
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      }
+    } else if (event.key === 'Delete') {
+      if (pos <= val.length - 2 && val[pos] === '\u2003' && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault()
+        input.value = val.substring(0, pos) + val.substring(pos + 2)
+        input.selectionStart = input.selectionEnd = pos
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+        return true
+      }
+    } else if (event.key === 'ArrowLeft' && !event.shiftKey) {
+      if (pos >= 2 && val[pos - 2] === '\u2003' && window._emojiReverse[val[pos - 1]]) {
+        event.preventDefault()
+        input.selectionStart = input.selectionEnd = pos - 2
+        return true
+      }
+      if (pos >= 1 && val[pos - 1] === '\u2003' && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault()
+        input.selectionStart = input.selectionEnd = pos - 1
+        return true
+      }
+    } else if (event.key === 'ArrowRight' && !event.shiftKey) {
+      if (pos <= val.length - 2 && val[pos] === '\u2003' && window._emojiReverse[val[pos + 1]]) {
+        event.preventDefault()
+        input.selectionStart = input.selectionEnd = pos + 2
+        return true
+      }
+      if (pos > 0 && val[pos - 1] === '\u2003' && pos < val.length && window._emojiReverse[val[pos]]) {
+        event.preventDefault()
+        input.selectionStart = input.selectionEnd = pos + 1
+        return true
+      }
+    }
+    return false
   }
 }

@@ -1,0 +1,87 @@
+<h2 class="text-xl font-bold text-white mb-6">Stickers</h2>
+
+<!-- Upload Sticker -->
+<% if @current_membership&.has_permission?("create_stickers") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
+<div class="bg-gray-800 rounded-lg p-4 mb-6">
+  <h3 class="text-sm font-semibold text-white mb-3">Upload Sticker</h3>
+  <p class="text-xs text-gray-400 mb-3">PNG, GIF, WebP, or APNG. Max 512KB.</p>
+  <%= form_with url: server_stickers_path(@server), method: :post, html: { multipart: true, class: "space-y-4" } do |f| %>
+    <!-- Upload area -->
+    <div class="flex items-start gap-4">
+      <div id="sticker-preview-area" class="w-28 h-28 rounded-lg bg-gray-700 border-2 border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-orange-500 transition shrink-0 overflow-hidden">
+        <div id="sticker-preview-placeholder" class="text-center">
+          <svg class="w-8 h-8 text-gray-500 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span class="text-xs text-gray-500">Click to select</span>
+        </div>
+        <img id="sticker-preview-img" class="hidden w-full h-full object-contain" alt="Preview">
+      </div>
+      <div class="flex-1 space-y-2">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Name</label>
+          <input type="text" name="server_sticker[name]" id="sticker-name-input" placeholder="Cool sticker" required class="w-full max-w-48 bg-gray-700 text-white text-sm rounded px-3 py-2 outline-none focus:ring-1 focus:ring-orange-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Description (optional)</label>
+          <input type="text" name="server_sticker[description]" placeholder="A cool sticker" class="w-full max-w-48 bg-gray-700 text-white text-sm rounded px-3 py-2 outline-none focus:ring-1 focus:ring-orange-500">
+        </div>
+        <input type="file" name="server_sticker[image]" id="sticker-file-input" accept="image/png,image/gif,image/webp" required class="hidden">
+      </div>
+    </div>
+    <button type="submit" class="bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium px-4 py-2 rounded transition cursor-pointer">Upload Sticker</button>
+  <% end %>
+</div>
+<script>
+  document.addEventListener("turbo:load", function() {
+    const area = document.getElementById("sticker-preview-area")
+    const fileInput = document.getElementById("sticker-file-input")
+    const preview = document.getElementById("sticker-preview-img")
+    const placeholder = document.getElementById("sticker-preview-placeholder")
+    const nameInput = document.getElementById("sticker-name-input")
+    if (!area || !fileInput) return
+
+    area.addEventListener("click", function() { fileInput.click() })
+
+    fileInput.addEventListener("change", function() {
+      const file = this.files[0]
+      if (!file) return
+      preview.src = URL.createObjectURL(file)
+      preview.classList.remove("hidden")
+      placeholder.classList.add("hidden")
+      area.classList.remove("border-dashed")
+      area.classList.add("border-solid", "border-orange-500")
+      if (!nameInput.value) {
+        nameInput.value = file.name.replace(/\.[^.]+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, function(c) { return c.toUpperCase() })
+        nameInput.focus()
+      }
+    })
+  })
+</script>
+<% end %>
+
+<!-- Existing Stickers -->
+<div>
+  <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Stickers (<%= @stickers.count %>/<%= ServerSticker::MAX_STICKERS_PER_SERVER %>)</h3>
+  <% if @stickers.any? %>
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      <% @stickers.each do |sticker| %>
+        <div class="bg-gray-800 rounded-lg p-3 text-center relative group">
+          <% if sticker.image.attached? %>
+            <%= image_tag sticker.image, class: "w-full h-24 object-contain mb-2" %>
+          <% end %>
+          <p class="text-white text-xs font-medium truncate"><%= sticker.name %></p>
+          <% if sticker.description.present? %>
+            <p class="text-gray-500 text-xs truncate"><%= sticker.description %></p>
+          <% end %>
+          <p class="text-gray-600 text-xs mt-0.5">by <%= sticker.creator.username %></p>
+          <% if @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
+            <%= button_to server_sticker_path(@server, sticker), method: :delete, data: { turbo_confirm: "Delete sticker '#{sticker.name}'?" }, class: "absolute top-1 right-1 hidden group-hover:block text-gray-400 hover:text-red-400 transition cursor-pointer" do %>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            <% end %>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+  <% else %>
+    <p class="text-gray-500 text-sm">No stickers yet. Upload one above!</p>
+  <% end %>
+</div>

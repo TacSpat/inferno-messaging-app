@@ -884,9 +884,20 @@ export default class extends Controller {
 
   async deleteMessage(messageId, skipConfirm = false) {
     if (!skipConfirm && !(await this.showConfirm("Delete Message", "Are you sure you want to delete this message? This cannot be undone."))) return
-    const channelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
-    await fetch(`/channels/${channelId}/messages/${messageId}`, {
+    const channelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId
+    const conversationId = document.querySelector("[data-dm-message-form-conversation-id-value]")?.dataset?.dmMessageFormConversationIdValue
+
+    let url
+    if (channelId) {
+      url = `/channels/${channelId}/messages/${messageId}`
+    } else if (conversationId) {
+      url = `/conversations/${conversationId}/dm_messages/${messageId}`
+    } else {
+      return
+    }
+
+    await fetch(url, {
       method: "DELETE",
       headers: { "X-CSRF-Token": csrf }
     })

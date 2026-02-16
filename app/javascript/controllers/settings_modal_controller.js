@@ -1,7 +1,7 @@
 import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
-  static targets = ["overlay", "content", "nav"]
+  static targets = ["overlay", "content", "nav", "sidebar"]
 
   connect() {
     this.handleEsc = (e) => { if (e.key === "Escape") this.close() }
@@ -18,12 +18,22 @@ export default class extends Controller {
   open() {
     this.overlayTarget.classList.remove("hidden")
     document.body.classList.add("overflow-hidden")
-    this.loadSection("my-account")
+
+    // On mobile, show sidebar first so user can pick a section
+    if (window.innerWidth < 768) {
+      this.showNav()
+    } else {
+      this.loadSection("my-account")
+    }
   }
 
   close() {
     this.overlayTarget.classList.add("hidden")
     document.body.classList.remove("overflow-hidden")
+    // Reset sidebar state
+    if (this.hasSidebarTarget) {
+      this.sidebarTarget.style.cssText = ""
+    }
   }
 
   closeOnBackdrop(e) {
@@ -31,19 +41,16 @@ export default class extends Controller {
   }
 
   showNav() {
-    const sidebar = this.overlayTarget.querySelector(".settings-sidebar-mobile")
-    if (sidebar) {
-      sidebar.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;"
-    }
+    if (!this.hasSidebarTarget) return
+    this.sidebarTarget.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;justify-content:flex-start;background-color:#1e1f22;"
   }
 
   async navigate(e) {
     e.preventDefault()
     const section = e.currentTarget.dataset.section
     // On mobile, hide nav overlay after selection
-    const sidebar = this.overlayTarget.querySelector(".settings-sidebar-mobile")
-    if (sidebar && window.innerWidth < 768) {
-      sidebar.style.cssText = ""
+    if (this.hasSidebarTarget && window.innerWidth < 768) {
+      this.sidebarTarget.style.cssText = ""
     }
     this.loadSection(section)
   }
@@ -67,7 +74,6 @@ export default class extends Controller {
   }
 
   async submitForm(e) {
-    console.log("[settings-modal] submitForm triggered")
     e.preventDefault()
     const form = e.target
     const formData = new FormData(form)
@@ -86,7 +92,6 @@ export default class extends Controller {
       this.contentTarget.innerHTML = html
       if (res.ok) {
         this.showToast("Changes saved!")
-        // Reload page after short delay to reflect changes
         setTimeout(() => window.location.assign(window.location.pathname), 1000)
       }
     } catch (err) {

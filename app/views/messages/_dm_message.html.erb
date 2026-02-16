@@ -1,6 +1,26 @@
-<div id="message_<%= message.public_id %>" class="flex items-start py-0.5 px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>">
-  <!-- Avatar -->
-  <div class="shrink-0 mt-0.5 mr-4">
+<div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>">
+  <!-- Mobile: avatar + name inline row -->
+  <div class="flex items-center mb-0.5 sm:hidden">
+    <% if message.user.avatar.attached? %>
+      <%= image_tag message.user.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
+    <% else %>
+      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
+        <%= message.user.username[0].upcase %>
+      </div>
+    <% end %>
+    <span class="ml-2 font-medium text-sm text-white truncate">
+      <%= message.user.display_name.presence || message.user.username %>
+    </span>
+    <span class="ml-2 text-xs text-gray-500 shrink-0">
+      <%= message.created_at.strftime("%l:%M %p").strip %>
+    </span>
+    <% if message.edited? %>
+      <span class="ml-1 text-xs text-gray-500 shrink-0">(edited)</span>
+    <% end %>
+  </div>
+
+  <!-- Desktop: avatar column -->
+  <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
     <% if message.user.avatar.attached? %>
       <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
     <% else %>
@@ -20,7 +40,8 @@
       </div>
     <% end %>
 
-    <div class="flex items-baseline">
+    <!-- Desktop name/timestamp -->
+    <div class="hidden sm:flex items-baseline">
       <span class="font-medium hover:underline cursor-pointer text-sm text-white">
         <%= message.user.display_name.presence || message.user.username %>
       </span>
@@ -41,11 +62,11 @@
         <% message.files.each do |file| %>
           <% if file.content_type&.start_with?("image/") %>
             <div data-attachment-id="<%= file.id %>" class="inline-block">
-              <%= image_tag url_for(file), class: "max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", loading: "lazy", data: { preview_src: url_for(file), preview_filename: file.filename.to_s } %>
+              <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", loading: "lazy", data: { preview_src: url_for(file), preview_filename: file.filename.to_s }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
             </div>
           <% elsif file.content_type&.start_with?("video/") %>
             <div class="inline-block relative rounded-lg overflow-hidden" data-controller="video-player">
-              <video preload="metadata" class="max-w-lg max-h-96 block" src="<%= url_for(file) %>"
+              <video preload="metadata" class="max-w-full sm:max-w-lg max-h-96 block" src="<%= url_for(file) %>"
                      data-video-player-target="video" data-video-src="<%= url_for(file) %>"
                      data-video-filename="<%= file.filename %>"></video>
             </div>

@@ -14,8 +14,9 @@ class User < ApplicationRecord
 
   # Servers
   has_many :server_memberships, dependent: :destroy
-  has_many :servers, through: :server_memberships
+  has_many :servers, -> { order("server_memberships.position ASC, server_memberships.joined_at ASC") }, through: :server_memberships
   has_many :owned_servers, class_name: "Server", foreign_key: :owner_id, dependent: :nullify
+  has_many :server_folders, dependent: :destroy
 
   # Invites
   has_many :created_invites, class_name: "Invite", foreign_key: :creator_id, dependent: :destroy
@@ -37,6 +38,10 @@ class User < ApplicationRecord
   # Conversations
   has_many :conversation_participants, dependent: :destroy
   has_many :conversations, through: :conversation_participants
+
+  # GIF collections & favorites
+  has_many :gif_collections, dependent: :destroy
+  has_many :gif_favorites, dependent: :destroy
 
   # Notifications
   has_many :notifications, dependent: :destroy
@@ -103,6 +108,27 @@ class User < ApplicationRecord
     return "#ffffff" unless membership
     membership.top_role&.color || "#ffffff"
   end
+
+  def ordered_rail_items
+    memberships = server_memberships.includes(:server, :server_folder).ordered
+    folders = server_folders.ordered.includes(server_memberships: :server)
+
+    items = []
+
+    # Add folders with their servers
+    folders.each do |folder|
+      folder_servers = memberships.select { |m| m.server_folder_id == folder.id }.map(&:server)
+      items << { type: :folder, folder: folder, servers: folder_servers, position: folder.position }
+    end
+
+    # Add top-level servers (not in any folder)
+    memberships.select { |m| m.server_folder_id.nil? }.each do |m|
+      items << { type: :server, server: m.server, position: m.position }
+    end
+
+    items.sort_by { |item| item[:position] }
+  end
+
   private
 
   def profile_changed?

@@ -79,6 +79,7 @@ export default class extends Controller {
     // Track scroll position continuously
     this._onScroll = () => {
       this._lastScrollTop = this.element.scrollTop
+      if (!this.isNearBottom()) this._keepingBottom = false
       if (this.isNearBottom()) this.hideNewMessageBar()
       if (this.isNearTop() && !this._initializing) {
         this.loadOlderMessages()
@@ -155,6 +156,16 @@ export default class extends Controller {
 
   _restoreScroll() {
     const savedAnchor = this.getSavedAnchor()
+
+    // Was at bottom — go straight to bottom and stay there as media loads
+    if (savedAnchor === "__bottom__") {
+      this.scrollToBottom()
+      this._lastAnchorId = "__bottom__"
+      this._keepAtBottom()
+      this._finishInit()
+      return
+    }
+
     if (savedAnchor) {
       const el = document.getElementById(`message_${savedAnchor}`)
       if (el) {
@@ -173,8 +184,13 @@ export default class extends Controller {
     if (saved !== null && saved > 0) {
       this.element.scrollTop = saved
       this._lastScrollTop = saved
+      if (this.isNearBottom()) {
+        this.scrollToBottom()
+        this._lastAnchorId = "__bottom__"
+      }
     } else {
       this.scrollToBottom()
+      this._lastAnchorId = "__bottom__"
     }
     this._finishInit()
   }
@@ -198,7 +214,23 @@ export default class extends Controller {
 
   _finishInit() {
     // Single rAF — enough to prevent scroll handler from firing during initial set
-    requestAnimationFrame(() => { this._initializing = false })
+    requestAnimationFrame(() => {
+      this._initializing = false
+      // Force lazy images in viewport to load (Turbo Frame swap can skip them)
+      this._eagerLoadVisibleImages()
+    })
+  }
+
+  _eagerLoadVisibleImages() {
+    const rect = this.element.getBoundingClientRect()
+    this.element.querySelectorAll('img[loading="lazy"]').forEach(img => {
+      if (img.complete) return
+      const imgRect = img.getBoundingClientRect()
+      // If image is within or near the visible scroll area, force it to load
+      if (imgRect.bottom >= rect.top - 200 && imgRect.top <= rect.bottom + 200) {
+        img.loading = "eager"
+      }
+    })
   }
 
   highlightMessage(el, afterScroll = false) {
@@ -268,6 +300,30 @@ export default class extends Controller {
     this.observer?.disconnect()
     try { this.element.removeEventListener("scroll", this._onScroll) } catch {}
     clearInterval(this._saveInterval)
+  }
+
+  // Keep snapping to bottom as media (images, iframes, videos) loads.
+  // Cancelled immediately if the user scrolls away from bottom.
+  _keepAtBottom() {
+    this._keepingBottom = true
+    const snap = () => { if (this._keepingBottom) this.scrollToBottom() }
+    this.element.querySelectorAll("img, iframe, video").forEach(el => {
+      if (el.tagName === "IMG" && !el.complete) {
+        el.addEventListener("load", snap, { once: true })
+      } else if (el.tagName === "IFRAME") {
+        el.addEventListener("load", snap, { once: true })
+      } else if (el.tagName === "VIDEO") {
+        el.addEventListener("loadedmetadata", snap, { once: true })
+      }
+    })
+    // Fallback: periodic re-snap for 2 seconds to catch any layout shifts
+    let count = 0
+    const tick = () => {
+      if (!this._keepingBottom || count++ >= 8) return
+      this.scrollToBottom()
+      setTimeout(tick, 250)
+    }
+    setTimeout(tick, 250)
   }
 
   scrollToBottom() {
@@ -542,8 +598,8 @@ export default class extends Controller {
 
       // Save single anchor per channel — replaces any previous anchor
       if (this.isNearBottom() && !this.hasNewerValue) {
-        this.clearSavedAnchor()
-        this._lastAnchorId = null
+        this._lastAnchorId = "__bottom__"
+        sessionStorage.setItem("channel_anchor_" + this.channelIdValue, "__bottom__")
       } else {
         const anchor = this._findAnchorMessage()
         if (anchor) {

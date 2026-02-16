@@ -2,8 +2,10 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [:invites, :create_invite, :destroy_invite, :update_member]
+  before_action :ensure_permission!, except: [:invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers]
   before_action :ensure_invite_permission!, only: [:invites, :create_invite, :destroy_invite]
+  before_action :ensure_emoji_permission!, only: [:emojis]
+  before_action :ensure_sticker_permission!, only: [:stickers]
   layout "server_settings"
 
   def overview
@@ -132,6 +134,14 @@ class ServerSettingsController < ApplicationController
     redirect_to server_settings_invites_path(@server), notice: "Invite revoked."
   end
 
+  def emojis
+    @emojis = @server.server_emojis.includes(:creator, image_attachment: :blob).order(:name)
+  end
+
+  def stickers
+    @stickers = @server.server_stickers.includes(:creator, image_attachment: :blob).order(:name)
+  end
+
   def audit_log
     server_item_ids = {
       "Server" => [@server.id],
@@ -186,6 +196,18 @@ class ServerSettingsController < ApplicationController
 
   def ensure_invite_permission!
     unless @current_membership&.has_permission?("create_invite") || @current_membership&.has_permission?("manage_invites") || @current_membership&.admin?
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
+    end
+  end
+
+  def ensure_emoji_permission!
+    unless @current_membership&.has_permission?("create_emojis") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin?
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
+    end
+  end
+
+  def ensure_sticker_permission!
+    unless @current_membership&.has_permission?("create_stickers") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin?
       redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
     end
   end
