@@ -58,8 +58,9 @@ class Api::FederationSyncController < ApplicationController
     render json: { status: "ok", synced: synced }
   end
 
-  # GET /api/federation_sync/check_reachable?url=...
-  # Server-side reachability check (avoids cross-origin issues in JS)
+  # GET /api/federation_sync/check_reachable?url=...&prune=1
+  # Server-side reachability check (avoids cross-origin issues in JS).
+  # If prune=1 and unreachable, also destroys the matching remote reference.
   def check_reachable
     url = params[:url].to_s
     if url.blank?
@@ -68,6 +69,24 @@ class Api::FederationSyncController < ApplicationController
     end
 
     reachable = FederationService.reachable?(url)
+
+    if !reachable && params[:prune] == "1"
+      # Destroy matching remote server or conversation reference
+      current_user.remote_server_references.each do |ref|
+        ref_url = ref.remote_server_url || ref.remote_instance_url
+        if ref_url == url
+          ref.destroy
+          break
+        end
+      end
+      current_user.remote_conversation_references.each do |ref|
+        if ref.remote_conversation_url == url
+          ref.destroy
+          break
+        end
+      end
+    end
+
     render json: { reachable: reachable }
   end
 
