@@ -37,7 +37,7 @@ module Nostr
       # Create challenge
       challenge = NostrAuthChallenge.create!(
         nonce: SecureRandom.hex(32),
-        requesting_domain: request.host,
+        requesting_domain: request.host_with_port,
         callback_url: callback_with_home,
         expires_at: 5.minutes.from_now
       )
@@ -47,7 +47,7 @@ module Nostr
       home_signing_url = "#{protocol}://#{home_instance}/auth/nostr/sign?" + {
         challenge: challenge.nonce,
         callback: challenge.callback_url,
-        requesting_domain: request.host
+        requesting_domain: request.host_with_port
       }.to_query
 
       redirect_to home_signing_url, allow_other_host: true
