@@ -81,7 +81,7 @@ Rails.application.routes.draw do
 
   # Servers
   patch :reorder_servers, to: "servers#reorder_servers"
-  resources :servers, only: [:new, :create, :edit, :update, :destroy] do
+  resources :servers, only: [:show, :new, :create, :edit, :update, :destroy] do
     member do
       post :join
       delete :leave
