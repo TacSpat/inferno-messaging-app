@@ -29,6 +29,10 @@ class FederationProfileSyncJob < ApplicationJob
     conversations_data = FederationService.fetch_remote_conversations(home_instance: home, pubkey: pubkey, token: token)
     sync_conversation_references(shadow_user, conversations_data) if conversations_data
 
+    # Sync friends
+    friends_data = FederationService.fetch_remote_friends(home_instance: home, pubkey: pubkey, token: token)
+    sync_friend_references(shadow_user, friends_data) if friends_data
+
     # Sync GIF collections
     gif_data = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey, token: token)
     sync_gif_collections(shadow_user, gif_data) if gif_data
@@ -64,6 +68,34 @@ class FederationProfileSyncJob < ApplicationJob
         .where.not(id: synced_ids)
         .destroy_all
     end
+  end
+
+  def sync_friend_references(shadow_user, data)
+    friends = data["friends"] || []
+    synced_ids = []
+    protocol = Rails.env.development? ? "http" : "https"
+    home_url = "#{protocol}://#{shadow_user.remote_user_detail&.home_instance}"
+
+    friends.each do |friend_data|
+      ref = shadow_user.remote_friend_references.find_or_initialize_by(
+        remote_instance_url: home_url,
+        friend_public_key: friend_data["nostr_public_key"]
+      )
+      ref.update!(
+        friend_username: friend_data["username"],
+        friend_display_name: friend_data["display_name"],
+        friend_discriminator: friend_data["discriminator"],
+        friend_avatar_url: friend_data["avatar_url"],
+        friend_profile_color: friend_data["profile_color"],
+        online_state: friend_data["online_state"] || "offline"
+      )
+      synced_ids << ref.id
+    end
+
+    # Remove stale friend references
+    shadow_user.remote_friend_references
+      .where.not(id: synced_ids)
+      .destroy_all
   end
 
   def sync_gif_collections(shadow_user, data)

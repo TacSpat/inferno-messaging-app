@@ -163,13 +163,14 @@ module Nostr
             invite.increment_uses!
             server.server_memberships.create!(user: shadow_user)
           end
-          redirect_to server_channel_path(server, server.channels.ordered.first),
+          target = server_channel_path(server, server.channels.ordered.first)
+          redirect_to federation_syncing_path(redirect_to: target),
                       notice: "Welcome to #{server.name}!"
           return
         end
       end
 
-      redirect_to root_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
+      redirect_to federation_syncing_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
     end
 
     private

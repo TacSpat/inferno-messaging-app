@@ -14,8 +14,10 @@ class ConversationsController < ApplicationController
     case @tab
     when 'online'
       @friends = current_user.friends.includes(avatar_attachment: :blob).where.not(online_state: :offline).order(:display_name)
+      @remote_friends = current_user.remote_friend_references.online.ordered if current_user.remote?
     when 'all'
       @friends = current_user.friends.includes(avatar_attachment: :blob).order(:display_name)
+      @remote_friends = current_user.remote_friend_references.ordered if current_user.remote?
     when 'pending'
       @incoming = current_user.pending_friend_requests.includes(user: { avatar_attachment: :blob })
       @outgoing = current_user.sent_friend_requests.includes(friend: { avatar_attachment: :blob })

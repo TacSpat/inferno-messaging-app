@@ -8,7 +8,7 @@ class RemoteConversationReference < ApplicationRecord
   scope :ordered, -> { order(last_message_at: :desc, created_at: :desc) }
 
   def remote_conversation_url
-    "#{remote_instance_url}/conversations"
+    "#{remote_instance_url}/conversations/#{remote_conversation_id}"
   end
 
   def display_name

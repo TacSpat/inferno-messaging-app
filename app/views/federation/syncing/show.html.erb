@@ -1,0 +1,106 @@
+<div class="w-full max-w-md mx-auto px-4">
+  <div class="bg-gray-800 rounded-xl shadow-2xl p-8 text-center">
+    <!-- Spinner -->
+    <div id="sync-spinner" class="mx-auto mb-6 w-12 h-12 border-4 border-gray-600 border-t-indigo-500 rounded-full animate-spin"></div>
+
+    <h1 class="text-xl font-semibold text-white mb-2">Syncing your data</h1>
+    <p class="text-sm text-gray-400 mb-6">
+      from <span class="text-gray-300 font-medium"><%= @home_instance %></span>
+    </p>
+
+    <!-- Progress list -->
+    <div id="sync-progress" class="text-left space-y-2 mb-6">
+      <div class="flex items-center gap-2 text-sm text-gray-500" data-sync-item="profile">
+        <span class="sync-icon w-5 h-5 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="4 4"/></svg>
+        </span>
+        <span>Profile</span>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-500" data-sync-item="servers">
+        <span class="sync-icon w-5 h-5 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="4 4"/></svg>
+        </span>
+        <span>Servers</span>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-500" data-sync-item="friends">
+        <span class="sync-icon w-5 h-5 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="4 4"/></svg>
+        </span>
+        <span>Friends</span>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-500" data-sync-item="conversations">
+        <span class="sync-icon w-5 h-5 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="4 4"/></svg>
+        </span>
+        <span>Conversations</span>
+      </div>
+      <div class="flex items-center gap-2 text-sm text-gray-500" data-sync-item="gif_collections">
+        <span class="sync-icon w-5 h-5 flex items-center justify-center shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2" stroke-dasharray="4 4"/></svg>
+        </span>
+        <span>GIF Collections</span>
+      </div>
+    </div>
+
+    <!-- Status message -->
+    <p id="sync-status" class="text-xs text-gray-500">Starting sync...</p>
+  </div>
+</div>
+
+<script>
+  (async function() {
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+    const redirectTo = "<%= j @redirect_to %>";
+    const statusEl = document.getElementById('sync-status');
+    const spinnerEl = document.getElementById('sync-spinner');
+
+    function markItem(key, success) {
+      const item = document.querySelector(`[data-sync-item="${key}"]`);
+      if (!item) return;
+      const icon = item.querySelector('.sync-icon');
+      if (success) {
+        item.classList.remove('text-gray-500');
+        item.classList.add('text-green-400');
+        icon.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+      } else {
+        item.classList.remove('text-gray-500');
+        item.classList.add('text-yellow-400');
+        icon.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M12 3a9 9 0 100 18 9 9 0 000-18z"/></svg>';
+      }
+    }
+
+    try {
+      statusEl.textContent = 'Syncing...';
+      const response = await fetch('/api/federation_sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        }
+      });
+
+      const data = await response.json();
+
+      if (data.status === 'ok') {
+        const synced = data.synced || [];
+        const allItems = ['profile', 'servers', 'friends', 'conversations', 'gif_collections'];
+        allItems.forEach(item => markItem(item, synced.includes(item)));
+
+        spinnerEl.classList.remove('border-t-indigo-500', 'animate-spin');
+        spinnerEl.classList.add('border-t-green-500');
+        spinnerEl.innerHTML = '<svg class="w-8 h-8 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
+        spinnerEl.classList.remove('border-4', 'rounded-full');
+        statusEl.textContent = 'Sync complete! Redirecting...';
+
+        setTimeout(() => { window.location.href = redirectTo; }, 800);
+      } else {
+        statusEl.textContent = data.message || 'Sync skipped.';
+        setTimeout(() => { window.location.href = redirectTo; }, 1500);
+      }
+    } catch (err) {
+      statusEl.textContent = 'Sync failed. Redirecting...';
+      console.error('Federation sync error:', err);
+      setTimeout(() => { window.location.href = redirectTo; }, 2000);
+    }
+  })();
+</script>

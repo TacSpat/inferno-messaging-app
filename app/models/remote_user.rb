@@ -25,6 +25,8 @@ class RemoteUser < ApplicationRecord
     # Ensure shadow user exists
     unless remote_user.shadow_user
       shadow_username = username.presence || "remote_#{public_key[0..7]}"
+      taken = User.where(username: shadow_username).pluck(:discriminator)
+      available = ("0001".."9999").to_a - taken
       shadow = User.new(
         username: shadow_username,
         display_name: display_name.presence || shadow_username,
@@ -33,11 +35,13 @@ class RemoteUser < ApplicationRecord
         remote: true,
         remote_user_detail: remote_user,
         public_id: SecureRandom.alphanumeric(12),
-        profile_color: remote_user.profile_color
+        profile_color: remote_user.profile_color,
+        discriminator: available.sample || "0000"
       )
       # Skip confirmation for remote users
       shadow.skip_confirmation!
       shadow.save!(validate: false)
+      remote_user.reload
     end
 
     remote_user

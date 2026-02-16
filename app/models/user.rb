@@ -46,6 +46,7 @@ class User < ApplicationRecord
   # Remote server references (servers on other instances)
   has_many :remote_server_references, dependent: :destroy
   has_many :remote_conversation_references, dependent: :destroy
+  has_many :remote_friend_references, dependent: :destroy
 
   # Voice
   has_many :voice_states, dependent: :destroy
@@ -100,6 +101,15 @@ class User < ApplicationRecord
   def nip05_identifier
     if remote? && remote_user_detail.present?
       remote_user_detail.nip05_identifier
+    else
+      super
+    end
+  end
+
+  # For remote users, the public key lives on the RemoteUser record
+  def npub
+    if remote? && remote_user_detail&.nostr_public_key.present?
+      Nostr::Bech32.encode_npub(remote_user_detail.nostr_public_key)
     else
       super
     end

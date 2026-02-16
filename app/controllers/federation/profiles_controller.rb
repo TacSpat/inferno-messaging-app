@@ -166,6 +166,33 @@ class Federation::ProfilesController < ApplicationController
     render json: { status: "ok", received: servers.size }
   end
 
+  # GET /federation/profiles/:pubkey/friends
+  def friends
+    user = find_local_user
+    return unless user
+
+    protocol = Rails.env.development? ? "http" : "https"
+    host = request.host_with_port
+
+    friends_data = user.friends.includes(avatar_attachment: :blob).map do |friend|
+      avatar_url = if friend.avatar.attached?
+        rails_blob_url(friend.avatar, host: host, protocol: protocol)
+      end
+
+      {
+        username: friend.username,
+        display_name: friend.display_name,
+        discriminator: friend.discriminator,
+        avatar_url: avatar_url,
+        profile_color: friend.profile_color,
+        nostr_public_key: friend.nostr_public_key,
+        online_state: friend.online_state
+      }
+    end
+
+    render json: { friends: friends_data }
+  end
+
   # GET /federation/profiles/:pubkey/gif_collections
   def gif_collections
     user = find_local_user
