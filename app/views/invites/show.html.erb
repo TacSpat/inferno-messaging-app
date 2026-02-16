@@ -1,7 +1,7 @@
-<div class="flex items-center justify-center min-h-screen bg-gray-900">
+<div class="flex items-center justify-center min-h-screen bg-gray-900 px-4">
   <div class="w-full max-w-sm text-center">
     <!-- Server card -->
-    <div class="bg-gray-800 rounded-lg shadow-xl p-8">
+    <div class="bg-gray-800 rounded-lg shadow-xl p-6 sm:p-8">
       <!-- Server icon -->
       <div class="flex justify-center mb-4">
         <% if @server.icon.attached? %>
@@ -68,12 +68,12 @@
           <% else %>
             <p class="text-xs text-gray-400 mb-2">Have an account on another instance?</p>
           <% end %>
-          <%= form_tag accept_invite_path(@invite.code), method: :post, class: "flex gap-2 #{'mt-2' if @detected_home_instance}", data: { turbo: false } do %>
+          <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2 #{'mt-3' if @detected_home_instance}", data: { turbo: false } do %>
             <%= text_field_tag :home_instance, nil,
                   placeholder: "home.instance.com",
-                  class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500" %>
+                  class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500" %>
             <%= submit_tag "Login via Home Instance",
-                  class: "bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm whitespace-nowrap" %>
+                  class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
           <% end %>
         </div>
       <% end %>
