@@ -164,7 +164,14 @@ module Nostr
     def extract_home_instance(relay_url)
       return nil if relay_url.blank?
       uri = URI.parse(relay_url)
-      uri.host
+      return nil if uri.host.blank?
+      # Include port for non-standard ports (important for dev with localhost)
+      default_port = (uri.scheme == "wss" || uri.scheme == "https") ? 443 : 80
+      if uri.port && uri.port != default_port
+        "#{uri.host}:#{uri.port}"
+      else
+        uri.host
+      end
     rescue URI::InvalidURIError
       nil
     end
