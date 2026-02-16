@@ -4,6 +4,9 @@
     <% if @user.banner.attached? %>
       <%= image_tag @user.banner, class: "w-full h-full object-cover",
           data: { banner_editor_target: "previewBanner" } %>
+    <% elsif @user.effective_banner_url.present? %>
+      <%= image_tag @user.effective_banner_url, class: "w-full h-full object-cover",
+          data: { banner_editor_target: "previewBanner" } %>
     <% else %>
       <div class="w-full h-full bg-gray-700"></div>
       <%= image_tag "", class: "w-full h-full object-cover hidden absolute inset-0",
@@ -18,6 +21,9 @@
            style="background: <%= @user.profile_color_2.presence || @user.profile_color || '#2b2d31' %>">
         <% if @user.avatar.attached? %>
           <%= image_tag @user.avatar, class: "w-full h-full rounded-full object-cover",
+              data: { banner_editor_target: "previewAvatar" } %>
+        <% elsif @user.effective_avatar_url.present? %>
+          <%= image_tag @user.effective_avatar_url, class: "w-full h-full rounded-full object-cover",
               data: { banner_editor_target: "previewAvatar" } %>
         <% else %>
           <%= image_tag "", class: "w-full h-full rounded-full object-cover hidden",
