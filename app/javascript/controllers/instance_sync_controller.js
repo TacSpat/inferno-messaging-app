@@ -36,7 +36,7 @@ export default class extends Controller {
 
     // Server-side reachability check
     try {
-      const checkUrl = `/api/federation_sync/check_reachable?url=${encodeURIComponent(targetUrl)}`
+      const checkUrl = `/api/federation_sync/check_reachable?url=${encodeURIComponent(targetUrl)}&prune=1`
       const check = await fetch(checkUrl)
       if (check.ok) {
         const { reachable } = await check.json()
