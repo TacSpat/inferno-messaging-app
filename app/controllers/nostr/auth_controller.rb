@@ -38,6 +38,9 @@ module Nostr
         expires_at: 5.minutes.from_now
       )
 
+      # Store home instance in session so callback can use it
+      session[:nostr_auth_home_instance] = home_instance
+
       # Redirect to home instance's signing endpoint
       protocol = Rails.env.development? ? "http" : "https"
       home_signing_url = "#{protocol}://#{home_instance}/auth/nostr/sign?" + {
@@ -97,9 +100,8 @@ module Nostr
 
       pubkey = verified_event["pubkey"]
 
-      # Verify pubkey via NIP-05 lookup against home instance
-      relay_tag = (verified_event["tags"] || []).find { |t| t[0] == "relay" }
-      home_instance = extract_home_instance(relay_tag&.dig(1))
+      # Retrieve home instance from session (stored in `new` before redirect)
+      home_instance = session.delete(:nostr_auth_home_instance)
 
       if home_instance.present?
         # Check blocklist again with the verified home instance
