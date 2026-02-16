@@ -72,9 +72,9 @@
 
       <!-- Actions -->
       <div class="flex gap-3">
-        <%= link_to "Cancel", root_path, class: "flex-1 text-center bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2.5 rounded-lg transition text-sm" %>
+        <%= link_to "Cancel", root_path, class: "flex-1 text-center bg-gray-700 hover:bg-gray-600 text-gray-300 font-semibold py-2.5 rounded-lg transition text-sm", data: { turbo: false } %>
 
-        <%= form_with url: nostr_auth_sign_path, method: :post, class: "flex-1" do |f| %>
+        <%= form_with url: nostr_auth_sign_path, method: :post, class: "flex-1", data: { turbo: false } do |f| %>
           <%= f.hidden_field :challenge, value: @challenge %>
           <%= f.hidden_field :callback, value: @callback %>
           <%= f.hidden_field :requesting_domain, value: @requesting_domain %>
