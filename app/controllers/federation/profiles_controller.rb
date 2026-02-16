@@ -132,6 +132,40 @@ class Federation::ProfilesController < ApplicationController
     render json: { conversations: conversations_data }
   end
 
+  # POST /federation/profiles/:pubkey/report_memberships
+  # Remote instances push their server list back to the home instance
+  def report_memberships
+    user = find_local_user
+    return unless user
+
+    servers = params[:servers] || []
+    synced_ids = []
+
+    servers.each do |server_data|
+      ref = user.remote_server_references.find_or_initialize_by(
+        remote_instance_url: server_data[:instance_url],
+        remote_server_id: server_data[:server_id]
+      )
+      ref.update!(
+        name: server_data[:name],
+        icon_url: server_data[:icon_url],
+        invite_code: server_data[:invite_code]
+      )
+      synced_ids << ref.id
+    end
+
+    # Clean up stale references from the reporting instance
+    reporting_url = servers.first&.dig(:instance_url) || servers.first&.dig("instance_url")
+    if reporting_url.present?
+      user.remote_server_references
+        .where(remote_instance_url: reporting_url)
+        .where.not(id: synced_ids)
+        .destroy_all
+    end
+
+    render json: { status: "ok", received: servers.size }
+  end
+
   # GET /federation/profiles/:pubkey/gif_collections
   def gif_collections
     user = find_local_user

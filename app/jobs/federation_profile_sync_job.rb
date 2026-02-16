@@ -14,7 +14,12 @@ class FederationProfileSyncJob < ApplicationJob
 
     # Sync profile data
     profile_data = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey, token: token)
-    remote_user.sync_from_profile_data(profile_data) if profile_data
+    if profile_data
+      remote_user.sync_from_profile_data(profile_data)
+    else
+      # Profile not found (user may have been deleted on home instance)
+      Rails.logger.info("Federation: profile not found for #{pubkey} on #{home}, user may have been deleted")
+    end
 
     # Sync server references
     servers_data = FederationService.fetch_remote_servers(home_instance: home, pubkey: pubkey, token: token)
@@ -27,12 +32,17 @@ class FederationProfileSyncJob < ApplicationJob
     # Sync GIF collections
     gif_data = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey, token: token)
     sync_gif_collections(shadow_user, gif_data) if gif_data
+
+    # Report this instance's server memberships back to home
+    report_memberships_to_home(shadow_user, home, pubkey, token)
   end
 
   private
 
   def sync_server_references(shadow_user, data)
     servers = data["servers"] || []
+    synced_ids = []
+
     servers.each do |server_data|
       ref = shadow_user.remote_server_references.find_or_initialize_by(
         remote_instance_url: server_data["instance_url"],
@@ -43,6 +53,16 @@ class FederationProfileSyncJob < ApplicationJob
         icon_url: server_data["icon_url"],
         invite_code: server_data["invite_code"]
       )
+      synced_ids << ref.id
+    end
+
+    # Remove references from home instance that no longer exist
+    home_url_pattern = servers.first&.dig("instance_url")
+    if home_url_pattern.present?
+      shadow_user.remote_server_references
+        .where(remote_instance_url: home_url_pattern)
+        .where.not(id: synced_ids)
+        .destroy_all
     end
   end
 
@@ -72,8 +92,34 @@ class FederationProfileSyncJob < ApplicationJob
     end
   end
 
+  def report_memberships_to_home(shadow_user, home, pubkey, token)
+    protocol = Rails.env.development? ? "http" : "https"
+    instance_url = "#{protocol}://#{Rails.application.config.x.instance_domain}"
+
+    # Gather this instance's local server memberships for the shadow user
+    local_servers = shadow_user.server_memberships.includes(server: [:invites, { icon_attachment: :blob }]).map do |membership|
+      server = membership.server
+      invite = server.invites.first
+      {
+        server_id: server.public_id,
+        name: server.name,
+        icon_url: nil,
+        invite_code: invite&.code,
+        instance_url: instance_url
+      }
+    end
+
+    return if local_servers.empty?
+
+    FederationService.report_memberships_to_home(
+      home_instance: home, pubkey: pubkey, token: token, servers: local_servers
+    )
+  end
+
   def sync_conversation_references(shadow_user, data)
     conversations = data["conversations"] || []
+    synced_ids = []
+
     conversations.each do |conv_data|
       other = conv_data["other_user"] || {}
       ref = shadow_user.remote_conversation_references.find_or_initialize_by(
@@ -89,6 +135,16 @@ class FederationProfileSyncJob < ApplicationJob
         other_profile_color: other["profile_color"],
         last_message_at: conv_data["last_message_at"]
       )
+      synced_ids << ref.id
+    end
+
+    # Remove conversations from home instance that no longer exist
+    home_url_pattern = conversations.first&.dig("instance_url")
+    if home_url_pattern.present?
+      shadow_user.remote_conversation_references
+        .where(remote_instance_url: home_url_pattern)
+        .where.not(id: synced_ids)
+        .destroy_all
     end
   end
 end

@@ -38,6 +38,7 @@ Rails.application.routes.draw do
     get "profiles/:pubkey/servers", to: "profiles#servers", as: :federation_profile_servers
     get "profiles/:pubkey/conversations", to: "profiles#conversations", as: :federation_profile_conversations
     get "profiles/:pubkey/gif_collections", to: "profiles#gif_collections", as: :federation_profile_gif_collections
+    post "profiles/:pubkey/report_memberships", to: "profiles#report_memberships", as: :federation_profile_report_memberships
   end
 
   # Cross-instance Nostr authentication

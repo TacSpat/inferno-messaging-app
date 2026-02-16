@@ -66,6 +66,11 @@ class FederationService
     fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/gif_collections", token: token)
   end
 
+  # Report this instance's server memberships back to the user's home instance
+  def self.report_memberships_to_home(home_instance:, pubkey:, token: nil, servers:)
+    post_federation_json(home_instance, "/federation/profiles/#{pubkey}/report_memberships", token: token, body: { servers: servers })
+  end
+
   private
 
   def self.fetch_federation_json(home_instance, path, token: nil)
@@ -88,6 +93,30 @@ class FederationService
     JSON.parse(response.body)
   rescue StandardError => e
     Rails.logger.warn("Federation fetch failed for #{home_instance}#{path}: #{e.message}")
+    nil
+  end
+
+  def self.post_federation_json(home_instance, path, token: nil, body: {})
+    protocol = Rails.env.development? ? "http" : "https"
+    requesting_instance = Rails.application.config.x.instance_domain
+    url = "#{protocol}://#{home_instance}#{path}?requesting_instance=#{CGI.escape(requesting_instance)}"
+
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = 5
+    http.read_timeout = 10
+
+    request = Net::HTTP::Post.new(uri.request_uri)
+    request["Content-Type"] = "application/json"
+    request["X-Federation-Token"] = token if token.present?
+    request.body = body.to_json
+    response = http.request(request)
+
+    return nil unless response.code.to_i == 200
+    JSON.parse(response.body)
+  rescue StandardError => e
+    Rails.logger.warn("Federation post failed for #{home_instance}#{path}: #{e.message}")
     nil
   end
 
