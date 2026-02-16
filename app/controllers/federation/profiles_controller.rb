@@ -14,13 +14,15 @@ class Federation::ProfilesController < ApplicationController
       return
     end
 
+    host = request.host_with_port
+
     avatar_url = if user.avatar.attached?
-      rails_blob_url(user.avatar, host: Rails.application.config.x.instance_domain,
+      rails_blob_url(user.avatar, host: host,
                      protocol: Rails.env.development? ? "http" : "https")
     end
 
     banner_url = if user.banner.attached?
-      rails_blob_url(user.banner, host: Rails.application.config.x.instance_domain,
+      rails_blob_url(user.banner, host: host,
                      protocol: Rails.env.development? ? "http" : "https")
     end
 
@@ -29,6 +31,7 @@ class Federation::ProfilesController < ApplicationController
       username: user.username,
       discriminator: user.discriminator,
       display_name: user.display_name,
+      email: user.email,
       bio: user.bio,
       profile_color: user.profile_color,
       profile_color_2: user.profile_color_2,
@@ -36,7 +39,7 @@ class Federation::ProfilesController < ApplicationController
       status: user.status,
       status_emoji: user.status_emoji,
       nip05: user.nip05_identifier,
-      home_instance: Rails.application.config.x.instance_domain,
+      home_instance: host,
       avatar_url: avatar_url,
       banner_url: banner_url,
       synced_at: Time.current.iso8601
@@ -49,9 +52,8 @@ class Federation::ProfilesController < ApplicationController
     return unless user
 
     protocol = Rails.env.development? ? "http" : "https"
-    instance_url = "#{protocol}://#{Rails.application.config.x.instance_domain}"
-
-    host = Rails.application.config.x.instance_domain
+    host = request.host_with_port
+    instance_url = "#{protocol}://#{host}"
 
     servers_data = user.server_memberships.includes(server: [:invites, :server_emojis, :server_stickers, { icon_attachment: :blob }]).map do |membership|
       server = membership.server
@@ -97,7 +99,8 @@ class Federation::ProfilesController < ApplicationController
     return unless user
 
     protocol = Rails.env.development? ? "http" : "https"
-    instance_url = "#{protocol}://#{Rails.application.config.x.instance_domain}"
+    host = request.host_with_port
+    instance_url = "#{protocol}://#{host}"
 
     conversations_data = user.conversations.includes(:participants, :messages).map do |conv|
       other = conv.direct? ? conv.other_user(user) : nil
@@ -105,7 +108,7 @@ class Federation::ProfilesController < ApplicationController
 
       other_data = if other
         avatar_url = if other.avatar.attached?
-          rails_blob_url(other.avatar, host: Rails.application.config.x.instance_domain, protocol: protocol)
+          rails_blob_url(other.avatar, host: host, protocol: protocol)
         end
 
         {
