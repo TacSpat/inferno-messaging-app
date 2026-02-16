@@ -34,8 +34,30 @@ export default class extends Controller {
       console.warn("Instance sync failed:", e)
     }
 
+    // Check if the target is still reachable (not a login redirect)
+    try {
+      const check = await fetch(targetUrl, { method: "GET", redirect: "manual", mode: "no-cors" })
+      // opaqueredirect type means server sent a redirect (likely to login)
+      if (check.type === "opaqueredirect") {
+        this.removeStaleReference()
+        this.hideOverlay()
+        return
+      }
+    } catch (e) {
+      // Cross-origin or network error — remove stale reference
+      this.removeStaleReference()
+      this.hideOverlay()
+      return
+    }
+
     window.open(targetUrl, "_blank", "noopener")
     this.hideOverlay()
+  }
+
+  removeStaleReference() {
+    // Remove this server/conversation from the sidebar
+    const railItem = this.element.closest("[data-rail-item]")
+    if (railItem) railItem.remove()
   }
 
   showOverlay() {
