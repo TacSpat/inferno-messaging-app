@@ -70,7 +70,6 @@ Rails.application.routes.draw do
   # Tenor API proxy & GIF collections
   namespace :api do
     post "federation_sync", to: "federation_sync#create"
-    get "federation_sync/check_reachable", to: "federation_sync#check_reachable"
     get "tenor/search", to: "tenor#search"
     get "tenor/trending", to: "tenor#trending"
     get "tenor/categories", to: "tenor#categories"

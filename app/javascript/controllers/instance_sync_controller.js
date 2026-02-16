@@ -2,7 +2,8 @@ import { Controller } from "@hotwired/stimulus"
 
 // Intercepts clicks on remote instance links.
 // Shows a "Syncing instance info..." overlay, hits the sync endpoint,
-// checks reachability, then navigates to the target URL or shows an error.
+// then navigates to the target URL — or removes the link if the user
+// no longer exists on the home instance.
 export default class extends Controller {
   static values = { url: String }
 
@@ -25,30 +26,20 @@ export default class extends Controller {
 
       if (response.ok) {
         const data = await response.json()
-        this.updateOverlayStatus(data.synced || [])
-        // Brief pause so user sees what synced
-        await new Promise(r => setTimeout(r, 400))
-      }
-    } catch (e) {
-      // Sync failed — continue to reachability check
-      console.warn("Instance sync failed:", e)
-    }
 
-    // Server-side reachability check
-    try {
-      const checkUrl = `/api/federation_sync/check_reachable?url=${encodeURIComponent(targetUrl)}&prune=1`
-      const check = await fetch(checkUrl)
-      if (check.ok) {
-        const { reachable } = await check.json()
-        if (!reachable) {
+        // If home instance is unreachable, the user was likely deleted there
+        if (data.status === "home_unreachable") {
           this.removeStaleReference()
           this.hideOverlay()
           this.showError("That server is no longer reachable — your account may have been removed from that instance.")
           return
         }
+
+        this.updateOverlayStatus(data.synced || [])
+        await new Promise(r => setTimeout(r, 400))
       }
     } catch (e) {
-      console.warn("Reachability check failed:", e)
+      console.warn("Instance sync failed:", e)
     }
 
     window.open(targetUrl, "_blank", "noopener")
