@@ -51,51 +51,16 @@ class Api::FederationSyncController < ApplicationController
       synced << "gif_collections"
     end
 
+    # If profile fetch failed, the user may have been deleted on home instance.
+    # Prune all remote references and signal the client.
+    unless synced.include?("profile")
+      current_user.remote_server_references.destroy_all
+      current_user.remote_conversation_references.destroy_all
+      render json: { status: "home_unreachable", synced: synced }
+      return
+    end
+
     render json: { status: "ok", synced: synced }
-  end
-
-  # GET /api/federation_sync/check_reachable?url=...
-  # Checks if the current user's account still exists on the remote instance
-  # by hitting the federation profile endpoint. If not, prunes the matching reference.
-  def check_reachable
-    url = params[:url].to_s
-    if url.blank? || !current_user.remote?
-      render json: { reachable: false }
-      return
-    end
-
-    remote_user = current_user.remote_user_detail
-    unless remote_user
-      render json: { reachable: false }
-      return
-    end
-
-    # Check if the user's profile still exists on their home instance
-    profile = FederationService.fetch_remote_profile(
-      home_instance: remote_user.home_instance,
-      pubkey: remote_user.nostr_public_key,
-      token: remote_user.federation_token
-    )
-
-    if profile
-      render json: { reachable: true }
-    else
-      # Profile gone — prune the matching reference
-      current_user.remote_server_references.each do |ref|
-        if (ref.remote_server_url || ref.remote_instance_url) == url
-          ref.destroy
-          break
-        end
-      end
-      current_user.remote_conversation_references.each do |ref|
-        if ref.remote_conversation_url == url
-          ref.destroy
-          break
-        end
-      end
-
-      render json: { reachable: false }
-    end
   end
 
   private
