@@ -63,13 +63,16 @@ class InvitesController < ApplicationController
     referer = request.referer
     return nil if referer.blank?
 
-    referer_host = URI.parse(referer).host
-    return nil if referer_host.blank?
+    referer_uri = URI.parse(referer)
+    return nil if referer_uri.host.blank?
 
-    # Don't suggest federation auth if the referer is this same instance
-    return nil if referer_host == request.host
+    # Compare host:port to handle localhost with different ports (dev)
+    referer_authority = "#{referer_uri.host}:#{referer_uri.port}"
+    local_authority = "#{request.host}:#{request.port}"
+    return nil if referer_authority == local_authority
 
-    referer_host
+    # Return host:port for localhost (dev), just host for production
+    referer_uri.host == "localhost" ? referer_authority : referer_uri.host
   rescue URI::InvalidURIError
     nil
   end
