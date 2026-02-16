@@ -5,6 +5,16 @@ class RelayConnection < ApplicationRecord
   validates :url, format: { with: /\Awss?:\/\/.+/i, message: "must be a WebSocket URL (wss:// or ws://)" }
   validates :status, inclusion: { in: STATUSES }
 
+  def self.find_or_create_for_relay(relay_url)
+    relay_url = relay_url.to_s.strip
+    return nil if relay_url.blank? || !relay_url.match?(/\Awss?:\/\/.+/i)
+    find_or_create_by(url: relay_url) do |conn|
+      conn.status = "active"
+    end
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+    find_by(url: relay_url)
+  end
+
   scope :active, -> { where(status: "active") }
   scope :connectable, -> { active }
 

@@ -23,6 +23,12 @@ class Federation::ServersController < ApplicationController
       return render json: { error: "Instance is blocked" }, status: :forbidden
     end
 
+    # Auto-create relay connection from event's relay tag
+    relay_tag = (event_data["tags"] || []).find { |t| t[0] == "relay" }
+    if relay_tag&.dig(1).present?
+      RelayConnection.find_or_create_for_relay(relay_tag[1])
+    end
+
     # Find or create the remote user
     content = JSON.parse(event_data["content"]) rescue {}
     remote_user = RemoteUser.find_or_create_from_auth(

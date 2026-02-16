@@ -32,7 +32,8 @@ module Nostr
       callback_params = {
         event: encoded_event,
         username: current_user.username,
-        display_name: current_user.display_name
+        display_name: current_user.display_name,
+        home_relay: InstanceConfig.current.instance_relay_url
       }
 
       redirect_url = "#{callback}?#{callback_params.to_query}"
