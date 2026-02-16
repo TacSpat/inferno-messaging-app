@@ -30,16 +30,17 @@ module Nostr
         return
       end
 
+      # Embed home_instance in the callback URL (sessions are unreliable
+      # when both instances share localhost cookies in dev)
+      callback_with_home = "#{nostr_auth_callback_url}?home_instance=#{CGI.escape(home_instance)}"
+
       # Create challenge
       challenge = NostrAuthChallenge.create!(
         nonce: SecureRandom.hex(32),
         requesting_domain: request.host,
-        callback_url: nostr_auth_callback_url,
+        callback_url: callback_with_home,
         expires_at: 5.minutes.from_now
       )
-
-      # Store home instance in session so callback can use it
-      session[:nostr_auth_home_instance] = home_instance
 
       # Redirect to home instance's signing endpoint
       protocol = Rails.env.development? ? "http" : "https"
@@ -100,8 +101,8 @@ module Nostr
 
       pubkey = verified_event["pubkey"]
 
-      # Retrieve home instance from session (stored in `new` before redirect)
-      home_instance = session.delete(:nostr_auth_home_instance)
+      # Home instance is passed through the callback URL params
+      home_instance = params[:home_instance]&.strip&.downcase
 
       if home_instance.present?
         # Check blocklist again with the verified home instance
