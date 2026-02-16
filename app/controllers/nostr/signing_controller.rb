@@ -35,12 +35,14 @@ module Nostr
       )
 
       # Build callback URL with the signed event and optional profile info
+      # Note: home_instance is already embedded in the callback URL by the
+      # requesting instance's auth controller — don't re-add it here as
+      # instance_domain may lack the port number in development.
       callback_params = {
         event: encoded_event,
         username: current_user.username,
         display_name: current_user.display_name,
         home_relay: InstanceConfig.current.instance_relay_url,
-        home_instance: Rails.application.config.x.instance_domain,
         profile_color: current_user.profile_color,
         discriminator: current_user.discriminator,
         federation_token: federation_token
