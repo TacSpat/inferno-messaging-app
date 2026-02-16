@@ -18,6 +18,7 @@ class Friendship < ApplicationRecord
         f.status = :accepted
       end
     end
+    notify_remote_acceptance if federation_callback_token.present? && user.remote?
   end
 
   private
@@ -39,5 +40,20 @@ class Friendship < ApplicationRecord
 
   def publish_nostr_contacts
     NostrPublishJob.perform_later(user_id, :contacts)
+  end
+
+  def notify_remote_acceptance
+    home = user.remote_user_detail&.home_instance
+    return unless home
+
+    protocol = Rails.env.development? ? "http" : "https"
+    FederationService.notify_friend_response(
+      instance_url: "#{protocol}://#{home}",
+      callback_token: federation_callback_token,
+      status: "accepted",
+      responder: friend
+    )
+  rescue => e
+    Rails.logger.warn("Federation: failed to notify remote acceptance: #{e.message}")
   end
 end

@@ -30,6 +30,13 @@ class Api::FederationSyncController < ApplicationController
       synced << "servers"
     end
 
+    # Friends
+    friends_data = FederationService.fetch_remote_friends(home_instance: home, pubkey: pubkey, token: token)
+    if friends_data
+      sync_friend_references(current_user, home, friends_data)
+      synced << "friends"
+    end
+
     # Conversations
     conversations_data = FederationService.fetch_remote_conversations(home_instance: home, pubkey: pubkey, token: token)
     if conversations_data
@@ -61,6 +68,33 @@ class Api::FederationSyncController < ApplicationController
         invite_code: server_data["invite_code"]
       )
     end
+  end
+
+  def sync_friend_references(user, home_instance, data)
+    friends = data["friends"] || []
+    synced_ids = []
+    protocol = Rails.env.development? ? "http" : "https"
+    home_url = "#{protocol}://#{home_instance}"
+
+    friends.each do |friend_data|
+      ref = user.remote_friend_references.find_or_initialize_by(
+        remote_instance_url: home_url,
+        friend_public_key: friend_data["nostr_public_key"]
+      )
+      ref.update!(
+        friend_username: friend_data["username"],
+        friend_display_name: friend_data["display_name"],
+        friend_discriminator: friend_data["discriminator"],
+        friend_avatar_url: friend_data["avatar_url"],
+        friend_profile_color: friend_data["profile_color"],
+        online_state: friend_data["online_state"] || "offline"
+      )
+      synced_ids << ref.id
+    end
+
+    user.remote_friend_references
+      .where.not(id: synced_ids)
+      .destroy_all
   end
 
   def sync_conversation_references(user, data)

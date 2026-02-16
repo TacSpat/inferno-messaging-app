@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_080002) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_16_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -139,6 +139,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_080002) do
     t.integer "status", default: 0, null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.string "federation_callback_token"
     t.index ["friend_id"], name: "index_friendships_on_friend_id"
     t.index ["user_id", "friend_id"], name: "index_friendships_on_user_id_and_friend_id", unique: true
     t.index ["user_id"], name: "index_friendships_on_user_id"
@@ -369,6 +370,22 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_080002) do
     t.datetime "updated_at", null: false
     t.index ["user_id", "remote_instance_url", "remote_conversation_id"], name: "idx_remote_conv_refs_unique", unique: true
     t.index ["user_id"], name: "index_remote_conversation_references_on_user_id"
+  end
+
+  create_table "remote_friend_references", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "remote_instance_url", null: false
+    t.string "friend_username"
+    t.string "friend_display_name"
+    t.string "friend_discriminator"
+    t.string "friend_avatar_url"
+    t.string "friend_profile_color"
+    t.string "friend_public_key"
+    t.string "online_state", default: "offline"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["user_id", "remote_instance_url", "friend_public_key"], name: "idx_remote_friends_unique", unique: true
+    t.index ["user_id"], name: "index_remote_friend_references_on_user_id"
   end
 
   create_table "remote_server_references", force: :cascade do |t|
@@ -612,6 +629,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_080002) do
   add_foreign_key "reactions", "messages"
   add_foreign_key "reactions", "users"
   add_foreign_key "remote_conversation_references", "users"
+  add_foreign_key "remote_friend_references", "users"
   add_foreign_key "remote_server_references", "users"
   add_foreign_key "roles", "servers"
   add_foreign_key "server_emojis", "servers"

@@ -37,13 +37,19 @@
 
   <!-- Remote server references -->
   <% current_user.remote_server_references.ordered.each do |ref| %>
+    <% is_remote_gif = ref.icon_url.present? && ref.icon_url.to_s.match?(/\.gif(\?|$)/i) %>
     <div data-rail-item="remote-server" class="relative" data-controller="instance-sync" data-instance-sync-url-value="<%= ref.remote_server_url || ref.remote_instance_url %>">
       <a href="<%= ref.remote_server_url || ref.remote_instance_url %>"
          data-action="click->instance-sync#navigate"
-         class="group relative flex items-center justify-center w-12 h-12 rounded-2xl bg-gray-700 hover:bg-indigo-600 hover:rounded-xl transition-all duration-200 cursor-pointer"
+         class="group relative flex items-center justify-center w-12 h-12 rounded-2xl overflow-hidden bg-gray-700 hover:bg-indigo-600 hover:rounded-xl transition-all duration-200 cursor-pointer<%= ' server-icon-gif' if is_remote_gif %>"
          title="<%= ref.name %> — <%= ref.instance_domain %>">
         <% if ref.icon_url.present? %>
-          <%= image_tag ref.icon_url, class: "w-full h-full rounded-2xl object-cover hover:rounded-xl transition-all duration-200" %>
+          <% if is_remote_gif %>
+            <canvas class="gif-static w-full h-full object-cover absolute inset-0" data-gif-freeze></canvas>
+            <%= image_tag ref.icon_url, class: "gif-animated w-full h-full object-cover absolute inset-0", data: { gif_src: true } %>
+          <% else %>
+            <%= image_tag ref.icon_url, class: "w-full h-full rounded-2xl object-cover hover:rounded-xl transition-all duration-200" %>
+          <% end %>
         <% else %>
           <span class="text-white font-semibold text-sm"><%= ref.name&.split&.map(&:first)&.join&.slice(0, 2)&.upcase || "?" %></span>
         <% end %>
