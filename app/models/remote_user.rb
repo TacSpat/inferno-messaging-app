@@ -75,7 +75,10 @@ class RemoteUser < ApplicationRecord
         status: data["status"],
         status_emoji: data["status_emoji"]
       }
-      attrs[:email] = data["email"] if data["email"].present?
+      if data["email"].present?
+        shadow_user.skip_reconfirmation!
+        attrs[:email] = data["email"]
+      end
       shadow_user.update!(attrs)
     end
   end
