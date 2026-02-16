@@ -66,7 +66,7 @@ class RemoteUser < ApplicationRecord
 
     # Sync display fields to shadow user
     if shadow_user
-      shadow_user.update!(
+      attrs = {
         display_name: data["display_name"].presence || shadow_user.display_name,
         bio: data["bio"],
         profile_color: data["profile_color"],
@@ -74,7 +74,9 @@ class RemoteUser < ApplicationRecord
         banner_offset_y: data["banner_offset_y"],
         status: data["status"],
         status_emoji: data["status_emoji"]
-      )
+      }
+      attrs[:email] = data["email"] if data["email"].present?
+      shadow_user.update!(attrs)
     end
   end
 
