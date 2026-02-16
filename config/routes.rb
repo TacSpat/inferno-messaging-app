@@ -31,6 +31,11 @@ Rails.application.routes.draw do
   get "/.well-known/nostr.json", to: "nostr/well_known#show", as: :nostr_well_known
   get "/.well-known/instance.json", to: "nostr/instance_metadata#show", as: :instance_metadata
 
+  # Federation API (cross-instance server creation)
+  namespace :federation do
+    post :create_server, to: "servers#create"
+  end
+
   # Cross-instance Nostr authentication
   # Remote instance side: initiate auth + receive callback
   get  "auth/nostr",          to: "nostr/auth#new",      as: :nostr_auth
@@ -83,6 +88,9 @@ Rails.application.routes.draw do
         get :around_messages
         post :bridge, controller: "shared_channels"
         delete :unbridge, controller: "shared_channels"
+        post :join_voice, to: "voice_channels#join"
+        post :refresh_voice_token, to: "voice_channels#refresh_token"
+        delete :leave_voice, to: "voice_channels#leave"
       end
     end
     resources :categories, only: [:new, :create, :edit, :update, :destroy]
@@ -159,6 +167,24 @@ Rails.application.routes.draw do
 
   # Moderation reports (user-facing)
   resources :moderation_reports, only: [:create]
+
+  # LiveKit webhooks
+  post "/livekit/webhooks", to: "livekit_webhooks#create"
+
+  # Voice state self-updates
+  patch "voice_states/self_mute", to: "voice_states#self_mute"
+  patch "voice_states/self_deafen", to: "voice_states#self_deafen"
+
+  # Voice participant context menu & moderation
+  resources :voice_states, only: [] do
+    member do
+      get :context_menu
+      patch :server_mute
+      patch :server_deafen
+      post :kick
+      post :move
+    end
+  end
 
   # Notifications
   post "notifications/mark_read", to: "notifications#mark_read"

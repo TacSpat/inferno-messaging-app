@@ -28,7 +28,14 @@ class Role < ApplicationRecord
     manage_server: false,
     kick_members: false,
     ban_members: false,
-    administrator: false
+    administrator: false,
+    connect_voice: true,
+    speak: true,
+    video: true,
+    screen_share: true,
+    mute_members: false,
+    deafen_members: false,
+    move_members: false
   }.freeze
 
   ADMIN_PERMISSIONS = DEFAULT_PERMISSIONS.merge(
@@ -42,7 +49,10 @@ class Role < ApplicationRecord
     manage_roles: true,
     kick_members: true,
     ban_members: true,
-    administrator: true
+    administrator: true,
+    mute_members: true,
+    deafen_members: true,
+    move_members: true
   ).freeze
 
   OWNER_PERMISSIONS = ADMIN_PERMISSIONS.merge(

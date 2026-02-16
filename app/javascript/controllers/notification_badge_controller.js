@@ -472,9 +472,9 @@ export default class extends Controller {
       return
     }
 
-    // Channel item
+    // Channel item (skip if right-clicking a voice participant — those have their own context menu)
     const channelEl = event.target.closest("[data-channel-id]")
-    if (channelEl) {
+    if (channelEl && !event.target.closest("[data-voice-state-id]")) {
       event.preventDefault()
       this.closeMenu()
       this.showChannelContextMenu(event.clientX, event.clientY, channelEl.dataset.channelId)

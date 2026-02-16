@@ -1,6 +1,9 @@
 require "active_support/core_ext/integer/time"
 
 Rails.application.configure do
+  # Allow Tailscale HTTPS proxy hostname
+  config.hosts << "beast-mint.tail84ddc9.ts.net"
+
   # Configure 'rails notes' to inspect Cucumber files
   config.annotations.register_directories('features')
   config.annotations.register_extensions('feature') { |tag| /#\s*(#{tag}):?\s*(.*)$/ }

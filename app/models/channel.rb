@@ -7,6 +7,7 @@ class Channel < ApplicationRecord
   has_many :messages, dependent: :destroy
   has_many :channel_reads, dependent: :destroy
   has_many :nostr_event_logs, dependent: :destroy
+  has_many :voice_states, dependent: :destroy
 
   def unread_for?(user)
     last_message_at = messages.maximum(:created_at)

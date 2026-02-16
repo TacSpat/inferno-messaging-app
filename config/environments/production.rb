@@ -57,7 +57,7 @@ Rails.application.configure do
   # config.action_mailer.raise_delivery_errors = false
 
   # Set host to be used by links generated in mailer templates.
-  config.action_mailer.default_url_options = { host: "example.com" }
+  config.action_mailer.default_url_options = { host: ENV.fetch("INSTANCE_DOMAIN", "example.com") }
 
   # Specify outgoing SMTP server. Remember to add smtp/* credentials via rails credentials:edit.
   # config.action_mailer.smtp_settings = {
@@ -79,11 +79,21 @@ Rails.application.configure do
   config.active_record.attributes_for_inspect = [ :id ]
 
   # Enable DNS rebinding protection and other `Host` header attacks.
-  # config.hosts = [
-  #   "example.com",     # Allow requests from example.com
-  #   /.*\.example\.com/ # Allow requests from subdomains like `www.example.com`
-  # ]
-  #
-  # Skip DNS rebinding protection for the default health check endpoint.
-  # config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+  # Set INSTANCE_DOMAIN to your domain (e.g., chat.example.com).
+  # Also allows relay subdomain automatically.
+  if ENV["INSTANCE_DOMAIN"].present?
+    config.hosts << ENV["INSTANCE_DOMAIN"]
+    config.hosts << ".#{ENV['INSTANCE_DOMAIN']}" # subdomains (relay.*, www.*, etc.)
+  end
+
+  # Skip DNS rebinding protection for the health check endpoint.
+  config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
+
+  # ActionCable allowed origins — must match your domain for WebSocket connections
+  if ENV["INSTANCE_DOMAIN"].present?
+    config.action_cable.allowed_request_origins = [
+      "https://#{ENV['INSTANCE_DOMAIN']}",
+      "wss://#{ENV['INSTANCE_DOMAIN']}"
+    ]
+  end
 end

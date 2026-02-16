@@ -33,6 +33,15 @@ const PERMISSION_GROUPS = {
     kick_members: "Remove members from the server",
     ban_members: "Permanently ban members"
   },
+  Voice: {
+    connect_voice: "Join voice channels",
+    speak: "Speak in voice channels",
+    video: "Send video in voice channels",
+    screen_share: "Share their screen in voice channels",
+    mute_members: "Server-mute other members in voice",
+    deafen_members: "Server-deafen other members in voice",
+    move_members: "Move members between voice channels"
+  },
   Dangerous: {
     administrator: "Full admin access — bypasses all permission checks"
   }

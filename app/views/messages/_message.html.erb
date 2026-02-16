@@ -30,6 +30,9 @@
         <span class="ml-2 font-medium text-sm truncate" style="color: <%= message.user.role_color_for(server) %>">
           <%= message.user.display_name_for(server) %>
         </span>
+        <% if message.user.remote? %>
+          <span class="ml-1 text-[10px] text-indigo-400/70 bg-indigo-500/10 px-1 rounded"><%= message.user.home_instance_domain %></span>
+        <% end %>
         <span class="ml-2 text-xs text-gray-500 shrink-0">
           <%= message.created_at.strftime("%l:%M %p").strip %>
         </span>
@@ -66,6 +69,9 @@
           <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= message.user.role_color_for(server) %>">
             <%= message.user.display_name_for(server) %>
           </span>
+          <% if message.user.remote? %>
+            <span class="ml-1 text-[10px] text-indigo-400/70 bg-indigo-500/10 px-1 rounded"><%= message.user.home_instance_domain %></span>
+          <% end %>
           <span class="ml-2 text-xs text-gray-500">
             <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
           </span>

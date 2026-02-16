@@ -13,7 +13,7 @@ export default class extends Controller {
         received: (data) => this.handleReceived(data)
       }
     )
-    this.fileList = new DataTransfer()
+    this.pendingFiles = []
     this.typingUsers = new Map()
     this._lastTypingSent = 0
     this._submitting = false
@@ -103,40 +103,84 @@ export default class extends Controller {
     }
   }
 
-  // --- Intercept form submission to inject DataTransfer files ---
+  // --- Direct form submission (bypasses Turbo for reliable file uploads) ---
 
   setupFileIntercept() {
     const form = this.element.querySelector("form")
     if (!form) return
-    this._fileInterceptHandler = (event) => {
-      const body = event.detail.fetchOptions.body
-      if (body instanceof FormData) {
-        // Convert emoji placeholders (em-space + PUA) back to :name: before sending
-        const content = body.get("message[content]")
-        if (content && window._emojiReverse) {
-          body.set("message[content]", content.replace(/\u2003([\uE000-\uF8FF])/g, (m, ch, offset, str) => {
-            const name = window._emojiReverse[ch]
-            if (!name) return m
-            const next = str[offset + m.length]
-            return `:${name}:` + (next === '\u2003' ? ' ' : '')
-          }))
-        }
-        // Inject DataTransfer files
-        if (this.fileList.files.length > 0) {
-          body.delete("message[files][]")
-          for (const file of this.fileList.files) {
-            body.append("message[files][]", file)
-          }
-        }
-      }
+    this._formSubmitHandler = (event) => {
+      event.preventDefault()
+      this.submitMessage()
     }
-    form.addEventListener("turbo:before-fetch-request", this._fileInterceptHandler)
+    form.addEventListener("submit", this._formSubmitHandler)
   }
 
   teardownFileIntercept() {
     const form = this.element.querySelector("form")
-    if (form && this._fileInterceptHandler) {
-      form.removeEventListener("turbo:before-fetch-request", this._fileInterceptHandler)
+    if (form && this._formSubmitHandler) {
+      form.removeEventListener("submit", this._formSubmitHandler)
+    }
+  }
+
+  async submitMessage() {
+    if (this._submitting) return
+    const form = this.element.querySelector("form")
+    if (!form) return
+
+    const content = this.inputTarget.value.trim()
+    const hasFiles = this.pendingFiles.length > 0
+    if (!content && !hasFiles) return
+
+    this._submitting = true
+
+    const formData = new FormData(form)
+
+    // Remove empty file input entries and inject real files from array
+    formData.delete("message[files][]")
+    if (hasFiles) {
+      for (const file of this.pendingFiles) {
+        formData.append("message[files][]", file)
+      }
+    }
+
+    // Convert emoji placeholders (em-space + PUA) back to :name: before sending
+    let msgContent = formData.get("message[content]")
+    if (msgContent && window._emojiReverse) {
+      msgContent = msgContent.replace(/\u2003([\uE000-\uF8FF])/g, (m, ch, offset, str) => {
+        const name = window._emojiReverse[ch]
+        if (!name) return m
+        const next = str[offset + m.length]
+        return `:${name}:` + (next === '\u2003' ? ' ' : '')
+      })
+      formData.set("message[content]", msgContent)
+    }
+
+    const token = document.querySelector("meta[name=csrf-token]")?.content
+    try {
+      const response = await fetch(form.action, {
+        method: "POST",
+        headers: {
+          "Accept": "text/vnd.turbo-stream.html, text/html, application/xhtml+xml",
+          "X-CSRF-Token": token,
+        },
+        body: formData
+      })
+
+      if (response.ok) {
+        this.inputTarget.value = ""
+        this.updateHighlight()
+        this.inputTarget.style.height = "auto"
+        this.inputTarget.style.fontFamily = ""
+        this.inputTarget.style.fontSize = ""
+        if (this.inputTarget.parentElement) this.inputTarget.parentElement.style.backgroundColor = ""
+        this.pendingFiles = []
+        this.renderPreviews()
+        this.clearReply()
+      }
+    } catch(e) {
+      console.error("Message send failed:", e)
+    } finally {
+      this._submitting = false
     }
   }
 
@@ -184,38 +228,30 @@ export default class extends Controller {
   handleFileSelect(event) {
     this.addFiles(event.target.files)
     event.target.value = ""
-    this.syncFileInput()
   }
 
   addFiles(files) {
     for (const file of files) {
-      this.fileList.items.add(file)
+      this.pendingFiles.push(file)
     }
-    this.syncFileInput()
     this.renderPreviews()
   }
 
   removeFile(event) {
     const index = parseInt(event.currentTarget.dataset.index)
-    this.fileList.items.remove(index)
-    this.syncFileInput()
+    this.pendingFiles.splice(index, 1)
     this.renderPreviews()
-  }
-
-  syncFileInput() {
-    const input = this.element.querySelector("input[type=file]")
-    if (input) input.files = this.fileList.files
   }
 
   renderPreviews() {
     const container = this.filePreviewTarget
     container.innerHTML = ""
-    if (this.fileList.files.length === 0) {
+    if (this.pendingFiles.length === 0) {
       container.classList.add("hidden")
       return
     }
     container.classList.remove("hidden")
-    Array.from(this.fileList.files).forEach((file, i) => {
+    this.pendingFiles.forEach((file, i) => {
       const wrapper = document.createElement("div")
       wrapper.className = "relative inline-flex items-center bg-gray-700 rounded-lg p-2 mr-2 mb-2"
 
@@ -327,28 +363,22 @@ export default class extends Controller {
         return
       }
       event.preventDefault()
-      if (this._submitting) return
-      const trimmed = content.trim()
-      const fileInput = this.element.querySelector("input[type=file]")
-      const hasFiles = fileInput && fileInput.files.length > 0
-      if (!trimmed && !hasFiles) return
-      this._submitting = true
-      const form = event.target.closest("form")
-      if (form) form.requestSubmit()
+      this.submitMessage()
     }
   }
 
   handleSubmit(event) {
+    // Legacy handler for turbo:submit-end — no longer used since we submit via fetch directly
+    // Kept for backwards compatibility if the form is submitted via other means
     this._submitting = false
-    if (event.detail.success) {
+    if (event.detail?.success) {
       this.inputTarget.value = ""
       this.updateHighlight()
       this.inputTarget.style.height = "auto"
       this.inputTarget.style.fontFamily = ""
       this.inputTarget.style.fontSize = ""
       if (this.inputTarget.parentElement) this.inputTarget.parentElement.style.backgroundColor = ""
-      this.fileList = new DataTransfer()
-      this.syncFileInput()
+      this.pendingFiles = []
       this.renderPreviews()
       this.clearReply()
     }
