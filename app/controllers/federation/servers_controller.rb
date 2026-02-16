@@ -142,7 +142,13 @@ class Federation::ServersController < ApplicationController
     return nil unless relay_tag
 
     uri = URI.parse(relay_tag[1])
-    uri.host
+    return nil if uri.host.blank?
+    default_port = (uri.scheme == "wss" || uri.scheme == "https") ? 443 : 80
+    if uri.port && uri.port != default_port
+      "#{uri.host}:#{uri.port}"
+    else
+      uri.host
+    end
   rescue URI::InvalidURIError
     nil
   end
