@@ -36,7 +36,8 @@ module Nostr
         home_relay: InstanceConfig.current.instance_relay_url
       }
 
-      redirect_url = "#{callback}?#{callback_params.to_query}"
+      separator = callback.include?("?") ? "&" : "?"
+      redirect_url = "#{callback}#{separator}#{callback_params.to_query}"
       redirect_to redirect_url, allow_other_host: true
     end
 
