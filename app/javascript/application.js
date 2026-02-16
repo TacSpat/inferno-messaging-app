@@ -86,6 +86,7 @@ import DirtyFormController from "./controllers/dirty_form_controller"
 import FrameLoadingController from "./controllers/frame_loading_controller"
 import VoiceChannelController from "./controllers/voice_channel_controller"
 import VoiceContextController from "./controllers/voice_context_controller"
+import InstanceSyncController from "./controllers/instance_sync_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -118,4 +119,5 @@ application.register("dirty-form", DirtyFormController)
 application.register("frame-loading", FrameLoadingController)
 application.register("voice-channel", VoiceChannelController)
 application.register("voice-context", VoiceContextController)
+application.register("instance-sync", InstanceSyncController)
 // rebuild trigger

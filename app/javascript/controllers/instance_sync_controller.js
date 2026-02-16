@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 
 // Intercepts clicks on remote instance links.
 // Shows a "Syncing instance info..." overlay, hits the sync endpoint,
-// then navigates to the target URL.
+// checks reachability, then navigates to the target URL or shows an error.
 export default class extends Controller {
   static values = { url: String }
 
@@ -30,11 +30,11 @@ export default class extends Controller {
         await new Promise(r => setTimeout(r, 400))
       }
     } catch (e) {
-      // Sync failed — navigate anyway
+      // Sync failed — continue to reachability check
       console.warn("Instance sync failed:", e)
     }
 
-    // Server-side reachability check (avoids cross-origin issues)
+    // Server-side reachability check
     try {
       const checkUrl = `/api/federation_sync/check_reachable?url=${encodeURIComponent(targetUrl)}`
       const check = await fetch(checkUrl)
@@ -43,6 +43,7 @@ export default class extends Controller {
         if (!reachable) {
           this.removeStaleReference()
           this.hideOverlay()
+          this.showError("That server is no longer reachable — your account may have been removed from that instance.")
           return
         }
       }
@@ -55,13 +56,19 @@ export default class extends Controller {
   }
 
   removeStaleReference() {
-    // Remove this server/conversation from the sidebar
     const railItem = this.element.closest("[data-rail-item]")
     if (railItem) railItem.remove()
   }
 
+  showError(message) {
+    const toast = document.createElement("div")
+    toast.className = "fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg"
+    toast.setAttribute("data-controller", "toast")
+    toast.textContent = message
+    document.body.appendChild(toast)
+  }
+
   showOverlay() {
-    // Reuse existing overlay or create one
     let overlay = document.getElementById("instance-sync-overlay")
     if (!overlay) {
       overlay = document.createElement("div")
