@@ -166,8 +166,10 @@ class FederationService
     )
   end
 
-  # Quick reachability check — HEAD request with short timeout
-  # Returns true if the URL responds with any 2xx/3xx status
+  # Quick reachability check — GET request with short timeout.
+  # Returns true if the URL responds with a 2xx status.
+  # Returns false if unreachable, 4xx/5xx, or redirects to a login page
+  # (meaning the user's shadow account was deleted on that instance).
   def self.reachable?(url)
     uri = URI.parse(url)
     http = Net::HTTP.new(uri.host, uri.port)
@@ -175,9 +177,20 @@ class FederationService
     http.open_timeout = 3
     http.read_timeout = 3
 
-    request = Net::HTTP::Head.new(uri.request_uri)
+    request = Net::HTTP::Get.new(uri.request_uri)
     response = http.request(request)
-    response.code.to_i < 400
+    code = response.code.to_i
+
+    return true if code >= 200 && code < 300
+
+    # Redirect to login means user no longer exists there
+    if code >= 300 && code < 400
+      location = response["Location"].to_s
+      return false if location.match?(/sign_in|login|session/i)
+      return true
+    end
+
+    false
   rescue StandardError
     false
   end
