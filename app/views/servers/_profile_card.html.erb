@@ -3,6 +3,9 @@
     <% if member.banner.attached? %>
       <%= image_tag member.banner, class: "w-full h-full object-cover",
           style: "object-position: center #{(member.banner_offset_y || 0)}px;" %>
+    <% elsif member.effective_banner_url.present? %>
+      <%= image_tag member.effective_banner_url, class: "w-full h-full object-cover",
+          style: "object-position: center #{(member.banner_offset_y || 0)}px;" %>
     <% else %>
       <div class="w-full h-full bg-gray-700"></div>
     <% end %>
@@ -13,6 +16,8 @@
            style="background: <%= member.profile_color_2.presence || member.profile_color || '#2b2d31' %>">
         <% if member.avatar.attached? %>
           <%= image_tag member.avatar, class: "w-full h-full rounded-full object-cover" %>
+        <% elsif member.effective_avatar_url.present? %>
+          <%= image_tag member.effective_avatar_url, class: "w-full h-full rounded-full object-cover" %>
         <% else %>
           <div class="w-full h-full rounded-full flex items-center justify-center text-xl font-bold text-white"
                style="background-color: <%= member.profile_color || '#2b2d31' %>">

@@ -45,6 +45,7 @@ class User < ApplicationRecord
 
   # Remote server references (servers on other instances)
   has_many :remote_server_references, dependent: :destroy
+  has_many :remote_conversation_references, dependent: :destroy
 
   # Voice
   has_many :voice_states, dependent: :destroy
@@ -95,9 +96,32 @@ class User < ApplicationRecord
     display_name.presence || username
   end
 
+  # Override NIP-05 for remote users: delegate to home instance identifier
+  def nip05_identifier
+    if remote? && remote_user_detail.present?
+      remote_user_detail.nip05_identifier
+    else
+      super
+    end
+  end
+
   def home_instance_domain
     return nil unless remote?
     remote_user_detail&.home_instance
+  end
+
+  # Returns remote avatar URL for remote users without a local attachment
+  def effective_avatar_url
+    return nil if avatar.attached?
+    return nil unless remote?
+    remote_user_detail&.avatar_url
+  end
+
+  # Returns remote banner URL for remote users without a local attachment
+  def effective_banner_url
+    return nil if banner.attached?
+    return nil unless remote?
+    remote_user_detail&.banner_url
   end
 
   def blocked?(user)

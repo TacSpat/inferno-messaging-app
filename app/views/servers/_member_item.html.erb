@@ -22,6 +22,8 @@
   <div class="relative">
     <% if member.avatar.attached? %>
       <%= image_tag member.avatar, class: "w-8 h-8 rounded-full object-cover" %>
+    <% elsif member.effective_avatar_url.present? %>
+      <%= image_tag member.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
     <% else %>
       <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= member.profile_color || '#2b2d31' %>">
         <%= member.username[0].upcase %>

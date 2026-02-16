@@ -22,6 +22,8 @@
       <div class="flex items-center mb-0.5 sm:hidden">
         <% if message.user.avatar.attached? %>
           <%= image_tag message.user.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
+        <% elsif message.user.effective_avatar_url.present? %>
+          <%= image_tag message.user.effective_avatar_url, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
         <% else %>
           <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
             <%= message.user.username[0].upcase %>
@@ -45,6 +47,8 @@
       <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
         <% if message.user.avatar.attached? %>
           <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
+        <% elsif message.user.effective_avatar_url.present? %>
+          <%= image_tag message.user.effective_avatar_url, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
         <% else %>
           <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
             <%= message.user.username[0].upcase %>

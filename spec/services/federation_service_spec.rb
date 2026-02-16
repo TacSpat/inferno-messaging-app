@@ -150,4 +150,85 @@ RSpec.describe FederationService do
       end
     end
   end
+
+  describe ".fetch_remote_profile" do
+    let(:pubkey) { SecureRandom.hex(32) }
+    let(:home) { "home.chat" }
+    let(:profile_json) do
+      { username: "alice", display_name: "Alice", bio: "Hi" }.to_json
+    end
+
+    it "returns parsed JSON on success" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}/)
+        .to_return(status: 200, body: profile_json, headers: { "Content-Type" => "application/json" })
+
+      result = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey)
+      expect(result["username"]).to eq("alice")
+    end
+
+    it "includes federation token in request header" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}/)
+        .to_return(status: 200, body: profile_json, headers: { "Content-Type" => "application/json" })
+
+      FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey, token: "my-token")
+
+      expect(WebMock).to have_requested(:get, /federation\/profiles/)
+        .with(headers: { "X-Federation-Token" => "my-token" })
+    end
+
+    it "returns nil on 404" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}/)
+        .to_return(status: 404, body: { error: "Not found" }.to_json)
+
+      result = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey)
+      expect(result).to be_nil
+    end
+
+    it "returns nil on network error" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}/)
+        .to_timeout
+
+      result = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey)
+      expect(result).to be_nil
+    end
+  end
+
+  describe ".fetch_remote_servers" do
+    let(:pubkey) { SecureRandom.hex(32) }
+    let(:home) { "home.chat" }
+
+    it "returns parsed JSON on success" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}\/servers/)
+        .to_return(status: 200, body: { servers: [{ name: "S1" }] }.to_json, headers: { "Content-Type" => "application/json" })
+
+      result = FederationService.fetch_remote_servers(home_instance: home, pubkey: pubkey)
+      expect(result["servers"].length).to eq(1)
+    end
+  end
+
+  describe ".fetch_remote_conversations" do
+    let(:pubkey) { SecureRandom.hex(32) }
+    let(:home) { "home.chat" }
+
+    it "returns parsed JSON on success" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}\/conversations/)
+        .to_return(status: 200, body: { conversations: [] }.to_json, headers: { "Content-Type" => "application/json" })
+
+      result = FederationService.fetch_remote_conversations(home_instance: home, pubkey: pubkey)
+      expect(result["conversations"]).to eq([])
+    end
+  end
+
+  describe ".fetch_remote_gif_collections" do
+    let(:pubkey) { SecureRandom.hex(32) }
+    let(:home) { "home.chat" }
+
+    it "returns parsed JSON on success" do
+      stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}\/gif_collections/)
+        .to_return(status: 200, body: { gif_collections: [] }.to_json, headers: { "Content-Type" => "application/json" })
+
+      result = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey)
+      expect(result["gif_collections"]).to eq([])
+    end
+  end
 end

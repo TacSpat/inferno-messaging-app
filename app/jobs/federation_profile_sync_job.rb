@@ -1,0 +1,94 @@
+class FederationProfileSyncJob < ApplicationJob
+  queue_as :default
+
+  def perform(remote_user_id)
+    remote_user = RemoteUser.find_by(id: remote_user_id)
+    return unless remote_user
+
+    shadow_user = remote_user.shadow_user
+    return unless shadow_user
+
+    home = remote_user.home_instance
+    pubkey = remote_user.nostr_public_key
+    token = remote_user.federation_token
+
+    # Sync profile data
+    profile_data = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey, token: token)
+    remote_user.sync_from_profile_data(profile_data) if profile_data
+
+    # Sync server references
+    servers_data = FederationService.fetch_remote_servers(home_instance: home, pubkey: pubkey, token: token)
+    sync_server_references(shadow_user, servers_data) if servers_data
+
+    # Sync conversation references
+    conversations_data = FederationService.fetch_remote_conversations(home_instance: home, pubkey: pubkey, token: token)
+    sync_conversation_references(shadow_user, conversations_data) if conversations_data
+
+    # Sync GIF collections
+    gif_data = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey, token: token)
+    sync_gif_collections(shadow_user, gif_data) if gif_data
+  end
+
+  private
+
+  def sync_server_references(shadow_user, data)
+    servers = data["servers"] || []
+    servers.each do |server_data|
+      ref = shadow_user.remote_server_references.find_or_initialize_by(
+        remote_instance_url: server_data["instance_url"],
+        remote_server_id: server_data["server_id"]
+      )
+      ref.update!(
+        name: server_data["name"],
+        icon_url: server_data["icon_url"],
+        invite_code: server_data["invite_code"]
+      )
+    end
+  end
+
+  def sync_gif_collections(shadow_user, data)
+    collections = data["gif_collections"] || []
+    collections.each do |coll_data|
+      collection = shadow_user.gif_collections.find_or_initialize_by(name: coll_data["name"])
+      collection.icon = coll_data["icon"]
+      collection.position = coll_data["position"] || 0
+      collection.save!
+
+      favorites = coll_data["favorites"] || []
+      favorites.each do |fav_data|
+        fav = shadow_user.gif_favorites.find_or_initialize_by(
+          gif_collection: collection,
+          tenor_gif_id: fav_data["tenor_gif_id"]
+        )
+        fav.assign_attributes(
+          tenor_url: fav_data["tenor_url"],
+          preview_url: fav_data["preview_url"],
+          gif_url: fav_data["gif_url"],
+          description: fav_data["description"],
+          position: fav_data["position"] || 0
+        )
+        fav.save!
+      end
+    end
+  end
+
+  def sync_conversation_references(shadow_user, data)
+    conversations = data["conversations"] || []
+    conversations.each do |conv_data|
+      other = conv_data["other_user"] || {}
+      ref = shadow_user.remote_conversation_references.find_or_initialize_by(
+        remote_instance_url: conv_data["instance_url"],
+        remote_conversation_id: conv_data["conversation_id"]
+      )
+      ref.update!(
+        kind: conv_data["kind"],
+        name: conv_data["name"],
+        other_username: other["username"],
+        other_display_name: other["display_name"],
+        other_avatar_url: other["avatar_url"],
+        other_profile_color: other["profile_color"],
+        last_message_at: conv_data["last_message_at"]
+      )
+    end
+  end
+end
