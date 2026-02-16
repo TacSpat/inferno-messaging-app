@@ -166,6 +166,22 @@ class FederationService
     )
   end
 
+  # Quick reachability check — HEAD request with short timeout
+  # Returns true if the URL responds with any 2xx/3xx status
+  def self.reachable?(url)
+    uri = URI.parse(url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = 3
+    http.read_timeout = 3
+
+    request = Net::HTTP::Head.new(uri.request_uri)
+    response = http.request(request)
+    response.code.to_i < 400
+  rescue StandardError
+    false
+  end
+
   # Push a conversation reference to a remote instance
   def self.push_conversation_reference(instance_url:, for_pubkey:, conversation_id:, other_user:)
     instance_url = normalize_instance_url(instance_url)

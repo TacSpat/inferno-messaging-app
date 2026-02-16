@@ -51,6 +51,10 @@ class Api::FederationSyncController < ApplicationController
       synced << "gif_collections"
     end
 
+    # Prune unreachable remote references
+    prune_stale_references(current_user)
+    synced << "pruned_stale"
+
     render json: { status: "ok", synced: synced }
   end
 
@@ -138,5 +142,29 @@ class Api::FederationSyncController < ApplicationController
         fav.save!
       end
     end
+  end
+
+  # Check remote server and conversation references are still reachable.
+  # Remove any that point to instances/resources we can no longer reach.
+  def prune_stale_references(user)
+    this_instance = Rails.application.config.x.instance_domain
+
+    # Prune remote server references (skip servers on this instance)
+    user.remote_server_references.each do |ref|
+      next if ref.remote_instance_url&.include?(this_instance)
+      unless FederationService.reachable?(ref.remote_server_url || ref.remote_instance_url)
+        ref.destroy
+      end
+    end
+
+    # Prune remote conversation references (skip conversations hosted here)
+    user.remote_conversation_references.each do |ref|
+      next if ref.remote_instance_url&.include?(this_instance)
+      unless FederationService.reachable?(ref.remote_conversation_url)
+        ref.destroy
+      end
+    end
+  rescue StandardError => e
+    Rails.logger.warn("Federation: prune_stale_references failed: #{e.message}")
   end
 end
