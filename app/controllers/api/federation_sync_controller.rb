@@ -51,30 +51,38 @@ class Api::FederationSyncController < ApplicationController
       synced << "gif_collections"
     end
 
-    # Prune unreachable remote references
-    prune_stale_references(current_user)
-    synced << "pruned_stale"
-
     render json: { status: "ok", synced: synced }
   end
 
-  # GET /api/federation_sync/check_reachable?url=...&prune=1
-  # Server-side reachability check (avoids cross-origin issues in JS).
-  # If prune=1 and unreachable, also destroys the matching remote reference.
+  # GET /api/federation_sync/check_reachable?url=...
+  # Checks if the current user's account still exists on the remote instance
+  # by hitting the federation profile endpoint. If not, prunes the matching reference.
   def check_reachable
     url = params[:url].to_s
-    if url.blank?
+    if url.blank? || !current_user.remote?
       render json: { reachable: false }
       return
     end
 
-    reachable = FederationService.reachable?(url)
+    remote_user = current_user.remote_user_detail
+    unless remote_user
+      render json: { reachable: false }
+      return
+    end
 
-    if !reachable && params[:prune] == "1"
-      # Destroy matching remote server or conversation reference
+    # Check if the user's profile still exists on their home instance
+    profile = FederationService.fetch_remote_profile(
+      home_instance: remote_user.home_instance,
+      pubkey: remote_user.nostr_public_key,
+      token: remote_user.federation_token
+    )
+
+    if profile
+      render json: { reachable: true }
+    else
+      # Profile gone — prune the matching reference
       current_user.remote_server_references.each do |ref|
-        ref_url = ref.remote_server_url || ref.remote_instance_url
-        if ref_url == url
+        if (ref.remote_server_url || ref.remote_instance_url) == url
           ref.destroy
           break
         end
@@ -85,9 +93,9 @@ class Api::FederationSyncController < ApplicationController
           break
         end
       end
-    end
 
-    render json: { reachable: reachable }
+      render json: { reachable: false }
+    end
   end
 
   private
@@ -176,27 +184,4 @@ class Api::FederationSyncController < ApplicationController
     end
   end
 
-  # Check remote server and conversation references are still reachable.
-  # Remove any that point to instances/resources we can no longer reach.
-  def prune_stale_references(user)
-    this_instance = Rails.application.config.x.instance_domain
-
-    # Prune remote server references (skip servers on this instance)
-    user.remote_server_references.each do |ref|
-      next if ref.remote_instance_url&.include?(this_instance)
-      unless FederationService.reachable?(ref.remote_server_url || ref.remote_instance_url)
-        ref.destroy
-      end
-    end
-
-    # Prune remote conversation references (skip conversations hosted here)
-    user.remote_conversation_references.each do |ref|
-      next if ref.remote_instance_url&.include?(this_instance)
-      unless FederationService.reachable?(ref.remote_conversation_url)
-        ref.destroy
-      end
-    end
-  rescue StandardError => e
-    Rails.logger.warn("Federation: prune_stale_references failed: #{e.message}")
-  end
 end
