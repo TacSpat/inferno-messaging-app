@@ -58,6 +58,19 @@ class Api::FederationSyncController < ApplicationController
     render json: { status: "ok", synced: synced }
   end
 
+  # GET /api/federation_sync/check_reachable?url=...
+  # Server-side reachability check (avoids cross-origin issues in JS)
+  def check_reachable
+    url = params[:url].to_s
+    if url.blank?
+      render json: { reachable: false }
+      return
+    end
+
+    reachable = FederationService.reachable?(url)
+    render json: { reachable: reachable }
+  end
+
   private
 
   def sync_server_references(user, data)

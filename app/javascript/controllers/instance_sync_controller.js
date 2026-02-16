@@ -34,20 +34,20 @@ export default class extends Controller {
       console.warn("Instance sync failed:", e)
     }
 
-    // Check if the target is still reachable (not a login redirect)
+    // Server-side reachability check (avoids cross-origin issues)
     try {
-      const check = await fetch(targetUrl, { method: "GET", redirect: "manual", mode: "no-cors" })
-      // opaqueredirect type means server sent a redirect (likely to login)
-      if (check.type === "opaqueredirect") {
-        this.removeStaleReference()
-        this.hideOverlay()
-        return
+      const checkUrl = `/api/federation_sync/check_reachable?url=${encodeURIComponent(targetUrl)}`
+      const check = await fetch(checkUrl)
+      if (check.ok) {
+        const { reachable } = await check.json()
+        if (!reachable) {
+          this.removeStaleReference()
+          this.hideOverlay()
+          return
+        }
       }
     } catch (e) {
-      // Cross-origin or network error — remove stale reference
-      this.removeStaleReference()
-      this.hideOverlay()
-      return
+      console.warn("Reachability check failed:", e)
     }
 
     window.open(targetUrl, "_blank", "noopener")
