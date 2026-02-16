@@ -39,9 +39,6 @@ class FederationProfileSyncJob < ApplicationJob
 
     # Report this instance's server memberships back to home
     report_memberships_to_home(shadow_user, home, pubkey, token)
-
-    # Prune unreachable remote references
-    prune_stale_references(shadow_user)
   end
 
   private
@@ -183,23 +180,4 @@ class FederationProfileSyncJob < ApplicationJob
     end
   end
 
-  def prune_stale_references(user)
-    this_instance = Rails.application.config.x.instance_domain
-
-    user.remote_server_references.each do |ref|
-      next if ref.remote_instance_url&.include?(this_instance)
-      unless FederationService.reachable?(ref.remote_server_url || ref.remote_instance_url)
-        ref.destroy
-      end
-    end
-
-    user.remote_conversation_references.each do |ref|
-      next if ref.remote_instance_url&.include?(this_instance)
-      unless FederationService.reachable?(ref.remote_conversation_url)
-        ref.destroy
-      end
-    end
-  rescue StandardError => e
-    Rails.logger.warn("Federation: prune_stale_references failed: #{e.message}")
-  end
 end
