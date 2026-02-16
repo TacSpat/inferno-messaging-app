@@ -8,7 +8,10 @@ class RemoteServerReference < ApplicationRecord
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
 
   def remote_server_url
-    "#{remote_instance_url}/invite/#{invite_code}" if invite_code.present?
+    return nil unless invite_code.present?
+    base = "#{remote_instance_url}/invite/#{invite_code}"
+    home_domain = Rails.application.config.x.instance_domain
+    home_domain.present? ? "#{base}?from=#{home_domain}" : base
   end
 
   def instance_domain

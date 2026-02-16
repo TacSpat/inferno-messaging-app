@@ -39,7 +39,8 @@ module Nostr
       )
 
       # Redirect to home instance's signing endpoint
-      home_signing_url = "https://#{home_instance}/auth/nostr/sign?" + {
+      protocol = Rails.env.development? ? "http" : "https"
+      home_signing_url = "#{protocol}://#{home_instance}/auth/nostr/sign?" + {
         challenge: challenge.nonce,
         callback: challenge.callback_url,
         requesting_domain: request.host
@@ -130,6 +131,30 @@ module Nostr
 
       # Sign in the shadow user via Devise
       sign_in(shadow_user)
+
+      # Auto-create relay connection for home instance
+      if params[:home_relay].present?
+        RelayConnection.find_or_create_for_relay(params[:home_relay])
+      end
+
+      # Redeem pending invite
+      if (code = session.delete(:pending_invite_code))
+        invite = Invite.find_by(code: code)
+        if invite&.usable?
+          server = invite.server
+          unless shadow_user.servers.include?(server)
+            if shadow_user.remote? && InstanceConfig.current.remote_joins_blocked?
+              redirect_to root_path, alert: "Remote user joins are currently disabled."
+              return
+            end
+            invite.increment_uses!
+            server.server_memberships.create!(user: shadow_user)
+          end
+          redirect_to server_channel_path(server, server.channels.ordered.first),
+                      notice: "Welcome to #{server.name}!"
+          return
+        end
+      end
 
       redirect_to root_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
     end

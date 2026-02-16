@@ -82,6 +82,49 @@ RSpec.describe RelayConnection, type: :model do
     end
   end
 
+  describe ".find_or_create_for_relay" do
+    it "creates an active relay connection for a valid wss:// URL" do
+      relay = RelayConnection.find_or_create_for_relay("wss://relay.home.com")
+
+      expect(relay).to be_persisted
+      expect(relay.url).to eq("wss://relay.home.com")
+      expect(relay.status).to eq("active")
+    end
+
+    it "creates an active relay connection for a valid ws:// URL" do
+      relay = RelayConnection.find_or_create_for_relay("ws://relay.home.com")
+
+      expect(relay).to be_persisted
+      expect(relay.url).to eq("ws://relay.home.com")
+      expect(relay.status).to eq("active")
+    end
+
+    it "returns existing relay if already present" do
+      existing = create(:relay_connection, url: "wss://relay.home.com")
+      result = RelayConnection.find_or_create_for_relay("wss://relay.home.com")
+
+      expect(result.id).to eq(existing.id)
+      expect(RelayConnection.where(url: "wss://relay.home.com").count).to eq(1)
+    end
+
+    it "returns nil for blank URL" do
+      expect(RelayConnection.find_or_create_for_relay("")).to be_nil
+      expect(RelayConnection.find_or_create_for_relay(nil)).to be_nil
+    end
+
+    it "returns nil for non-WebSocket URL" do
+      expect(RelayConnection.find_or_create_for_relay("https://example.com")).to be_nil
+      expect(RelayConnection.find_or_create_for_relay("ftp://relay.com")).to be_nil
+    end
+
+    it "strips whitespace from URLs" do
+      relay = RelayConnection.find_or_create_for_relay("  wss://relay.home.com  ")
+
+      expect(relay).to be_persisted
+      expect(relay.url).to eq("wss://relay.home.com")
+    end
+  end
+
   describe "status predicates" do
     it "#active? returns true for active status" do
       expect(build(:relay_connection, status: "active").active?).to be true

@@ -46,8 +46,9 @@
         <div class="px-4 py-3 flex items-center justify-between gap-4">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
-              <span class="text-sm text-gray-300 font-mono select-all truncate"><%= request.base_url %>/invite/<%= invite.code %></span>
-              <button type="button" onclick="navigator.clipboard.writeText('<%= request.base_url %>/invite/<%= invite.code %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-orange-400 hover:text-orange-300 text-xs font-semibold shrink-0">Copy</button>
+              <% invite_link = "#{request.base_url}/invite/#{invite.code}?from=#{Rails.application.config.x.instance_domain}" %>
+              <span class="text-sm text-gray-300 font-mono select-all truncate"><%= invite_link %></span>
+              <button type="button" onclick="navigator.clipboard.writeText('<%= invite_link %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-orange-400 hover:text-orange-300 text-xs font-semibold shrink-0">Copy</button>
             </div>
             <div class="flex items-center gap-3 text-xs text-gray-500">
               <span>by <%= invite.creator.username %></span>
