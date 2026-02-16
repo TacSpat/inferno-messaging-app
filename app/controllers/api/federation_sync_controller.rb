@@ -2,13 +2,19 @@ class Api::FederationSyncController < ApplicationController
   before_action :authenticate_user!
 
   # POST /api/federation_sync
-  # Re-syncs data from a remote instance (or home instance for shadow users)
+  # For remote (shadow) users: re-syncs data from home instance.
+  # For local users: checks if their account still exists on the target remote instance.
   def create
-    unless current_user.remote? && current_user.remote_user_detail.present?
-      render json: { status: "skipped", message: "Not a remote user" }
-      return
+    if current_user.remote? && current_user.remote_user_detail.present?
+      sync_remote_user
+    else
+      check_local_user_remote_access
     end
+  end
 
+  private
+
+  def sync_remote_user
     remote_user = current_user.remote_user_detail
     home = remote_user.home_instance
     pubkey = remote_user.nostr_public_key
@@ -16,43 +22,36 @@ class Api::FederationSyncController < ApplicationController
 
     synced = []
 
-    # Profile
     profile_data = FederationService.fetch_remote_profile(home_instance: home, pubkey: pubkey, token: token)
     if profile_data
       remote_user.sync_from_profile_data(profile_data)
       synced << "profile"
     end
 
-    # Servers
     servers_data = FederationService.fetch_remote_servers(home_instance: home, pubkey: pubkey, token: token)
     if servers_data
       sync_server_references(current_user, servers_data)
       synced << "servers"
     end
 
-    # Friends
     friends_data = FederationService.fetch_remote_friends(home_instance: home, pubkey: pubkey, token: token)
     if friends_data
       sync_friend_references(current_user, home, friends_data)
       synced << "friends"
     end
 
-    # Conversations
     conversations_data = FederationService.fetch_remote_conversations(home_instance: home, pubkey: pubkey, token: token)
     if conversations_data
       sync_conversation_references(current_user, conversations_data)
       synced << "conversations"
     end
 
-    # GIF collections
     gif_data = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey, token: token)
     if gif_data
       sync_gif_collections(current_user, gif_data)
       synced << "gif_collections"
     end
 
-    # If profile fetch failed, the user may have been deleted on home instance.
-    # Prune all remote references and signal the client.
     unless synced.include?("profile")
       current_user.remote_server_references.destroy_all
       current_user.remote_conversation_references.destroy_all
@@ -63,7 +62,49 @@ class Api::FederationSyncController < ApplicationController
     render json: { status: "ok", synced: synced }
   end
 
-  private
+  # For local users clicking a remote server/conversation link.
+  # Extract the instance from the target URL and check if the user's
+  # shadow account still exists there via the federation profile endpoint.
+  def check_local_user_remote_access
+    target_url = params[:target_url].to_s
+    if target_url.blank? || !current_user.nostr_public_key.present?
+      render json: { status: "ok", synced: [] }
+      return
+    end
+
+    # Extract instance host from target URL
+    uri = URI.parse(target_url) rescue nil
+    unless uri&.host
+      render json: { status: "ok", synced: [] }
+      return
+    end
+
+    instance_host = uri.host
+    instance_host += ":#{uri.port}" if uri.port && ![80, 443].include?(uri.port)
+
+    # Check if the remote instance still knows about this user
+    profile = FederationService.fetch_remote_profile(
+      home_instance: instance_host,
+      pubkey: current_user.nostr_public_key
+    )
+
+    if profile
+      render json: { status: "ok", synced: [] }
+    else
+      # Shadow account was deleted on the remote — prune references for that instance
+      protocol = Rails.env.development? ? "http" : "https"
+      instance_url = "#{protocol}://#{instance_host}"
+
+      current_user.remote_server_references
+        .where(remote_instance_url: instance_url)
+        .destroy_all
+      current_user.remote_conversation_references
+        .where(remote_instance_url: instance_url)
+        .destroy_all
+
+      render json: { status: "home_unreachable", synced: [] }
+    end
+  end
 
   def sync_server_references(user, data)
     (data["servers"] || []).each do |server_data|

@@ -21,7 +21,8 @@ export default class extends Controller {
         headers: {
           "Content-Type": "application/json",
           "X-CSRF-Token": csrfToken
-        }
+        },
+        body: JSON.stringify({ target_url: targetUrl })
       })
 
       if (response.ok) {
