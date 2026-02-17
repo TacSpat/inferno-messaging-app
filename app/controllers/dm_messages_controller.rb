@@ -1,7 +1,10 @@
 class DmMessagesController < ApplicationController
+  include FileTypeValidatable
+
   before_action :authenticate_user!
   before_action :set_conversation
   before_action :set_message, only: [:update, :destroy]
+  before_action :validate_file_types, only: [:create, :update]
 
   def create
     participant = @conversation.conversation_participants.find_by(user: current_user)

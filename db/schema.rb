@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_17_020001) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -133,6 +133,44 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
     t.index ["public_id"], name: "index_conversations_on_public_id", unique: true
   end
 
+  create_table "data_exports", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.bigint "requested_by_id", null: false
+    t.string "export_type", default: "full", null: false
+    t.string "status", default: "pending", null: false
+    t.string "file_path"
+    t.datetime "expires_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["requested_by_id"], name: "index_data_exports_on_requested_by_id"
+    t.index ["status"], name: "index_data_exports_on_status"
+    t.index ["user_id"], name: "index_data_exports_on_user_id"
+  end
+
+  create_table "domain_block_snapshots", force: :cascade do |t|
+    t.bigint "instance_blocklist_id", null: false
+    t.jsonb "snapshot_data", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["instance_blocklist_id"], name: "index_domain_block_snapshots_on_instance_blocklist_id", unique: true
+  end
+
+  create_table "federation_audit_logs", force: :cascade do |t|
+    t.string "event_type", null: false
+    t.string "actor_type"
+    t.bigint "actor_id"
+    t.string "target_type"
+    t.bigint "target_id"
+    t.string "remote_domain"
+    t.inet "ip_address"
+    t.jsonb "metadata", default: {}
+    t.datetime "created_at", null: false
+    t.index ["actor_type", "actor_id"], name: "index_federation_audit_logs_on_actor_type_and_actor_id"
+    t.index ["event_type", "created_at"], name: "index_federation_audit_logs_on_event_type_and_created_at"
+    t.index ["remote_domain", "created_at"], name: "index_federation_audit_logs_on_remote_domain_and_created_at"
+    t.index ["target_type", "target_id"], name: "index_federation_audit_logs_on_target_type_and_target_id"
+  end
+
   create_table "friendships", force: :cascade do |t|
     t.bigint "user_id", null: false
     t.bigint "friend_id", null: false
@@ -230,6 +268,21 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
     t.index ["creator_id"], name: "index_invites_on_creator_id"
     t.index ["server_id", "active"], name: "index_invites_on_server_id_and_active"
     t.index ["server_id"], name: "index_invites_on_server_id"
+  end
+
+  create_table "legal_holds", force: :cascade do |t|
+    t.string "holdable_type", null: false
+    t.bigint "holdable_id", null: false
+    t.bigint "placed_by_id", null: false
+    t.boolean "active", default: true, null: false
+    t.datetime "placed_at", null: false
+    t.datetime "lifted_at"
+    t.text "reason"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["holdable_type", "holdable_id"], name: "index_legal_holds_active_unique", unique: true, where: "(active = true)"
+    t.index ["holdable_type", "holdable_id"], name: "index_legal_holds_on_holdable_type_and_holdable_id"
+    t.index ["placed_by_id"], name: "index_legal_holds_on_placed_by_id"
   end
 
   create_table "membership_roles", force: :cascade do |t|
@@ -519,6 +572,32 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
     t.index ["welcome_channel_id"], name: "index_servers_on_welcome_channel_id"
   end
 
+  create_table "user_suspensions", force: :cascade do |t|
+    t.bigint "user_id", null: false
+    t.string "suspension_type", null: false
+    t.text "reason"
+    t.string "reason_category"
+    t.boolean "auto_triggered", default: false, null: false
+    t.bigint "triggered_by_quarantine_id"
+    t.bigint "suspended_by_id"
+    t.datetime "expires_at"
+    t.datetime "lifted_at"
+    t.bigint "lifted_by_id"
+    t.text "lift_reason"
+    t.string "federation_broadcast_status", default: "not_applicable", null: false
+    t.datetime "federation_broadcast_at"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["created_at"], name: "index_user_suspensions_on_created_at"
+    t.index ["expires_at"], name: "index_user_suspensions_on_expires_at_active", where: "(lifted_at IS NULL)"
+    t.index ["lifted_by_id"], name: "index_user_suspensions_on_lifted_by_id"
+    t.index ["reason_category"], name: "index_user_suspensions_on_reason_category"
+    t.index ["suspended_by_id"], name: "index_user_suspensions_on_suspended_by_id"
+    t.index ["suspension_type"], name: "index_user_suspensions_on_suspension_type"
+    t.index ["user_id", "lifted_at"], name: "index_user_suspensions_on_user_id_and_lifted_at"
+    t.index ["user_id"], name: "index_user_suspensions_on_user_id"
+  end
+
   create_table "users", force: :cascade do |t|
     t.string "email", default: "", null: false
     t.string "encrypted_password", default: "", null: false
@@ -551,6 +630,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
     t.bigint "remote_user_detail_id"
     t.datetime "nostr_profile_published_at"
     t.datetime "nostr_contacts_published_at"
+    t.datetime "suspended_at"
     t.index ["confirmation_token"], name: "index_users_on_confirmation_token", unique: true
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["nostr_public_key"], name: "index_users_on_nostr_public_key", unique: true
@@ -567,7 +647,12 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
     t.string "item_type", null: false
     t.string "event", null: false
     t.text "object"
+    t.string "remote_domain"
+    t.inet "ip_address"
+    t.jsonb "metadata"
+    t.index ["created_at"], name: "index_versions_on_created_at"
     t.index ["item_type", "item_id"], name: "index_versions_on_item_type_and_item_id"
+    t.index ["remote_domain"], name: "index_versions_on_remote_domain", where: "(remote_domain IS NOT NULL)"
   end
 
   create_table "voice_states", force: :cascade do |t|
@@ -606,6 +691,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
   add_foreign_key "channels", "servers"
   add_foreign_key "conversation_participants", "conversations"
   add_foreign_key "conversation_participants", "users"
+  add_foreign_key "data_exports", "users"
+  add_foreign_key "data_exports", "users", column: "requested_by_id"
+  add_foreign_key "domain_block_snapshots", "instance_blocklists"
   add_foreign_key "friendships", "users"
   add_foreign_key "friendships", "users", column: "friend_id"
   add_foreign_key "gif_collections", "users"
@@ -614,6 +702,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
   add_foreign_key "instance_blocklists", "users", column: "blocked_by_id"
   add_foreign_key "invites", "servers"
   add_foreign_key "invites", "users", column: "creator_id"
+  add_foreign_key "legal_holds", "users", column: "placed_by_id"
   add_foreign_key "membership_roles", "roles"
   add_foreign_key "membership_roles", "server_memberships"
   add_foreign_key "messages", "channels"
@@ -645,6 +734,9 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
   add_foreign_key "server_stickers", "users", column: "creator_id"
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
+  add_foreign_key "user_suspensions", "users"
+  add_foreign_key "user_suspensions", "users", column: "lifted_by_id"
+  add_foreign_key "user_suspensions", "users", column: "suspended_by_id"
   add_foreign_key "users", "remote_users", column: "remote_user_detail_id"
   add_foreign_key "voice_states", "channels"
   add_foreign_key "voice_states", "servers"

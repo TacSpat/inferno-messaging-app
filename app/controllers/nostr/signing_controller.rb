@@ -34,6 +34,14 @@ module Nostr
         requesting_instance: requesting_domain
       )
 
+      AuditService.log(
+        event_type: "token_issued",
+        actor: current_user,
+        remote_domain: requesting_domain,
+        ip_address: request.remote_ip,
+        metadata: { pubkey: current_user.nostr_public_key }
+      )
+
       # Build callback URL with the signed event and optional profile info
       # Note: home_instance is already embedded in the callback URL by the
       # requesting instance's auth controller — don't re-add it here as

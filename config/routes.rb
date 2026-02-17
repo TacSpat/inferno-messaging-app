@@ -25,6 +25,14 @@ Rails.application.routes.draw do
         post :review
       end
     end
+    resources :audit_logs, only: [:index]
+    resources :legal_holds, only: [:index, :create, :destroy]
+    resources :data_exports, only: [:index, :create] do
+      member do
+        get :download
+      end
+    end
+    resources :user_suspensions, only: [:index, :create, :destroy]
   end
 
   # NIP-05 Nostr identity verification

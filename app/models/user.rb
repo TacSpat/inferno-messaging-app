@@ -4,6 +4,7 @@ class User < ApplicationRecord
   devise :database_authenticatable, :registerable,
          :recoverable, :rememberable, :validatable,
          :confirmable
+  include Suspendable
 
   # Remote user detail (for shadow users)
   belongs_to :remote_user_detail, class_name: "RemoteUser", optional: true
@@ -47,6 +48,9 @@ class User < ApplicationRecord
   has_many :remote_server_references, dependent: :destroy
   has_many :remote_conversation_references, dependent: :destroy
   has_many :remote_friend_references, dependent: :destroy
+
+  # Suspensions
+  has_many :user_suspensions, dependent: :destroy
 
   # Voice
   has_many :voice_states, dependent: :destroy

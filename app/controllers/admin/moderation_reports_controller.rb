@@ -31,6 +31,14 @@ module Admin
 
       @report.review!(current_user, new_status: new_status)
 
+      AuditService.log(
+        event_type: "moderation_report_reviewed",
+        actor: current_user,
+        target: @report,
+        ip_address: request.remote_ip,
+        metadata: { new_status: new_status, reported_pubkey: @report.reported_pubkey }
+      )
+
       # Optionally publish NIP-56 report to relays
       if params[:publish_to_relays] == "1" && new_status == "actioned"
         NostrReportPublishJob.perform_later(@report.id)
