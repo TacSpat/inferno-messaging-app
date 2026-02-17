@@ -33,6 +33,10 @@ class FederationProfileSyncJob < ApplicationJob
     friends_data = FederationService.fetch_remote_friends(home_instance: home, pubkey: pubkey, token: token)
     sync_friend_references(shadow_user, friends_data) if friends_data
 
+    # Sync folders (after servers, so we can match server_ids to remote refs)
+    folders_data = FederationService.fetch_remote_folders(home_instance: home, pubkey: pubkey, token: token)
+    sync_folders(shadow_user, folders_data) if folders_data
+
     # Sync GIF collections
     gif_data = FederationService.fetch_remote_gif_collections(home_instance: home, pubkey: pubkey, token: token)
     sync_gif_collections(shadow_user, gif_data) if gif_data
@@ -96,6 +100,35 @@ class FederationProfileSyncJob < ApplicationJob
     shadow_user.remote_friend_references
       .where.not(id: synced_ids)
       .destroy_all
+  end
+
+  def sync_folders(shadow_user, data)
+    folders = data["folders"] || []
+    synced_folder_ids = []
+
+    remote_ref_lookup = shadow_user.remote_server_references.index_by(&:remote_server_id)
+
+    folders.each do |folder_data|
+      folder = shadow_user.server_folders.find_or_initialize_by(name: folder_data["name"])
+      folder.assign_attributes(
+        color: folder_data["color"] || "#4f545c",
+        position: folder_data["position"] || 0,
+        collapsed: folder_data["collapsed"] != false
+      )
+      folder.save!
+      synced_folder_ids << folder.id
+
+      home_server_ids = folder_data["server_ids"] || []
+      home_server_ids.each_with_index do |server_id, idx|
+        ref = remote_ref_lookup[server_id]
+        next unless ref
+        ref.update_columns(server_folder_id: folder.id, position: idx)
+      end
+    end
+
+    stale_folders = shadow_user.server_folders.where.not(id: synced_folder_ids)
+    stale_folders.each { |f| f.remote_server_references.update_all(server_folder_id: nil) }
+    stale_folders.destroy_all
   end
 
   def sync_gif_collections(shadow_user, data)

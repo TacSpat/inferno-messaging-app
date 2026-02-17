@@ -1,5 +1,6 @@
 class RemoteServerReference < ApplicationRecord
   belongs_to :user
+  belongs_to :server_folder, optional: true
 
   validates :remote_instance_url, presence: true
   validates :remote_server_id, presence: true

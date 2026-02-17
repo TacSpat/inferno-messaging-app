@@ -159,13 +159,25 @@ export default class extends Controller {
 
   async createFolder(serverId1, serverId2, el1, el2) {
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
+
+    const serverIds = []
+    const remoteServerIds = []
+    ;[serverId1, serverId2].forEach(id => {
+      if (id.startsWith("r_")) {
+        remoteServerIds.push(id.substring(2))
+      } else {
+        serverIds.push(id)
+      }
+    })
+
     try {
       const response = await fetch("/server_folders", {
         method: "POST",
         headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
         body: JSON.stringify({
           server_folder: { name: "Folder" },
-          server_ids: [serverId1, serverId2]
+          server_ids: serverIds,
+          remote_server_ids: remoteServerIds
         })
       })
 
@@ -554,6 +566,13 @@ export default class extends Controller {
 
   // --- Save order ---
 
+  parseServerId(rawId) {
+    if (rawId && rawId.startsWith("r_")) {
+      return { id: rawId.substring(2), remote: true }
+    }
+    return { id: rawId, remote: false }
+  }
+
   async saveOrder() {
     const items = []
     let position = 0
@@ -565,13 +584,21 @@ export default class extends Controller {
         if (serverList) {
           Array.from(serverList.children).forEach((serverEl, idx) => {
             if (serverEl.dataset.serverId) {
-              folderServers.push({ id: serverEl.dataset.serverId, position: idx })
+              const parsed = this.parseServerId(serverEl.dataset.serverId)
+              const entry = { id: parsed.id, position: idx }
+              if (parsed.remote) entry.remote = true
+              folderServers.push(entry)
             }
           })
         }
         items.push({ type: "folder", id: child.dataset.folderId, position: position++, servers: folderServers })
       } else if (child.dataset.serverId) {
-        items.push({ type: "server", id: child.dataset.serverId, position: position++ })
+        const parsed = this.parseServerId(child.dataset.serverId)
+        if (parsed.remote) {
+          items.push({ type: "remote_server", id: parsed.id, position: position++ })
+        } else {
+          items.push({ type: "server", id: parsed.id, position: position++ })
+        }
       }
     })
 

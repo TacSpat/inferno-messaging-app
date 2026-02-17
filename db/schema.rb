@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_16_100000) do
+ActiveRecord::Schema[8.0].define(version: 2026_02_16_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -398,6 +398,8 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_100000) do
     t.integer "position", default: 0
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.bigint "server_folder_id"
+    t.index ["server_folder_id"], name: "index_remote_server_references_on_server_folder_id"
     t.index ["user_id", "remote_instance_url", "remote_server_id"], name: "idx_remote_server_refs_unique", unique: true
     t.index ["user_id"], name: "index_remote_server_references_on_user_id"
   end
@@ -630,6 +632,7 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_16_100000) do
   add_foreign_key "reactions", "users"
   add_foreign_key "remote_conversation_references", "users"
   add_foreign_key "remote_friend_references", "users"
+  add_foreign_key "remote_server_references", "server_folders"
   add_foreign_key "remote_server_references", "users"
   add_foreign_key "roles", "servers"
   add_foreign_key "server_emojis", "servers"

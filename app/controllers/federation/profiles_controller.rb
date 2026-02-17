@@ -225,6 +225,26 @@ class Federation::ProfilesController < ApplicationController
     render json: { friends: friends_data }
   end
 
+  # GET /federation/profiles/:pubkey/folders
+  def folders
+    user = find_local_user
+    return unless user
+
+    folders_data = user.server_folders.ordered.includes(server_memberships: :server).map do |folder|
+      server_ids = folder.server_memberships.ordered.map { |m| m.server.public_id }
+
+      {
+        name: folder.name,
+        color: folder.color,
+        position: folder.position,
+        collapsed: folder.collapsed,
+        server_ids: server_ids
+      }
+    end
+
+    render json: { folders: folders_data }
+  end
+
   # GET /federation/profiles/:pubkey/gif_collections
   def gif_collections
     user = find_local_user

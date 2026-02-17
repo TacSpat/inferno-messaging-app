@@ -48,8 +48,17 @@ export default class extends Controller {
   }
 
   removeStaleReference() {
-    const railItem = this.element.closest("[data-rail-item]")
-    if (railItem) railItem.remove()
+    const serverEl = this.element.closest("[data-server-id]")
+    if (!serverEl) return
+
+    const folderList = serverEl.closest("[data-folder-server-list]")
+    serverEl.remove()
+
+    // If it was in a folder and the folder is now empty, remove the folder too
+    if (folderList && folderList.children.length === 0) {
+      const folderEl = folderList.closest("[data-rail-item]")
+      if (folderEl) folderEl.remove()
+    }
   }
 
   showError(message) {
@@ -91,7 +100,9 @@ export default class extends Controller {
     const labels = {
       profile: "Profile",
       servers: "Servers",
+      folders: "Folders",
       conversations: "Conversations",
+      friends: "Friends",
       gif_collections: "GIF collections"
     }
     const names = synced.map(s => labels[s] || s).join(", ")
