@@ -64,8 +64,6 @@ jobs:
         with:
           ruby-version: .ruby-version
           bundler-cache: true
-        env:
-          BUNDLE_FORCE_RUBY_PLATFORM: "true"
 
       - uses: oven-sh/setup-bun@v2
         with:
