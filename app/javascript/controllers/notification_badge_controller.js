@@ -329,7 +329,7 @@ export default class extends Controller {
     // Don't add if this is the active server
     if (serverIcon.classList.contains("bg-orange-600")) return
     const pill = document.createElement("div")
-    pill.className = "server-unread-pill absolute left-0 top-1/2 -translate-x-[22px] -translate-y-1/2 w-1 h-2 bg-white rounded-r-full"
+    pill.className = "server-unread-pill absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-2 bg-amber-300 rounded-r-full"
     serverIcon.appendChild(pill)
   }
 
@@ -398,9 +398,9 @@ export default class extends Controller {
     visible.forEach((u, i) => {
       const offset = i > 0 ? 'margin-left: -4px;' : ''
       if (u.avatar_url) {
-        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid #2b2d31; position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`
+        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`
       } else {
-        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid #2b2d31; position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || '#5865f2'};">${u.avatar_initial || '?'}</div>`
+        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || '#b45309'};">${u.avatar_initial || '?'}</div>`
       }
     })
     if (extra > 0) {
@@ -408,7 +408,7 @@ export default class extends Controller {
     }
     html += '</div>'
     // Animated dots
-    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: #9ca3af;"><span>.</span><span>.</span><span>.</span></span>'
+    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: #878583;"><span>.</span><span>.</span><span>.</span></span>'
     html += '</div>'
 
     let indicator = existingIndicator
@@ -747,7 +747,7 @@ export default class extends Controller {
       }
       // Build modal
       const overlay = document.createElement("div")
-      overlay.className = "fixed inset-0 z-[200] bg-black/60 flex items-center justify-center"
+      overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/60 flex items-center justify-center"
       overlay.addEventListener("click", (e) => { if (e.target === overlay) overlay.remove() })
       const modal = document.createElement("div")
       modal.className = "bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4 overflow-hidden"
@@ -789,7 +789,7 @@ export default class extends Controller {
     contentEl.innerHTML = `
       <form class="flex gap-2 items-center" data-edit-message-id="${messageId}">
         <input type="text" value="${currentText.replace(/"/g, "&quot;")}" 
-               class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+               class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-amber-500"
                autofocus>
         <button type="submit" class="text-xs text-green-400 hover:text-green-300">Save</button>
         <button type="button" class="text-xs text-gray-400 hover:text-gray-200 cancel-edit-btn">Cancel</button>
@@ -905,7 +905,7 @@ export default class extends Controller {
 
     renderContextMenu(x, y, items) {
     const menu = document.createElement("div")
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[200px]"
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[200px] context-pop"
     menu.id = "notif-context-menu"
     menu.style.left = `${x}px`
     menu.style.top = `${y}px`
@@ -1036,7 +1036,7 @@ export default class extends Controller {
   showConfirm(title, message, confirmText = "Delete", confirmClass = "bg-red-600 hover:bg-red-700") {
     return new Promise((resolve) => {
       const overlay = document.createElement("div")
-      overlay.className = "fixed inset-0 z-[200] bg-black/70 flex items-center justify-center"
+      overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/70 flex items-center justify-center"
       overlay.id = "confirm-modal"
       const esc = (s) => { const d = document.createElement("div"); d.textContent = s; return d.innerHTML }
       overlay.innerHTML = `
@@ -1045,7 +1045,7 @@ export default class extends Controller {
             <h3 class="text-xl font-bold text-white mb-2">${esc(title)}</h3>
             <p class="text-sm text-gray-300">${esc(message)}</p>
           </div>
-          <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #2b2d31;">
+          <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #1e1c1b;">
             <button id="confirm-cancel" class="px-4 py-2 text-sm font-medium text-white hover:underline cursor-pointer">Cancel</button>
             <button id="confirm-ok" class="px-4 py-2 text-sm font-medium text-white rounded ${confirmClass} cursor-pointer">${esc(confirmText)}</button>
           </div>

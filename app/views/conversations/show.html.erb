@@ -30,7 +30,7 @@
           <% if @other_user.avatar.attached? %>
             <%= image_tag @other_user.avatar, class: "w-full h-full object-cover" %>
           <% else %>
-            <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#2b2d31' %>">
+            <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
               <%= @other_user.username[0].upcase %>
             </div>
           <% end %>

@@ -29,7 +29,7 @@ export default class extends Controller {
 
     const html = await response.text()
     this.menu = document.createElement("div")
-    this.menu.className = "fixed z-[60]"
+    this.menu.className = "fixed z-[60] context-pop"
     this.menu.setAttribute("data-context-menu", "voice")
     this.menu.innerHTML = html
 
@@ -139,7 +139,7 @@ export default class extends Controller {
     if (!this.menu || !channels.length) return
 
     this.moveDropdown = document.createElement("div")
-    this.moveDropdown.className = "absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto"
+    this.moveDropdown.className = "absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop"
 
     const wrapper = btn.closest(".context-move-wrapper")
     const btnRect = wrapper.getBoundingClientRect()
@@ -223,9 +223,13 @@ export default class extends Controller {
 
   showToast(msg, isError = false) {
     const toast = document.createElement("div")
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
     toast.textContent = msg
     document.body.appendChild(toast)
-    setTimeout(() => toast.remove(), 3000)
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s"
+      toast.style.opacity = "0"
+      setTimeout(() => toast.remove(), 300)
+    }, 3000)
   }
 }

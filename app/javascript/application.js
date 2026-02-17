@@ -8,7 +8,7 @@ const application = Application.start()
 Turbo.setConfirmMethod((message) => {
   return new Promise((resolve) => {
     const overlay = document.createElement("div")
-    overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
+    overlay.className = "modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
 
     overlay.innerHTML = `
       <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-md mx-4 overflow-hidden">

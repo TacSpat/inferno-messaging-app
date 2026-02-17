@@ -316,7 +316,7 @@ export default class extends Controller {
       const gridContainer = document.querySelector("[data-voice-participant-grid]")
       const emptyState = document.querySelector("[data-voice-empty-state]")
 
-      const color = data.profile_color || "#2b2d31"
+      const color = data.profile_color || "#1e1c1b"
       const initial = data.username?.[0]?.toUpperCase() || "?"
       const avatarHtml = data.avatar_url
         ? `<img src="${data.avatar_url}" class="voice-avatar" />`

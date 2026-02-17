@@ -1,7 +1,7 @@
 <div class="w-full max-w-md mx-auto px-4">
   <div class="bg-gray-800 rounded-xl shadow-2xl p-8 text-center">
     <!-- Spinner -->
-    <div id="sync-spinner" class="mx-auto mb-6 w-12 h-12 border-4 border-gray-600 border-t-indigo-500 rounded-full animate-spin"></div>
+    <div id="sync-spinner" class="mx-auto mb-6 w-12 h-12 border-4 border-gray-600 border-t-amber-500 rounded-full animate-spin"></div>
 
     <h1 class="text-xl font-semibold text-white mb-2">Syncing your data</h1>
     <p class="text-sm text-gray-400 mb-6">
@@ -86,7 +86,7 @@
         const allItems = ['profile', 'servers', 'friends', 'conversations', 'gif_collections'];
         allItems.forEach(item => markItem(item, synced.includes(item)));
 
-        spinnerEl.classList.remove('border-t-indigo-500', 'animate-spin');
+        spinnerEl.classList.remove('border-t-amber-500', 'animate-spin');
         spinnerEl.classList.add('border-t-green-500');
         spinnerEl.innerHTML = '<svg class="w-8 h-8 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>';
         spinnerEl.classList.remove('border-4', 'rounded-full');

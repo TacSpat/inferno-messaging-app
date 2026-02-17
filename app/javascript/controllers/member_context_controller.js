@@ -31,7 +31,7 @@ export default class extends Controller {
 
     const html = await response.text()
     this.menu = document.createElement("div")
-    this.menu.className = "fixed z-[60]"
+    this.menu.className = "fixed z-[60] context-pop"
     this.menu.setAttribute("data-context-menu", "member")
     this.menu.innerHTML = html
 
@@ -82,7 +82,7 @@ export default class extends Controller {
 
     // Build the secondary dropdown
     this.rolesDropdown = document.createElement("div")
-    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto"
+    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop"
 
     // Position it to the right of the wrapper
     const wrapper = btn.closest(".context-roles-wrapper")
@@ -173,7 +173,7 @@ export default class extends Controller {
 
     // Build modal overlay
     this.nicknameModal = document.createElement("div")
-    this.nicknameModal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
+    this.nicknameModal.className = "modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
     this.nicknameModal.innerHTML = `
       <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-sm mx-4 p-5" data-nickname-panel>
         <h3 class="text-lg font-bold text-white mb-1">Change Nickname</h3>

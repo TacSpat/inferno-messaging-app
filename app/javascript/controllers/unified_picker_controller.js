@@ -105,16 +105,20 @@ export default class extends Controller {
   toggle() {
     const panel = this.panelTarget
     const wasHidden = panel.classList.contains("hidden")
-    panel.classList.toggle("hidden")
     if (wasHidden) {
+      panel.classList.remove("hidden")
+      panel.classList.add("context-pop")
       this.updateTabStyles()
       this.renderCurrentTab()
       if (this.hasSearchInputTarget) this.searchInputTarget.focus()
+    } else {
+      this.close()
     }
   }
 
   close() {
     this.panelTarget.classList.add("hidden")
+    this.panelTarget.classList.remove("context-pop")
   }
 
   closeOnClickOutside(event) {
@@ -713,7 +717,7 @@ export default class extends Controller {
 
     const menu = document.createElement("div")
     menu.id = "gif-context-menu"
-    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[180px] text-sm"
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[180px] text-sm context-pop"
     menu.style.left = `${event.clientX}px`
     menu.style.top = `${event.clientY}px`
 
@@ -999,7 +1003,7 @@ export default class extends Controller {
 
     const menu = document.createElement("div")
     menu.id = "gif-context-menu"
-    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px] text-sm"
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px] text-sm context-pop"
     menu.style.left = `${event.clientX}px`
     menu.style.top = `${event.clientY}px`
 

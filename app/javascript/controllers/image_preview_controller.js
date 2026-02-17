@@ -48,7 +48,7 @@ export default class extends Controller {
   openLightbox(src, filename) {
     const overlay = document.createElement("div")
     overlay.id = "image-lightbox"
-    overlay.className = "fixed inset-0 z-[200] bg-black/80 flex items-center justify-center"
+    overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/80 flex items-center justify-center"
     overlay.style.touchAction = "none"
 
     const container = document.createElement("div")
@@ -248,7 +248,7 @@ export default class extends Controller {
     const downloadBtn = document.createElement("a")
     downloadBtn.href = src
     downloadBtn.download = filename || "image"
-    downloadBtn.className = "text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1"
+    downloadBtn.className = "text-sm text-amber-400 hover:text-amber-300 flex items-center gap-1"
     downloadBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Download'
     bar.appendChild(downloadBtn)
 
@@ -275,7 +275,7 @@ export default class extends Controller {
   showContextMenu(x, y, src, filename) {
     const menu = document.createElement("div")
     menu.id = "image-context-menu"
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px]"
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop"
     menu.style.left = `${x}px`
     menu.style.top = `${y}px`
 
@@ -334,7 +334,7 @@ export default class extends Controller {
   showVideoContextMenu(x, y, src, filename) {
     const menu = document.createElement("div")
     menu.id = "image-context-menu"
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px]"
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop"
     menu.style.left = `${x}px`
     menu.style.top = `${y}px`
 

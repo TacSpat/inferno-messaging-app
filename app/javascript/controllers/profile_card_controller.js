@@ -28,7 +28,7 @@ export default class extends Controller {
 
     const html = await response.text()
     this.card = document.createElement("div")
-    this.card.className = "fixed z-50"
+    this.card.className = "fixed z-50 context-pop"
     this.card.innerHTML = html
 
     // Position to the left of the member sidebar

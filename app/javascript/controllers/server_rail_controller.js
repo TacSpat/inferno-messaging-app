@@ -318,6 +318,11 @@ export default class extends Controller {
 
       const serverList = folderEl.querySelector("[data-folder-server-list]")
       if (serverList) this.initSingleFolderSortable(serverList)
+
+      // Re-freeze GIFs that are now visible inside the expanded folder
+      // Need enough delay for hidden images to render after folder expands
+      setTimeout(() => this.freezeGifs(), 100)
+      setTimeout(() => this.freezeGifs(), 500)
     } else {
       // Collapsing — animate server list closed, then swap views
       if (container) {
@@ -358,7 +363,7 @@ export default class extends Controller {
     const currentName = folderNameEl ? folderNameEl.textContent.trim() : "Folder"
 
     this.folderMenu = document.createElement("div")
-    this.folderMenu.className = "fixed z-[60] w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-600 py-1.5 text-sm"
+    this.folderMenu.className = "fixed z-[60] w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-600 py-1.5 text-sm context-pop"
 
     let left = event.clientX
     let top = event.clientY
@@ -442,7 +447,7 @@ export default class extends Controller {
 
     const presets = [
       { color: "#4f545c", label: "Gray" },
-      { color: "#5865f2", label: "Blurple" },
+      { color: "#b45309", label: "Ember" },
       { color: "#57f287", label: "Green" },
       { color: "#fee75c", label: "Yellow" },
       { color: "#eb459e", label: "Pink" },
@@ -637,8 +642,9 @@ export default class extends Controller {
       if (!img || !canvas) return
 
       const draw = () => {
-        canvas.width = img.naturalWidth || 48
-        canvas.height = img.naturalHeight || 48
+        if (!img.naturalWidth) return
+        canvas.width = img.naturalWidth
+        canvas.height = img.naturalHeight
         const ctx = canvas.getContext("2d")
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
       }

@@ -54,12 +54,12 @@ export default class extends Controller {
 
     // Backdrop
     const backdrop = document.createElement("div")
-    backdrop.className = "fixed inset-0 bg-black/50 z-[100]"
+    backdrop.className = "modal-overlay fixed inset-0 bg-black/50 z-[100]"
     backdrop.addEventListener("click", this._dismiss)
 
     // Sheet
     const sheet = document.createElement("div")
-    sheet.className = "fixed bottom-0 left-0 right-0 z-[101] bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-700"
+    sheet.className = "fixed bottom-0 left-0 right-0 z-[101] bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-700 context-pop"
     sheet.innerHTML = `
       <div class="w-10 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-2"></div>
       <div class="px-4 pb-2">

@@ -1,6 +1,6 @@
 module ApplicationHelper
   def profile_gradient_style(user, direction: "to bottom")
-    c1 = user.profile_color.presence || "#2b2d31"
+    c1 = user.profile_color.presence || "#1e1c1b"
     c2 = user.profile_color_2.presence || c1
     if c1 == c2
       "background-color: #{c1};"

@@ -58,7 +58,7 @@
       <% end %>
     </div>
     <% if has_unread && total_mentions == 0 %>
-      <div class="server-unread-pill absolute left-0 top-1/2 -translate-x-[22px] -translate-y-1/2 w-1 h-2 bg-white rounded-r-full"></div>
+      <div class="server-unread-pill absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-2 bg-amber-300 rounded-r-full"></div>
     <% end %>
     <% if total_mentions > 0 %>
       <div class="mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950">
@@ -83,7 +83,14 @@
             <% if fi[:type] == :server %>
               <% server = fi[:server] %>
               <% if server.icon.attached? %>
-                <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+                <% if server.icon.content_type == "image/gif" %>
+                  <div class="folder-mini-gif w-full h-full">
+                    <canvas class="gif-static w-full h-full object-cover" data-gif-freeze></canvas>
+                    <%= image_tag server.icon, class: "gif-animated w-full h-full object-cover", data: { gif_src: true } %>
+                  </div>
+                <% else %>
+                  <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+                <% end %>
               <% else %>
                 <div class="w-full h-full bg-gray-600 flex items-center justify-center">
                   <span class="text-white text-[6px] font-bold"><%= server.name[0..1].upcase %></span>
@@ -111,7 +118,7 @@
         <div data-server-rail-target="folderList"
              data-folder-server-list="<%= folder.public_id %>"
              data-folder-server-bg="<%= folder.color %>"
-             class="flex flex-col items-center space-y-2 py-2 mt-1 rounded-2xl"
+             class="flex flex-col items-center space-y-2 py-2 px-2.5 mt-1 rounded-2xl"
              style="background-color: <%= folder.color %>30">
           <% folder_items.each do |fi| %>
             <% if fi[:type] == :server %>

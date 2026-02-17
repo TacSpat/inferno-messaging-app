@@ -4,11 +4,18 @@ export default class extends Controller {
   static targets = ["menu"]
 
   toggle() {
-    this.menuTarget.classList.toggle("hidden")
+    const isHidden = this.menuTarget.classList.contains("hidden")
+    if (isHidden) {
+      this.menuTarget.classList.remove("hidden")
+      this.menuTarget.classList.add("dropdown-enter")
+    } else {
+      this.close()
+    }
   }
 
   close() {
     this.menuTarget.classList.add("hidden")
+    this.menuTarget.classList.remove("dropdown-enter")
   }
 
   closeOnClickOutside(event) {

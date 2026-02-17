@@ -647,7 +647,7 @@ export default class extends Controller {
   }
 
   buildParticipantCard(data) {
-    const color = data.profile_color || "#2b2d31"
+    const color = data.profile_color || "#1e1c1b"
     const initial = data.username?.[0]?.toUpperCase() || "?"
     const avatarHtml = data.avatar_url
       ? `<img src="${data.avatar_url}" class="voice-avatar" />`
@@ -793,9 +793,13 @@ export default class extends Controller {
 
   showToast(msg, isError = false) {
     const toast = document.createElement("div")
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
     toast.textContent = msg
     document.body.appendChild(toast)
-    setTimeout(() => toast.remove(), 3000)
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s"
+      toast.style.opacity = "0"
+      setTimeout(() => toast.remove(), 300)
+    }, 3000)
   }
 }

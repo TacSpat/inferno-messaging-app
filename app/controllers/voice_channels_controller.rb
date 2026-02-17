@@ -60,7 +60,7 @@ class VoiceChannelsController < ApplicationController
       user_id: current_user.public_id,
       username: current_user.display_name.presence || current_user.username,
       avatar_url: current_user.avatar.attached? ? url_for(current_user.avatar) : nil,
-      profile_color: current_user.profile_color || "#2b2d31",
+      profile_color: current_user.profile_color || "#1e1c1b",
       sidebar_html: sidebar_html
     }
   end
@@ -128,7 +128,7 @@ class VoiceChannelsController < ApplicationController
       self_mute: voice_state.self_mute,
       self_deaf: voice_state.self_deaf,
       avatar_url: current_user.avatar.attached? ? url_for(current_user.avatar) : nil,
-      profile_color: current_user.profile_color || "#2b2d31",
+      profile_color: current_user.profile_color || "#1e1c1b",
       html: sidebar_html
     })
   end

@@ -46,7 +46,7 @@ export default class extends Controller {
     const title = mode === "avatar" ? "Edit Avatar" : "Edit Banner"
 
     this.modal = document.createElement("div")
-    this.modal.className = "fixed inset-0 z-[300] flex items-center justify-center bg-black/70"
+    this.modal.className = "modal-overlay fixed inset-0 z-[300] flex items-center justify-center bg-black/70"
     this.modal.innerHTML = `
       <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4">
         <div class="px-5 pt-5 pb-3">
@@ -73,12 +73,12 @@ export default class extends Controller {
         </div>
         <div class="px-5 py-3 flex items-center gap-3">
           <span class="text-gray-400 text-xs">Zoom</span>
-          <input type="range" min="100" max="300" value="100" class="flex-1 accent-indigo-500" data-crop-zoom />
+          <input type="range" min="100" max="300" value="100" class="flex-1 accent-amber-500" data-crop-zoom />
           <span class="text-gray-400 text-xs w-10 text-right" data-crop-zoom-label>1.0x</span>
         </div>
         <div class="px-5 pb-5 flex justify-end gap-3">
           <button type="button" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition" data-crop-cancel>Cancel</button>
-          <button type="button" class="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
+          <button type="button" class="px-5 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
         </div>
       </div>
     `
