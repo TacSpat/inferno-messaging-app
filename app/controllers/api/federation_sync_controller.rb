@@ -62,10 +62,36 @@ class Api::FederationSyncController < ApplicationController
     render json: { status: "ok", synced: synced }
   end
 
-  # Local users navigating to remote instances are handled by the nostr
-  # auth flow on the remote side — no pre-check needed.
+  # For local users: pull fresh server memberships from the target remote instance.
   def check_local_user_remote_access
-    render json: { status: "ok", synced: [] }
+    target_url = params[:target_url].to_s
+    pubkey = current_user.nostr_public_key
+
+    if target_url.blank? || pubkey.blank?
+      render json: { status: "ok", synced: [] }
+      return
+    end
+
+    # Extract instance host from target URL
+    uri = URI.parse(target_url) rescue nil
+    unless uri&.host
+      render json: { status: "ok", synced: [] }
+      return
+    end
+
+    instance_host = uri.host
+    instance_host += ":#{uri.port}" if uri.port && ![80, 443].include?(uri.port)
+
+    # Pull current memberships from the remote instance
+    data = FederationService.fetch_remote_memberships(instance: instance_host, pubkey: pubkey)
+
+    if data
+      sync_server_references(current_user, data)
+      render json: { status: "ok", synced: ["servers"] }
+    else
+      # Remote instance unreachable or user not found there
+      render json: { status: "ok", synced: [] }
+    end
   end
 
   def sync_server_references(user, data)

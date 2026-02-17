@@ -66,6 +66,11 @@ class FederationService
     fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/friends", token: token)
   end
 
+  # Fetch a user's server memberships from a remote instance (no token needed)
+  def self.fetch_remote_memberships(instance:, pubkey:)
+    fetch_federation_json(instance, "/federation/profiles/#{pubkey}/memberships")
+  end
+
   # Fetch a user's GIF collections from their home instance
   def self.fetch_remote_gif_collections(home_instance:, pubkey:, token: nil)
     fetch_federation_json(home_instance, "/federation/profiles/#{pubkey}/gif_collections", token: token)

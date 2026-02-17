@@ -3,7 +3,7 @@ class Federation::ProfilesController < ApplicationController
 
   before_action :verify_federation_open
   before_action :check_blocklist
-  before_action :verify_federation_token
+  before_action :verify_federation_token, except: [:memberships]
 
   # GET /federation/profiles/:pubkey?requesting_instance=example.com
   def show
@@ -164,6 +164,38 @@ class Federation::ProfilesController < ApplicationController
     end
 
     render json: { status: "ok", received: servers.size }
+  end
+
+  # GET /federation/profiles/:pubkey/memberships?requesting_instance=...
+  # Returns the shadow user's local server memberships on this instance.
+  # No federation token required — used by home instances to pull fresh data.
+  # Protected by blocklist + federation-open checks only.
+  def memberships
+    user = User.find_by(nostr_public_key: params[:pubkey])
+    unless user
+      render json: { error: "User not found" }, status: :not_found
+      return
+    end
+
+    protocol = Rails.env.development? ? "http" : "https"
+    host = request.host_with_port
+    instance_url = "#{protocol}://#{host}"
+
+    servers_data = user.server_memberships.includes(server: [:invites, { icon_attachment: :blob }]).map do |membership|
+      server = membership.server
+      invite = server.invites.first
+      icon_url = server.icon.attached? ? rails_blob_url(server.icon, host: host, protocol: protocol) : nil
+
+      {
+        server_id: server.public_id,
+        name: server.name,
+        icon_url: icon_url,
+        invite_code: invite&.code,
+        instance_url: instance_url
+      }
+    end
+
+    render json: { servers: servers_data }
   end
 
   # GET /federation/profiles/:pubkey/friends
