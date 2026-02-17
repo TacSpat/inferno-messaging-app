@@ -62,48 +62,10 @@ class Api::FederationSyncController < ApplicationController
     render json: { status: "ok", synced: synced }
   end
 
-  # For local users clicking a remote server/conversation link.
-  # Extract the instance from the target URL and check if the user's
-  # shadow account still exists there via the federation profile endpoint.
+  # Local users navigating to remote instances are handled by the nostr
+  # auth flow on the remote side — no pre-check needed.
   def check_local_user_remote_access
-    target_url = params[:target_url].to_s
-    if target_url.blank? || !current_user.nostr_public_key.present?
-      render json: { status: "ok", synced: [] }
-      return
-    end
-
-    # Extract instance host from target URL
-    uri = URI.parse(target_url) rescue nil
-    unless uri&.host
-      render json: { status: "ok", synced: [] }
-      return
-    end
-
-    instance_host = uri.host
-    instance_host += ":#{uri.port}" if uri.port && ![80, 443].include?(uri.port)
-
-    # Check if the remote instance still knows about this user
-    profile = FederationService.fetch_remote_profile(
-      home_instance: instance_host,
-      pubkey: current_user.nostr_public_key
-    )
-
-    if profile
-      render json: { status: "ok", synced: [] }
-    else
-      # Shadow account was deleted on the remote — prune references for that instance
-      protocol = Rails.env.development? ? "http" : "https"
-      instance_url = "#{protocol}://#{instance_host}"
-
-      current_user.remote_server_references
-        .where(remote_instance_url: instance_url)
-        .destroy_all
-      current_user.remote_conversation_references
-        .where(remote_instance_url: instance_url)
-        .destroy_all
-
-      render json: { status: "home_unreachable", synced: [] }
-    end
+    render json: { status: "ok", synced: [] }
   end
 
   def sync_server_references(user, data)
