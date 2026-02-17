@@ -42,7 +42,7 @@ module HasNostrIdentity
 
   def encryptor
     key = ActiveSupport::KeyGenerator.new(
-      Rails.application.credentials.secret_key_base
+      Rails.application.secret_key_base
     ).generate_key("nostr keypair encryption", 32)
     ActiveSupport::MessageEncryptor.new(key)
   end
