@@ -3,7 +3,7 @@ class RemoteConversationReference < ApplicationRecord
 
   validates :remote_instance_url, presence: true
   validates :remote_conversation_id, presence: true
-  validates :remote_conversation_id, uniqueness: { scope: [:user_id, :remote_instance_url] }
+  validates :remote_conversation_id, uniqueness: { scope: [ :user_id, :remote_instance_url ] }
 
   scope :ordered, -> { order(last_message_at: :desc, created_at: :desc) }
 

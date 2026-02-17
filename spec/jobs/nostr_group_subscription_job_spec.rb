@@ -23,10 +23,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Hello from remote!",
         "sig" => "a" * 128,
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
       allow(NostrEventService).to receive(:verify_schnorr_signature).and_return(true)
 
       expect {
@@ -47,10 +47,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Hello!",
         "sig" => "a" * 128,
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
       allow(NostrEventService).to receive(:verify_schnorr_signature).and_return(true)
 
       expect {
@@ -72,10 +72,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Duplicate!",
         "sig" => "a" * 128,
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
 
       expect {
         NostrGroupSubscriptionJob.perform_now
@@ -92,10 +92,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Local message",
         "sig" => "a" * 128,
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
 
       expect {
         NostrGroupSubscriptionJob.perform_now
@@ -111,10 +111,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Bad sig",
         "sig" => "bad" * 42 + "ab",
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
       allow(NostrEventService).to receive(:verify_schnorr_signature)
         .and_raise(NostrEventService::InvalidSignature, "Bad signature")
 
@@ -132,10 +132,10 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
         "content" => "Hello!",
         "sig" => "a" * 128,
         "created_at" => Time.now.to_i,
-        "tags" => [["h", channel.nostr_group_id]]
+        "tags" => [ [ "h", channel.nostr_group_id ] ]
       }
 
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
       allow(NostrEventService).to receive(:verify_schnorr_signature).and_return(true)
 
       expect {

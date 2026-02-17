@@ -3,8 +3,8 @@ class DmMessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_conversation
-  before_action :set_message, only: [:update, :destroy]
-  before_action :validate_file_types, only: [:create, :update]
+  before_action :set_message, only: [ :update, :destroy ]
+  before_action :validate_file_types, only: [ :create, :update ]
 
   def create
     participant = @conversation.conversation_participants.find_by(user: current_user)
@@ -27,8 +27,8 @@ class DmMessagesController < ApplicationController
       ConversationChannel.broadcast_to(
         @conversation,
         {
-          type: 'new_message',
-          html: render_to_string(partial: 'messages/dm_message', locals: { message: @message })
+          type: "new_message",
+          html: render_to_string(partial: "messages/dm_message", locals: { message: @message })
         }
       )
       # Notify other participants
@@ -68,9 +68,9 @@ class DmMessagesController < ApplicationController
       ConversationChannel.broadcast_to(
         @conversation,
         {
-          type: 'update_message',
+          type: "update_message",
           message_id: @message.public_id,
-          html: render_to_string(partial: 'messages/dm_message', locals: { message: @message })
+          html: render_to_string(partial: "messages/dm_message", locals: { message: @message })
         }
       )
       respond_to do |format|
@@ -94,7 +94,7 @@ class DmMessagesController < ApplicationController
     @message.destroy
     ConversationChannel.broadcast_to(
       @conversation,
-      { type: 'delete_message', message_id: message_public_id }
+      { type: "delete_message", message_id: message_public_id }
     )
     respond_to do |format|
       format.turbo_stream { head :ok }

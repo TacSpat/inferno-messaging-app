@@ -7,6 +7,6 @@ class CreateChannelReads < ActiveRecord::Migration[8.0]
 
       t.timestamps
     end
-    add_index :channel_reads, [:user_id, :channel_id], unique: true
+    add_index :channel_reads, [ :user_id, :channel_id ], unique: true
   end
 end

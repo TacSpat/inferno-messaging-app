@@ -18,7 +18,7 @@ class CreateUserSuspensions < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :user_suspensions, [:user_id, :lifted_at]
+    add_index :user_suspensions, [ :user_id, :lifted_at ]
     add_index :user_suspensions, :suspension_type
     add_index :user_suspensions, :reason_category
     add_index :user_suspensions, :expires_at, where: "lifted_at IS NULL", name: "index_user_suspensions_on_expires_at_active"

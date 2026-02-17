@@ -9,16 +9,16 @@ RSpec.describe "Federation::Servers", type: :request do
   def build_create_server_event(name:, description: nil, pubkey: public_key, privkey: private_key, home_relay: "wss://home.chat")
     content = { name: name, description: description, username: "testuser" }.to_json
     tags = [
-      ["d", "create_server"],
-      ["relay", home_relay]
+      [ "d", "create_server" ],
+      [ "relay", home_relay ]
     ]
     created_at = Time.now.to_i
 
-    serialized = [0, pubkey, created_at, 30078, tags, content]
+    serialized = [ 0, pubkey, created_at, 30078, tags, content ]
     id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-    message_bin = [id].pack("H*")
-    private_key_bin = [privkey].pack("H*")
+    message_bin = [ id ].pack("H*")
+    private_key_bin = [ privkey ].pack("H*")
     signature = Schnorr.sign(message_bin, private_key_bin)
     sig_hex = signature.encode.unpack1("H*")
 
@@ -109,7 +109,7 @@ RSpec.describe "Federation::Servers", type: :request do
         event[:kind] = 1
 
         # Recompute id for wrong kind
-        serialized = [0, event[:pubkey], event[:created_at], 1, event[:tags], event[:content]]
+        serialized = [ 0, event[:pubkey], event[:created_at], 1, event[:tags], event[:content] ]
         event[:id] = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
         post federation_create_server_path, params: { event: event }, as: :json
@@ -121,14 +121,14 @@ RSpec.describe "Federation::Servers", type: :request do
 
       it "rejects missing d-tag" do
         content = { name: "Test" }.to_json
-        tags = [["relay", "wss://home.chat"]]
+        tags = [ [ "relay", "wss://home.chat" ] ]
         created_at = Time.now.to_i
 
-        serialized = [0, public_key, created_at, 30078, tags, content]
+        serialized = [ 0, public_key, created_at, 30078, tags, content ]
         id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-        message_bin = [id].pack("H*")
-        private_key_bin = [private_key].pack("H*")
+        message_bin = [ id ].pack("H*")
+        private_key_bin = [ private_key ].pack("H*")
         signature = Schnorr.sign(message_bin, private_key_bin)
         sig_hex = signature.encode.unpack1("H*")
 
@@ -168,14 +168,14 @@ RSpec.describe "Federation::Servers", type: :request do
 
       it "rejects expired events" do
         content = { name: "Old", username: "testuser" }.to_json
-        tags = [["d", "create_server"], ["relay", "wss://home.chat"]]
+        tags = [ [ "d", "create_server" ], [ "relay", "wss://home.chat" ] ]
         created_at = 20.minutes.ago.to_i
 
-        serialized = [0, public_key, created_at, 30078, tags, content]
+        serialized = [ 0, public_key, created_at, 30078, tags, content ]
         id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-        message_bin = [id].pack("H*")
-        private_key_bin = [private_key].pack("H*")
+        message_bin = [ id ].pack("H*")
+        private_key_bin = [ private_key ].pack("H*")
         signature = Schnorr.sign(message_bin, private_key_bin)
         sig_hex = signature.encode.unpack1("H*")
 

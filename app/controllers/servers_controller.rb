@@ -1,7 +1,7 @@
 class ServersController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_server, only: [:show, :edit, :update, :destroy, :join, :leave]
-  before_action :set_no_cache, only: [:new]
+  before_action :set_server, only: [ :show, :edit, :update, :destroy, :join, :leave ]
+  before_action :set_no_cache, only: [ :new ]
 
   def show
     first_channel = @server.channels.ordered.first

@@ -23,7 +23,7 @@ RSpec.describe NostrProfileFetchJob, type: :job do
         }.to_json
       }
 
-      allow(RelayService).to receive(:fetch_from_all).and_return([profile_event])
+      allow(RelayService).to receive(:fetch_from_all).and_return([ profile_event ])
 
       NostrProfileFetchJob.perform_now(pubkey)
       remote_user.reload
@@ -51,7 +51,7 @@ RSpec.describe NostrProfileFetchJob, type: :job do
         "content" => { "display_name" => "New Display Name" }.to_json
       }
 
-      allow(RelayService).to receive(:fetch_from_all).and_return([profile_event])
+      allow(RelayService).to receive(:fetch_from_all).and_return([ profile_event ])
 
       NostrProfileFetchJob.perform_now(pubkey)
       remote_user.reload
@@ -83,7 +83,7 @@ RSpec.describe NostrProfileFetchJob, type: :job do
         "content" => { "name" => "new_name" }.to_json
       }
 
-      allow(RelayService).to receive(:fetch_from_all).and_return([old_event, new_event])
+      allow(RelayService).to receive(:fetch_from_all).and_return([ old_event, new_event ])
 
       NostrProfileFetchJob.perform_now(pubkey)
       remote_user.reload

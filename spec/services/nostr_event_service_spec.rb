@@ -86,7 +86,7 @@ RSpec.describe NostrEventService do
     it "rejects challenge mismatch" do
       event = {
         "kind" => 22242, "pubkey" => "abc", "sig" => "x", "id" => "x",
-        "tags" => [["challenge", "wrong_challenge"]]
+        "tags" => [ [ "challenge", "wrong_challenge" ] ]
       }
       expect {
         NostrEventService.verify_auth_event(event, expected_challenge: challenge)
@@ -97,7 +97,7 @@ RSpec.describe NostrEventService do
       event = {
         "kind" => 22242, "pubkey" => public_key, "sig" => "x",
         "id" => "tampered_id", "created_at" => Time.now.to_i, "content" => "",
-        "tags" => [["challenge", challenge]]
+        "tags" => [ [ "challenge", challenge ] ]
       }
       expect {
         NostrEventService.verify_auth_event(event, expected_challenge: challenge)
@@ -119,8 +119,8 @@ RSpec.describe NostrEventService do
       event_data["created_at"] = 20.minutes.ago.to_i
 
       # Recalculate ID to match the tampered timestamp
-      serialized = [0, event_data["pubkey"], event_data["created_at"], event_data["kind"],
-                    event_data["tags"], event_data["content"] || ""]
+      serialized = [ 0, event_data["pubkey"], event_data["created_at"], event_data["kind"],
+                    event_data["tags"], event_data["content"] || "" ]
       event_data["id"] = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
       expect {

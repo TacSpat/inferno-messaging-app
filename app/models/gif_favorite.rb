@@ -5,7 +5,7 @@ class GifFavorite < ApplicationRecord
   belongs_to :gif_collection
 
   validates :tenor_gif_id, presence: true,
-            uniqueness: { scope: [:user_id, :gif_collection_id], message: "already in this collection" }
+            uniqueness: { scope: [ :user_id, :gif_collection_id ], message: "already in this collection" }
   validates :tenor_url, presence: true
   validates :preview_url, presence: true
   validates :gif_url, presence: true

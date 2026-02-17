@@ -18,7 +18,7 @@ RSpec.describe RemoteServerReference, type: :model do
       ref_c = create(:remote_server_reference, user: user, position: 2,
                      created_at: ref_b.created_at + 1.second)
 
-      expect(user.remote_server_references.ordered).to eq([ref_a, ref_b, ref_c])
+      expect(user.remote_server_references.ordered).to eq([ ref_a, ref_b, ref_c ])
     end
   end
 

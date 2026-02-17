@@ -1,7 +1,7 @@
 class ChannelsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
-  before_action :set_channel, only: [:show, :edit, :update, :destroy, :older_messages, :newer_messages, :around_messages]
+  before_action :set_channel, only: [ :show, :edit, :update, :destroy, :older_messages, :newer_messages, :around_messages ]
   before_action :ensure_member!
 
   def show
@@ -23,7 +23,7 @@ class ChannelsController < ApplicationController
       current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
       ChannelRead.upsert(
         { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
-        unique_by: [:user_id, :channel_id]
+        unique_by: [ :user_id, :channel_id ]
       )
     end
   end

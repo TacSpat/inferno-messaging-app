@@ -6,14 +6,14 @@ RSpec.describe "Federation::FriendRequests", type: :request do
 
   def build_signed_event(private_key_hex, public_key_hex, content_hash)
     content = content_hash.to_json
-    tags = [["d", "friend_request"], ["relay", "wss://remote.chat"]]
+    tags = [ [ "d", "friend_request" ], [ "relay", "wss://remote.chat" ] ]
     created_at = Time.now.to_i
 
-    serialized = [0, public_key_hex, created_at, 30078, tags, content]
+    serialized = [ 0, public_key_hex, created_at, 30078, tags, content ]
     id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-    message_bin = [id].pack("H*")
-    private_key_bin = [private_key_hex].pack("H*")
+    message_bin = [ id ].pack("H*")
+    private_key_bin = [ private_key_hex ].pack("H*")
     signature = Schnorr.sign(message_bin, private_key_bin)
     sig_hex = signature.encode.unpack1("H*")
 

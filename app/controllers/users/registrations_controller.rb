@@ -1,7 +1,7 @@
 class Users::RegistrationsController < Devise::RegistrationsController
-  before_action :redirect_if_authenticated, only: [:new, :create]
-  before_action :check_registration_limit, only: [:new, :create]
-  before_action :set_no_cache, only: [:new]
+  before_action :redirect_if_authenticated, only: [ :new, :create ]
+  before_action :check_registration_limit, only: [ :new, :create ]
+  before_action :set_no_cache, only: [ :new ]
 
   protected
 

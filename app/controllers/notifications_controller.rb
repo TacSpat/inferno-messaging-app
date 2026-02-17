@@ -21,14 +21,14 @@ class NotificationsController < ApplicationController
     if params[:channel_id].present? && channel
       ChannelRead.upsert(
         { user_id: current_user.id, channel_id: channel.id, last_read_at: Time.current },
-        unique_by: [:user_id, :channel_id]
+        unique_by: [ :user_id, :channel_id ]
       )
     end
     if params[:server_id].present? && server && params[:channel_id].blank?
       server.channels.find_each do |ch|
         ChannelRead.upsert(
           { user_id: current_user.id, channel_id: ch.id, last_read_at: Time.current },
-          unique_by: [:user_id, :channel_id]
+          unique_by: [ :user_id, :channel_id ]
         )
       end
     end

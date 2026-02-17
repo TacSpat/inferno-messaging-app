@@ -243,17 +243,17 @@ class FederationService
     }.to_json
 
     tags = [
-      ["d", "friend_request"],
-      ["relay", "wss://#{host}"]
+      [ "d", "friend_request" ],
+      [ "relay", "wss://#{host}" ]
     ]
 
     created_at = Time.now.to_i
 
-    serialized = [0, user.nostr_public_key, created_at, 30078, tags, content]
+    serialized = [ 0, user.nostr_public_key, created_at, 30078, tags, content ]
     id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-    message_bin = [id].pack("H*")
-    private_key_bin = [user.nostr_private_key].pack("H*")
+    message_bin = [ id ].pack("H*")
+    private_key_bin = [ user.nostr_private_key ].pack("H*")
     signature = Schnorr.sign(message_bin, private_key_bin)
     sig_hex = signature.encode.unpack1("H*")
 
@@ -340,19 +340,19 @@ class FederationService
     content = { name: name, description: description, username: user.username }.to_json
 
     tags = [
-      ["d", "create_server"],
-      ["relay", "wss://#{Rails.application.config.x.instance_domain}"]
+      [ "d", "create_server" ],
+      [ "relay", "wss://#{Rails.application.config.x.instance_domain}" ]
     ]
 
     created_at = Time.now.to_i
 
     # Build the event hash
-    serialized = [0, user.nostr_public_key, created_at, 30078, tags, content]
+    serialized = [ 0, user.nostr_public_key, created_at, 30078, tags, content ]
     id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
     # Sign with Schnorr
-    message_bin = [id].pack("H*")
-    private_key_bin = [user.nostr_private_key].pack("H*")
+    message_bin = [ id ].pack("H*")
+    private_key_bin = [ user.nostr_private_key ].pack("H*")
     signature = Schnorr.sign(message_bin, private_key_bin)
     sig_hex = signature.encode.unpack1("H*")
 

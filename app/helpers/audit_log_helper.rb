@@ -23,7 +23,7 @@ module AuditLogHelper
       icon = raw('<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="2"/></svg>')
     end
 
-    [label, color, icon]
+    [ label, color, icon ]
   end
 
   private
@@ -31,7 +31,7 @@ module AuditLogHelper
   def extract_name(version)
     return nil unless version.object.present?
     begin
-      obj = YAML.safe_load(version.object, permitted_classes: [Time, Date, ActiveSupport::TimeWithZone, BigDecimal])
+      obj = YAML.safe_load(version.object, permitted_classes: [ Time, Date, ActiveSupport::TimeWithZone, BigDecimal ])
       obj["name"] || obj["username"]
     rescue
       nil
