@@ -70,11 +70,10 @@ class Message < ApplicationRecord
   end
 
   def unfurl_images(html)
-
     html.gsub(/<a[^>]*href="([^"]+)"[^>]*>([^<]*)<\/a>/) do |match|
       url = $1
       if url.match?(IMAGE_URL_REGEX)
-        fname = begin; File.basename(URI.parse(url).path); rescue; 'image'; end
+        fname = begin; File.basename(URI.parse(url).path); rescue; "image"; end
         %(<div class="mt-2"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" loading="lazy" data-preview-src="#{url}" data-preview-filename="#{fname}"></div>)
       else
         match
@@ -132,7 +131,7 @@ def unfurl_links(html, sync_tenor: true)
   html = html.gsub(/<p>\s*<\/p>/, "")
   embeds << %(<a href="#{discord_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-[#5865F2]/10 hover:bg-[#5865F2]/20 transition-colors no-underline px-3 py-2.5 group" data-discord-#{message_id}><div class="w-10 h-10 rounded-full bg-[#5865F2] flex items-center justify-center shrink-0"><svg class="w-6 h-6 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03z"/></svg></div><div><div class="text-[#5865F2] text-sm font-semibold group-hover:underline">Discord Message</div><div class="text-gray-400 text-xs">Click to view on Discord</div></div></a>)
 end
-    # Collect YouTube embeds
+  # Collect YouTube embeds
   (content || "").scan(YOUTUBE_REGEX) do
     video_id = $1
     next if embeds.any? { |e| e.include?(video_id) }
@@ -147,7 +146,7 @@ end
     ig_url = "https://www.instagram.com/#{type}/#{shortcode}/"
     label = type == "reel" ? "Instagram Reel" : "Instagram Post"
     embed_url = "https://www.instagram.com/#{type}/#{shortcode}/embed/"
-  # Strip the raw Instagram URL from rendered HTML
+    # Strip the raw Instagram URL from rendered HTML
     html = html.gsub(/<a[^>]*href="[^"]*(?:instagram\.com|kkinstagram\.com)\/(?:reel|p)\/#{shortcode}[^"]*"[^>]*>[^<]*<\/a>/, "")
     html = html.gsub(/<p>\s*<\/p>/, "")
 embeds << %(<div class="mt-2 max-w-sm rounded-lg overflow-hidden border border-gray-700 bg-black relative group" style="height:450px"><iframe src="https://www.instagram.com/#{type}/#{shortcode}/embed/" style="width:100%;height:150%;border:none;position:absolute;top:0;left:0;transform-origin:top center" scrolling="no" allowtransparency="true" loading="lazy"></iframe><a href="#{ig_url}" target="_blank" rel="noopener" class="absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 text-white/80 hover:text-white rounded px-2 py-1 text-xs no-underline z-10 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>View on Instagram</a></div>)
@@ -201,7 +200,7 @@ end
     embeds << %(<div class="mt-2 max-w-md rounded-lg overflow-hidden border border-gray-700 bg-[#1a1a1b] relative group" style="height:400px" data-reddit-#{post_id}><iframe src="#{embed_url}" style="width:100%;height:100%;border:none" scrolling="yes" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups"></iframe><a href="#{reddit_url}" target="_blank" rel="noopener" class="absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 text-white/80 hover:text-white rounded px-2 py-1 text-xs no-underline z-10 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 01-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 01.042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 014.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 01.14-.197.35.35 0 01.238-.042l2.906.617a1.214 1.214 0 011.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 00-.231.094.33.33 0 000 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 00.029-.463.33.33 0 00-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 00-.232-.095z"/></svg>r/#{ERB::Util.html_escape(subreddit)}</a></div>)
   end
 
-    # Collect other URL previews (non-image, non-youtube)
+  # Collect other URL previews (non-image, non-youtube)
   seen_urls = Set.new
   (content || "").scan(URL_REGEX).each do |url|
     next if url.match?(IMAGE_URL_REGEX)
@@ -221,7 +220,7 @@ end
   html + embeds.join
 end
 
-# Extract mentioned user ids from content
+  # Extract mentioned user ids from content
 
   def mentioned_user_ids
     return [] if content.blank?
@@ -309,7 +308,7 @@ end
         notified_ids << member.id
       end
     elsif content&.include?("@here")
-      server.members.where(online_state: [:online, :idle]).where.not(id: user.id).find_each do |member|
+      server.members.where(online_state: [ :online, :idle ]).where.not(id: user.id).find_each do |member|
         Notification.create(user: member, server: server, channel: channel, message: self, notification_type: :everyone_mention)
         notified_ids << member.id
       end

@@ -1,6 +1,6 @@
 module Nostr
   class AuthController < ApplicationController
-    skip_before_action :verify_authenticity_token, only: [:callback]
+    skip_before_action :verify_authenticity_token, only: [ :callback ]
 
     # GET /auth/nostr?home_instance=home.chat
     # Start the remote auth flow: generate challenge, redirect to home instance

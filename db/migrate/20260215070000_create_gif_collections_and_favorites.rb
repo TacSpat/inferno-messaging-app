@@ -8,7 +8,7 @@ class CreateGifCollectionsAndFavorites < ActiveRecord::Migration[8.0]
       t.timestamps
     end
     add_index :gif_collections, :public_id, unique: true
-    add_index :gif_collections, [:user_id, :name], unique: true
+    add_index :gif_collections, [ :user_id, :name ], unique: true
 
     create_table :gif_favorites do |t|
       t.references :user, null: false, foreign_key: true
@@ -23,6 +23,6 @@ class CreateGifCollectionsAndFavorites < ActiveRecord::Migration[8.0]
       t.timestamps
     end
     add_index :gif_favorites, :public_id, unique: true
-    add_index :gif_favorites, [:user_id, :tenor_gif_id], unique: true
+    add_index :gif_favorites, [ :user_id, :tenor_gif_id ], unique: true
   end
 end

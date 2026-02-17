@@ -2,8 +2,8 @@ class ServerStickersController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_membership
-  before_action :ensure_create_stickers!, only: [:create]
-  before_action :ensure_manage_emojis!, only: [:destroy]
+  before_action :ensure_create_stickers!, only: [ :create ]
+  before_action :ensure_manage_emojis!, only: [ :destroy ]
 
   def index
     stickers = @server.server_stickers.includes(image_attachment: :blob).order(:name).map do |sticker|

@@ -75,11 +75,11 @@ class Nip49Service
   # log_n: scrypt cost parameter (16 = ~1s, 20 = ~16s). Higher = slower brute force.
   # key_security: 0x00 = exposed, 0x01 = not exposed, 0x02 = unknown
   def self.encrypt(hex_privkey, password, log_n: 16, key_security: 0x02)
-    privkey_bytes = [hex_privkey].pack("H*")
+    privkey_bytes = [ hex_privkey ].pack("H*")
     password_nfkc = password.unicode_normalize(:nfkc)
     salt          = SecureRandom.random_bytes(SALT_BYTES)
     nonce         = SecureRandom.random_bytes(NONCE_BYTES)
-    ad            = [key_security].pack("C")
+    ad            = [ key_security ].pack("C")
 
     sym_key = OpenSSL::KDF.scrypt(
       password_nfkc, salt: salt, N: 2**log_n, r: SCRYPT_R, p: SCRYPT_P, length: KEY_BYTES
@@ -97,7 +97,7 @@ class Nip49Service
     raise "Encryption failed" unless result == 0
 
     # NIP-49 payload: version(1) + log_n(1) + salt(16) + nonce(24) + ad(1) + ciphertext(48) = 91 bytes
-    payload = [VERSION, log_n].pack("CC") + salt + nonce + ad.b + ciphertext_buf
+    payload = [ VERSION, log_n ].pack("CC") + salt + nonce + ad.b + ciphertext_buf
 
     data_5bit = Bech32.convert_bits(payload.bytes, 8, 5, true)
     Bech32.encode("ncryptsec", data_5bit, Bech32::Encoding::BECH32)
@@ -119,7 +119,7 @@ class Nip49Service
     nonce        = payload.byteslice(18, NONCE_BYTES)
     key_security = payload.getbyte(42)
     ciphertext   = payload.byteslice(43, KEY_BYTES + TAG_BYTES)
-    ad           = [key_security].pack("C")
+    ad           = [ key_security ].pack("C")
 
     password_nfkc = password.unicode_normalize(:nfkc)
     sym_key = OpenSSL::KDF.scrypt(

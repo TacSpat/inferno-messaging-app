@@ -15,7 +15,7 @@ class CreateVoiceStates < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :voice_states, [:user_id, :server_id], unique: true
+    add_index :voice_states, [ :user_id, :server_id ], unique: true
     add_index :voice_states, :public_id, unique: true
     add_index :voice_states, :session_id, unique: true
   end

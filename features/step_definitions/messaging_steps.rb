@@ -17,7 +17,7 @@ When("I send a message with an image attachment") do
     Rails.root.join("spec/fixtures/files/test_image.png"), "image/png"
   )
   page.driver.post channel_messages_path(@channel), {
-    message: { content: "image post", files: [file] }
+    message: { content: "image post", files: [ file ] }
   }
 end
 
@@ -26,7 +26,7 @@ When("I send a message with a video attachment") do
     Rails.root.join("spec/fixtures/files/test_video.mp4"), "video/mp4"
   )
   page.driver.post channel_messages_path(@channel), {
-    message: { content: "video post", files: [file] }
+    message: { content: "video post", files: [ file ] }
   }
 end
 
@@ -35,7 +35,7 @@ When("I send a message with a gif attachment") do
     Rails.root.join("spec/fixtures/files/test_image.gif"), "image/gif"
   )
   page.driver.post channel_messages_path(@channel), {
-    message: { content: "gif post", files: [file] }
+    message: { content: "gif post", files: [ file ] }
   }
 end
 

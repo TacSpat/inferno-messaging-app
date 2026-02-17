@@ -2,10 +2,10 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [:invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers]
-  before_action :ensure_invite_permission!, only: [:invites, :create_invite, :destroy_invite]
-  before_action :ensure_emoji_permission!, only: [:emojis]
-  before_action :ensure_sticker_permission!, only: [:stickers]
+  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers ]
+  before_action :ensure_invite_permission!, only: [ :invites, :create_invite, :destroy_invite ]
+  before_action :ensure_emoji_permission!, only: [ :emojis ]
+  before_action :ensure_sticker_permission!, only: [ :stickers ]
   layout "server_settings"
 
   def overview
@@ -144,7 +144,7 @@ class ServerSettingsController < ApplicationController
 
   def audit_log
     server_item_ids = {
-      "Server" => [@server.id],
+      "Server" => [ @server.id ],
       "Channel" => @server.channel_ids,
       "Role" => @server.role_ids,
       "ServerMembership" => @server.server_membership_ids,
@@ -218,7 +218,7 @@ class ServerSettingsController < ApplicationController
       partial: "servers/member_item",
       locals: { member: user, server: @server },
       layout: false,
-      formats: [:html]
+      formats: [ :html ]
     )
     ServerChannel.broadcast_to(@server, {
       type: "member_update",

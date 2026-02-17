@@ -11,7 +11,7 @@ class CreateInvites < ActiveRecord::Migration[8.0]
       t.timestamps
     end
     add_index :invites, :code, unique: true
-    add_index :invites, [:server_id, :active]
+    add_index :invites, [ :server_id, :active ]
 
     # Migrate existing invite codes to Invite records
     reversible do |dir|

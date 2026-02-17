@@ -1,7 +1,7 @@
 FactoryBot.define do
   factory :legal_hold do
-    association :holdable, factory: [:user, :confirmed]
-    association :placed_by, factory: [:user, :confirmed, :admin]
+    association :holdable, factory: [ :user, :confirmed ]
+    association :placed_by, factory: [ :user, :confirmed, :admin ]
     placed_at { Time.current }
     active { true }
     reason { "Legal preservation request" }

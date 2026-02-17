@@ -29,7 +29,7 @@ class FederationTokenService
 
   def self.verifier
     @verifier ||= ActiveSupport::MessageVerifier.new(
-      Rails.application.credentials.secret_key_base + "federation_tokens"
+      Rails.application.secret_key_base + "federation_tokens"
     )
   end
 end
