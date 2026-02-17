@@ -157,18 +157,34 @@ class User < ApplicationRecord
   def ordered_rail_items
     memberships = server_memberships.includes(:server, :server_folder).ordered
     folders = server_folders.ordered.includes(server_memberships: :server)
+    remote_refs = remote_server_references.includes(:server_folder).ordered
 
     items = []
 
-    # Add folders with their servers
+    # Add folders with their mixed local + remote servers
     folders.each do |folder|
-      folder_servers = memberships.select { |m| m.server_folder_id == folder.id }.map(&:server)
-      items << { type: :folder, folder: folder, servers: folder_servers, position: folder.position }
+      folder_items = []
+
+      memberships.select { |m| m.server_folder_id == folder.id }.each do |m|
+        folder_items << { type: :server, server: m.server, position: m.position }
+      end
+
+      remote_refs.select { |r| r.server_folder_id == folder.id }.each do |r|
+        folder_items << { type: :remote_server, remote_ref: r, position: r.position }
+      end
+
+      folder_items.sort_by! { |i| i[:position] }
+      items << { type: :folder, folder: folder, items: folder_items, position: folder.position }
     end
 
     # Add top-level servers (not in any folder)
     memberships.select { |m| m.server_folder_id.nil? }.each do |m|
       items << { type: :server, server: m.server, position: m.position }
+    end
+
+    # Add top-level remote servers (not in any folder)
+    remote_refs.select { |r| r.server_folder_id.nil? }.each do |r|
+      items << { type: :remote_server, remote_ref: r, position: r.position }
     end
 
     items.sort_by { |item| item[:position] }

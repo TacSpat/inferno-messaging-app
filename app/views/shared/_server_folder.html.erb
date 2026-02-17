@@ -1,11 +1,13 @@
 <% folder = item[:folder] %>
-<% folder_servers = item[:servers] %>
+<% folder_items = item[:items] %>
 <% collapsed = folder.collapsed? %>
 <%
-  # Aggregate badges across contained servers
+  # Aggregate badges across contained local servers
   total_mentions = 0
   has_unread = false
-  folder_servers.each do |server|
+  folder_items.each do |fi|
+    next unless fi[:type] == :server
+    server = fi[:server]
     total_mentions += current_user.notifications.unread.for_server(server.id).count
     has_unread = true if server.channels.any? { |ch| ch.unread_for?(current_user) }
   end
@@ -21,24 +23,36 @@
        data-action="click->server-rail#toggleFolder contextmenu->server-rail#showFolderMenu">
     <div data-folder-icons data-folder-color="<%= folder.color %>" class="relative w-12 h-12 rounded-2xl hover:rounded-xl transition-all duration-200 flex items-center justify-center overflow-hidden" style="background-color: <%= folder.color %>">
       <!-- Stacked mini server icons -->
-      <% folder_servers.first(3).each_with_index do |server, i| %>
+      <% folder_items.first(3).each_with_index do |fi, i| %>
         <% offset_x = i == 0 ? -4 : (i == 1 ? 6 : 1) %>
         <% offset_y = i == 0 ? -4 : (i == 1 ? -2 : 6) %>
         <div class="absolute w-5 h-5 rounded-md overflow-hidden border border-gray-800"
              style="transform: translate(<%= offset_x %>px, <%= offset_y %>px); z-index: <%= 3 - i %>;">
-          <% if server.icon.attached? %>
-            <% if server.icon.content_type == "image/gif" %>
-              <div class="folder-mini-gif w-full h-full">
-                <canvas class="gif-static w-full h-full object-cover" data-gif-freeze></canvas>
-                <%= image_tag server.icon, class: "gif-animated w-full h-full object-cover", data: { gif_src: true } %>
-              </div>
+          <% if fi[:type] == :server %>
+            <% server = fi[:server] %>
+            <% if server.icon.attached? %>
+              <% if server.icon.content_type == "image/gif" %>
+                <div class="folder-mini-gif w-full h-full">
+                  <canvas class="gif-static w-full h-full object-cover" data-gif-freeze></canvas>
+                  <%= image_tag server.icon, class: "gif-animated w-full h-full object-cover", data: { gif_src: true } %>
+                </div>
+              <% else %>
+                <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+              <% end %>
             <% else %>
-              <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+              <div class="w-full h-full bg-gray-600 flex items-center justify-center">
+                <span class="text-white text-[6px] font-bold"><%= server.name[0..1].upcase %></span>
+              </div>
             <% end %>
           <% else %>
-            <div class="w-full h-full bg-gray-600 flex items-center justify-center">
-              <span class="text-white text-[6px] font-bold"><%= server.name[0..1].upcase %></span>
-            </div>
+            <% ref = fi[:remote_ref] %>
+            <% if ref.icon_url.present? %>
+              <%= image_tag ref.icon_url, class: "w-full h-full object-cover" %>
+            <% else %>
+              <div class="w-full h-full bg-gray-600 flex items-center justify-center">
+                <span class="text-white text-[6px] font-bold"><%= ref.name&.slice(0, 2)&.upcase || "?" %></span>
+              </div>
+            <% end %>
           <% end %>
         </div>
       <% end %>
@@ -61,17 +75,29 @@
     <div class="relative group cursor-pointer"
          data-action="click->server-rail#toggleFolder contextmenu->server-rail#showFolderMenu">
       <div data-folder-icons data-folder-color="<%= folder.color %>" class="relative w-12 h-12 rounded-2xl hover:rounded-xl transition-all duration-200 flex items-center justify-center overflow-hidden" style="background-color: <%= folder.color %>">
-        <% folder_servers.first(3).each_with_index do |server, i| %>
+        <% folder_items.first(3).each_with_index do |fi, i| %>
           <% offset_x = i == 0 ? -4 : (i == 1 ? 6 : 1) %>
           <% offset_y = i == 0 ? -4 : (i == 1 ? -2 : 6) %>
           <div class="absolute w-5 h-5 rounded-md overflow-hidden border border-gray-800"
                style="transform: translate(<%= offset_x %>px, <%= offset_y %>px); z-index: <%= 3 - i %>;">
-            <% if server.icon.attached? %>
-              <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+            <% if fi[:type] == :server %>
+              <% server = fi[:server] %>
+              <% if server.icon.attached? %>
+                <%= image_tag server.icon, class: "w-full h-full object-cover" %>
+              <% else %>
+                <div class="w-full h-full bg-gray-600 flex items-center justify-center">
+                  <span class="text-white text-[6px] font-bold"><%= server.name[0..1].upcase %></span>
+                </div>
+              <% end %>
             <% else %>
-              <div class="w-full h-full bg-gray-600 flex items-center justify-center">
-                <span class="text-white text-[6px] font-bold"><%= server.name[0..1].upcase %></span>
-              </div>
+              <% ref = fi[:remote_ref] %>
+              <% if ref.icon_url.present? %>
+                <%= image_tag ref.icon_url, class: "w-full h-full object-cover" %>
+              <% else %>
+                <div class="w-full h-full bg-gray-600 flex items-center justify-center">
+                  <span class="text-white text-[6px] font-bold"><%= ref.name&.slice(0, 2)&.upcase || "?" %></span>
+                </div>
+              <% end %>
             <% end %>
           </div>
         <% end %>
@@ -87,10 +113,14 @@
              data-folder-server-bg="<%= folder.color %>"
              class="flex flex-col items-center space-y-2 py-2 mt-1 rounded-2xl"
              style="background-color: <%= folder.color %>30">
-          <% folder_servers.each do |server| %>
-            <div data-server-id="<%= server.public_id %>">
-              <%= render partial: "servers/server_icon", locals: { server: server, active: local_assigns[:active_server] == server } %>
-            </div>
+          <% folder_items.each do |fi| %>
+            <% if fi[:type] == :server %>
+              <div data-server-id="<%= fi[:server].public_id %>">
+                <%= render partial: "servers/server_icon", locals: { server: fi[:server], active: local_assigns[:active_server] == fi[:server] } %>
+              </div>
+            <% else %>
+              <%= render partial: "shared/remote_server_icon", locals: { ref: fi[:remote_ref], in_folder: true } %>
+            <% end %>
           <% end %>
         </div>
       </div>

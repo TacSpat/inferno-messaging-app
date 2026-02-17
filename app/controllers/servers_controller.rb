@@ -64,6 +64,7 @@ class ServersController < ApplicationController
     items = params.require(:items)
     memberships = current_user.server_memberships.includes(:server).index_by { |m| m.server.public_id }
     folders = current_user.server_folders.index_by(&:public_id)
+    remote_refs = current_user.remote_server_references.index_by { |r| r.id.to_s }
 
     ActiveRecord::Base.transaction do
       items.each do |entry|
@@ -73,12 +74,22 @@ class ServersController < ApplicationController
           next unless folder
           folder.update_column(:position, pos)
 
-          # Update servers inside this folder
+          # Update servers inside this folder (local + remote)
           (entry[:servers] || []).each do |server_entry|
-            membership = memberships[server_entry[:id]]
-            next unless membership
-            membership.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
+            if server_entry[:remote].present?
+              ref = remote_refs[server_entry[:id].to_s]
+              next unless ref
+              ref.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
+            else
+              membership = memberships[server_entry[:id]]
+              next unless membership
+              membership.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
+            end
           end
+        elsif entry[:type] == "remote_server"
+          ref = remote_refs[entry[:id].to_s]
+          next unless ref
+          ref.update_columns(position: pos, server_folder_id: nil)
         else
           membership = memberships[entry[:id]]
           next unless membership
