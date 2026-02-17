@@ -93,7 +93,7 @@ RSpec.describe "Nostr::Auth", type: :request do
 
       get nostr_auth_callback_path, params: { event: encoded }
 
-      expect(response).to redirect_to(root_path)
+      expect(response).to redirect_to(federation_syncing_path)
       expect(flash[:notice]).to be_present
 
       # Challenge should be consumed

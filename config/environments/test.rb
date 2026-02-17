@@ -54,4 +54,7 @@ Rails.application.configure do
 
   # Raise error when a before_action's only/except options reference missing actions.
   config.action_controller.raise_on_missing_callback_actions = true
+
+  # Fix instance domain to a known value so tests don't pick up .env overrides
+  config.x.instance_domain = "localhost"
 end
