@@ -20,9 +20,7 @@ jobs:
           bundler-cache: true
 
       - name: Scan for common Rails security vulnerabilities using static analysis
-        run: |
-          bin/brakeman --no-pager; rc=$?
-          if [ $rc -eq 0 ] || [ $rc -eq 3 ]; then exit 0; else exit $rc; fi
+        run: bin/brakeman --no-pager --no-exit-on-warn
 
   lint:
     runs-on: ubuntu-latest
@@ -79,7 +77,13 @@ jobs:
         env:
           RAILS_ENV: test
           DATABASE_URL: postgres://postgres:postgres@localhost:5432
-        run: bin/rails test test:system
+        run: bin/rails test
+
+      - name: Run system tests
+        env:
+          RAILS_ENV: test
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432
+        run: bin/rails test:system
 
       - name: Run RSpec
         env:
