@@ -39,6 +39,7 @@ Rails.application.routes.draw do
     get "profiles/:pubkey/conversations", to: "profiles#conversations", as: :federation_profile_conversations
     get "profiles/:pubkey/friends", to: "profiles#friends", as: :federation_profile_friends
     get "profiles/:pubkey/gif_collections", to: "profiles#gif_collections", as: :federation_profile_gif_collections
+    get "profiles/:pubkey/memberships", to: "profiles#memberships", as: :federation_profile_memberships
     post "profiles/:pubkey/report_memberships", to: "profiles#report_memberships", as: :federation_profile_report_memberships
     get "syncing", to: "syncing#show", as: :syncing
 
