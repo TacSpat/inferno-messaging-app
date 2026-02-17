@@ -46,7 +46,7 @@ class VoiceChannelsController < ApplicationController
     sidebar_html = render_to_string(
       partial: "voice_states/participant",
       locals: { voice_state: voice_state },
-      formats: [:html]
+      formats: [ :html ]
     )
 
     broadcast_voice_join(voice_state, sidebar_html)

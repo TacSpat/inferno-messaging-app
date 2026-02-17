@@ -12,9 +12,9 @@ class CreateFederationAuditLogs < ActiveRecord::Migration[8.0]
       t.datetime :created_at, null: false
     end
 
-    add_index :federation_audit_logs, [:event_type, :created_at]
-    add_index :federation_audit_logs, [:actor_type, :actor_id]
-    add_index :federation_audit_logs, [:remote_domain, :created_at]
-    add_index :federation_audit_logs, [:target_type, :target_id]
+    add_index :federation_audit_logs, [ :event_type, :created_at ]
+    add_index :federation_audit_logs, [ :actor_type, :actor_id ]
+    add_index :federation_audit_logs, [ :remote_domain, :created_at ]
+    add_index :federation_audit_logs, [ :target_type, :target_id ]
   end
 end

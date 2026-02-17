@@ -3,7 +3,7 @@ class Federation::ProfilesController < ApplicationController
 
   before_action :verify_federation_open
   before_action :check_blocklist
-  before_action :verify_federation_token, except: [:memberships]
+  before_action :verify_federation_token, except: [ :memberships ]
 
   # GET /federation/profiles/:pubkey?requesting_instance=example.com
   def show
@@ -15,6 +15,7 @@ class Federation::ProfilesController < ApplicationController
     end
 
     host = request.host_with_port
+    instance_domain = Rails.application.config.x.instance_domain
 
     avatar_url = if user.avatar.attached?
       rails_blob_url(user.avatar, host: host,
@@ -39,7 +40,7 @@ class Federation::ProfilesController < ApplicationController
       status: user.status,
       status_emoji: user.status_emoji,
       nip05: user.nip05_identifier,
-      home_instance: host,
+      home_instance: instance_domain,
       avatar_url: avatar_url,
       banner_url: banner_url,
       synced_at: Time.current.iso8601
@@ -55,7 +56,7 @@ class Federation::ProfilesController < ApplicationController
     host = request.host_with_port
     instance_url = "#{protocol}://#{host}"
 
-    servers_data = user.server_memberships.includes(server: [:invites, :server_emojis, :server_stickers, { icon_attachment: :blob }]).map do |membership|
+    servers_data = user.server_memberships.includes(server: [ :invites, :server_emojis, :server_stickers, { icon_attachment: :blob } ]).map do |membership|
       server = membership.server
       invite = server.invites.first
 
@@ -181,7 +182,7 @@ class Federation::ProfilesController < ApplicationController
     host = request.host_with_port
     instance_url = "#{protocol}://#{host}"
 
-    servers_data = user.server_memberships.includes(server: [:invites, { icon_attachment: :blob }]).map do |membership|
+    servers_data = user.server_memberships.includes(server: [ :invites, { icon_attachment: :blob } ]).map do |membership|
       server = membership.server
       invite = server.invites.first
       icon_url = server.icon.attached? ? rails_blob_url(server.icon, host: host, protocol: protocol) : nil
@@ -302,7 +303,7 @@ class Federation::ProfilesController < ApplicationController
     requesting = params[:requesting_instance]&.strip&.downcase
     if requesting.present? && payload["instance"] != requesting
       render json: { error: "Token instance mismatch" }, status: :forbidden
-      return
+      nil
     end
   end
 

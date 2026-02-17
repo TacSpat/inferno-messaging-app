@@ -71,8 +71,8 @@ RSpec.describe NostrReportPublishJob, type: :job do
       event_data ||= published_event
 
       tags = event_data["tags"] || event_data[:tags]
-      expect(tags).to include(["L", "MOD"])
-      expect(tags).to include(["l", "spam", "MOD"])
+      expect(tags).to include([ "L", "MOD" ])
+      expect(tags).to include([ "l", "spam", "MOD" ])
     end
 
     it "uses instance keypair for signing" do

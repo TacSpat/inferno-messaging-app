@@ -15,7 +15,7 @@ RSpec.describe "File type validation", type: :request do
       )
 
       post channel_messages_path(channel), params: {
-        message: { content: "test", files: [exe_file] }
+        message: { content: "test", files: [ exe_file ] }
       }
 
       expect(response).to have_http_status(:unprocessable_entity)
@@ -29,7 +29,7 @@ RSpec.describe "File type validation", type: :request do
       )
 
       post channel_messages_path(channel), params: {
-        message: { content: "test", files: [png_file] }
+        message: { content: "test", files: [ png_file ] }
       }
 
       expect(response).not_to have_http_status(:unprocessable_entity)

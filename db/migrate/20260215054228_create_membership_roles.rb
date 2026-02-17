@@ -6,7 +6,7 @@ class CreateMembershipRoles < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :membership_roles, [:server_membership_id, :role_id], unique: true
+    add_index :membership_roles, [ :server_membership_id, :role_id ], unique: true
     add_index :membership_roles, :role_id
     add_foreign_key :membership_roles, :server_memberships
     add_foreign_key :membership_roles, :roles

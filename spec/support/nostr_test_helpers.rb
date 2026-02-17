@@ -52,8 +52,8 @@ module NostrTestHelpers
       pubkey: public_key,
       content: "",
       tags: [
-        ["relay", relay_url],
-        ["challenge", challenge]
+        [ "relay", relay_url ],
+        [ "challenge", challenge ]
       ]
     )
     signed = signer.sign(event)

@@ -14,7 +14,7 @@ rescue ActiveRecord::PendingMigrationError => e
 end
 
 RSpec.configure do |config|
-  config.fixture_paths = [Rails.root.join('spec/fixtures')]
+  config.fixture_paths = [ Rails.root.join('spec/fixtures') ]
   config.use_transactional_fixtures = true
   config.infer_spec_type_from_file_location!
   config.filter_rails_from_backtrace!
@@ -23,6 +23,9 @@ RSpec.configure do |config|
   config.include Devise::Test::IntegrationHelpers, type: :request
   config.include NostrTestHelpers
   config.include AdminHelpers, type: :request
+
+  # Use test adapter to prevent perform_later from hitting Redis/Sidekiq
+  ActiveJob::Base.queue_adapter = :test
 
   WebMock.disable_net_connect!(allow_localhost: true)
 

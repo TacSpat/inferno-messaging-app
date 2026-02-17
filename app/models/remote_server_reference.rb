@@ -4,13 +4,13 @@ class RemoteServerReference < ApplicationRecord
 
   validates :remote_instance_url, presence: true
   validates :remote_server_id, presence: true
-  validates :remote_server_id, uniqueness: { scope: [:user_id, :remote_instance_url] }
+  validates :remote_server_id, uniqueness: { scope: [ :user_id, :remote_instance_url ] }
 
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
 
   def remote_server_url
-    return nil unless remote_server_id.present?
-    "#{remote_instance_url}/servers/#{remote_server_id}"
+    return nil unless invite_code.present?
+    "#{remote_instance_url}/invite/#{invite_code}"
   end
 
   def instance_domain

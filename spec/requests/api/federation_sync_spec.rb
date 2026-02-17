@@ -36,6 +36,8 @@ RSpec.describe "Api::FederationSync", type: :request do
     stub_request(:get, /#{Regexp.escape(base)}(\?|$)/).to_return(status: 200, body: profile_response, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/servers/).to_return(status: 200, body: { servers: [] }.to_json, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/conversations/).to_return(status: 200, body: { conversations: [] }.to_json, headers: headers)
+    stub_request(:get, /#{Regexp.escape(base)}\/friends/).to_return(status: 200, body: { friends: [] }.to_json, headers: headers)
+    stub_request(:get, /#{Regexp.escape(base)}\/folders/).to_return(status: 200, body: { folders: [] }.to_json, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/gif_collections/).to_return(status: 200, body: { gif_collections: [] }.to_json, headers: headers)
   end
 

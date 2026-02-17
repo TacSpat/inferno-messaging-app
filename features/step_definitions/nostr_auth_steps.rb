@@ -36,6 +36,6 @@ end
 
 Then("I should be redirected to the callback URL with a signed event") do
   # rack_test won't follow external redirects, but we can check the response
-  expect([302, 303]).to include(page.driver.response.status)
+  expect([ 302, 303 ]).to include(page.driver.response.status)
   expect(page.driver.response.location).to include("event=")
 end

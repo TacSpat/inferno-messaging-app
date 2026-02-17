@@ -1,7 +1,7 @@
 FactoryBot.define do
   factory :user_suspension do
-    association :user, factory: [:user, :confirmed]
-    association :suspended_by, factory: [:user, :confirmed, :admin]
+    association :user, factory: [ :user, :confirmed ]
+    association :suspended_by, factory: [ :user, :confirmed, :admin ]
     suspension_type { "permanent" }
     reason { "Violation of terms of service" }
     reason_category { "admin_action" }
@@ -18,7 +18,7 @@ FactoryBot.define do
 
     trait :lifted do
       lifted_at { Time.current }
-      association :lifted_by, factory: [:user, :confirmed, :admin]
+      association :lifted_by, factory: [ :user, :confirmed, :admin ]
       lift_reason { "Appeal approved" }
     end
 

@@ -6,7 +6,7 @@ namespace :instance do
 
     if config_path.exist?
       raw = ERB.new(config_path.read).result
-      all_config = YAML.safe_load(raw, permitted_classes: [Symbol], aliases: true) || {}
+      all_config = YAML.safe_load(raw, permitted_classes: [ Symbol ], aliases: true) || {}
       env_config = all_config[Rails.env] || all_config["default"] || {}
     end
 

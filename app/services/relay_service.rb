@@ -24,7 +24,7 @@ class RelayService
 
   # Publish a signed event to a specific relay
   def self.publish_to_relay(relay, signed_event)
-    event_message = JSON.generate(["EVENT", signed_event])
+    event_message = JSON.generate([ "EVENT", signed_event ])
     result = { success: false, message: "Not attempted" }
 
     run_with_eventmachine do |done|
@@ -76,8 +76,8 @@ class RelayService
   def self.fetch_from_relay(relay_url, filter, timeout: RESPONSE_TIMEOUT)
     events = []
     sub_id = SecureRandom.hex(8)
-    req_message = JSON.generate(["REQ", sub_id, filter])
-    close_message = JSON.generate(["CLOSE", sub_id])
+    req_message = JSON.generate([ "REQ", sub_id, filter ])
+    close_message = JSON.generate([ "CLOSE", sub_id ])
 
     run_with_eventmachine do |done|
       ws = Faye::WebSocket::Client.new(relay_url)

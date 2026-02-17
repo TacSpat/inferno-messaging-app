@@ -9,6 +9,6 @@ class CreateServerFolders < ActiveRecord::Migration[8.0]
       t.timestamps
     end
     add_index :server_folders, :public_id, unique: true
-    add_index :server_folders, [:user_id, :position]
+    add_index :server_folders, [ :user_id, :position ]
   end
 end

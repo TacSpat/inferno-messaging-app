@@ -15,7 +15,7 @@ RSpec.describe Nip49Service do
     end
 
     it "works with different key_security values" do
-      [0x00, 0x01, 0x02].each do |ks|
+      [ 0x00, 0x01, 0x02 ].each do |ks|
         ncryptsec = Nip49Service.encrypt(test_privkey, password, log_n: 8, key_security: ks)
         decrypted = Nip49Service.decrypt(ncryptsec, password)
         expect(decrypted).to eq(test_privkey)

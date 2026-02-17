@@ -39,7 +39,7 @@ RSpec.describe FederationService do
           event = body["event"]
           event["kind"] == 30078 &&
             event["pubkey"] == public_key &&
-            event["tags"].any? { |t| t == ["d", "create_server"] }
+            event["tags"].any? { |t| t == [ "d", "create_server" ] }
         }
     end
 
@@ -199,7 +199,7 @@ RSpec.describe FederationService do
 
     it "returns parsed JSON on success" do
       stub_request(:get, /home\.chat\/federation\/profiles\/#{pubkey}\/servers/)
-        .to_return(status: 200, body: { servers: [{ name: "S1" }] }.to_json, headers: { "Content-Type" => "application/json" })
+        .to_return(status: 200, body: { servers: [ { name: "S1" } ] }.to_json, headers: { "Content-Type" => "application/json" })
 
       result = FederationService.fetch_remote_servers(home_instance: home, pubkey: pubkey)
       expect(result["servers"].length).to eq(1)
