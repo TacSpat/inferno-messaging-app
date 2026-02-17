@@ -99,7 +99,10 @@ RSpec.describe FederationProfileSyncJob, type: :job do
     stub_request(:get, /#{Regexp.escape(base)}(\?|$)/).to_return(status: 200, body: profile_response, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/servers/).to_return(status: 200, body: servers_response, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/conversations/).to_return(status: 200, body: conversations_response, headers: headers)
+    stub_request(:get, /#{Regexp.escape(base)}\/friends/).to_return(status: 200, body: { friends: [] }.to_json, headers: headers)
+    stub_request(:get, /#{Regexp.escape(base)}\/folders/).to_return(status: 200, body: { folders: [] }.to_json, headers: headers)
     stub_request(:get, /#{Regexp.escape(base)}\/gif_collections/).to_return(status: 200, body: gif_response, headers: headers)
+    stub_request(:post, /#{Regexp.escape(base)}\/report_memberships/).to_return(status: 200, body: { status: "ok" }.to_json, headers: headers)
   end
 
   it "syncs profile data to remote user and shadow" do

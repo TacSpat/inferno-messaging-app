@@ -75,7 +75,7 @@ class Api::FederationSyncController < ApplicationController
     pubkey = current_user.nostr_public_key
 
     if target_url.blank? || pubkey.blank?
-      render json: { status: "ok", synced: [] }
+      render json: { status: "skipped", synced: [] }
       return
     end
 
