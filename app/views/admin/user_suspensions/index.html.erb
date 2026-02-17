@@ -1,0 +1,138 @@
+<div class="h-full overflow-y-auto bg-gray-900 text-gray-100">
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-white">User Suspensions</h1>
+        <p class="text-sm text-gray-400 mt-1">
+          <%= @active_suspensions.count %> active <%= "suspension".pluralize(@active_suspensions.count) %>
+        </p>
+      </div>
+      <%= link_to "Back to Admin", admin_instance_config_path, class: "text-sm text-gray-400 hover:text-white transition" %>
+    </div>
+
+    <%# Suspend user form %>
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <h3 class="text-sm font-semibold text-white mb-3">Suspend User</h3>
+      <%= form_tag admin_user_suspensions_path, method: :post, class: "space-y-3" do %>
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">User ID</label>
+            <input type="number" name="user_id" required
+                   class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 w-24"
+                   placeholder="ID">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Type</label>
+            <select name="suspension_type" class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
+              <option value="temporary">Temporary</option>
+              <option value="permanent">Permanent</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Category</label>
+            <select name="reason_category" class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
+              <option value="">-- None --</option>
+              <% UserSuspension::REASON_CATEGORIES.each do |cat| %>
+                <option value="<%= cat %>"><%= cat.titleize %></option>
+              <% end %>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Expires at</label>
+            <input type="datetime-local" name="expires_at"
+                   class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Reason</label>
+          <input type="text" name="reason"
+                 class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 w-full"
+                 placeholder="Reason for suspension (optional)">
+        </div>
+        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-1.5 rounded transition">
+          Suspend User
+        </button>
+      <% end %>
+    </div>
+
+    <%# Active suspensions %>
+    <h2 class="text-lg font-semibold text-white mb-3">Active Suspensions</h2>
+    <% if @active_suspensions.any? %>
+      <div class="space-y-2 mb-8">
+        <% @active_suspensions.each do |suspension| %>
+          <div class="bg-gray-800 rounded-lg px-4 py-3 flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold px-2 py-0.5 rounded bg-red-900 text-red-300">
+                  <%= suspension.suspension_type.capitalize %>
+                </span>
+                <span class="text-sm text-white"><%= suspension.user.username %> (ID: <%= suspension.user.id %>)</span>
+                <% if suspension.reason_category.present? %>
+                  <span class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-300"><%= suspension.reason_category.titleize %></span>
+                <% end %>
+              </div>
+              <div class="mt-1 text-xs text-gray-400">
+                <% if suspension.suspended_by %>
+                  Suspended by <%= suspension.suspended_by.username %>
+                <% else %>
+                  Auto-triggered
+                <% end %>
+                on <%= suspension.created_at.strftime("%Y-%m-%d %H:%M") %>
+                <% if suspension.reason.present? %>
+                  &mdash; <%= suspension.reason %>
+                <% end %>
+                <% if suspension.expires_at.present? %>
+                  <br>Expires: <%= suspension.expires_at.strftime("%Y-%m-%d %H:%M") %>
+                <% end %>
+              </div>
+            </div>
+            <%= form_tag admin_user_suspension_path(suspension), method: :delete, class: "flex items-center gap-2" do %>
+              <input type="text" name="lift_reason" placeholder="Lift reason"
+                     class="bg-gray-700 text-white text-xs rounded px-2 py-1 border border-gray-600 w-32">
+              <button type="submit" class="bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded transition"
+                      data-turbo-confirm="Are you sure you want to lift this suspension?">
+                Lift
+              </button>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-gray-800 rounded-lg p-6 text-center mb-8">
+        <p class="text-gray-400">No active suspensions.</p>
+      </div>
+    <% end %>
+
+    <%# Recently lifted %>
+    <% if @recent_lifted.any? %>
+      <h2 class="text-lg font-semibold text-white mb-3">Recently Lifted</h2>
+      <div class="space-y-2">
+        <% @recent_lifted.each do |suspension| %>
+          <div class="bg-gray-800 rounded-lg px-4 py-3 opacity-60">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-400">Lifted</span>
+              <span class="text-sm text-gray-300"><%= suspension.user.username %> (ID: <%= suspension.user.id %>)</span>
+              <% if suspension.reason_category.present? %>
+                <span class="text-xs px-2 py-0.5 rounded bg-gray-700 text-gray-400"><%= suspension.reason_category.titleize %></span>
+              <% end %>
+            </div>
+            <div class="mt-1 text-xs text-gray-500">
+              <% if suspension.suspended_by %>
+                Suspended by <%= suspension.suspended_by.username %>
+              <% end %>
+              <% if suspension.lifted_at %>
+                &mdash; lifted <%= time_ago_in_words(suspension.lifted_at) %> ago
+                <% if suspension.lifted_by %>
+                  by <%= suspension.lifted_by.username %>
+                <% end %>
+              <% end %>
+              <% if suspension.lift_reason.present? %>
+                &mdash; <%= suspension.lift_reason %>
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>

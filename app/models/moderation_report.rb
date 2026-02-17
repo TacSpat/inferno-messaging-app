@@ -1,4 +1,6 @@
 class ModerationReport < ApplicationRecord
+  has_paper_trail only: [:status, :reviewed_by_id]
+
   REPORT_TYPES = %w[spam illegal impersonation harassment other].freeze
   STATUSES = %w[open reviewed dismissed actioned].freeze
 

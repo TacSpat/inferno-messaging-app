@@ -26,6 +26,12 @@ module Nostr
 
       # Check blocklist
       if InstanceBlocklist.blocked?(home_instance)
+        AuditService.log(
+          event_type: "auth_failure",
+          remote_domain: home_instance,
+          ip_address: request.remote_ip,
+          metadata: { reason: "blocked_domain" }
+        )
         redirect_to root_path, alert: "Authentication from #{home_instance} is not allowed."
         return
       end
@@ -40,6 +46,13 @@ module Nostr
         requesting_domain: request.host_with_port,
         callback_url: callback_with_home,
         expires_at: 5.minutes.from_now
+      )
+
+      AuditService.log(
+        event_type: "auth_attempt",
+        remote_domain: home_instance,
+        ip_address: request.remote_ip,
+        metadata: { challenge_nonce: challenge.nonce }
       )
 
       # Redirect to home instance's signing endpoint
@@ -83,6 +96,11 @@ module Nostr
       # Find and validate the challenge
       challenge = NostrAuthChallenge.valid_for_nonce(nonce).first
       unless challenge
+        AuditService.log(
+          event_type: "auth_failure",
+          ip_address: request.remote_ip,
+          metadata: { reason: "invalid_or_expired_challenge" }
+        )
         redirect_to root_path, alert: "Invalid or expired authentication challenge."
         return
       end
@@ -95,6 +113,11 @@ module Nostr
         )
       rescue NostrEventService::InvalidSignature, NostrEventService::InvalidEvent => e
         Rails.logger.warn("Nostr auth verification failed: #{e.message}")
+        AuditService.log(
+          event_type: "auth_failure",
+          ip_address: request.remote_ip,
+          metadata: { reason: "verification_failed", error: e.message }
+        )
         redirect_to root_path, alert: "Authentication verification failed."
         return
       end
@@ -107,6 +130,12 @@ module Nostr
       if home_instance.present?
         # Check blocklist again with the verified home instance
         if InstanceBlocklist.blocked?(home_instance)
+          AuditService.log(
+            event_type: "auth_failure",
+            remote_domain: home_instance,
+            ip_address: request.remote_ip,
+            metadata: { reason: "blocked_domain", pubkey: pubkey }
+          )
           redirect_to root_path, alert: "Authentication from #{home_instance} is not allowed."
           return
         end
@@ -141,6 +170,14 @@ module Nostr
 
       # Sign in the shadow user via Devise
       sign_in(shadow_user)
+
+      AuditService.log(
+        event_type: "auth_success",
+        actor: shadow_user,
+        remote_domain: home_instance,
+        ip_address: request.remote_ip,
+        metadata: { pubkey: pubkey, nip05_verified: nip05_verified || false }
+      )
 
       # Enqueue background profile sync from home instance
       FederationProfileSyncJob.perform_later(remote_user.id)

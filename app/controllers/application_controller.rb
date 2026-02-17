@@ -20,4 +20,13 @@ class ApplicationController < ActionController::Base
   def user_for_paper_trail
     current_user&.id&.to_s
   end
+
+  # PaperTrail merges this into every new version record
+  def info_for_paper_trail
+    {
+      ip_address: request.remote_ip,
+      remote_domain: @paper_trail_remote_domain,
+      metadata: @paper_trail_metadata
+    }.compact
+  end
 end

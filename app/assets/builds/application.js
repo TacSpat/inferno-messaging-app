@@ -34738,7 +34738,7 @@ class message_form_controller_default extends Controller {
       input.style.fontFamily = "Consolas, Monaco, 'Courier New', monospace";
       input.style.fontSize = "0.8rem";
       if (input.parentElement)
-        input.parentElement.style.backgroundColor = "rgb(30 31 34)";
+        input.parentElement.style.backgroundColor = "rgb(18 17 16)";
     } else {
       input.style.fontFamily = "";
       input.style.fontSize = "";
@@ -34760,6 +34760,11 @@ class message_form_controller_default extends Controller {
           scrollCtrl.showNewMessageBar();
         } else {
           messagesDiv.insertAdjacentHTML("beforeend", data.html);
+          const newEl = messagesDiv.lastElementChild;
+          if (newEl) {
+            newEl.classList.add("message-appear");
+            newEl.addEventListener("animationend", () => newEl.classList.remove("message-appear"), { once: true });
+          }
           const allMsgs = messagesDiv.querySelectorAll("[data-message-id]");
           if (allMsgs.length > 0) {
             this.applyGrouping(allMsgs[allMsgs.length - 1]);
@@ -34865,7 +34870,7 @@ class message_form_controller_default extends Controller {
     const common = ["\uD83D\uDE00", "\uD83D\uDE02", "❤️", "\uD83D\uDC4D", "\uD83D\uDC4E", "\uD83D\uDE2E", "\uD83D\uDE22", "\uD83D\uDE21", "\uD83D\uDE0D", "\uD83E\uDD14", "\uD83D\uDE4F", "\uD83D\uDE4C", "\uD83D\uDD25", "\uD83C\uDF89", "✨", "\uD83D\uDCAF", "\uD83D\uDC80", "\uD83E\uDD23", "\uD83D\uDE0E", "\uD83D\uDE44"];
     const popup = document.createElement("div");
     popup.id = "reaction-picker-popup";
-    popup.className = "fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-0.5 w-64";
+    popup.className = "fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-0.5 w-64 context-pop";
     const msgEl = document.getElementById(`message_${messageId}`);
     if (msgEl) {
       const rect = msgEl.getBoundingClientRect();
@@ -34920,7 +34925,7 @@ class message_form_controller_default extends Controller {
       return;
     const text = this.inputTarget.value;
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-blue-400">$1</span>');
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>');
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>');
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>');
@@ -35254,7 +35259,7 @@ class scroll_position_controller_default extends Controller {
   }
   highlightMessage(el, afterScroll = false) {
     const doHighlight = () => {
-      el.style.backgroundColor = "rgba(99, 102, 241, 0.3)";
+      el.style.backgroundColor = "rgba(249, 115, 22, 0.3)";
       el.style.borderRadius = "4px";
       setTimeout(() => {
         el.style.transition = "background-color 0.8s ease-out";
@@ -35550,7 +35555,8 @@ class scroll_position_controller_default extends Controller {
     }
     const bar = this.element.parentElement?.querySelector("[data-scroll-position-target=newMessageBar]");
     if (bar) {
-      bar.classList.remove("hidden");
+      bar.classList.remove("hidden", "new-msg-bar-exit");
+      bar.classList.add("new-msg-bar-enter");
       const countEl = bar.querySelector("[data-count]");
       if (countEl)
         countEl.textContent = text;
@@ -35559,8 +35565,14 @@ class scroll_position_controller_default extends Controller {
   hideNewMessageBar() {
     this.newMessageCount = 0;
     const bar = this.element.parentElement?.querySelector("[data-scroll-position-target=newMessageBar]");
-    if (bar)
-      bar.classList.add("hidden");
+    if (bar && !bar.classList.contains("hidden")) {
+      bar.classList.remove("new-msg-bar-enter");
+      bar.classList.add("new-msg-bar-exit");
+      bar.addEventListener("animationend", () => {
+        bar.classList.add("hidden");
+        bar.classList.remove("new-msg-bar-exit");
+      }, { once: true });
+    }
   }
   getSavedPosition() {
     try {
@@ -35790,16 +35802,20 @@ class unified_picker_controller_default extends Controller {
   toggle() {
     const panel = this.panelTarget;
     const wasHidden = panel.classList.contains("hidden");
-    panel.classList.toggle("hidden");
     if (wasHidden) {
+      panel.classList.remove("hidden");
+      panel.classList.add("context-pop");
       this.updateTabStyles();
       this.renderCurrentTab();
       if (this.hasSearchInputTarget)
         this.searchInputTarget.focus();
+    } else {
+      this.close();
     }
   }
   close() {
     this.panelTarget.classList.add("hidden");
+    this.panelTarget.classList.remove("context-pop");
   }
   closeOnClickOutside(event) {
     if (this.panelTarget.contains(event.target))
@@ -36317,7 +36333,7 @@ class unified_picker_controller_default extends Controller {
     this.dismissContextMenu();
     const menu = document.createElement("div");
     menu.id = "gif-context-menu";
-    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[180px] text-sm";
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[180px] text-sm context-pop";
     menu.style.left = `${event.clientX}px`;
     menu.style.top = `${event.clientY}px`;
     const otherCollections = this.userCollections.filter((c) => {
@@ -36561,7 +36577,7 @@ class unified_picker_controller_default extends Controller {
     this.dismissContextMenu();
     const menu = document.createElement("div");
     menu.id = "gif-context-menu";
-    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px] text-sm";
+    menu.className = "fixed bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 z-[9999] min-w-[160px] text-sm context-pop";
     menu.style.left = `${event.clientX}px`;
     menu.style.top = `${event.clientY}px`;
     const deleteBtn = document.createElement("button");
@@ -36763,10 +36779,17 @@ class gif_save_controller_default extends Controller {
 class dropdown_controller_default extends Controller {
   static targets = ["menu"];
   toggle() {
-    this.menuTarget.classList.toggle("hidden");
+    const isHidden = this.menuTarget.classList.contains("hidden");
+    if (isHidden) {
+      this.menuTarget.classList.remove("hidden");
+      this.menuTarget.classList.add("dropdown-enter");
+    } else {
+      this.close();
+    }
   }
   close() {
     this.menuTarget.classList.add("hidden");
+    this.menuTarget.classList.remove("dropdown-enter");
   }
   closeOnClickOutside(event) {
     if (!this.element.contains(event.target)) {
@@ -36957,7 +36980,7 @@ class server_members_controller_default extends Controller {
       h3.classList.add("text-gray-400");
       h3.textContent = "Offline — 0";
     } else {
-      h3.style.color = "#9ca3af";
+      h3.style.color = "#878583";
       h3.textContent = "Role — 0";
     }
     h3.setAttribute("data-role-position", String(position));
@@ -37078,7 +37101,7 @@ class profile_card_controller_default extends Controller {
       return;
     const html = await response.text();
     this.card = document.createElement("div");
-    this.card.className = "fixed z-50";
+    this.card.className = "fixed z-50 context-pop";
     this.card.innerHTML = html;
     const rect = target.getBoundingClientRect();
     let left = rect.left - 288;
@@ -37619,7 +37642,7 @@ class notification_badge_controller_default extends Controller {
     if (serverIcon.classList.contains("bg-orange-600"))
       return;
     const pill = document.createElement("div");
-    pill.className = "server-unread-pill absolute left-0 top-1/2 -translate-x-[22px] -translate-y-1/2 w-1 h-2 bg-white rounded-r-full";
+    pill.className = "server-unread-pill absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-2 bg-amber-300 rounded-r-full";
     serverIcon.appendChild(pill);
   }
   removeServerUnread(serverId) {
@@ -37686,16 +37709,16 @@ class notification_badge_controller_default extends Controller {
     visible.forEach((u, i) => {
       const offset = i > 0 ? "margin-left: -4px;" : "";
       if (u.avatar_url) {
-        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid #2b2d31; position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`;
+        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`;
       } else {
-        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid #2b2d31; position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || "#5865f2"};">${u.avatar_initial || "?"}</div>`;
+        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || "#b45309"};">${u.avatar_initial || "?"}</div>`;
       }
     });
     if (extra > 0) {
       html += `<span class="text-[9px] text-gray-400 font-semibold" style="margin-left: 2px;">+${extra}</span>`;
     }
     html += "</div>";
-    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: #9ca3af;"><span>.</span><span>.</span><span>.</span></span>';
+    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: #878583;"><span>.</span><span>.</span><span>.</span></span>';
     html += "</div>";
     let indicator = existingIndicator;
     if (!indicator) {
@@ -37998,7 +38021,7 @@ class notification_badge_controller_default extends Controller {
         return;
       }
       const overlay = document.createElement("div");
-      overlay.className = "fixed inset-0 z-[200] bg-black/60 flex items-center justify-center";
+      overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/60 flex items-center justify-center";
       overlay.addEventListener("click", (e) => {
         if (e.target === overlay)
           overlay.remove();
@@ -38044,7 +38067,7 @@ class notification_badge_controller_default extends Controller {
     contentEl.innerHTML = `
       <form class="flex gap-2 items-center" data-edit-message-id="${messageId}">
         <input type="text" value="${currentText.replace(/"/g, "&quot;")}" 
-               class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-indigo-500"
+               class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-amber-500"
                autofocus>
         <button type="submit" class="text-xs text-green-400 hover:text-green-300">Save</button>
         <button type="button" class="text-xs text-gray-400 hover:text-gray-200 cancel-edit-btn">Cancel</button>
@@ -38145,7 +38168,7 @@ class notification_badge_controller_default extends Controller {
   }
   renderContextMenu(x, y, items) {
     const menu = document.createElement("div");
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[200px]";
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[200px] context-pop";
     menu.id = "notif-context-menu";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
@@ -38266,7 +38289,7 @@ class notification_badge_controller_default extends Controller {
   showConfirm(title, message, confirmText = "Delete", confirmClass = "bg-red-600 hover:bg-red-700") {
     return new Promise((resolve) => {
       const overlay = document.createElement("div");
-      overlay.className = "fixed inset-0 z-[200] bg-black/70 flex items-center justify-center";
+      overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/70 flex items-center justify-center";
       overlay.id = "confirm-modal";
       const esc = (s) => {
         const d = document.createElement("div");
@@ -38279,7 +38302,7 @@ class notification_badge_controller_default extends Controller {
             <h3 class="text-xl font-bold text-white mb-2">${esc(title)}</h3>
             <p class="text-sm text-gray-300">${esc(message)}</p>
           </div>
-          <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #2b2d31;">
+          <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #1e1c1b;">
             <button id="confirm-cancel" class="px-4 py-2 text-sm font-medium text-white hover:underline cursor-pointer">Cancel</button>
             <button id="confirm-ok" class="px-4 py-2 text-sm font-medium text-white rounded ${confirmClass} cursor-pointer">${esc(confirmText)}</button>
           </div>
@@ -38336,7 +38359,7 @@ class member_context_controller_default extends Controller {
       return;
     const html = await response.text();
     this.menu = document.createElement("div");
-    this.menu.className = "fixed z-[60]";
+    this.menu.className = "fixed z-[60] context-pop";
     this.menu.setAttribute("data-context-menu", "member");
     this.menu.innerHTML = html;
     let left = event.clientX;
@@ -38379,7 +38402,7 @@ class member_context_controller_default extends Controller {
     if (!this.menu)
       return;
     this.rolesDropdown = document.createElement("div");
-    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto";
+    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop";
     const wrapper = btn.closest(".context-roles-wrapper");
     const menuRect = this.menu.getBoundingClientRect();
     const btnRect = wrapper.getBoundingClientRect();
@@ -38448,7 +38471,7 @@ class member_context_controller_default extends Controller {
     const currentNickname = btn.dataset.currentNickname || "";
     this.closeMenu();
     this.nicknameModal = document.createElement("div");
-    this.nicknameModal.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
+    this.nicknameModal.className = "modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
     this.nicknameModal.innerHTML = `
       <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-sm mx-4 p-5" data-nickname-panel>
         <h3 class="text-lg font-bold text-white mb-1">Change Nickname</h3>
@@ -38878,7 +38901,7 @@ class channel_sidebar_controller_default extends Controller {
     if (wrapper?.dataset.currentChannelId === data.channel_id) {
       const gridContainer = document.querySelector("[data-voice-participant-grid]");
       const emptyState = document.querySelector("[data-voice-empty-state]");
-      const color = data.profile_color || "#2b2d31";
+      const color = data.profile_color || "#1e1c1b";
       const initial = data.username?.[0]?.toUpperCase() || "?";
       const avatarHtml = data.avatar_url ? `<img src="${data.avatar_url}" class="voice-avatar" />` : `<div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, ${color}, white 20%)">${initial}</div>`;
       const vsId = data.voice_state_id || "";
@@ -41384,7 +41407,7 @@ class image_preview_controller_default extends Controller {
   openLightbox(src, filename) {
     const overlay = document.createElement("div");
     overlay.id = "image-lightbox";
-    overlay.className = "fixed inset-0 z-[200] bg-black/80 flex items-center justify-center";
+    overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/80 flex items-center justify-center";
     overlay.style.touchAction = "none";
     const container = document.createElement("div");
     container.className = "relative max-w-[90vw] max-h-[90vh] flex flex-col items-center";
@@ -41569,7 +41592,7 @@ class image_preview_controller_default extends Controller {
     const downloadBtn = document.createElement("a");
     downloadBtn.href = src;
     downloadBtn.download = filename || "image";
-    downloadBtn.className = "text-sm text-blue-400 hover:text-blue-300 flex items-center gap-1";
+    downloadBtn.className = "text-sm text-amber-400 hover:text-amber-300 flex items-center gap-1";
     downloadBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Download';
     bar.appendChild(downloadBtn);
     const closeBtn = document.createElement("button");
@@ -41597,7 +41620,7 @@ class image_preview_controller_default extends Controller {
   showContextMenu(x, y, src, filename) {
     const menu = document.createElement("div");
     menu.id = "image-context-menu";
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px]";
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     const items = [
@@ -41652,7 +41675,7 @@ class image_preview_controller_default extends Controller {
   showVideoContextMenu(x, y, src, filename) {
     const menu = document.createElement("div");
     menu.id = "image-context-menu";
-    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px]";
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop";
     menu.style.left = `${x}px`;
     menu.style.top = `${y}px`;
     const items = [
@@ -41802,7 +41825,7 @@ class banner_editor_controller_default extends Controller {
     const vpHeight = mode === "avatar" ? 300 : 180;
     const title = mode === "avatar" ? "Edit Avatar" : "Edit Banner";
     this.modal = document.createElement("div");
-    this.modal.className = "fixed inset-0 z-[300] flex items-center justify-center bg-black/70";
+    this.modal.className = "modal-overlay fixed inset-0 z-[300] flex items-center justify-center bg-black/70";
     this.modal.innerHTML = `
       <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4">
         <div class="px-5 pt-5 pb-3">
@@ -41829,12 +41852,12 @@ class banner_editor_controller_default extends Controller {
         </div>
         <div class="px-5 py-3 flex items-center gap-3">
           <span class="text-gray-400 text-xs">Zoom</span>
-          <input type="range" min="100" max="300" value="100" class="flex-1 accent-indigo-500" data-crop-zoom />
+          <input type="range" min="100" max="300" value="100" class="flex-1 accent-amber-500" data-crop-zoom />
           <span class="text-gray-400 text-xs w-10 text-right" data-crop-zoom-label>1.0x</span>
         </div>
         <div class="px-5 pb-5 flex justify-end gap-3">
           <button type="button" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition" data-crop-cancel>Cancel</button>
-          <button type="button" class="px-5 py-2 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
+          <button type="button" class="px-5 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
         </div>
       </div>
     `;
@@ -42383,7 +42406,7 @@ class dm_message_form_controller_default extends Controller {
       input.style.fontFamily = "Consolas, Monaco, 'Courier New', monospace";
       input.style.fontSize = "0.8rem";
       if (input.parentElement)
-        input.parentElement.style.backgroundColor = "rgb(30 31 34)";
+        input.parentElement.style.backgroundColor = "rgb(18 17 16)";
     } else {
       input.style.fontFamily = "";
       input.style.fontSize = "";
@@ -42402,6 +42425,11 @@ class dm_message_form_controller_default extends Controller {
           welcome.remove();
         const nearBottom = messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight < 150;
         messagesDiv.insertAdjacentHTML("beforeend", data.html);
+        const dmNewEl = messagesDiv.lastElementChild;
+        if (dmNewEl) {
+          dmNewEl.classList.add("message-appear");
+          dmNewEl.addEventListener("animationend", () => dmNewEl.classList.remove("message-appear"), { once: true });
+        }
         if (nearBottom)
           messagesDiv.scrollTop = messagesDiv.scrollHeight;
         break;
@@ -42438,7 +42466,7 @@ class dm_message_form_controller_default extends Controller {
       return;
     const text = this.inputTarget.value;
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-blue-400">$1</span>');
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>');
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>');
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>');
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>');
@@ -42568,7 +42596,14 @@ class invite_menu_controller_default extends Controller {
   static values = { baseUrl: String, serverId: String };
   toggle(event) {
     event.stopPropagation();
-    this.panelTarget.classList.toggle("hidden");
+    const isHidden = this.panelTarget.classList.contains("hidden");
+    if (isHidden) {
+      this.panelTarget.classList.remove("hidden");
+      this.panelTarget.classList.add("dropdown-enter");
+    } else {
+      this.panelTarget.classList.add("hidden");
+      this.panelTarget.classList.remove("dropdown-enter");
+    }
   }
   copy() {
     const text = this.linkTextTarget.textContent.trim();
@@ -42945,7 +42980,7 @@ class video_player_controller_default extends Controller {
       .vp-btn:hover { color: #fff; }
       .vp-time {
         font-size: 12px;
-        color: #9ca3af;
+        color: #878583;
         white-space: nowrap;
         flex-shrink: 0;
         user-select: none;
@@ -43659,10 +43694,14 @@ class role_editor_controller_default extends Controller {
   }
   showToast(msg, isError = false) {
     const toast = document.createElement("div");
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`;
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`;
     toast.textContent = msg;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2000);
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s";
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 300);
+    }, 2000);
   }
 }
 
@@ -43748,7 +43787,7 @@ class member_roles_controller_default extends Controller {
     if (!toast)
       return;
     toast.textContent = message;
-    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`;
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 context-pop ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`;
     toast.classList.remove("hidden", "opacity-0");
     setTimeout(() => {
       toast.classList.add("opacity-0");
@@ -43883,13 +43922,23 @@ class server_rail_controller_default extends Controller {
   }
   async createFolder(serverId1, serverId2, el1, el2) {
     const csrf = document.querySelector("meta[name=csrf-token]")?.content;
+    const serverIds = [];
+    const remoteServerIds = [];
+    [serverId1, serverId2].forEach((id) => {
+      if (id.startsWith("r_")) {
+        remoteServerIds.push(id.substring(2));
+      } else {
+        serverIds.push(id);
+      }
+    });
     try {
       const response = await fetch("/server_folders", {
         method: "POST",
         headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
         body: JSON.stringify({
           server_folder: { name: "Folder" },
-          server_ids: [serverId1, serverId2]
+          server_ids: serverIds,
+          remote_server_ids: remoteServerIds
         })
       });
       if (!response.ok)
@@ -44004,6 +44053,8 @@ class server_rail_controller_default extends Controller {
       const serverList = folderEl.querySelector("[data-folder-server-list]");
       if (serverList)
         this.initSingleFolderSortable(serverList);
+      setTimeout(() => this.freezeGifs(), 100);
+      setTimeout(() => this.freezeGifs(), 500);
     } else {
       if (container) {
         container.classList.add("folder-grid-collapsed");
@@ -44036,7 +44087,7 @@ class server_rail_controller_default extends Controller {
     const folderNameEl = folderEl.querySelector("[data-folder-name]");
     const currentName = folderNameEl ? folderNameEl.textContent.trim() : "Folder";
     this.folderMenu = document.createElement("div");
-    this.folderMenu.className = "fixed z-[60] w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-600 py-1.5 text-sm";
+    this.folderMenu.className = "fixed z-[60] w-48 bg-gray-800 rounded-lg shadow-xl border border-gray-600 py-1.5 text-sm context-pop";
     let left = event.clientX;
     let top = event.clientY;
     if (left + 192 > window.innerWidth)
@@ -44106,7 +44157,7 @@ class server_rail_controller_default extends Controller {
       return;
     const presets = [
       { color: "#4f545c", label: "Gray" },
-      { color: "#5865f2", label: "Blurple" },
+      { color: "#b45309", label: "Ember" },
       { color: "#57f287", label: "Green" },
       { color: "#fee75c", label: "Yellow" },
       { color: "#eb459e", label: "Pink" },
@@ -44206,6 +44257,12 @@ class server_rail_controller_default extends Controller {
     }
     this.saveOrder();
   }
+  parseServerId(rawId) {
+    if (rawId && rawId.startsWith("r_")) {
+      return { id: rawId.substring(2), remote: true };
+    }
+    return { id: rawId, remote: false };
+  }
   async saveOrder() {
     const items = [];
     let position = 0;
@@ -44216,13 +44273,22 @@ class server_rail_controller_default extends Controller {
         if (serverList) {
           Array.from(serverList.children).forEach((serverEl, idx) => {
             if (serverEl.dataset.serverId) {
-              folderServers.push({ id: serverEl.dataset.serverId, position: idx });
+              const parsed = this.parseServerId(serverEl.dataset.serverId);
+              const entry = { id: parsed.id, position: idx };
+              if (parsed.remote)
+                entry.remote = true;
+              folderServers.push(entry);
             }
           });
         }
         items.push({ type: "folder", id: child.dataset.folderId, position: position++, servers: folderServers });
       } else if (child.dataset.serverId) {
-        items.push({ type: "server", id: child.dataset.serverId, position: position++ });
+        const parsed = this.parseServerId(child.dataset.serverId);
+        if (parsed.remote) {
+          items.push({ type: "remote_server", id: parsed.id, position: position++ });
+        } else {
+          items.push({ type: "server", id: parsed.id, position: position++ });
+        }
       }
     });
     const csrf = document.querySelector("meta[name=csrf-token]")?.content;
@@ -44254,8 +44320,10 @@ class server_rail_controller_default extends Controller {
       if (!img || !canvas)
         return;
       const draw = () => {
-        canvas.width = img.naturalWidth || 48;
-        canvas.height = img.naturalHeight || 48;
+        if (!img.naturalWidth)
+          return;
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
         const ctx = canvas.getContext("2d");
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
@@ -44312,10 +44380,10 @@ class message_actions_controller_default extends Controller {
     const preview = rawContent.replace(/```\w*\n?/g, "").replace(/```/g, "").trim().slice(0, 80);
     const isDM = !!document.querySelector("[data-controller*='dm-message-form']");
     const backdrop = document.createElement("div");
-    backdrop.className = "fixed inset-0 bg-black/50 z-[100]";
+    backdrop.className = "modal-overlay fixed inset-0 bg-black/50 z-[100]";
     backdrop.addEventListener("click", this._dismiss);
     const sheet = document.createElement("div");
-    sheet.className = "fixed bottom-0 left-0 right-0 z-[101] bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-700";
+    sheet.className = "fixed bottom-0 left-0 right-0 z-[101] bg-gray-800 rounded-t-2xl shadow-2xl border-t border-gray-700 context-pop";
     sheet.innerHTML = `
       <div class="w-10 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-2"></div>
       <div class="px-4 pb-2">
@@ -45075,7 +45143,7 @@ class voice_channel_controller_default extends Controller {
     }
   }
   buildParticipantCard(data) {
-    const color = data.profile_color || "#2b2d31";
+    const color = data.profile_color || "#1e1c1b";
     const initial = data.username?.[0]?.toUpperCase() || "?";
     const avatarHtml = data.avatar_url ? `<img src="${data.avatar_url}" class="voice-avatar" />` : `<div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, ${color}, white 20%)">${initial}</div>`;
     const vsId = data.voice_state_id || "";
@@ -45196,10 +45264,14 @@ class voice_channel_controller_default extends Controller {
   }
   showToast(msg, isError = false) {
     const toast = document.createElement("div");
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`;
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`;
     toast.textContent = msg;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s";
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
   }
 }
 
@@ -45229,7 +45301,7 @@ class voice_context_controller_default extends Controller {
       return;
     const html = await response.text();
     this.menu = document.createElement("div");
-    this.menu.className = "fixed z-[60]";
+    this.menu.className = "fixed z-[60] context-pop";
     this.menu.setAttribute("data-context-menu", "voice");
     this.menu.innerHTML = html;
     let left = event.clientX;
@@ -45328,7 +45400,7 @@ class voice_context_controller_default extends Controller {
     if (!this.menu || !channels.length)
       return;
     this.moveDropdown = document.createElement("div");
-    this.moveDropdown.className = "absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto";
+    this.moveDropdown.className = "absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop";
     const wrapper = btn.closest(".context-move-wrapper");
     const btnRect = wrapper.getBoundingClientRect();
     let ddLeft = btnRect.right + 4;
@@ -45401,10 +45473,113 @@ class voice_context_controller_default extends Controller {
   }
   showToast(msg, isError = false) {
     const toast = document.createElement("div");
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium`;
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`;
     toast.textContent = msg;
     document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 3000);
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s";
+      toast.style.opacity = "0";
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
+  }
+}
+
+// app/javascript/controllers/instance_sync_controller.js
+class instance_sync_controller_default extends Controller {
+  static values = { url: String };
+  async navigate(event) {
+    event.preventDefault();
+    const targetUrl = this.urlValue || this.element.href;
+    if (!targetUrl)
+      return;
+    this.showOverlay();
+    try {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content;
+      const response = await fetch("/api/federation_sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ target_url: targetUrl })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.status === "home_unreachable") {
+          this.removeStaleReference();
+          this.hideOverlay();
+          this.showError("That server is no longer reachable — your account may have been removed from that instance.");
+          return;
+        }
+        this.updateOverlayStatus(data.synced || []);
+        await new Promise((r2) => setTimeout(r2, 400));
+      }
+    } catch (e2) {
+      console.warn("Instance sync failed:", e2);
+    }
+    window.location.href = targetUrl;
+  }
+  removeStaleReference() {
+    const serverEl = this.element.closest("[data-server-id]");
+    if (!serverEl)
+      return;
+    const folderList = serverEl.closest("[data-folder-server-list]");
+    serverEl.remove();
+    if (folderList && folderList.children.length === 0) {
+      const folderEl = folderList.closest("[data-rail-item]");
+      if (folderEl)
+        folderEl.remove();
+    }
+  }
+  showError(message) {
+    const toast = document.createElement("div");
+    toast.className = "fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg";
+    toast.setAttribute("data-controller", "toast");
+    toast.textContent = message;
+    document.body.appendChild(toast);
+  }
+  showOverlay() {
+    let overlay = document.getElementById("instance-sync-overlay");
+    if (!overlay) {
+      overlay = document.createElement("div");
+      overlay.id = "instance-sync-overlay";
+      overlay.innerHTML = `
+        <div class="modal-overlay fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center backdrop-blur-sm">
+          <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
+            <div class="flex justify-center mb-4">
+              <svg class="w-8 h-8 text-amber-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </div>
+            <h3 class="text-lg font-semibold text-white mb-1">Syncing instance data</h3>
+            <p class="text-sm text-gray-400" data-sync-status>Fetching latest profile, servers, and collections...</p>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+    }
+    overlay.classList.remove("hidden");
+  }
+  updateOverlayStatus(synced) {
+    const el = document.querySelector("[data-sync-status]");
+    if (!el)
+      return;
+    const labels = {
+      profile: "Profile",
+      servers: "Servers",
+      folders: "Folders",
+      conversations: "Conversations",
+      friends: "Friends",
+      gif_collections: "GIF collections"
+    };
+    const names = synced.map((s) => labels[s] || s).join(", ");
+    el.textContent = names.length > 0 ? `Synced: ${names}` : "Up to date";
+  }
+  hideOverlay() {
+    const overlay = document.getElementById("instance-sync-overlay");
+    if (overlay)
+      overlay.classList.add("hidden");
   }
 }
 
@@ -45413,7 +45588,7 @@ var application = Application.start();
 setConfirmMethod((message) => {
   return new Promise((resolve) => {
     const overlay = document.createElement("div");
-    overlay.className = "fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
+    overlay.className = "modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60";
     overlay.innerHTML = `
       <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-md mx-4 overflow-hidden">
         <div class="px-5 pt-5 pb-4">
@@ -45491,5 +45666,6 @@ application.register("dirty-form", dirty_form_controller_default);
 application.register("frame-loading", frame_loading_controller_default);
 application.register("voice-channel", voice_channel_controller_default);
 application.register("voice-context", voice_context_controller_default);
+application.register("instance-sync", instance_sync_controller_default);
 
-//# debugId=B3169B36CD724FA564756E2164756E21
+//# debugId=28FC3774DE29622D64756E2164756E21

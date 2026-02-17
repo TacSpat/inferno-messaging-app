@@ -1,0 +1,94 @@
+<div class="h-full overflow-y-auto bg-gray-900 text-gray-100">
+  <div class="max-w-4xl mx-auto px-6 py-8">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-white">Legal Holds</h1>
+        <p class="text-sm text-gray-400 mt-1">
+          <%= @active_holds.count %> active <%= "hold".pluralize(@active_holds.count) %>
+        </p>
+      </div>
+      <%= link_to "Back to Admin", admin_instance_config_path, class: "text-sm text-gray-400 hover:text-white transition" %>
+    </div>
+
+    <%# Place hold form %>
+    <div class="bg-gray-800 rounded-lg p-4 mb-6">
+      <h3 class="text-sm font-semibold text-white mb-3">Place New Hold</h3>
+      <%= form_tag admin_legal_holds_path, method: :post, class: "flex flex-wrap items-end gap-4" do %>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Type</label>
+          <select name="holdable_type" class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
+            <option value="User">User</option>
+            <option value="Server">Server</option>
+            <option value="Channel">Channel</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">ID</label>
+          <input type="number" name="holdable_id" required
+                 class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 w-24"
+                 placeholder="ID">
+        </div>
+        <div class="flex-1">
+          <label class="block text-xs text-gray-400 mb-1">Reason</label>
+          <input type="text" name="reason"
+                 class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 w-full"
+                 placeholder="Reason for hold (optional)">
+        </div>
+        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white text-sm px-4 py-1.5 rounded transition">
+          Place Hold
+        </button>
+      <% end %>
+    </div>
+
+    <%# Active holds %>
+    <h2 class="text-lg font-semibold text-white mb-3">Active Holds</h2>
+    <% if @active_holds.any? %>
+      <div class="space-y-2 mb-8">
+        <% @active_holds.each do |hold| %>
+          <div class="bg-gray-800 rounded-lg px-4 py-3 flex items-center justify-between">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold px-2 py-0.5 rounded bg-red-900 text-red-300">Active</span>
+                <span class="text-sm text-white"><%= hold.holdable_type %> #<%= hold.holdable_id %></span>
+              </div>
+              <div class="mt-1 text-xs text-gray-400">
+                Placed by <%= hold.placed_by.username %> on <%= hold.placed_at.strftime("%Y-%m-%d %H:%M") %>
+                <% if hold.reason.present? %>
+                  &mdash; <%= hold.reason %>
+                <% end %>
+              </div>
+            </div>
+            <%= button_to "Lift Hold", admin_legal_hold_path(hold), method: :delete,
+                class: "bg-gray-700 hover:bg-gray-600 text-white text-xs px-3 py-1 rounded transition",
+                data: { turbo_confirm: "Are you sure you want to lift this legal hold?" } %>
+          </div>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-gray-800 rounded-lg p-6 text-center mb-8">
+        <p class="text-gray-400">No active legal holds.</p>
+      </div>
+    <% end %>
+
+    <%# Recently lifted %>
+    <% if @recent_lifted.any? %>
+      <h2 class="text-lg font-semibold text-white mb-3">Recently Lifted</h2>
+      <div class="space-y-2">
+        <% @recent_lifted.each do |hold| %>
+          <div class="bg-gray-800 rounded-lg px-4 py-3 opacity-60">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded bg-gray-700 text-gray-400">Lifted</span>
+              <span class="text-sm text-gray-300"><%= hold.holdable_type %> #<%= hold.holdable_id %></span>
+            </div>
+            <div class="mt-1 text-xs text-gray-500">
+              Placed by <%= hold.placed_by.username %> on <%= hold.placed_at.strftime("%Y-%m-%d %H:%M") %>
+              <% if hold.lifted_at %>
+                &mdash; lifted <%= time_ago_in_words(hold.lifted_at) %> ago
+              <% end %>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+</div>

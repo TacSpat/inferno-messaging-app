@@ -1,4 +1,12 @@
 class InstanceConfig < ApplicationRecord
+  has_paper_trail only: [
+    :federation_mode, :lockdown_enabled,
+    :lockdown_remote_auth, :lockdown_remote_joins,
+    :lockdown_local_signups, :lockdown_invite_creation,
+    :pruning_strategy, :message_retention_days, :attachment_retention_days,
+    :max_users, :max_servers, :max_members_per_server
+  ]
+
   PRUNING_STRATEGIES = %w[none time_based storage_based].freeze
   FEDERATION_MODES = %w[open allowlist closed].freeze
 

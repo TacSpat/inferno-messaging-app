@@ -29,11 +29,23 @@ module Admin
 
     def emergency_lockdown
       InstanceConfig.current.emergency_lockdown!
+      AuditService.log(
+        event_type: "lockdown_activated",
+        actor: current_user,
+        target: InstanceConfig.current,
+        ip_address: request.remote_ip
+      )
       redirect_to admin_instance_config_path, notice: "Emergency lockdown activated. All locks enabled."
     end
 
     def lift_lockdown
       InstanceConfig.current.lift_lockdown!
+      AuditService.log(
+        event_type: "lockdown_lifted",
+        actor: current_user,
+        target: InstanceConfig.current,
+        ip_address: request.remote_ip
+      )
       redirect_to admin_instance_config_path, notice: "All lockdowns lifted."
     end
 
