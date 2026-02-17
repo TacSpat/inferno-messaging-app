@@ -389,7 +389,7 @@ export default class extends Controller {
       .vp-btn:hover { color: #fff; }
       .vp-time {
         font-size: 12px;
-        color: #9ca3af;
+        color: #878583;
         white-space: nowrap;
         flex-shrink: 0;
         user-select: none;

@@ -42,7 +42,7 @@ export default class extends Controller {
 
   showNav() {
     if (!this.hasSidebarTarget) return
-    this.sidebarTarget.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;justify-content:flex-start;background-color:#1e1f22;"
+    this.sidebarTarget.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;justify-content:flex-start;background-color:#141312;"
   }
 
   async navigate(e) {
@@ -101,9 +101,13 @@ export default class extends Controller {
 
   showToast(msg) {
     const toast = document.createElement("div")
-    toast.className = "fixed bottom-6 right-6 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium"
+    toast.className = "fixed bottom-6 right-6 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop"
     toast.textContent = msg
     document.body.appendChild(toast)
-    setTimeout(() => toast.remove(), 2000)
+    setTimeout(() => {
+      toast.style.transition = "opacity 0.3s"
+      toast.style.opacity = "0"
+      setTimeout(() => toast.remove(), 300)
+    }, 2000)
   }
 }

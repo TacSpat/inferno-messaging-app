@@ -90,7 +90,7 @@ export default class extends Controller {
     const toast = document.getElementById("toast")
     if (!toast) return
     toast.textContent = message
-    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 context-pop ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`
     toast.classList.remove("hidden", "opacity-0")
     setTimeout(() => {
       toast.classList.add("opacity-0")

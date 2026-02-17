@@ -235,7 +235,7 @@ export default class extends Controller {
 
   highlightMessage(el, afterScroll = false) {
     const doHighlight = () => {
-      el.style.backgroundColor = "rgba(99, 102, 241, 0.3)"
+      el.style.backgroundColor = "rgba(249, 115, 22, 0.3)"
       el.style.borderRadius = "4px"
       setTimeout(() => {
         el.style.transition = "background-color 0.8s ease-out"
@@ -569,7 +569,8 @@ export default class extends Controller {
     }
     const bar = this.element.parentElement?.querySelector("[data-scroll-position-target=newMessageBar]")
     if (bar) {
-      bar.classList.remove("hidden")
+      bar.classList.remove("hidden", "new-msg-bar-exit")
+      bar.classList.add("new-msg-bar-enter")
       const countEl = bar.querySelector("[data-count]")
       if (countEl) countEl.textContent = text
     }
@@ -579,7 +580,14 @@ export default class extends Controller {
     this.newMessageCount = 0
 
     const bar = this.element.parentElement?.querySelector("[data-scroll-position-target=newMessageBar]")
-    if (bar) bar.classList.add("hidden")
+    if (bar && !bar.classList.contains("hidden")) {
+      bar.classList.remove("new-msg-bar-enter")
+      bar.classList.add("new-msg-bar-exit")
+      bar.addEventListener("animationend", () => {
+        bar.classList.add("hidden")
+        bar.classList.remove("new-msg-bar-exit")
+      }, { once: true })
+    }
   }
 
   getSavedPosition() {

@@ -204,7 +204,7 @@ export default class extends Controller {
       h3.textContent = "Offline — 0"
     } else {
       // Role group: "role:<public_id>"
-      h3.style.color = "#9ca3af"
+      h3.style.color = "#878583"
       h3.textContent = "Role — 0"
     }
 

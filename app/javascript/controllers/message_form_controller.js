@@ -401,7 +401,7 @@ export default class extends Controller {
     if (inCodeBlock) {
       input.style.fontFamily = "Consolas, Monaco, 'Courier New', monospace"
       input.style.fontSize = "0.8rem"
-      if (input.parentElement) input.parentElement.style.backgroundColor = "rgb(30 31 34)"
+      if (input.parentElement) input.parentElement.style.backgroundColor = "rgb(18 17 16)"
     } else {
       input.style.fontFamily = ""
       input.style.fontSize = ""
@@ -427,6 +427,12 @@ export default class extends Controller {
           scrollCtrl.showNewMessageBar()
         } else {
           messagesDiv.insertAdjacentHTML("beforeend", data.html)
+          // Animate new message in
+          const newEl = messagesDiv.lastElementChild
+          if (newEl) {
+            newEl.classList.add("message-appear")
+            newEl.addEventListener("animationend", () => newEl.classList.remove("message-appear"), { once: true })
+          }
           // Apply grouping to the newly inserted message
           const allMsgs = messagesDiv.querySelectorAll("[data-message-id]")
           if (allMsgs.length > 0) {
@@ -539,7 +545,7 @@ export default class extends Controller {
     const common = ["😀","😂","❤️","👍","👎","😮","😢","😡","😍","🤔","🙏","🙌","🔥","🎉","✨","💯","💀","🤣","😎","🙄"]
     const popup = document.createElement("div")
     popup.id = "reaction-picker-popup"
-    popup.className = "fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-0.5 w-64"
+    popup.className = "fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-0.5 w-64 context-pop"
     // Position near the message
     const msgEl = document.getElementById(`message_${messageId}`)
     if (msgEl) {
@@ -596,7 +602,7 @@ export default class extends Controller {
     // Escape HTML
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     // Highlight URLs
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-blue-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>')
     // Highlight bold **text**
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     // Highlight italic *text*

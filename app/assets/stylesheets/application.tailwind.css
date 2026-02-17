@@ -1,58 +1,72 @@
 @import "tailwindcss";
 
+@theme {
+  --color-gray-50: #f3f3f2;
+  --color-gray-100: #e1e0df;
+  --color-gray-200: #cccbca;
+  --color-gray-300: #a8a7a5;
+  --color-gray-400: #878583;
+  --color-gray-500: #656361;
+  --color-gray-600: #403e3c;
+  --color-gray-700: #2c2a29;
+  --color-gray-800: #1e1c1b;
+  --color-gray-900: #141312;
+  --color-gray-950: #0a0a09;
+}
+
 @layer base {
   .message-content { overflow-wrap: break-word; overflow-x: hidden; }
   .message-content p { margin-bottom: 0.25rem; }
   .message-content .emoji-only { font-size: 3.5rem; line-height: 1.2; }
   .message-content p:last-child { margin-bottom: 0; }
   .message-content code {
-    background-color: rgb(30 31 34);
+    background-color: rgb(18 17 16);
     padding: 0.125rem 0.375rem;
     border-radius: 0.25rem;
     font-size: 0.85em;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    color: #e2e8f0;
+    color: #cccbca;
   }
   .message-content pre {
-    background-color: rgb(30 31 34) !important;
+    background-color: rgb(18 17 16) !important;
     padding: 0.75rem;
     border-radius: 0.5rem;
     overflow-x: auto;
     margin: 0.5rem 0;
-    border: 1px solid rgb(55 65 81);
+    border: 1px solid rgb(44 42 41);
   }
   .message-content pre code {
     background: none !important;
     padding: 0;
     border-radius: 0;
     font-size: 0.875rem;
-    color: #e2e8f0;
+    color: #cccbca;
   }
   .message-content a {
-    color: rgb(96 165 250);
+    color: rgb(217 158 80);
     text-decoration: none;
     word-break: break-all;
   }
   .message-content a:hover { text-decoration: underline; }
   .message-content strong { font-weight: 700; color: #fff; }
   .message-content em { font-style: italic; }
-  .message-content del { text-decoration: line-through; color: rgb(156 163 175); }
+  .message-content del { text-decoration: line-through; color: rgb(135 133 131); }
   .message-content blockquote {
-    border-left: 4px solid rgb(75 85 99);
+    border-left: 4px solid rgb(56 54 52);
     padding-left: 0.75rem;
     margin: 0.5rem 0;
-    color: rgb(156 163 175);
+    color: rgb(135 133 131);
   }
   .message-content ul { list-style: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
   .message-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
   .message-content li { margin-bottom: 0.125rem; }
   .message-content table { border-collapse: collapse; margin: 0.5rem 0; }
   .message-content th, .message-content td {
-    border: 1px solid rgb(75 85 99);
+    border: 1px solid rgb(56 54 52);
     padding: 0.375rem 0.75rem;
     font-size: 0.875rem;
   }
-  .message-content th { background-color: rgb(55 65 81); font-weight: 600; }
+  .message-content th { background-color: rgb(44 42 41); font-weight: 600; }
   .mention {
     background-color: rgba(249, 115, 22, 0.15);
     color: #f97316;
@@ -69,18 +83,18 @@
     position: absolute; top: 0; right: 0;
     padding: 0.125rem 0.5rem;
     font-size: 0.7rem;
-    color: rgb(156 163 175);
+    color: rgb(135 133 131);
     background: rgba(0,0,0,0.3);
     border-radius: 0 0.5rem 0 0.25rem;
     text-transform: uppercase;
     font-family: sans-serif;
   }
   .code-block-wrapper pre.highlight {
-    background-color: rgb(30 31 34) !important;
+    background-color: rgb(18 17 16) !important;
     padding: 0.75rem;
     border-radius: 0.5rem;
     overflow-x: auto;
-    border: 1px solid rgb(55 65 81);
+    border: 1px solid rgb(44 42 41);
     margin: 0;
   }
   .code-block-wrapper pre.highlight code {
@@ -168,7 +182,7 @@
     grid-template-rows: 0fr;
   }
   .folder-expand-grid > * {
-    overflow: hidden;
+    overflow: clip;
     min-height: 0;
   }
 
@@ -238,21 +252,365 @@
   .text-transparent::selection {
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
-    background: rgba(59, 130, 246, 0.3);
+    background: rgba(249, 115, 22, 0.25);
   }
   .text-transparent::-moz-selection {
     color: transparent !important;
-    background: rgba(59, 130, 246, 0.3);
+    background: rgba(249, 115, 22, 0.25);
+  }
+
+  /* ═══════════════════════════════════════════
+     INFERNO — Magma glow effects
+     ═══════════════════════════════════════════ */
+
+  /* Ember border: subtle orange seam between major panels */
+  .bg-gray-800 { border-color: rgba(249, 115, 22, 0.08); }
+  .bg-gray-950 { border-color: rgba(249, 115, 22, 0.06); }
+
+  /* Sidebar dividers glow faintly like cooling cracks */
+  .border-gray-900 {
+    border-color: rgba(249, 115, 22, 0.10);
+  }
+
+  /* Channel items + member items — ember hover */
+  aside a:hover, aside button:hover {
+    background-color: rgba(249, 115, 22, 0.08) !important;
+  }
+
+  /* Active channel glow — magma seeping through (channels use bg-gray-600, DMs use bg-gray-700) */
+  aside a.bg-gray-600.text-white,
+  aside a.bg-gray-700.text-white {
+    background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(234, 88, 12, 0.08)) !important;
+    border-left: 2px solid #f97316;
+    box-shadow: inset 3px 0 8px -3px rgba(249, 115, 22, 0.3);
+  }
+
+  /* Server icons — molten ring on hover */
+  nav a:hover > :not(.mention-badge),
+  nav div[class*="cursor-pointer"]:hover {
+    box-shadow: 0 0 8px rgba(249, 115, 22, 0.4), 0 0 2px rgba(249, 115, 22, 0.6);
+  }
+
+  /* Active server icon pill — tall amber blip, matches home button */
+
+  /* ── MESSAGE INPUT ── */
+  /* The input bar: persistent ember border + glow on focus */
+  .bg-gray-600.rounded-lg {
+    border: 1px solid rgba(249, 115, 22, 0.2);
+    transition: box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .bg-gray-600.rounded-lg:focus-within {
+    border-color: rgba(249, 115, 22, 0.5);
+    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.12),
+                0 0 20px rgba(249, 115, 22, 0.1),
+                inset 0 0 12px rgba(249, 115, 22, 0.04);
+  }
+  /* Send button — fire up on hover */
+  .bg-gray-600.rounded-lg button[type="submit"]:hover {
+    color: #f97316 !important;
+    filter: drop-shadow(0 0 6px rgba(249, 115, 22, 0.6));
+  }
+  /* Emoji/picker button glow */
+  .bg-gray-600.rounded-lg button:hover {
+    color: #f97316 !important;
+  }
+  /* File upload label glow */
+  .bg-gray-600.rounded-lg label:hover {
+    color: #f97316 !important;
+    filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.4));
+  }
+  /* Reply bar — ember accent */
+  [data-message-form-target="replyBar"] {
+    border-left: 2px solid rgba(249, 115, 22, 0.5);
+    background: linear-gradient(90deg, rgba(249, 115, 22, 0.06), transparent) !important;
+  }
+  /* File preview bar */
+  [data-message-form-target="filePreview"] {
+    border-left: 2px solid rgba(249, 115, 22, 0.3);
+    background: linear-gradient(90deg, rgba(249, 115, 22, 0.04), transparent) !important;
+  }
+
+  /* ── MESSAGES ── */
+  /* Message hover — magma underlighting */
+  [data-message-id] {
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+    border-left: 2px solid transparent;
+  }
+  [data-message-id]:hover {
+    background-color: rgba(249, 115, 22, 0.06) !important;
+    border-left-color: rgba(249, 115, 22, 0.4);
+    box-shadow: inset 4px 0 12px -4px rgba(249, 115, 22, 0.15);
+  }
+  /* Message action toolbar — ember-bordered floating bar */
+  [data-message-id] .group-hover\:flex {
+    border-color: rgba(249, 115, 22, 0.25) !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgba(249, 115, 22, 0.1);
+  }
+  [data-message-id] .group-hover\:flex button:hover {
+    color: #f97316 !important;
+    background-color: rgba(249, 115, 22, 0.1);
+    border-radius: 4px;
+  }
+  /* Message avatars — ember ring on hover */
+  [data-message-id] img.rounded-full {
+    transition: box-shadow 0.15s ease;
+  }
+  [data-message-id]:hover img.rounded-full {
+    box-shadow: 0 0 8px rgba(249, 115, 22, 0.35);
+  }
+
+  /* ── ATTACHMENTS ── */
+  /* Image attachments — ember glow on hover only */
+  [data-attachment-id] img {
+    transition: box-shadow 0.2s ease;
+  }
+  [data-attachment-id] img:hover {
+    box-shadow: 0 0 16px rgba(249, 115, 22, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+  /* Audio player container */
+  .message-content + div .bg-gray-800.rounded-lg,
+  [data-message-id] .bg-gray-800.rounded-lg {
+    border: 1px solid rgba(249, 115, 22, 0.1);
+    transition: border-color 0.2s ease;
+  }
+  [data-message-id] .bg-gray-800.rounded-lg:hover {
+    border-color: rgba(249, 115, 22, 0.3);
+    box-shadow: 0 0 10px rgba(249, 115, 22, 0.08);
+  }
+  /* Video player — ember border */
+  [data-controller="video-player"] {
+    border: 1px solid rgba(249, 115, 22, 0.1);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  [data-controller="video-player"]:hover {
+    border-color: rgba(249, 115, 22, 0.35);
+    box-shadow: 0 0 14px rgba(249, 115, 22, 0.15);
+  }
+
+  /* ── MEMBER LIST ── */
+  /* Member items — ember hover with left magma seam */
+  #member-sidebar [data-user-id] {
+    transition: all 0.15s ease;
+    border-left: 2px solid transparent;
+  }
+  #member-sidebar [data-user-id]:hover {
+    background: linear-gradient(90deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.03)) !important;
+    border-left-color: rgba(249, 115, 22, 0.5);
+    box-shadow: inset 4px 0 10px -4px rgba(249, 115, 22, 0.2);
+  }
+  /* Member avatar — ember ring on hover */
+  #member-sidebar [data-user-id] img.rounded-full,
+  #member-sidebar [data-user-id] div.rounded-full:not([class*="border-"]) {
+    transition: box-shadow 0.15s ease;
+  }
+  #member-sidebar [data-user-id]:hover img.rounded-full,
+  #member-sidebar [data-user-id]:hover > div > div.rounded-full {
+    box-shadow: 0 0 8px rgba(249, 115, 22, 0.35);
+  }
+  /* Online status dot — glow when green */
+  #member-sidebar .bg-green-500 {
+    box-shadow: 0 0 5px rgba(34, 197, 94, 0.5);
+  }
+  /* Role section headers — ember underline */
+  #member-sidebar h3 {
+    border-bottom: 1px solid rgba(249, 115, 22, 0.08);
+    padding-bottom: 4px;
+  }
+  /* Member sidebar top edge — lava seam */
+  #member-sidebar {
+    border-left: 1px solid rgba(249, 115, 22, 0.15) !important;
+    box-shadow: -2px 0 16px rgba(249, 115, 22, 0.06);
+  }
+
+  /* Buttons — fire glow on hover */
+  .bg-orange-600:hover, .bg-amber-600:hover {
+    box-shadow: 0 0 14px rgba(249, 115, 22, 0.5), 0 2px 8px rgba(249, 115, 22, 0.3);
+  }
+  .bg-orange-600, .bg-amber-600 {
+    transition: box-shadow 0.2s ease;
+  }
+
+  /* Scrollbar — molten track */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(249, 115, 22, 0.25);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(249, 115, 22, 0.45);
+  }
+
+  /* Text selection — orange ember */
+  ::selection {
+    background: rgba(249, 115, 22, 0.3);
+    color: #fff;
+  }
+
+  /* Focus rings — fire instead of default blue */
+  *:focus-visible {
+    outline-color: rgba(249, 115, 22, 0.6) !important;
+  }
+
+  /* Animated lava border for server header */
+  .border-b.border-gray-900.shadow-sm {
+    border-bottom-color: transparent;
+    background-image: linear-gradient(var(--tw-gradient-stops, #282625, #282625)),
+                      linear-gradient(90deg, rgba(249,115,22,0.0), rgba(249,115,22,0.3), rgba(234,88,12,0.1));
+    background-clip: padding-box, border-box;
+    background-origin: padding-box, border-box;
+    border-bottom: 1px solid transparent;
+  }
+
+  /* Pulsing ember glow on the active server rail pill */
+  .bg-amber-300.rounded-r-full {
+    box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+    animation: ember-pulse 2s ease-in-out infinite;
+  }
+  @keyframes ember-pulse {
+    0%, 100% { box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
+    50% { box-shadow: 0 0 10px rgba(249, 115, 22, 0.7); }
+  }
+
+  /* Active server pill — fire flare on hover */
+  .active-server-pill {
+    transition: width 0.2s ease, height 0.2s ease, box-shadow 0.25s ease, background-color 0.25s ease;
+  }
+  .server-icon-wrap:hover .active-server-pill {
+    width: 5px;
+    background-color: #f97316;
+    box-shadow: 0 0 12px rgba(249, 115, 22, 0.7),
+                0 0 24px rgba(251, 146, 36, 0.35);
+    animation: pill-fire-flare 2.5s ease-in-out infinite;
+  }
+  @keyframes pill-fire-flare {
+    0%, 100% {
+      box-shadow: 0 0 12px rgba(249, 115, 22, 0.7),
+                  0 0 24px rgba(251, 146, 36, 0.35);
+      background-color: #f97316;
+    }
+    50% {
+      box-shadow: 0 0 16px rgba(251, 191, 36, 0.8),
+                  0 0 30px rgba(249, 115, 22, 0.45);
+      background-color: #fb923c;
+    }
+  }
+
+  /* Notification badges — hot red glow */
+  .mention-badge, .home-badge {
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+  }
+
+  /* Magma cracks between panels */
+  nav.bg-gray-950 {
+    border-right: 1px solid rgba(249, 115, 22, 0.15);
+    box-shadow: 1px 0 12px rgba(249, 115, 22, 0.06);
+  }
+  aside.bg-gray-800 {
+    box-shadow: 1px 0 8px rgba(249, 115, 22, 0.04);
+  }
+  /* Channel header bar — subtle bottom ember line */
+  .border-b.shadow-sm.bg-gray-800 {
+    border-bottom-color: rgba(249, 115, 22, 0.12);
+  }
+
+  /* Voice controls bar — inferno styling */
+  .voice-controls-inferno {
+    border-top: 1px solid rgba(249, 115, 22, 0.25);
+    background: linear-gradient(180deg, rgba(249, 115, 22, 0.06), transparent) !important;
+    animation: voice-bar-ember 3s ease-in-out infinite;
+  }
+  @keyframes voice-bar-ember {
+    0%, 100% { border-top-color: rgba(249, 115, 22, 0.2); }
+    50% { border-top-color: rgba(251, 191, 36, 0.4); }
+  }
+  .voice-controls-inferno button {
+    transition: all 0.15s ease;
+  }
+  .voice-controls-inferno button:hover {
+    box-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
   }
 
   /* Message jump highlight */
   .message-highlight {
     animation: message-flash 4s ease-out !important;
-    background-color: rgba(99, 102, 241, 0.15) !important;
+    background-color: rgba(249, 115, 22, 0.15) !important;
     border-radius: 4px;
   }
   @keyframes message-flash {
-    0%, 30% { background-color: rgba(99, 102, 241, 0.3) !important; }
+    0%, 30% { background-color: rgba(249, 115, 22, 0.3) !important; }
     100% { background-color: transparent !important; }
+  }
+
+  /* ═══════════════════════════════════════════
+     INFERNO — Entrance animations
+     ═══════════════════════════════════════════ */
+
+  /* New messages slide up from below */
+  .message-appear {
+    animation: msg-slide-in 0.3s ease-out both;
+  }
+  @keyframes msg-slide-in {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Toast alerts — slide in from right */
+  [data-controller="toast"] {
+    animation: toast-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes toast-enter {
+    from { opacity: 0; transform: translateX(80px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* Modal overlays — backdrop fade + dialog scale-up */
+  .modal-overlay {
+    animation: overlay-fade 0.2s ease-out both;
+  }
+  .modal-overlay > div:first-child {
+    animation: modal-rise 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes overlay-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes modal-rise {
+    from { opacity: 0; transform: scale(0.92) translateY(16px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+
+  /* Dropdown menus — fade + slide down */
+  .dropdown-enter {
+    animation: dropdown-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes dropdown-in {
+    from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* Context menus & profile cards — scale pop */
+  .context-pop {
+    animation: context-pop-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes context-pop-in {
+    from { opacity: 0; transform: scale(0.9); }
+    to { opacity: 1; transform: scale(1); }
+  }
+
+  /* New message bar — slide down from top */
+  .new-msg-bar-enter {
+    animation: bar-slide-down 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  @keyframes bar-slide-down {
+    from { opacity: 0; transform: translateY(-100%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .new-msg-bar-exit {
+    animation: bar-slide-up 0.2s ease-in both;
+  }
+  @keyframes bar-slide-up {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(-100%); }
   }
 }

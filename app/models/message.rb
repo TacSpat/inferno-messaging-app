@@ -87,31 +87,40 @@ def unfurl_links(html, sync_tenor: true)
   # Collect internal message link embeds
   (content || "").scan(MESSAGE_LINK_REGEX).each do |server_id, channel_id, message_id|
     linked_msg = Message.find_by(public_id: message_id)
-    if linked_msg && linked_msg.channel&.public_id == channel_id
+    link_url = "/servers/#{server_id}/channels/#{channel_id}#message-#{message_id}"
+
+    # Strip the raw link from rendered HTML regardless of whether the target exists
+    html = html.gsub(/<a[^>]*href="[^"]*\/servers\/#{server_id}\/channels\/#{channel_id}[^"]*#message[-_]#{message_id}[^"]*"[^>]*>[^<]*<\/a>/, "")
+    html = html.gsub(/<a[^>]*href="[^"]*\/servers\/#{server_id}\/channels\/#{channel_id}[^"]*"[^>]*>[^<]*<\/a>/, "")
+    html = html.gsub(/https?:\/\/[^\s<>]*\/servers\/#{server_id}\/channels\/#{channel_id}#message[-_]#{message_id}[^\s<>]*/, "")
+    html = html.gsub(/<p>\s*<\/p>/, "")
+    html = html.gsub(/<p>\s*<\/p>/, "")
+
+    if linked_msg.nil? || linked_msg.channel.nil? || linked_msg.channel.public_id != channel_id
+      # Message, channel, or server was deleted — show a placeholder
+      embeds << %(<div class="mt-2 border-l-4 border-gray-600 bg-gray-800/40 rounded-r-lg pl-3 pr-3 py-2"><div class="text-sm text-gray-500 italic">This message or channel no longer exists.</div></div>)
+    else
       author = linked_msg.user
-      preview = ActionController::Base.helpers.truncate(linked_msg.content.to_s.gsub(/```\w*
-?/, "").gsub(/```/, "").strip, length: 200)
+      preview = ActionController::Base.helpers.truncate(linked_msg.content.to_s.gsub(/```\w*\n?/, "").gsub(/```/, "").strip, length: 200)
       time = linked_msg.created_at.strftime("%l:%M %p")
       ch_name = linked_msg.channel.name rescue "unknown"
-      server_name = linked_msg.channel.server.name rescue "unknown"
-      link_url = "/servers/#{server_id}/channels/#{channel_id}#message-#{message_id}"
-      display = ERB::Util.html_escape(author.display_name || author.username)
-      if author.avatar.attached?
-        avatar_url = Rails.application.routes.url_helpers.rails_blob_path(author.avatar, only_path: true)
-        avatar_html = %(<img src="#{avatar_url}" class="w-5 h-5 rounded-full shrink-0 object-cover" />)
+      server_name = linked_msg.channel.server&.name || "unknown"
+
+      if author
+        display = ERB::Util.html_escape(author.display_name || author.username)
+        if author.avatar.attached?
+          avatar_url = Rails.application.routes.url_helpers.rails_blob_path(author.avatar, only_path: true)
+          avatar_html = %(<img src="#{avatar_url}" class="w-5 h-5 rounded-full shrink-0 object-cover" />)
+        else
+          avatar_initial = ERB::Util.html_escape(author.username[0].upcase)
+          avatar_html = %(<div class="w-5 h-5 rounded-full bg-amber-600 flex items-center justify-center text-white text-xs font-bold shrink-0">#{avatar_initial}</div>)
+        end
       else
-        avatar_initial = ERB::Util.html_escape(author.username[0].upcase)
-        avatar_html = %(<div class="w-5 h-5 rounded-full bg-indigo-600 flex items-center justify-center text-white text-xs font-bold shrink-0">#{avatar_initial}</div>)
+        display = "Deleted User"
+        avatar_html = %(<div class="w-5 h-5 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-bold shrink-0">?</div>)
       end
-      # Strip the raw link from rendered HTML (both plain and <a>-wrapped versions)
-      # Strip the entire line/paragraph containing the message link
-      html = html.gsub(/<a[^>]*href="[^"]*\/servers\/#{server_id}\/channels\/#{channel_id}[^"]*#message[-_]#{message_id}[^"]*"[^>]*>[^<]*<\/a>/, "")
-      html = html.gsub(/<a[^>]*href="[^"]*\/servers\/#{server_id}\/channels\/#{channel_id}[^"]*"[^>]*>[^<]*<\/a>/, "")
-      html = html.gsub(/https?:\/\/[^\s<>]*\/servers\/#{server_id}\/channels\/#{channel_id}#message[-_]#{message_id}[^\s<>]*/, "")
-      html = html.gsub(/<p>\s*<\/p>/, "")
-      # Clean up empty <p> tags left behind
-      html = html.gsub(/<p>\s*<\/p>/, "")
-      embeds << %(<a href="#{link_url}" data-turbo="false" class="mt-2 block border-l-4 border-indigo-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
+
+      embeds << %(<a href="#{link_url}" data-turbo="false" class="mt-2 block border-l-4 border-amber-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
     end
   end
 # Collect Discord message link embeds
@@ -158,11 +167,11 @@ embeds << %(<div class="mt-2 max-w-sm rounded-lg overflow-hidden border border-g
       if gif_src
         embeds << %(<div class="mt-2 inline-block relative group/gif" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}" data-gif-url="#{gif_src}" data-preview-url="#{gif_src}"><img src="#{gif_src}" alt="GIF" class="max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-animated-gif data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif"></div>)
       else
-        embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-blue-400 text-sm">View GIF on Tenor</span></a>)
+        embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-amber-400 text-sm">View GIF on Tenor</span></a>)
       end
     else
       # Placeholder for async path (new messages — TenorUnfurlJob resolves later)
-      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-blue-400 text-sm">Loading GIF...</span></a></div>)
+      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-amber-400 text-sm">Loading GIF...</span></a></div>)
     end
   end
 
@@ -207,7 +216,7 @@ end
     next if seen_urls.include?(url)
     seen_urls << url
     domain = begin; URI.parse(url).host; rescue; url; end
-    embeds << %(<div class="mt-2 border-l-4 border-gray-600 pl-3 py-1"><a href="#{ERB::Util.html_escape(url)}" target="_blank" rel="noopener" class="text-blue-400 hover:underline text-sm break-all">#{ERB::Util.html_escape(domain)}</a></div>)
+    embeds << %(<div class="mt-2 border-l-4 border-gray-600 pl-3 py-1"><a href="#{ERB::Util.html_escape(url)}" target="_blank" rel="noopener" class="text-amber-400 hover:underline text-sm break-all">#{ERB::Util.html_escape(domain)}</a></div>)
   end
   html + embeds.join
 end
@@ -347,8 +356,10 @@ end
     # For channel messages, use the channel's server; for DMs, use the sender's servers
     if channel&.server
       emojis = channel.server.server_emojis.where(name: emoji_names).includes(image_attachment: :blob)
-    else
+    elsif user
       emojis = ServerEmoji.where(server_id: user.servers.select(:id), name: emoji_names).includes(image_attachment: :blob)
+    else
+      return html
     end
     return html if emojis.empty?
 

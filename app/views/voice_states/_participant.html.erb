@@ -7,7 +7,7 @@
     <% if voice_state.user.avatar.attached? %>
       <%= image_tag voice_state.user.avatar, class: "w-5 h-5 rounded-full object-cover" %>
     <% else %>
-      <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style="background-color: <%= voice_state.user.profile_color || '#2b2d31' %>">
+      <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style="background-color: <%= voice_state.user.profile_color || '#1e1c1b' %>">
         <%= voice_state.user.username[0].upcase %>
       </div>
     <% end %>

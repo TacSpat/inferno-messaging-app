@@ -325,7 +325,7 @@ export default class extends Controller {
     if (inCodeBlock) {
       input.style.fontFamily = "Consolas, Monaco, 'Courier New', monospace"
       input.style.fontSize = "0.8rem"
-      if (input.parentElement) input.parentElement.style.backgroundColor = "rgb(30 31 34)"
+      if (input.parentElement) input.parentElement.style.backgroundColor = "rgb(18 17 16)"
     } else {
       input.style.fontFamily = ""
       input.style.fontSize = ""
@@ -345,6 +345,11 @@ export default class extends Controller {
         if (welcome) welcome.remove()
         const nearBottom = (messagesDiv.scrollHeight - messagesDiv.scrollTop - messagesDiv.clientHeight) < 150
         messagesDiv.insertAdjacentHTML("beforeend", data.html)
+        const dmNewEl = messagesDiv.lastElementChild
+        if (dmNewEl) {
+          dmNewEl.classList.add("message-appear")
+          dmNewEl.addEventListener("animationend", () => dmNewEl.classList.remove("message-appear"), { once: true })
+        }
         if (nearBottom) messagesDiv.scrollTop = messagesDiv.scrollHeight
         break
       case "update_message":
@@ -379,7 +384,7 @@ export default class extends Controller {
     if (!this.hasHighlightTarget) return
     const text = this.inputTarget.value
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-blue-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>')
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>')
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')

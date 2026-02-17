@@ -63,7 +63,7 @@
             <%= form_tag accept_invite_path(@invite.code), method: :post, data: { turbo: false } do %>
               <%= hidden_field_tag :home_instance, @detected_home_instance %>
               <%= submit_tag "Continue from #{@detected_home_instance}",
-                    class: "w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded transition cursor-pointer text-sm" %>
+                    class: "w-full bg-amber-600 hover:bg-amber-700 text-white font-semibold py-3 rounded transition cursor-pointer text-sm" %>
             <% end %>
           <% else %>
             <p class="text-xs text-gray-400 mb-2">Have an account on another instance?</p>

@@ -1,15 +1,16 @@
-<div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= message.user.public_id %>">
+<% author = message.user %>
+<div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>">
   <!-- Mobile: avatar + name inline row -->
   <div class="flex items-center mb-0.5 sm:hidden">
-    <% if message.user.avatar.attached? %>
-      <%= image_tag message.user.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
+    <% if author&.avatar&.attached? %>
+      <%= image_tag author.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0" %>
     <% else %>
-      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
-        <%= message.user.username[0].upcase %>
+      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>">
+        <%= author ? author.username[0].upcase : "?" %>
       </div>
     <% end %>
     <span class="ml-2 font-medium text-sm text-white truncate">
-      <%= message.user.display_name.presence || message.user.username %>
+      <%= author ? (author.display_name.presence || author.username) : "Deleted User" %>
     </span>
     <span class="ml-2 text-xs text-gray-500 shrink-0">
       <%= message.created_at.strftime("%l:%M %p").strip %>
@@ -21,11 +22,11 @@
 
   <!-- Desktop: avatar column -->
   <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
-    <% if message.user.avatar.attached? %>
-      <%= image_tag message.user.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
+    <% if author&.avatar&.attached? %>
+      <%= image_tag author.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer" %>
     <% else %>
-      <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= message.user.profile_color || '#2b2d31' %>">
-        <%= message.user.username[0].upcase %>
+      <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>">
+        <%= author ? author.username[0].upcase : "?" %>
       </div>
     <% end %>
   </div>
@@ -33,9 +34,10 @@
   <!-- Content -->
   <div class="flex-1 min-w-0">
     <% if message.parent %>
-      <div class="flex items-center text-xs text-gray-400 mb-0.5 cursor-pointer hover:text-gray-200" onclick="const el=document.getElementById('message_<%= message.parent.public_id %>'); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.backgroundColor='rgba(99,102,241,0.3)';el.style.borderRadius='4px';setTimeout(function(){el.style.transition='background-color 0.8s ease-out';el.style.backgroundColor='transparent';setTimeout(function(){el.style.backgroundColor='';el.style.borderRadius='';el.style.transition=''},800)},1000)}">
+      <% parent_author = message.parent.user %>
+      <div class="flex items-center text-xs text-gray-400 mb-0.5 cursor-pointer hover:text-gray-200" onclick="const el=document.getElementById('message_<%= message.parent.public_id %>'); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.backgroundColor='rgba(249,115,22,0.3)';el.style.borderRadius='4px';setTimeout(function(){el.style.transition='background-color 0.8s ease-out';el.style.backgroundColor='transparent';setTimeout(function(){el.style.backgroundColor='';el.style.borderRadius='';el.style.transition=''},800)},1000)}">
         <svg class="w-3 h-3 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
-        <span class="font-medium mr-1 text-white"><%= message.parent.user.display_name.presence || message.parent.user.username %></span>
+        <span class="font-medium mr-1 text-white"><%= parent_author ? (parent_author.display_name.presence || parent_author.username) : "Deleted User" %></span>
         <span class="truncate max-w-xs"><%= truncate(message.parent.content.to_s.gsub(/```\w*\n?/, "").gsub(/```/, "").strip, length: 60) %></span>
       </div>
     <% end %>
@@ -43,7 +45,7 @@
     <!-- Desktop name/timestamp -->
     <div class="hidden sm:flex items-baseline">
       <span class="font-medium hover:underline cursor-pointer text-sm text-white">
-        <%= message.user.display_name.presence || message.user.username %>
+        <%= author ? (author.display_name.presence || author.username) : "Deleted User" %>
       </span>
       <span class="ml-2 text-xs text-gray-500">
         <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
@@ -78,7 +80,7 @@
           <% else %>
             <a href="<%= url_for(file) %>" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
               <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-              <span class="text-sm text-blue-400"><%= file.filename %></span>
+              <span class="text-sm text-amber-400"><%= file.filename %></span>
             </a>
           <% end %>
         <% end %>
@@ -91,7 +93,7 @@
     <button class="p-1.5 text-gray-400 hover:text-gray-200" title="Reply"
             data-action="click->dm-message-form#setReply"
             data-message-id="<%= message.public_id %>"
-            data-author-name="<%= message.user.display_name.presence || message.user.username %>"
+            data-author-name="<%= author ? (author.display_name.presence || author.username) : 'Deleted User' %>"
             data-preview="<%= truncate(message.content.to_s.gsub(/```\w*\n?/, "").gsub(/```/, "").strip, length: 80) %>">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
     </button>

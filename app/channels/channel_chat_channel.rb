@@ -41,7 +41,7 @@ class ChannelChatChannel < ApplicationCable::Channel
     if user.avatar.attached?
       { avatar_url: rails_blob_path(user.avatar, only_path: true) }
     else
-      { avatar_initial: user.username[0].upcase, avatar_color: user.profile_color.presence || "#2b2d31" }
+      { avatar_initial: user.username[0].upcase, avatar_color: user.profile_color.presence || "#1e1c1b" }
     end
   end
 end

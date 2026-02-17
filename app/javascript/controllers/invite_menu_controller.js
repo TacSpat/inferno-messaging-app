@@ -6,7 +6,14 @@ export default class extends Controller {
 
   toggle(event) {
     event.stopPropagation()
-    this.panelTarget.classList.toggle("hidden")
+    const isHidden = this.panelTarget.classList.contains("hidden")
+    if (isHidden) {
+      this.panelTarget.classList.remove("hidden")
+      this.panelTarget.classList.add("dropdown-enter")
+    } else {
+      this.panelTarget.classList.add("hidden")
+      this.panelTarget.classList.remove("dropdown-enter")
+    }
   }
 
   copy() {
