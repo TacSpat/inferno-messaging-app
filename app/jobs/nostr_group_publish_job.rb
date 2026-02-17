@@ -20,7 +20,7 @@ class NostrGroupPublishJob < ApplicationJob
       pubkey: user.nostr_public_key,
       content: message.content || "",
       tags: [
-        ["h", channel.nostr_group_id]
+        [ "h", channel.nostr_group_id ]
       ]
     )
     signed = signer.sign(event)

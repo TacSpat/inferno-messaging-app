@@ -14,8 +14,8 @@ class NostrEventService
       pubkey: user.nostr_public_key,
       content: "",
       tags: [
-        ["relay", relay_url],
-        ["challenge", challenge]
+        [ "relay", relay_url ],
+        [ "challenge", challenge ]
       ]
     )
 
@@ -75,9 +75,9 @@ class NostrEventService
 
   # Verify a Schnorr signature using the bip-schnorr gem
   def self.verify_schnorr_signature(message_hex:, pubkey_hex:, signature_hex:)
-    message_bin = [message_hex].pack("H*")
-    pubkey_bin = [pubkey_hex].pack("H*")
-    signature_bin = [signature_hex].pack("H*")
+    message_bin = [ message_hex ].pack("H*")
+    pubkey_bin = [ pubkey_hex ].pack("H*")
+    signature_bin = [ signature_hex ].pack("H*")
 
     Schnorr.check_sig!(message_bin, pubkey_bin, signature_bin)
     true

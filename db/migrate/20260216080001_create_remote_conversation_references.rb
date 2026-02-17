@@ -15,7 +15,7 @@ class CreateRemoteConversationReferences < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :remote_conversation_references, [:user_id, :remote_instance_url, :remote_conversation_id],
+    add_index :remote_conversation_references, [ :user_id, :remote_instance_url, :remote_conversation_id ],
               unique: true, name: "idx_remote_conv_refs_unique"
   end
 end

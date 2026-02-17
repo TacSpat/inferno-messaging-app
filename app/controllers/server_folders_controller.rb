@@ -1,6 +1,6 @@
 class ServerFoldersController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_folder, only: [:update, :destroy, :toggle_collapse]
+  before_action :set_folder, only: [ :update, :destroy, :toggle_collapse ]
 
   def create
     @folder = current_user.server_folders.build(folder_params)

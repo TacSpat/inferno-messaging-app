@@ -21,7 +21,7 @@ class PruneMessagesJob < ApplicationJob
 
     cutoff = config.message_retention_days.days.ago
     scope = Message.where("created_at < ?", cutoff)
-    scope = scope.where(pinned: [false, nil]) if config.keep_pinned_messages
+    scope = scope.where(pinned: [ false, nil ]) if config.keep_pinned_messages
     scope = exclude_held_messages(scope)
 
     deleted = scope.delete_all

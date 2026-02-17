@@ -2,7 +2,7 @@ class FriendshipsController < ApplicationController
   before_action :authenticate_user!
 
   def index
-    redirect_to conversations_path(tab: 'online')
+    redirect_to conversations_path(tab: "online")
   end
 
   def create
@@ -16,20 +16,20 @@ class FriendshipsController < ApplicationController
 
     # Local friend request
     tag = params[:tag].to_s.strip
-    if tag.include?('#')
-      username, discriminator = tag.split('#', 2)
+    if tag.include?("#")
+      username, discriminator = tag.split("#", 2)
       friend = User.find_by(username: username, discriminator: discriminator)
     else
       friend = User.find_by(public_id: params[:user_id])
     end
 
     if friend.nil?
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'User not found. Make sure the username and tag are correct.'
+      redirect_to conversations_path(tab: "add_friend"), alert: "User not found. Make sure the username and tag are correct."
       return
     end
 
     if friend == current_user
-      redirect_to conversations_path(tab: 'add_friend'), alert: "You can't add yourself."
+      redirect_to conversations_path(tab: "add_friend"), alert: "You can't add yourself."
       return
     end
 
@@ -40,9 +40,9 @@ class FriendshipsController < ApplicationController
         from_user: current_user.display_name.presence || current_user.username,
         from_user_id: current_user.public_id
       })
-      redirect_to conversations_path(tab: 'pending'), notice: "Friend request sent to #{friend.tag}!"
+      redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{friend.tag}!"
     else
-      redirect_to conversations_path(tab: 'add_friend'), alert: friendship.errors.full_messages.join(', ')
+      redirect_to conversations_path(tab: "add_friend"), alert: friendship.errors.full_messages.join(", ")
     end
   end
 
@@ -50,9 +50,9 @@ class FriendshipsController < ApplicationController
     friendship = Friendship.find(params[:id])
     if friendship.friend == current_user
       friendship.accept!
-      redirect_to conversations_path(tab: 'all'), notice: 'Friend request accepted!'
+      redirect_to conversations_path(tab: "all"), notice: "Friend request accepted!"
     else
-      redirect_to conversations_path(tab: 'pending'), alert: 'Not authorized'
+      redirect_to conversations_path(tab: "pending"), alert: "Not authorized"
     end
   end
 
@@ -60,9 +60,9 @@ class FriendshipsController < ApplicationController
     friendship = Friendship.find(params[:id])
     if friendship.friend == current_user
       friendship.update!(status: :declined)
-      redirect_to conversations_path(tab: 'pending'), notice: 'Friend request declined.'
+      redirect_to conversations_path(tab: "pending"), notice: "Friend request declined."
     else
-      redirect_to conversations_path(tab: 'pending'), alert: 'Not authorized'
+      redirect_to conversations_path(tab: "pending"), alert: "Not authorized"
     end
   end
 
@@ -71,19 +71,19 @@ class FriendshipsController < ApplicationController
     friend = friendship.friend
     Friendship.where(user_id: current_user.id, friend_id: friend.id).destroy_all
     Friendship.where(user_id: friend.id, friend_id: current_user.id).destroy_all
-    redirect_to conversations_path(tab: 'all'), notice: "Removed #{friend.tag} from friends."
+    redirect_to conversations_path(tab: "all"), notice: "Removed #{friend.tag} from friends."
   end
 
   private
 
   def create_remote_friend_request(instance_url)
     tag = params[:tag].to_s.strip
-    unless tag.include?('#')
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'Enter a full tag like Username#0000 for cross-instance requests.'
+    unless tag.include?("#")
+      redirect_to conversations_path(tab: "add_friend"), alert: "Enter a full tag like Username#0000 for cross-instance requests."
       return
     end
 
-    username, discriminator = tag.split('#', 2)
+    username, discriminator = tag.split("#", 2)
 
     # Normalize instance URL
     instance_url = "#{Rails.env.development? ? 'http' : 'https'}://#{instance_url}" unless instance_url.start_with?("http")
@@ -92,13 +92,13 @@ class FriendshipsController < ApplicationController
     # Check local blocklist
     domain = extract_domain(instance_url)
     if InstanceBlocklist.blocked?(domain)
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'Communications with that instance are restricted.'
+      redirect_to conversations_path(tab: "add_friend"), alert: "Communications with that instance are restricted."
       return
     end
 
     # Check the user has a Nostr keypair
     unless current_user.nostr_private_key.present?
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'You need a Nostr keypair to send cross-instance friend requests.'
+      redirect_to conversations_path(tab: "add_friend"), alert: "You need a Nostr keypair to send cross-instance friend requests."
       return
     end
 
@@ -110,7 +110,7 @@ class FriendshipsController < ApplicationController
         discriminator: discriminator
       )
     rescue FederationService::FederationError => e
-      redirect_to conversations_path(tab: 'add_friend'), alert: e.message
+      redirect_to conversations_path(tab: "add_friend"), alert: e.message
       return
     end
 
@@ -128,19 +128,19 @@ class FriendshipsController < ApplicationController
 
     # Check blocks
     if current_user.blocked?(shadow_friend)
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'You have blocked this user.'
+      redirect_to conversations_path(tab: "add_friend"), alert: "You have blocked this user."
       return
     end
 
     if shadow_friend.blocked?(current_user)
-      redirect_to conversations_path(tab: 'add_friend'), alert: 'This user has blocked you.'
+      redirect_to conversations_path(tab: "add_friend"), alert: "This user has blocked you."
       return
     end
 
     # Check existing friendship
     existing = Friendship.find_by(user: current_user, friend: shadow_friend)
     if existing
-      redirect_to conversations_path(tab: 'add_friend'), alert: "You already have a #{existing.status} friendship with this user."
+      redirect_to conversations_path(tab: "add_friend"), alert: "You already have a #{existing.status} friendship with this user."
       return
     end
 
@@ -158,7 +158,7 @@ class FriendshipsController < ApplicationController
     )
 
     unless friendship.save
-      redirect_to conversations_path(tab: 'add_friend'), alert: friendship.errors.full_messages.join(', ')
+      redirect_to conversations_path(tab: "add_friend"), alert: friendship.errors.full_messages.join(", ")
       return
     end
 
@@ -174,11 +174,11 @@ class FriendshipsController < ApplicationController
     rescue FederationService::FederationError => e
       # Clean up local friendship on remote failure
       friendship.destroy
-      redirect_to conversations_path(tab: 'add_friend'), alert: e.message
+      redirect_to conversations_path(tab: "add_friend"), alert: e.message
       return
     end
 
-    redirect_to conversations_path(tab: 'pending'), notice: "Friend request sent to #{tag} on #{domain}!"
+    redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{tag} on #{domain}!"
   end
 
   def extract_domain(url)

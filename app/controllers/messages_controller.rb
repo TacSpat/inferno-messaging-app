@@ -3,8 +3,8 @@ class MessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_channel
-  before_action :set_message, only: [:edit, :update, :destroy]
-  before_action :validate_file_types, only: [:create, :update]
+  before_action :set_message, only: [ :edit, :update, :destroy ]
+  before_action :validate_file_types, only: [ :create, :update ]
 
   def create
     @message = @channel.messages.new(message_params.except(:parent_id))
@@ -15,7 +15,7 @@ class MessagesController < ApplicationController
 
     if @message.save
       # Preload associations for rendering to avoid N+1
-      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :roles }).call
+      ActiveRecord::Associations::Preloader.new(records: [ @message.user ], associations: { server_memberships: :roles }).call
       # Broadcast via ActionCable
       ChannelChatChannel.broadcast_to(
         @channel,
@@ -62,7 +62,7 @@ class MessagesController < ApplicationController
     end
     if @message.update(message_params)
       # Preload associations for rendering to avoid N+1
-      ActiveRecord::Associations::Preloader.new(records: [@message.user], associations: { server_memberships: :roles }).call
+      ActiveRecord::Associations::Preloader.new(records: [ @message.user ], associations: { server_memberships: :roles }).call
       ChannelChatChannel.broadcast_to(
         @channel,
         {

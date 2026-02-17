@@ -31,14 +31,14 @@ When("a remote user sends a valid server creation event for {string}") do |serve
   public_key = Nostr::Key.get_public_key(private_key)
 
   content = { name: server_name, description: "Federated", username: "remote_tester" }.to_json
-  tags = [["d", "create_server"], ["relay", "wss://home.chat"]]
+  tags = [ [ "d", "create_server" ], [ "relay", "wss://home.chat" ] ]
   created_at = Time.now.to_i
 
-  serialized = [0, public_key, created_at, 30078, tags, content]
+  serialized = [ 0, public_key, created_at, 30078, tags, content ]
   id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-  message_bin = [id].pack("H*")
-  private_key_bin = [private_key].pack("H*")
+  message_bin = [ id ].pack("H*")
+  private_key_bin = [ private_key ].pack("H*")
   signature = Schnorr.sign(message_bin, private_key_bin)
   sig_hex = signature.encode.unpack1("H*")
 
@@ -57,14 +57,14 @@ When("a remote user from {string} sends a server creation event for {string}") d
   public_key = Nostr::Key.get_public_key(private_key)
 
   content = { name: server_name, username: "evil_user" }.to_json
-  tags = [["d", "create_server"], ["relay", "wss://#{instance}"]]
+  tags = [ [ "d", "create_server" ], [ "relay", "wss://#{instance}" ] ]
   created_at = Time.now.to_i
 
-  serialized = [0, public_key, created_at, 30078, tags, content]
+  serialized = [ 0, public_key, created_at, 30078, tags, content ]
   id = Digest::SHA256.hexdigest(JSON.generate(serialized))
 
-  message_bin = [id].pack("H*")
-  private_key_bin = [private_key].pack("H*")
+  message_bin = [ id ].pack("H*")
+  private_key_bin = [ private_key ].pack("H*")
   signature = Schnorr.sign(message_bin, private_key_bin)
   sig_hex = signature.encode.unpack1("H*")
 

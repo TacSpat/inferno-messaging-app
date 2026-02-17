@@ -34,19 +34,19 @@ RSpec.describe RelayService do
       event = { "id" => "event1", "kind" => 0, "content" => "test" }
 
       # Simulate both relays returning the same event
-      allow(RelayService).to receive(:fetch_from_relay).and_return([event])
+      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
 
       create(:relay_connection, status: "active")
       create(:relay_connection, status: "active")
 
-      results = RelayService.fetch_from_all({ kinds: [0] })
+      results = RelayService.fetch_from_all({ kinds: [ 0 ] })
       expect(results.length).to eq(1)
       expect(results.first["id"]).to eq("event1")
     end
 
     it "returns empty array when no relays are active" do
       allow(RelayService).to receive(:fetch_from_all).and_call_original
-      results = RelayService.fetch_from_all({ kinds: [0] })
+      results = RelayService.fetch_from_all({ kinds: [ 0 ] })
       expect(results).to eq([])
     end
   end

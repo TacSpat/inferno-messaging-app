@@ -6,6 +6,6 @@ class AddDiscriminatorToUsers < ActiveRecord::Migration[8.0]
     remove_index :users, :username
 
     # Username + discriminator must be unique together
-    add_index :users, [:username, :discriminator], unique: true
+    add_index :users, [ :username, :discriminator ], unique: true
   end
 end

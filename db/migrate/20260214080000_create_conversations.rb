@@ -15,7 +15,7 @@ class CreateConversations < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :conversation_participants, [:conversation_id, :user_id], unique: true
+    add_index :conversation_participants, [ :conversation_id, :user_id ], unique: true
 
     add_reference :messages, :conversation, foreign_key: true, null: true
     change_column_null :messages, :channel_id, true
