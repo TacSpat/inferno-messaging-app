@@ -39,6 +39,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    env:
+      RAILS_ENV: test
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432
+      SECRET_KEY_BASE: test_secret_key_base_for_ci_only_not_production
 
     services:
       postgres:
@@ -68,28 +72,15 @@ jobs:
           bun-version: 1.2.3
 
       - name: Prepare database
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
-          SECRET_KEY_BASE: test_secret_key_base_for_ci_only_not_production
         run: bin/rails db:test:prepare
 
       - name: Run minitest
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
         run: bin/rails test
 
       - name: Run system tests
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
         run: bin/rails test:system
 
       - name: Run RSpec
-        env:
-          RAILS_ENV: test
-          DATABASE_URL: postgres://postgres:postgres@localhost:5432
         run: bundle exec rspec
 
       - name: Keep screenshots from failed system tests
