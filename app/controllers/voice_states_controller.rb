@@ -1,7 +1,7 @@
 class VoiceStatesController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_own_voice_state, only: [:self_mute, :self_deafen]
-  before_action :set_target_voice_state, only: [:context_menu, :server_mute, :server_deafen, :kick, :move]
+  before_action :set_own_voice_state, only: [ :self_mute, :self_deafen ]
+  before_action :set_target_voice_state, only: [ :context_menu, :server_mute, :server_deafen, :kick, :move ]
 
   # --- Self-actions (existing) ---
 
@@ -119,7 +119,7 @@ class VoiceStatesController < ApplicationController
     sidebar_html = render_to_string(
       partial: "voice_states/participant",
       locals: { voice_state: @voice_state },
-      formats: [:html]
+      formats: [ :html ]
     )
 
     ServerChannel.broadcast_to(server, {

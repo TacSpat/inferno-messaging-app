@@ -14,17 +14,17 @@ class NostrReportPublishJob < ApplicationJob
     return if instance_key.blank?
 
     tags = [
-      ["p", report.reported_pubkey, report.report_type]
+      [ "p", report.reported_pubkey, report.report_type ]
     ]
 
     # If reporting a specific event, add the "e" tag
     if report.reported_event_id.present?
-      tags << ["e", report.reported_event_id, report.report_type]
+      tags << [ "e", report.reported_event_id, report.report_type ]
     end
 
     # NIP-56 report type tag
-    tags << ["L", "MOD"]
-    tags << ["l", report.report_type, "MOD"]
+    tags << [ "L", "MOD" ]
+    tags << [ "l", report.report_type, "MOD" ]
 
     event = Nostr::Event.new(
       kind: 1984,

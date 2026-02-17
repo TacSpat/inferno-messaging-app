@@ -18,7 +18,7 @@ FactoryBot.define do
     end
 
     trait :with_actor do
-      association :actor, factory: [:user, :confirmed]
+      association :actor, factory: [ :user, :confirmed ]
     end
   end
 end

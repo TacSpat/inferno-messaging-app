@@ -71,7 +71,7 @@ class NostrPublishJob < ApplicationJob
   def build_contacts_event(user)
     tags = user.friends.where.not(nostr_public_key: nil).map do |friend|
       relay_url = InstanceConfig.current.instance_relay_url.presence || ""
-      ["p", friend.nostr_public_key, relay_url, friend.display_name.presence || friend.username]
+      [ "p", friend.nostr_public_key, relay_url, friend.display_name.presence || friend.username ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
@@ -88,14 +88,14 @@ class NostrPublishJob < ApplicationJob
   # Kind 10002: Relay list metadata
   def build_relay_list_event(user)
     tags = RelayConnection.active.pluck(:url).flat_map do |url|
-      [["r", url, "read"], ["r", url, "write"]]
+      [ [ "r", url, "read" ], [ "r", url, "write" ] ]
     end
 
     # Also include the instance relay if configured
     instance_relay = InstanceConfig.current.instance_relay_url
     if instance_relay.present? && tags.none? { |t| t[1] == instance_relay }
-      tags << ["r", instance_relay, "read"]
-      tags << ["r", instance_relay, "write"]
+      tags << [ "r", instance_relay, "read" ]
+      tags << [ "r", instance_relay, "write" ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)

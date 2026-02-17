@@ -33,8 +33,8 @@ class NostrGroupModerationJob < ApplicationJob
       pubkey: moderator.nostr_public_key,
       content: reason || "",
       tags: [
-        ["h", channel.nostr_group_id],
-        ["e", target_event_id]
+        [ "h", channel.nostr_group_id ],
+        [ "e", target_event_id ]
       ]
     )
     signed = signer.sign(event)
@@ -61,8 +61,8 @@ class NostrGroupModerationJob < ApplicationJob
       pubkey: moderator.nostr_public_key,
       content: reason || "",
       tags: [
-        ["h", channel.nostr_group_id],
-        ["p", target_pubkey]
+        [ "h", channel.nostr_group_id ],
+        [ "p", target_pubkey ]
       ]
     )
     signed = signer.sign(event)

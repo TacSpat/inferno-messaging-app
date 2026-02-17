@@ -11,7 +11,7 @@ class CreateRemoteServerReferences < ActiveRecord::Migration[7.1]
       t.timestamps
     end
 
-    add_index :remote_server_references, [:user_id, :remote_instance_url, :remote_server_id],
+    add_index :remote_server_references, [ :user_id, :remote_instance_url, :remote_server_id ],
               unique: true, name: "idx_remote_server_refs_unique"
   end
 end

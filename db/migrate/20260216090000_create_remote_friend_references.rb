@@ -14,7 +14,7 @@ class CreateRemoteFriendReferences < ActiveRecord::Migration[8.0]
       t.timestamps
     end
 
-    add_index :remote_friend_references, [:user_id, :remote_instance_url, :friend_public_key],
+    add_index :remote_friend_references, [ :user_id, :remote_instance_url, :friend_public_key ],
               unique: true, name: "idx_remote_friends_unique"
   end
 end

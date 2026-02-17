@@ -21,7 +21,7 @@ RSpec.describe "Messages", type: :request do
       image = fixture_file_upload("test_image.png", "image/png")
 
       expect {
-        post channel_messages_path(channel.public_id), params: { message: { content: "check this out", files: [image] } }
+        post channel_messages_path(channel.public_id), params: { message: { content: "check this out", files: [ image ] } }
       }.to change(channel.messages, :count).by(1)
 
       expect(channel.messages.last.files).to be_attached
@@ -31,7 +31,7 @@ RSpec.describe "Messages", type: :request do
       video = fixture_file_upload("test_video.mp4", "video/mp4")
 
       expect {
-        post channel_messages_path(channel.public_id), params: { message: { content: "video here", files: [video] } }
+        post channel_messages_path(channel.public_id), params: { message: { content: "video here", files: [ video ] } }
       }.to change(channel.messages, :count).by(1)
 
       expect(channel.messages.last.files).to be_attached
@@ -41,7 +41,7 @@ RSpec.describe "Messages", type: :request do
       gif = fixture_file_upload("test_image.gif", "image/gif")
 
       expect {
-        post channel_messages_path(channel.public_id), params: { message: { content: "funny gif", files: [gif] } }
+        post channel_messages_path(channel.public_id), params: { message: { content: "funny gif", files: [ gif ] } }
       }.to change(channel.messages, :count).by(1)
 
       expect(channel.messages.last.files).to be_attached

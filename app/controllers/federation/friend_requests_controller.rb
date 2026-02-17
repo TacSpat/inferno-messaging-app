@@ -2,7 +2,7 @@ class Federation::FriendRequestsController < ApplicationController
   skip_before_action :verify_authenticity_token
 
   before_action :verify_federation_open
-  before_action :check_blocklist, only: [:lookup, :create, :push_conversation_reference]
+  before_action :check_blocklist, only: [ :lookup, :create, :push_conversation_reference ]
 
   # POST /federation/users/lookup
   # Look up a local user by username + discriminator

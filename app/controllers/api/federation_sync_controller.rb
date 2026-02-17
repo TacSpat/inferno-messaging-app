@@ -87,14 +87,14 @@ class Api::FederationSyncController < ApplicationController
     end
 
     instance_host = uri.host
-    instance_host += ":#{uri.port}" if uri.port && ![80, 443].include?(uri.port)
+    instance_host += ":#{uri.port}" if uri.port && ![ 80, 443 ].include?(uri.port)
 
     # Pull current memberships from the remote instance
     data = FederationService.fetch_remote_memberships(instance: instance_host, pubkey: pubkey)
 
     if data
       sync_server_references(current_user, data)
-      render json: { status: "ok", synced: ["servers"] }
+      render json: { status: "ok", synced: [ "servers" ] }
     else
       # Remote instance unreachable or user not found there
       render json: { status: "ok", synced: [] }
@@ -224,5 +224,4 @@ class Api::FederationSyncController < ApplicationController
       end
     end
   end
-
 end

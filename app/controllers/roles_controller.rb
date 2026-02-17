@@ -3,7 +3,7 @@ class RolesController < ApplicationController
   before_action :set_server
   before_action :set_current_membership
   before_action :ensure_manage_roles!
-  before_action :set_role, only: [:update, :destroy]
+  before_action :set_role, only: [ :update, :destroy ]
 
   def create
     max_position = @server.roles.where.not("permissions @> ?", { owner: true }.to_json).maximum(:position) || 0

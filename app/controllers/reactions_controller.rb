@@ -41,5 +41,4 @@ class ReactionsController < ApplicationController
   def set_message
     @message = @channel.messages.find_by!(public_id: params[:id])
   end
-
 end

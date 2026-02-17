@@ -32,7 +32,7 @@ class NostrGroupSubscriptionJob < ApplicationJob
     since = oldest_log ? oldest_log.event_created_at.to_i : 1.hour.ago.to_i
 
     filter = {
-      kinds: [NIP29_GROUP_CHAT_MESSAGE],
+      kinds: [ NIP29_GROUP_CHAT_MESSAGE ],
       "#h" => group_ids,
       since: since
     }

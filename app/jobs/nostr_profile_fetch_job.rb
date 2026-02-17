@@ -7,8 +7,8 @@ class NostrProfileFetchJob < ApplicationJob
 
     # Fetch Kind 0 (profile) events for this pubkey from all active relays
     filter = {
-      kinds: [0],
-      authors: [nostr_public_key],
+      kinds: [ 0 ],
+      authors: [ nostr_public_key ],
       limit: 1
     }
 

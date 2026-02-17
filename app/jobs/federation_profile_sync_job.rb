@@ -162,7 +162,7 @@ class FederationProfileSyncJob < ApplicationJob
     instance_url = "#{protocol}://#{Rails.application.config.x.instance_domain}"
 
     # Gather this instance's local server memberships for the shadow user
-    local_servers = shadow_user.server_memberships.includes(server: [:invites, { icon_attachment: :blob }]).map do |membership|
+    local_servers = shadow_user.server_memberships.includes(server: [ :invites, { icon_attachment: :blob } ]).map do |membership|
       server = membership.server
       invite = server.invites.first
       {
@@ -212,5 +212,4 @@ class FederationProfileSyncJob < ApplicationJob
         .destroy_all
     end
   end
-
 end
