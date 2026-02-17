@@ -81,9 +81,10 @@ gem "pg_search", "~> 2.3"
 gem "image_processing", "~> 1.14"
 gem "redis", "~> 5.4"
 
-gem "letter_opener", "~> 1.10", :group => :development
-
-gem "letter_opener_web", "~> 3.0", :group => :development
+group :development do
+  gem "letter_opener", "~> 1.10"
+  gem "letter_opener_web", "~> 3.0"
+end
 
 gem "paper_trail", "~> 17.0"
 
