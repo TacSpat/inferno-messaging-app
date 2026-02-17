@@ -15,6 +15,7 @@ class Federation::ProfilesController < ApplicationController
     end
 
     host = request.host_with_port
+    instance_domain = Rails.application.config.x.instance_domain
 
     avatar_url = if user.avatar.attached?
       rails_blob_url(user.avatar, host: host,
@@ -39,7 +40,7 @@ class Federation::ProfilesController < ApplicationController
       status: user.status,
       status_emoji: user.status_emoji,
       nip05: user.nip05_identifier,
-      home_instance: host,
+      home_instance: instance_domain,
       avatar_url: avatar_url,
       banner_url: banner_url,
       synced_at: Time.current.iso8601

@@ -24,6 +24,9 @@ RSpec.configure do |config|
   config.include NostrTestHelpers
   config.include AdminHelpers, type: :request
 
+  # Use test adapter to prevent perform_later from hitting Redis/Sidekiq
+  ActiveJob::Base.queue_adapter = :test
+
   WebMock.disable_net_connect!(allow_localhost: true)
 
   config.before(:each) do
