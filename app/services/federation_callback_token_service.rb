@@ -22,7 +22,7 @@ class FederationCallbackTokenService
 
   def self.verifier
     @verifier ||= ActiveSupport::MessageVerifier.new(
-      Rails.application.credentials.secret_key_base + "friend_request_callbacks"
+      Rails.application.secret_key_base + "friend_request_callbacks"
     )
   end
 end
