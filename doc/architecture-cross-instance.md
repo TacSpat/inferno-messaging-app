@@ -382,7 +382,54 @@ Each instance exposes `/.well-known/instance.json` with its name, description, l
 
 ---
 
-## 10. Security Considerations
+## 10. Resilience & Recovery
+
+### What survives if a home instance goes down
+
+| Data | Survives? | Where it lives |
+|------|-----------|----------------|
+| Identity (public key) | Yes | Cryptographic — exists independently of any server |
+| Profile (name, bio, avatar) | Yes | Published as Kind 0 events to connected Nostr relays |
+| Friends / contacts | Yes | Published as Kind 3 events to connected Nostr relays |
+| Private key | Only if exported | Encrypted in the instance database; users must export via NIP-49 (`ncryptsec`) before losing access |
+| Messages | No | Stored in the instance's PostgreSQL database. Exception: messages in NIP-29 shared channels also exist on the relay. |
+| Server memberships | Partial | Remote instances retain the shadow account and cached profile. Home instance coordination is lost. |
+| Purchases / cosmetics | Yes | Published to the user's Nostr profile (Kind 0 metadata), readable by any instance |
+
+### Recovery flow
+
+1. User creates an account on a new instance.
+2. Imports their exported private key (NIP-49 `ncryptsec` + password).
+3. The new instance now holds the same keypair — same public key, same identity.
+4. Profile and contacts are pulled from Nostr relays automatically.
+5. Remote instances recognize the same public key — existing shadow accounts, friendships, and roles are intact.
+6. The user is back. Different home instance, same identity.
+
+### Key export must be prominent
+
+Key export is the difference between "my identity survives" and "I start over." It should not be buried in settings. On first signup, users should be clearly prompted to save their recovery key — not forced, but made obvious. The same approach password managers use: "save this somewhere safe."
+
+### Message backups
+
+Messages are the main casualty of an instance going down. Mitigation options:
+
+- **Periodic data export** — the GDPR export feature (already built) can serve as a personal backup if run regularly.
+- **NIP-29 shared channels** — messages in bridged channels already exist on relays and survive instance loss.
+- **Encrypted relay backup (future)** — opt-in encrypted message backup to Nostr relays. Privacy tradeoff: even encrypted, metadata (timestamps, channel IDs) would be visible to relay operators.
+
+### Remote instance continuity
+
+If a home instance dies, remote instances don't break. They still have:
+
+- The user's shadow account with cached profile data
+- Server memberships, roles, and permissions
+- The user's public key for future re-verification
+
+When the user re-homes to a new instance and the same public key reappears, remote instances can re-establish the federation link automatically.
+
+---
+
+## 11. Security Considerations
 
 ### Challenge Replay Prevention
 - Auth challenges include a nonce, timestamp, and the requesting relay/instance URL.
