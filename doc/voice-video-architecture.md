@@ -58,7 +58,7 @@ N-1 times               server forwards             server mixes into
 |---|---|---|---|---|---|
 | Language | Go | C | Node + C++ | Go | Java + JS |
 | License | Apache 2.0 | GPLv3 | ISC | MIT | Apache 2.0 |
-| Ruby SDK | **Yes** (`livekit-server-sdk-ruby` v0.8.3) | No | No | No | No |
+| Ruby SDK | **Yes** (`livekit-server-sdk` v0.8.3) | No | No | No | No |
 | JavaScript SDK | Yes (`livekit-client`) | Yes (janus.js) | Yes (mediasoup-client) | Yes (built-in) | Yes (lib-jitsi-meet) |
 | Self-host complexity | Docker one-liner / single binary | Complex (deps, plugin config) | Node sidecar + custom signaling | Single binary | Very complex (Oressbar, Ojicofo, JVB, Orosody) |
 | Built-in TURN | Yes (integrated) | No (needs coturn) | No (needs coturn) | No (needs coturn) | Yes (built-in Orosody) |
@@ -1113,7 +1113,7 @@ patch "voice_states/self_deafen", to: "voice_states#self_deafen"
 
 | Library | Version | Purpose | Install |
 |---|---|---|---|
-| `livekit-server-sdk-ruby` | ~> 0.8 | Token generation, room management, webhook verification | `bundle add livekit-server-sdk-ruby` |
+| `livekit-server-sdk` | ~> 0.8 | Token generation, room management, webhook verification | `bundle add livekit-server-sdk` |
 | `livekit-client` | ~> 2.x | Browser WebRTC client, room connection, track management | `yarn add livekit-client` / `importmap pin livekit-client` |
 | `livekit/livekit-server` | latest | SFU server (Docker image or binary) | `docker pull livekit/livekit-server` |
 
