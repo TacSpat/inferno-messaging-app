@@ -20,7 +20,7 @@ add_index :users, :nostr_public_key, unique: true
 **User model changes:**
 - Add `after_create :generate_nostr_keypair` callback.
 - Add `nostr_public_key` and `nostr_private_key` (decrypted accessor) methods.
-- Private key encryption uses `ActiveSupport::MessageEncryptor` with a key derived from `Rails.application.credentials.secret_key_base`.
+- Private key encryption uses `ActiveSupport::MessageEncryptor` with a key derived from `Rails.application.secret_key_base`.
 
 **Backfill task:**
 ```ruby
