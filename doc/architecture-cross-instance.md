@@ -21,7 +21,7 @@ On signup, the instance auto-generates a Nostr secp256k1 keypair for the user:
 | Column | Type | Description |
 |--------|------|-------------|
 | `nostr_public_key` | `string` | 32-byte hex public key (npub) — the user's global identity |
-| `nostr_encrypted_private_key` | `text` | Private key encrypted at rest with the instance's `Rails.application.credentials.secret_key_base` |
+| `nostr_encrypted_private_key` | `text` | Private key encrypted at rest with a key derived from `Rails.application.secret_key_base` |
 
 The **public key** is the user's cross-instance identifier. Two accounts on different instances with the same public key are the same person.
 
@@ -254,7 +254,7 @@ Each instance can optionally run a **strfry** relay as a sidecar process:
 The instance is the **custodial key manager**. This is the experience for most users:
 
 - Keypair is generated on signup using `secp256k1`.
-- Private key is encrypted with `Rails.application.credentials.secret_key_base` and stored in the database.
+- Private key is encrypted with a key derived from `Rails.application.secret_key_base` and stored in the database.
 - The user never needs to see or manage their keys.
 - The instance signs Nostr events on the user's behalf.
 
