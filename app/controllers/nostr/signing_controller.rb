@@ -4,11 +4,15 @@ module Nostr
     before_action :validate_params
 
     # GET /auth/nostr/sign?challenge=<nonce>&callback=<url>&requesting_domain=<domain>
-    # Show confirmation: "remote.chat wants to verify your identity"
+    # Auto-approve: the user already chose to navigate to the remote instance,
+    # so sign the challenge immediately and redirect back.
     def show
       @requesting_domain = params[:requesting_domain]
       @challenge = params[:challenge]
       @callback = params[:callback]
+
+      # Auto-approve — skip the manual confirmation page
+      create
     end
 
     # POST /auth/nostr/sign
