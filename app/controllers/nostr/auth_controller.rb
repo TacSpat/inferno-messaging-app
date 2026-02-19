@@ -2,10 +2,22 @@ module Nostr
   class AuthController < ApplicationController
     skip_before_action :verify_authenticity_token, only: [ :callback ]
 
-    # GET /auth/nostr?home_instance=home.chat
+    # GET /auth/nostr?home_instance=home.chat&redirect_to=/servers/abc
     # Start the remote auth flow: generate challenge, redirect to home instance
     def new
       home_instance = params[:home_instance]&.strip&.downcase
+
+      # Store target redirect for after auth completes
+      if params[:redirect_to].present?
+        session[:post_auth_redirect] = params[:redirect_to].to_s
+      end
+
+      # Already signed in on this instance — skip auth and go straight to target
+      if user_signed_in?
+        target = session.delete(:post_auth_redirect) || root_path
+        redirect_to target
+        return
+      end
 
       if home_instance.blank?
         redirect_to root_path, alert: "Home instance is required."
@@ -206,7 +218,13 @@ module Nostr
         end
       end
 
-      redirect_to federation_syncing_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
+      post_auth = session.delete(:post_auth_redirect)
+      if post_auth.present?
+        redirect_to federation_syncing_path(redirect_to: post_auth),
+                    notice: "Authenticated via #{home_instance || 'remote instance'}."
+      else
+        redirect_to federation_syncing_path, notice: "Authenticated via #{home_instance || 'remote instance'}."
+      end
     end
 
     private

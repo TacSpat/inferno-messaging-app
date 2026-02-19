@@ -76,8 +76,15 @@ export default class extends Controller {
       console.warn("Instance sync failed:", e)
     }
 
-    // 4. Navigate
-    window.location.href = targetUrl
+    // 4. Navigate — route through auth endpoint to ensure session on remote instance
+    if (switchingInstance) {
+      const target = new URL(targetUrl)
+      const currentHost = window.location.host
+      const authUrl = `${target.origin}/auth/nostr?home_instance=${encodeURIComponent(currentHost)}&redirect_to=${encodeURIComponent(target.pathname + target.search)}`
+      window.location.href = authUrl
+    } else {
+      window.location.href = targetUrl
+    }
   }
 
   // --- Instance & voice helpers ---
