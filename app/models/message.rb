@@ -220,9 +220,14 @@ end
       html = html.gsub(/<p>\s*<\/p>/, "")
     end
 
-    # Check if this is a local invite
+    # Check if this is a local invite (compare host:port, not just host)
     parsed_url = URI.parse(full_url) rescue nil
-    is_local = parsed_url && (parsed_url.host == local_domain || parsed_url.host == request_host)
+    parsed_authority = if parsed_url && parsed_url.port && ![80, 443].include?(parsed_url.port)
+      "#{parsed_url.host}:#{parsed_url.port}"
+    else
+      parsed_url&.host
+    end
+    is_local = parsed_url && (parsed_authority == local_domain || parsed_authority == request_host)
 
     if is_local
       # Local invite — look up directly from DB
