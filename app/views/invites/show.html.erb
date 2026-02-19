@@ -65,37 +65,49 @@
                 method: :post,
                 class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
         <% else %>
-          <div class="space-y-3">
-            <%= button_to "Accept Invite",
-                  accept_invite_path(@invite.code),
-                  method: :post,
-                  class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
-            <p class="text-xs text-gray-500 text-center">
-              Already have an account?
-              <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-red-400 hover:text-red-300" %>
-            </p>
-          </div>
+          <% if @detected_home_instance %>
+            <!-- Remote user detected — only show federation login -->
+            <%= form_tag accept_invite_path(@invite.code), method: :post, data: { turbo: false } do %>
+              <%= hidden_field_tag :home_instance, @detected_home_instance %>
+              <p class="text-xs text-gray-400 mb-2">Joining from <strong class="text-gray-200"><%= @detected_home_instance %></strong></p>
+              <%= submit_tag "Continue from #{@detected_home_instance}",
+                    class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+            <% end %>
 
-          <!-- Federation: login from another instance -->
-          <div class="mt-4 pt-4 border-t border-gray-700">
-            <% if @detected_home_instance %>
-              <p class="text-xs text-gray-400 mb-2">It looks like you're coming from <strong class="text-gray-200"><%= @detected_home_instance %></strong></p>
-              <%= form_tag accept_invite_path(@invite.code), method: :post, data: { turbo: false } do %>
-                <%= hidden_field_tag :home_instance, @detected_home_instance %>
-                <%= submit_tag "Continue from #{@detected_home_instance}",
-                      class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+            <div class="mt-4 pt-4 border-t border-gray-700">
+              <p class="text-xs text-gray-400 mb-2">Not your instance? Enter it manually:</p>
+              <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2", data: { turbo: false } do %>
+                <%= text_field_tag :home_instance, nil,
+                      placeholder: "home.instance.com",
+                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
+                <%= submit_tag "Login via Home Instance",
+                      class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
               <% end %>
-            <% else %>
+            </div>
+          <% else %>
+            <!-- Local user — show accept/register/login -->
+            <div class="space-y-3">
+              <%= button_to "Accept Invite",
+                    accept_invite_path(@invite.code),
+                    method: :post,
+                    class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+              <p class="text-xs text-gray-500 text-center">
+                Already have an account?
+                <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-red-400 hover:text-red-300" %>
+              </p>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-700">
               <p class="text-xs text-gray-400 mb-2">Have an account on another instance?</p>
-            <% end %>
-            <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2 #{'mt-3' if @detected_home_instance}", data: { turbo: false } do %>
-              <%= text_field_tag :home_instance, nil,
-                    placeholder: "home.instance.com",
-                    class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
-              <%= submit_tag "Login via Home Instance",
-                    class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
-            <% end %>
-          </div>
+              <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2", data: { turbo: false } do %>
+                <%= text_field_tag :home_instance, nil,
+                      placeholder: "home.instance.com",
+                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
+                <%= submit_tag "Login via Home Instance",
+                      class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
+              <% end %>
+            </div>
+          <% end %>
         <% end %>
       </div>
     </div>

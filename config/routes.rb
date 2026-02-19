@@ -231,6 +231,8 @@ Rails.application.routes.draw do
   get "settings/appearance", to: "settings#appearance", as: :user_settings_appearance
   get "settings/notifications", to: "settings#notifications", as: :user_settings_notifications
   get "settings/keybinds", to: "settings#keybinds", as: :user_settings_keybinds
+  get "settings/password", to: "settings#change_password", as: :user_settings_password
+  patch "settings/password", to: "settings#update_password", as: :settings_update_password
   post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
   post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
   resource :profile, only: [ :show, :edit, :update ]

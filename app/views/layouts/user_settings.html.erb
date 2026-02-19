@@ -33,6 +33,10 @@
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'profile' || action_name == 'update_profile' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
             <%= link_to "Appearance", user_settings_appearance_path,
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'appearance' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% unless current_user.remote? %>
+              <%= link_to "Password", user_settings_password_path,
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'change_password' || action_name == 'update_password' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
           </div>
 
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">App Settings</h3>

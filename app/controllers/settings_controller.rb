@@ -32,6 +32,43 @@ class SettingsController < ApplicationController
     @user = current_user
   end
 
+  def change_password
+    @user = current_user
+    if @user.remote?
+      redirect_to user_settings_account_path, alert: "Password is managed on your home instance."
+    end
+  end
+
+  def update_password
+    @user = current_user
+
+    unless @user.valid_password?(params[:current_password])
+      flash.now[:alert] = "Current password is incorrect."
+      render :change_password, status: :unprocessable_entity
+      return
+    end
+
+    if params[:new_password].blank?
+      flash.now[:alert] = "New password can't be blank."
+      render :change_password, status: :unprocessable_entity
+      return
+    end
+
+    if params[:new_password] != params[:new_password_confirmation]
+      flash.now[:alert] = "New passwords don't match."
+      render :change_password, status: :unprocessable_entity
+      return
+    end
+
+    if @user.update(password: params[:new_password], password_confirmation: params[:new_password_confirmation])
+      bypass_sign_in(@user)
+      redirect_to user_settings_account_path, notice: "Password updated successfully."
+    else
+      flash.now[:alert] = @user.errors.full_messages.join(", ")
+      render :change_password, status: :unprocessable_entity
+    end
+  end
+
   def reveal_nostr_key
     if current_user.valid_password?(params[:password])
       render json: { nsec: current_user.nsec }, layout: false
