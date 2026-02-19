@@ -101,9 +101,10 @@ export default class extends Controller {
 
   async _checkInstanceReachable(url) {
     try {
+      const origin = new URL(url).origin
       const ac = new AbortController()
       const timeout = setTimeout(() => ac.abort(), 5000)
-      await fetch(url, { method: "HEAD", mode: "no-cors", signal: ac.signal })
+      await fetch(`${origin}/up`, { method: "HEAD", mode: "no-cors", signal: ac.signal })
       clearTimeout(timeout)
       return true
     } catch {
