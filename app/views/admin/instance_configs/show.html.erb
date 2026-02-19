@@ -8,6 +8,39 @@
       <%= link_to "Back to App", root_path, class: "text-sm text-gray-400 hover:text-white transition shrink-0 ml-4" %>
     </div>
 
+    <% if request.ssl? || request.host.in?(%w[localhost 127.0.0.1]) %>
+      <div class="bg-green-900/40 border border-green-700/40 rounded-lg px-4 py-3 mb-5">
+        <div class="flex items-center gap-2.5">
+          <svg class="w-4 h-4 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <p class="text-xs text-green-300">
+            <strong>HTTPS active</strong>
+            <span class="text-green-400/60 ml-1">— <%= request.protocol %><%= request.host_with_port %></span>
+          </p>
+        </div>
+      </div>
+    <% else %>
+      <div class="bg-yellow-900/60 border border-yellow-600/50 rounded-lg p-4 mb-5">
+        <div class="flex gap-3">
+          <svg class="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+          <div>
+            <h3 class="text-sm font-semibold text-yellow-300">HTTPS Required</h3>
+            <p class="text-xs text-yellow-200/80 mt-1">
+              This instance is being served over <strong class="text-yellow-300">HTTP (<%= request.host_with_port %>)</strong>, which is insecure and will cause problems.
+              HTTPS is required for:
+            </p>
+            <ul class="text-xs text-yellow-200/80 mt-1.5 ml-4 list-disc space-y-0.5">
+              <li><strong class="text-yellow-300">Voice chat</strong> — browsers block microphone access without a secure context</li>
+              <li><strong class="text-yellow-300">Federation</strong> — cross-instance links and syncing will fail or create duplicate references</li>
+              <li><strong class="text-yellow-300">Security</strong> — passwords, tokens, and messages are transmitted in plaintext</li>
+            </ul>
+            <p class="text-xs text-yellow-200/60 mt-2">
+              Set up a reverse proxy with TLS (nginx, Caddy, Tailscale Serve, etc.) and update your <code class="text-yellow-300/80">INSTANCE_DOMAIN</code> to the HTTPS hostname.
+            </p>
+          </div>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Admin quick links -->
     <div class="flex flex-wrap gap-2 mb-5">
       <%= link_to "Moderation Reports", admin_moderation_reports_path, class: "text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white px-3 py-1.5 rounded transition" %>
