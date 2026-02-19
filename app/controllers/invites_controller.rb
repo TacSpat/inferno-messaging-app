@@ -29,7 +29,7 @@ class InvitesController < ApplicationController
           server_name: @server.name,
           description: @server.description,
           icon_url: @server.icon.attached? ? rails_blob_url(@server.icon) : nil,
-          banner_url: @server.banner.attached? ? rails_blob_url(@server.banner) : nil,
+          banner_url: @server.respond_to?(:banner) && @server.banner.attached? ? rails_blob_url(@server.banner) : nil,
           member_count: @member_count,
           online_count: @online_count,
           instance_domain: @instance_domain,
