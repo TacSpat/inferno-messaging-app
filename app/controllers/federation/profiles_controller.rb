@@ -19,12 +19,12 @@ class Federation::ProfilesController < ApplicationController
 
     avatar_url = if user.avatar.attached?
       rails_blob_url(user.avatar, host: host,
-                     protocol: Rails.env.development? ? "http" : "https")
+                     protocol: FederationService.federation_protocol(request.host_with_port))
     end
 
     banner_url = if user.banner.attached?
       rails_blob_url(user.banner, host: host,
-                     protocol: Rails.env.development? ? "http" : "https")
+                     protocol: FederationService.federation_protocol(request.host_with_port))
     end
 
     render json: {
@@ -52,7 +52,7 @@ class Federation::ProfilesController < ApplicationController
     user = find_local_user
     return unless user
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
     instance_url = "#{protocol}://#{host}"
 
@@ -99,7 +99,7 @@ class Federation::ProfilesController < ApplicationController
     user = find_local_user
     return unless user
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
     instance_url = "#{protocol}://#{host}"
 
@@ -182,7 +182,7 @@ class Federation::ProfilesController < ApplicationController
       return
     end
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
     instance_url = "#{protocol}://#{host}"
 
@@ -208,7 +208,7 @@ class Federation::ProfilesController < ApplicationController
     user = find_local_user
     return unless user
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
 
     friends_data = user.friends.includes(avatar_attachment: :blob).map do |friend|
@@ -316,7 +316,8 @@ class Federation::ProfilesController < ApplicationController
 
   def auto_link_relay_for(domain)
     return if domain.blank?
-    relay_url = domain.include?(":") ? "ws://#{domain}" : "wss://#{domain}"
+    host = domain.split(":").first
+    relay_url = (host == "localhost" || host == "127.0.0.1") ? "ws://#{domain}" : "wss://#{domain}"
     RelayConnection.find_or_create_for_relay(relay_url)
   rescue StandardError => e
     Rails.logger.warn("Failed to auto-link relay for #{domain}: #{e.message}")

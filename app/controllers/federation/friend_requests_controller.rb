@@ -17,7 +17,7 @@ class Federation::FriendRequestsController < ApplicationController
       return
     end
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
 
     avatar_url = if user.avatar.attached?
@@ -110,7 +110,7 @@ class Federation::FriendRequestsController < ApplicationController
     end
 
     # Notify target via ActionCable
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = FederationService.federation_protocol(request.host_with_port)
     host = request.host_with_port
     ActionCable.server.broadcast("user_notifications_#{target.id}", {
       type: "friend_request",
@@ -189,7 +189,7 @@ class Federation::FriendRequestsController < ApplicationController
 
       # Push conversation reference to the responder's home instance
       if to_remote.home_instance.present?
-        protocol = Rails.env.development? ? "http" : "https"
+        protocol = FederationService.federation_protocol(request.host_with_port)
         FederationService.push_conversation_reference(
           instance_url: "#{protocol}://#{to_remote.home_instance}",
           for_pubkey: payload[:to_pubkey],

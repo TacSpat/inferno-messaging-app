@@ -56,8 +56,7 @@ module Nostr
       )
 
       # Redirect to home instance's signing endpoint
-      # No explicit port = reverse proxy (HTTPS); explicit port = direct dev (HTTP)
-      protocol = home_instance.include?(":") ? "http" : "https"
+      protocol = FederationService.federation_protocol(home_instance)
       home_signing_url = "#{protocol}://#{home_instance}/auth/nostr/sign?" + {
         challenge: challenge.nonce,
         callback: challenge.callback_url,
@@ -214,8 +213,8 @@ module Nostr
 
     def derive_relay_url(domain)
       return nil if domain.blank?
-      # Explicit port = dev with direct HTTP → ws://; otherwise wss://
-      if domain.include?(":")
+      host = domain.split(":").first
+      if host == "localhost" || host == "127.0.0.1"
         "ws://#{domain}"
       else
         "wss://#{domain}"

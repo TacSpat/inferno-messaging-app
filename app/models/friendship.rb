@@ -46,9 +46,8 @@ class Friendship < ApplicationRecord
     home = user.remote_user_detail&.home_instance
     return unless home
 
-    protocol = Rails.env.development? ? "http" : "https"
     FederationService.notify_friend_response(
-      instance_url: "#{protocol}://#{home}",
+      instance_url: FederationService.normalize_instance_url_for_storage(home),
       callback_token: federation_callback_token,
       status: "accepted",
       responder: friend

@@ -152,7 +152,7 @@ class FederationService
     default_port = uri.scheme == "https" ? 443 : 80
     host_with_port += ":#{port}" if port && port != default_port
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = federation_protocol(Rails.application.config.x.instance_domain)
     avatar_url = if responder.avatar.attached?
       Rails.application.routes.url_helpers.rails_blob_url(
         responder.avatar, host: Rails.application.config.x.instance_domain, protocol: protocol
@@ -184,7 +184,7 @@ class FederationService
     default_port = uri.scheme == "https" ? 443 : 80
     host_with_port += ":#{port}" if port && port != default_port
 
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = federation_protocol(Rails.application.config.x.instance_domain)
     avatar_url = if other_user.avatar.attached?
       Rails.application.routes.url_helpers.rails_blob_url(
         other_user.avatar, host: Rails.application.config.x.instance_domain, protocol: protocol
@@ -239,7 +239,7 @@ class FederationService
   end
 
   def self.build_friend_request_event(user:, to_username:, to_discriminator:)
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = federation_protocol(Rails.application.config.x.instance_domain)
     host = Rails.application.config.x.instance_domain
 
     avatar_url = if user.avatar.attached?
@@ -308,8 +308,10 @@ class FederationService
 
   def self.federation_protocol(home_instance)
     return "https" unless Rails.env.development?
-    # In dev, explicit port means direct HTTP; no port means reverse proxy (HTTPS)
-    home_instance.include?(":") ? "http" : "https"
+    # In dev, only localhost/127.0.0.1 uses HTTP; all other domains use HTTPS
+    # (e.g. tailscale domains on non-standard ports are still HTTPS)
+    host = home_instance.to_s.split(":").first
+    (host == "localhost" || host == "127.0.0.1") ? "http" : "https"
   end
 
   def self.fetch_federation_json(home_instance, path, token: nil)
