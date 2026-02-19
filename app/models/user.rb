@@ -162,7 +162,7 @@ class User < ApplicationRecord
   def ordered_rail_items
     memberships = server_memberships.includes(:server, :server_folder).ordered
     folders = server_folders.ordered.includes(server_memberships: :server)
-    remote_refs = remote_server_references.includes(:server_folder).ordered
+    remote_refs = remote_server_references.prefer_https.includes(:server_folder).ordered
 
     items = []
 
