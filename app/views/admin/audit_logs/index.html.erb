@@ -78,14 +78,26 @@
               <span class="text-xs text-gray-500"><%= log.created_at.strftime("%Y-%m-%d %H:%M:%S") %></span>
             </div>
             <div class="mt-1 text-xs text-gray-400">
-              <% if log.actor %>
+              <% if log.actor.is_a?(User) %>
+                <span>
+                  <strong class="text-gray-200"><%= log.actor.display_name.presence || log.actor.username %></strong>
+                  <span class="text-gray-500">(<%= log.actor.username %>#<%= log.actor.discriminator %><%= " — remote" if log.actor.remote? %>)</span>
+                </span>
+              <% elsif log.actor %>
                 Actor: <%= log.actor_type %> #<%= log.actor_id %>
               <% end %>
               <% if log.ip_address.present? %>
                 <span class="ml-2">IP: <%= log.ip_address %></span>
               <% end %>
               <% if log.metadata.present? && log.metadata.any? %>
-                <span class="ml-2 font-mono"><%= log.metadata.to_json %></span>
+                <% resolved_meta = log.metadata.dup %>
+                <% if resolved_meta["pubkey"].present? %>
+                  <% pubkey_user = @pubkey_users[resolved_meta["pubkey"]] %>
+                  <% if pubkey_user %>
+                    <% resolved_meta["pubkey"] = "#{pubkey_user.display_name.presence || pubkey_user.username} (#{pubkey_user.username}##{pubkey_user.discriminator})" %>
+                  <% end %>
+                <% end %>
+                <span class="ml-2 font-mono"><%= resolved_meta.to_json %></span>
               <% end %>
             </div>
           </div>
@@ -114,7 +126,13 @@
             </div>
             <div class="mt-1 text-xs text-gray-400">
               <% if version.whodunnit.present? %>
-                By user #<%= version.whodunnit %>
+                <% whodunnit_user = @whodunnit_users[version.whodunnit] %>
+                <% if whodunnit_user %>
+                  By <strong class="text-gray-200"><%= whodunnit_user.display_name.presence || whodunnit_user.username %></strong>
+                  <span class="text-gray-500">(<%= whodunnit_user.username %>#<%= whodunnit_user.discriminator %>)</span>
+                <% else %>
+                  By user #<%= version.whodunnit %>
+                <% end %>
               <% end %>
               <% if version.ip_address.present? %>
                 <span class="ml-2">IP: <%= version.ip_address %></span>
