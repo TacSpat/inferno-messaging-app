@@ -36,6 +36,10 @@ export default class extends Controller {
     document.addEventListener("inferno:reply", this._replyHandler)
     document.addEventListener("inferno:react", this._reactHandler)
 
+    // Auto-focus: redirect keystrokes to message input when nothing else is focused
+    this._autoFocusHandler = (e) => this._handleAutoFocus(e)
+    document.addEventListener("keydown", this._autoFocusHandler)
+
     // Measure emoji placeholder width for pixel-perfect overlay
     this._measureEmojiWidth()
 
@@ -57,9 +61,21 @@ export default class extends Controller {
     this.teardownDragAndDrop()
     this.teardownPaste()
     this.teardownFileIntercept()
+    if (this._autoFocusHandler) document.removeEventListener("keydown", this._autoFocusHandler)
     if (this._emojiMapReady) document.removeEventListener("inferno:emoji-map-ready", this._emojiMapReady)
     if (this._replyHandler) document.removeEventListener("inferno:reply", this._replyHandler)
     if (this._reactHandler) document.removeEventListener("inferno:react", this._reactHandler)
+  }
+
+  // --- Auto-focus: redirect typing to message input ---
+
+  _handleAutoFocus(e) {
+    const active = document.activeElement
+    if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    if (e.key.length !== 1 && e.key !== "Enter") return
+    if (document.querySelector(".context-pop, [data-modal]")) return
+    this.inputTarget.focus()
   }
 
   // --- Paste ---

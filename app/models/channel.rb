@@ -20,7 +20,7 @@ class Channel < ApplicationRecord
   enum :channel_type, { text: 0, voice: 1, announcement: 2 }
 
   validates :name, presence: true, length: { maximum: 100 },
-            format: { with: /\A[a-z0-9_-]+\z/, message: "lowercase letters, numbers, hyphens, underscores only" }
+            format: { with: /\A[a-z0-9 _\-:\u{00A0}-\u{10FFFF}]+\z/, message: "lowercase letters, numbers, spaces, hyphens, underscores, and emojis only" }
   validates :channel_type, presence: true
   validate :within_channel_limit, on: :create
 

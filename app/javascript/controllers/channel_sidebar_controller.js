@@ -158,7 +158,7 @@ export default class extends Controller {
     const link = tpl.querySelector("a")
     link.href = `/servers/${this.serverIdValue}/channels/${data.channel_id}`
     link.dataset.channelId = data.channel_id
-    link.querySelector('[data-slot="name"]').textContent = data.name
+    this._setNameWithEmojis(link.querySelector('[data-slot="name"]'), data.name)
     return link
   }
 
@@ -189,7 +189,7 @@ export default class extends Controller {
     const existing = this.element.querySelector(`[data-channel-id="${data.channel_id}"]`)
     if (!existing) return
     const nameSpan = existing.querySelector(".truncate")
-    if (nameSpan && data.name) nameSpan.textContent = data.name
+    if (nameSpan && data.name) this._setNameWithEmojis(nameSpan, data.name)
   }
 
   removeChannel(data) {
@@ -203,7 +203,7 @@ export default class extends Controller {
     wrapper.dataset.controller = "category-collapse"
     wrapper.dataset.categoryCollapseIdValue = data.category_id
     wrapper.dataset.categoryId = data.category_id
-    wrapper.querySelector('[data-slot="name"]').textContent = data.name
+    this._setNameWithEmojis(wrapper.querySelector('[data-slot="name"]'), data.name)
     return wrapper
   }
 
@@ -217,7 +217,7 @@ export default class extends Controller {
     const el = this.element.querySelector(`[data-category-id="${data.category_id}"]`)
     if (el && data.name) {
       const nameSpan = el.querySelector(".uppercase.tracking-wide")
-      if (nameSpan) nameSpan.textContent = data.name
+      if (nameSpan) this._setNameWithEmojis(nameSpan, data.name)
     }
   }
 
@@ -530,5 +530,20 @@ export default class extends Controller {
     const tpl = document.getElementById("tpl-voice-empty-state").content.cloneNode(true)
     tpl.querySelector('[data-slot="channel-name"]').textContent = channelName
     return tpl.firstElementChild
+  }
+
+  _setNameWithEmojis(el, name) {
+    if (!name || !name.includes(":") || !window._emojiMap) {
+      el.textContent = name || ""
+      return
+    }
+    const escaped = name.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    const html = escaped.replace(/:([a-z0-9_]+):/g, (match, n) => {
+      const url = window._emojiMap[n]
+      if (url) return `<img src="${url}" alt="${match}" style="height:1.2em;width:1.2em;object-fit:contain;vertical-align:middle;display:inline" loading="lazy">`
+      return match
+    })
+    if (html !== escaped) el.innerHTML = html
+    else el.textContent = name
   }
 }
