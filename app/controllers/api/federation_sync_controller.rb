@@ -1,6 +1,32 @@
 class Api::FederationSyncController < ApplicationController
   before_action :authenticate_user!
 
+  # GET /api/check_instance?url=https://example.com/servers/abc
+  # Server-side reachability check — avoids browser cross-origin issues.
+  def check_instance
+    target_url = params[:url].to_s
+    uri = URI.parse(target_url) rescue nil
+    unless uri&.host
+      render json: { reachable: false }
+      return
+    end
+
+    origin = "#{uri.scheme}://#{uri.host}"
+    origin += ":#{uri.port}" if uri.port && ![80, 443].include?(uri.port)
+
+    begin
+      check_uri = URI.parse("#{origin}/up")
+      http = Net::HTTP.new(check_uri.host, check_uri.port)
+      http.use_ssl = check_uri.scheme == "https"
+      http.open_timeout = 3
+      http.read_timeout = 3
+      response = http.request(Net::HTTP::Head.new(check_uri.path))
+      render json: { reachable: response.code.to_i < 500 }
+    rescue StandardError
+      render json: { reachable: false }
+    end
+  end
+
   # POST /api/federation_sync
   # For remote (shadow) users: re-syncs data from home instance.
   # For local users: checks if their account still exists on the target remote instance.
