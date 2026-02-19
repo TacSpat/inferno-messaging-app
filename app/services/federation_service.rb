@@ -217,8 +217,9 @@ class FederationService
   end
 
   def self.federation_instance_url
-    protocol = Rails.env.development? ? "http" : "https"
-    "#{protocol}://#{Rails.application.config.x.instance_domain}"
+    domain = Rails.application.config.x.instance_domain
+    protocol = federation_protocol(domain)
+    "#{protocol}://#{domain}"
   end
 
   def self.build_friend_request_event(user:, to_username:, to_discriminator:)
