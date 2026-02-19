@@ -2,12 +2,16 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   connect() {
+    this._expectedPath = null
     this._onBeforeFetch = this._handleBeforeFetch.bind(this)
+    this._onBeforeResponse = this._handleBeforeResponse.bind(this)
     document.addEventListener("turbo:before-fetch-request", this._onBeforeFetch)
+    document.addEventListener("turbo:before-fetch-response", this._onBeforeResponse)
   }
 
   disconnect() {
     document.removeEventListener("turbo:before-fetch-request", this._onBeforeFetch)
+    document.removeEventListener("turbo:before-fetch-response", this._onBeforeResponse)
   }
 
   _handleBeforeFetch(e) {
@@ -18,7 +22,27 @@ export default class extends Controller {
     const method = e.detail?.fetchOptions?.method
     if (method && method.toUpperCase() !== "GET") return
 
+    // Track the latest requested path — stale responses will be dropped
+    try {
+      this._expectedPath = new URL(e.detail.url).pathname
+    } catch {
+      this._expectedPath = null
+    }
+
     this._showSkeleton(e.target)
+  }
+
+  _handleBeforeResponse(e) {
+    // Only handle main-content frame responses
+    if (e.target.id !== "main-content") return
+    if (!this._expectedPath) return
+
+    try {
+      const responsePath = new URL(e.detail.fetchResponse.response.url).pathname
+      if (responsePath !== this._expectedPath) {
+        e.preventDefault() // Drop stale response — a newer navigation superseded it
+      }
+    } catch {}
   }
 
   _showSkeleton(frame) {
