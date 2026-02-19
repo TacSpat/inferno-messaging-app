@@ -28,6 +28,6 @@ class Invite < ApplicationRecord
   private
 
   def generate_code
-    self.code ||= SecureRandom.alphanumeric(8)
+    self.code ||= SecureRandom.alphanumeric(16)
   end
 end

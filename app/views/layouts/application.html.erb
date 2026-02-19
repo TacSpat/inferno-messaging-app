@@ -10,6 +10,7 @@
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
     <%= action_cable_meta_tag %>
+    <%= yield :head %>
     <style>
       /* Mobile sidebar transitions */
       @media (max-width: 767px) {
@@ -113,11 +114,11 @@
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
                     Invite People
                   </button>
-                  <div data-invite-menu-target="panel" class="hidden mt-1 bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-2">
+                  <div data-invite-menu-target="panel" class="hidden mt-1 bg-gray-800 border border-gray-700 rounded-lg p-3 space-y-2 w-[420px] z-50">
                     <% active_invite = @server.invites.active_invites.first %>
                     <% if active_invite %>
                       <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
-                        <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono truncate flex-1 select-all"><%= request.base_url %>/invite/<%= active_invite.code %></span>
+                        <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono flex-1 select-all truncate"><%= request.base_url %>/inferno/invite/<%= active_invite.code %></span>
                         <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-red-400 hover:text-red-300 text-xs font-semibold shrink-0 cursor-pointer">Copy</button>
                       </div>
                     <% else %>
@@ -169,7 +170,7 @@
               <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>
               <p class="text-xs text-gray-400 truncate"><%= current_user.tag %></p>
             </div>
-            <%= link_to user_settings_account_path, class: "text-gray-400 hover:text-gray-200 p-1", data: { turbo: false } do %>
+            <%= link_to user_settings_account_path, class: "text-gray-400 hover:text-gray-200 p-1" do %>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             <% end %>
           </div>

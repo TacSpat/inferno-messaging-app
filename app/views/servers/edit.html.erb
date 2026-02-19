@@ -49,11 +49,22 @@
         <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "What's this server about?" %>
       </div>
 
+      <!-- Server Banner -->
+      <div>
+        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">Server Banner</label>
+        <% if @server.banner.attached? %>
+          <div class="mb-2 rounded overflow-hidden h-24">
+            <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
+          </div>
+        <% end %>
+        <%= f.file_field :banner, accept: "image/*", class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-red-600 hover:file:bg-red-700 file:cursor-pointer" %>
+      </div>
+
       <!-- Invite Code -->
       <div>
         <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Invite Link</label>
         <div class="flex items-center bg-gray-900 border border-gray-700 rounded px-3 py-2">
-          <span class="text-sm text-gray-400 flex-1"><%= request.base_url %>/invite/<%= @server.invites.active_invites.first&.code %></span>
+          <span class="text-sm text-gray-400 flex-1"><%= request.base_url %>/inferno/invite/<%= @server.invites.active_invites.first&.code %></span>
           <button type="button" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent.trim())" class="text-red-400 hover:text-red-300 text-xs font-semibold ml-2">Copy</button>
         </div>
       </div>

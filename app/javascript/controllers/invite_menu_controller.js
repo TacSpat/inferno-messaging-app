@@ -40,7 +40,7 @@ export default class extends Controller {
 
       if (response.ok) {
         const data = await response.json()
-        const url = `${this.baseUrlValue}/invite/${data.code}`
+        const url = `${this.baseUrlValue}/inferno/invite/${data.code}`
         this.linkTextTarget.textContent = url
         this.linkTextTarget.classList.remove("italic", "text-gray-500")
         this.linkTextTarget.classList.add("text-gray-300", "select-all")

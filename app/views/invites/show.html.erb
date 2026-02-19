@@ -1,82 +1,103 @@
+<% content_for :head do %>
+  <meta property="og:title" content="Join <%= @server.name %> on Inferno">
+  <meta property="og:description" content="<%= @server.description.presence || "#{@member_count} members · #{@online_count} online" %>">
+  <% if @server.icon.attached? %>
+    <meta property="og:image" content="<%= rails_blob_url(@server.icon) %>">
+  <% end %>
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="<%= request.original_url %>">
+  <meta property="og:site_name" content="Inferno · <%= @instance_domain %>">
+  <meta name="twitter:card" content="summary">
+<% end %>
+
 <div class="flex items-center justify-center min-h-screen bg-gray-900 px-4">
-  <div class="w-full max-w-sm text-center">
+  <div class="w-full max-w-sm">
     <!-- Server card -->
-    <div class="bg-gray-800 rounded-lg shadow-xl p-6 sm:p-8">
-      <!-- Server icon -->
-      <div class="flex justify-center mb-4">
-        <% if @server.icon.attached? %>
-          <%= image_tag @server.icon, class: "w-20 h-20 rounded-full object-cover" %>
-        <% else %>
-          <div class="w-20 h-20 rounded-full bg-gray-700 flex items-center justify-center text-3xl font-bold text-white">
-            <%= @server.name[0].upcase %>
-          </div>
+    <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
+      <!-- Banner -->
+      <div class="relative h-32 bg-gradient-to-br from-red-900/60 to-gray-800">
+        <% if @server.banner.attached? %>
+          <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
         <% end %>
       </div>
 
-      <p class="text-sm text-gray-400 mb-1">You've been invited to join</p>
-      <h1 class="text-2xl font-bold text-white mb-3"><%= @server.name %></h1>
-
-      <% if @server.description.present? %>
-        <p class="text-sm text-gray-400 mb-4"><%= @server.description %></p>
-      <% end %>
-
-      <!-- Member counts -->
-      <div class="flex items-center justify-center gap-4 mb-6 text-sm">
-        <div class="flex items-center gap-1.5">
-          <span class="w-2.5 h-2.5 rounded-full bg-green-500"></span>
-          <span class="text-gray-300"><%= @online_count %> Online</span>
+      <!-- Content -->
+      <div class="relative px-6 pb-6">
+        <!-- Server icon overlapping banner -->
+        <div class="-mt-10 mb-3">
+          <% if @server.icon.attached? %>
+            <%= image_tag @server.icon, class: "w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" %>
+          <% else %>
+            <div class="w-20 h-20 rounded-2xl bg-gray-700 border-4 border-gray-800 flex items-center justify-center text-3xl font-bold text-white">
+              <%= @server.name[0].upcase %>
+            </div>
+          <% end %>
         </div>
-        <div class="flex items-center gap-1.5">
-          <span class="w-2.5 h-2.5 rounded-full bg-gray-500"></span>
-          <span class="text-gray-300"><%= @member_count %> Members</span>
-        </div>
-      </div>
 
-      <% if @already_member %>
-        <!-- Already a member -->
-        <%= link_to "Open #{@server.name}",
-              server_channel_path(@server, @server.channels.ordered.first),
-              class: "block w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-3 rounded transition text-sm" %>
-      <% elsif user_signed_in? %>
-        <!-- Logged in, not a member -->
-        <%= button_to "Accept Invite",
-              accept_invite_path(@invite.code),
-              method: :post,
-              class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-3 rounded transition cursor-pointer text-sm" %>
-      <% else %>
-        <!-- Not logged in -->
-        <div class="space-y-3">
+        <p class="text-xs text-gray-400 mb-0.5">You've been invited to join</p>
+        <h1 class="text-xl font-bold text-white mb-1"><%= @server.name %></h1>
+
+        <% if @server.description.present? %>
+          <p class="text-sm text-gray-400 mb-3 line-clamp-2"><%= @server.description %></p>
+        <% end %>
+
+        <!-- Member counts -->
+        <div class="flex items-center gap-4 mb-2 text-xs">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-green-500"></span>
+            <span class="text-gray-300"><%= @online_count %> Online</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+            <span class="text-gray-300"><%= @member_count %> Members</span>
+          </div>
+        </div>
+
+        <p class="text-xs text-gray-500 mb-5">Inferno · <%= @instance_domain %></p>
+
+        <% if @already_member %>
+          <%= link_to "Open #{@server.name}",
+                server_channel_path(@server, @server.channels.ordered.first),
+                class: "block w-full text-center bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition text-sm" %>
+        <% elsif user_signed_in? %>
           <%= button_to "Accept Invite",
                 accept_invite_path(@invite.code),
                 method: :post,
-                class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-3 rounded transition cursor-pointer text-sm" %>
-          <p class="text-xs text-gray-500">
-            Already have an account?
-            <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-red-400 hover:text-red-300" %>
-          </p>
-        </div>
+                class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+        <% else %>
+          <div class="space-y-3">
+            <%= button_to "Accept Invite",
+                  accept_invite_path(@invite.code),
+                  method: :post,
+                  class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+            <p class="text-xs text-gray-500 text-center">
+              Already have an account?
+              <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-red-400 hover:text-red-300" %>
+            </p>
+          </div>
 
-        <!-- Federation: login from another instance -->
-        <div class="mt-4 pt-4 border-t border-gray-700">
-          <% if @detected_home_instance %>
-            <p class="text-xs text-gray-400 mb-2">It looks like you're coming from <strong class="text-gray-200"><%= @detected_home_instance %></strong></p>
-            <%= form_tag accept_invite_path(@invite.code), method: :post, data: { turbo: false } do %>
-              <%= hidden_field_tag :home_instance, @detected_home_instance %>
-              <%= submit_tag "Continue from #{@detected_home_instance}",
-                    class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-3 rounded transition cursor-pointer text-sm" %>
+          <!-- Federation: login from another instance -->
+          <div class="mt-4 pt-4 border-t border-gray-700">
+            <% if @detected_home_instance %>
+              <p class="text-xs text-gray-400 mb-2">It looks like you're coming from <strong class="text-gray-200"><%= @detected_home_instance %></strong></p>
+              <%= form_tag accept_invite_path(@invite.code), method: :post, data: { turbo: false } do %>
+                <%= hidden_field_tag :home_instance, @detected_home_instance %>
+                <%= submit_tag "Continue from #{@detected_home_instance}",
+                      class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+              <% end %>
+            <% else %>
+              <p class="text-xs text-gray-400 mb-2">Have an account on another instance?</p>
             <% end %>
-          <% else %>
-            <p class="text-xs text-gray-400 mb-2">Have an account on another instance?</p>
-          <% end %>
-          <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2 #{'mt-3' if @detected_home_instance}", data: { turbo: false } do %>
-            <%= text_field_tag :home_instance, nil,
-                  placeholder: "home.instance.com",
-                  class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
-            <%= submit_tag "Login via Home Instance",
-                  class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
-          <% end %>
-        </div>
-      <% end %>
+            <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2 #{'mt-3' if @detected_home_instance}", data: { turbo: false } do %>
+              <%= text_field_tag :home_instance, nil,
+                    placeholder: "home.instance.com",
+                    class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
+              <%= submit_tag "Login via Home Instance",
+                    class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
     </div>
   </div>
 </div>

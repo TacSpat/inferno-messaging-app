@@ -31,6 +31,7 @@ class Message < ApplicationRecord
   TENOR_REGEX = /https?:\/\/tenor\.com\/view\/([\w-]+)-(\d+)/i
   REDDIT_REGEX = /https?:\/\/(?:www\.)?(?:old\.)?reddit\.com\/r\/(\w+)\/comments\/(\w+)(?:\/([^\s\/\?#]*))?/i
   URL_REGEX = /https?:\/\/[^\s<>]+/i
+  INFERNO_INVITE_REGEX = /https?:\/\/[^\s<>]+\/inferno\/invite\/([a-zA-Z0-9]+)/i
   DISCORD_LINK_REGEX = /https?:\/\/(?:discord\.com|discordapp\.com)\/channels\/(\d+)\/(\d+)\/(\d+)/i
   MESSAGE_LINK_REGEX = /\/servers\/([a-zA-Z0-9]+)\/channels\/([a-zA-Z0-9]+)#message[-_]([a-zA-Z0-9]+)/
 
@@ -44,6 +45,7 @@ class Message < ApplicationRecord
     html = render_content_html(sync_tenor: false)
     update_column(:rendered_content_cached, html)
     TenorUnfurlJob.perform_later(id) if content.match?(TENOR_REGEX)
+    InviteUnfurlJob.perform_later(id) if content.match?(INFERNO_INVITE_REGEX)
   end
 
   def render_content_html(sync_tenor: true)
@@ -201,6 +203,46 @@ end
     embeds << %(<div class="mt-2 max-w-md rounded-lg overflow-hidden border border-gray-700 bg-[#1a1a1b] relative group" style="height:400px" data-reddit-#{post_id}><iframe src="#{embed_url}" style="width:100%;height:100%;border:none" scrolling="yes" loading="lazy" sandbox="allow-scripts allow-same-origin allow-popups"></iframe><a href="#{reddit_url}" target="_blank" rel="noopener" class="absolute bottom-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 hover:bg-black/80 text-white/80 hover:text-white rounded px-2 py-1 text-xs no-underline z-10 flex items-center gap-1"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0A12 12 0 000 12a12 12 0 0012 12 12 12 0 0012-12A12 12 0 0012 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 01-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 01.042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 014.028 12c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 01.14-.197.35.35 0 01.238-.042l2.906.617a1.214 1.214 0 011.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 00-.231.094.33.33 0 000 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 00.029-.463.33.33 0 00-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 00-.232-.095z"/></svg>r/#{ERB::Util.html_escape(subreddit)}</a></div>)
   end
 
+  # Collect Inferno invite embeds
+  local_domain = Rails.application.config.x.instance_domain
+  (content || "").scan(INFERNO_INVITE_REGEX).each do |code_match|
+    invite_code = code_match.is_a?(Array) ? code_match[0] : code_match
+    next if embeds.any? { |e| e.include?("invite-embed-#{invite_code}") }
+
+    # Find the full URL from content for stripping
+    full_url_match = (content || "").match(/https?:\/\/[^\s<>]+\/inferno\/invite\/#{Regexp.escape(invite_code)}/)
+    full_url = full_url_match[0] if full_url_match
+    invite_url = full_url
+
+    if full_url
+      # Strip the raw link from rendered HTML
+      html = html.gsub(/<a[^>]*href="[^"]*\/inferno\/invite\/#{Regexp.escape(invite_code)}[^"]*"[^>]*>[^<]*<\/a>/, "")
+      html = html.gsub(/<p>\s*<\/p>/, "")
+    end
+
+    # Check if this is a local invite
+    parsed_url = URI.parse(full_url) rescue nil
+    is_local = parsed_url && (parsed_url.host == local_domain || parsed_url.host == request_host)
+
+    if is_local
+      # Local invite — look up directly from DB
+      invite = Invite.find_by(code: invite_code)
+      if invite&.usable?
+        server = invite.server
+        embeds << render_invite_embed_html(server, invite_code, local_domain, local: true)
+      end
+    elsif sync_tenor
+      # Synchronous remote fetch (fallback/edit path)
+      data = fetch_invite_json(full_url)
+      if data
+        embeds << render_remote_invite_embed_html(data, full_url)
+      end
+    else
+      # Async placeholder for InviteUnfurlJob
+      embeds << %(<div class="mt-2 invite-placeholder" data-invite-code="#{invite_code}" data-invite-url="#{ERB::Util.html_escape(full_url)}"><a href="#{ERB::Util.html_escape(full_url)}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-gray-400 text-sm">Loading invite...</span></a></div>)
+    end
+  end
+
   # Collect other URL previews (non-image, non-youtube)
   seen_urls = Set.new
   (content || "").scan(URL_REGEX).each do |url|
@@ -213,6 +255,7 @@ end
     next if url.match?(TIKTOK_REGEX)
     next if url.match?(TENOR_REGEX)
     next if url.match?(REDDIT_REGEX)
+    next if url.match?(INFERNO_INVITE_REGEX)
     next if seen_urls.include?(url)
     seen_urls << url
     domain = begin; URI.parse(url).host; rescue; url; end
@@ -292,6 +335,68 @@ end
   rescue => e
     Rails.logger.warn("Tenor fetch failed: #{e.message}")
     nil
+  end
+
+  def request_host
+    Rails.application.config.x.instance_domain
+  end
+
+  def fetch_invite_json(url)
+    json_url = url.chomp("/") + ".json"
+    uri = URI.parse(json_url)
+    http = Net::HTTP.new(uri.host, uri.port)
+    http.use_ssl = uri.scheme == "https"
+    http.open_timeout = 3
+    http.read_timeout = 5
+    req = Net::HTTP::Get.new(uri)
+    req["Accept"] = "application/json"
+    response = http.request(req)
+    return nil unless response.is_a?(Net::HTTPSuccess)
+    JSON.parse(response.body)
+  rescue => e
+    Rails.logger.warn("Invite JSON fetch failed: #{e.message}")
+    nil
+  end
+
+  def render_invite_embed_html(server, invite_code, instance_domain, local: true)
+    icon_html = if server.icon.attached?
+      icon_url = Rails.application.routes.url_helpers.rails_blob_path(server.icon, only_path: true)
+      %(<img src="#{icon_url}" class="w-12 h-12 rounded-xl object-cover shrink-0" />)
+    else
+      %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-white shrink-0">#{ERB::Util.html_escape(server.name[0].upcase)}</div>)
+    end
+
+    member_count = server.members.count
+    online_count = server.members.where(online_state: :online).count
+
+    if local
+      first_channel = server.channels.ordered.first
+      link_url = first_channel ? "/servers/#{server.public_id}/channels/#{first_channel.public_id}" : "#"
+      target_attr = ""
+      nav_attr = ' data-turbo="false"'
+    else
+      link_url = "/inferno/invite/#{invite_code}"
+      target_attr = ""
+      nav_attr = ' data-turbo="false"'
+    end
+
+    %(<a href="#{link_url}"#{target_attr}#{nav_attr} class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-invite-embed="true" data-invite-embed-#{invite_code}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+  end
+
+  def render_remote_invite_embed_html(data, invite_url)
+    icon_html = if data["icon_url"].present?
+      %(<img src="#{ERB::Util.html_escape(data["icon_url"])}" class="w-12 h-12 rounded-xl object-cover shrink-0" />)
+    else
+      initial = (data["server_name"] || "?")[0].upcase
+      %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-white shrink-0">#{ERB::Util.html_escape(initial)}</div>)
+    end
+
+    name = ERB::Util.html_escape(data["server_name"] || "Unknown Server")
+    online = data["online_count"] || 0
+    members = data["member_count"] || 0
+    domain = ERB::Util.html_escape(data["instance_domain"] || "unknown")
+
+    %(<a href="#{ERB::Util.html_escape(invite_url)}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-invite-embed="true" data-invite-embed-#{ERB::Util.html_escape(data["invite_code"]||"")}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{domain}</div></div></a>)
   end
 
   def create_mention_notifications

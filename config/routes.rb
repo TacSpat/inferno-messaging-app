@@ -166,9 +166,12 @@ Rails.application.routes.draw do
     end
   end
 
-  # Invites
-  get "invite/:code", to: "invites#show", as: :invite
-  post "invite/:code/accept", to: "invites#accept", as: :accept_invite
+  # Invites (canonical paths)
+  get "inferno/invite/:code", to: "invites#show", as: :invite
+  post "inferno/invite/:code/accept", to: "invites#accept", as: :accept_invite
+  # Backward compat
+  get "invite/:code", to: redirect("/inferno/invite/%{code}")
+  post "invite/:code/accept", to: "invites#accept"
 
   # Conversations (DMs)
   resources :conversations, only: [ :index, :show, :create, :destroy ] do
