@@ -16,7 +16,7 @@
     <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
       <!-- Banner -->
       <div class="relative h-32 bg-gradient-to-br from-red-900/60 to-gray-800">
-        <% if @server.banner.attached? %>
+        <% if @server.respond_to?(:banner) && @server.banner.attached? %>
           <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
         <% end %>
       </div>
