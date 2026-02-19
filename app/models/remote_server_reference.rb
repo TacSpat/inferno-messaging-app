@@ -9,7 +9,11 @@ class RemoteServerReference < ApplicationRecord
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
 
   def remote_server_url
-    "#{remote_instance_url}/servers/#{remote_server_id}"
+    if invite_code.present?
+      "#{remote_instance_url}/invite/#{invite_code}"
+    else
+      "#{remote_instance_url}/servers/#{remote_server_id}"
+    end
   end
 
   def instance_domain
