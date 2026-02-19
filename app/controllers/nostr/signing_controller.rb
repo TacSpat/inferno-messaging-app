@@ -4,15 +4,11 @@ module Nostr
     before_action :validate_params
 
     # GET /auth/nostr/sign?challenge=<nonce>&callback=<url>&requesting_domain=<domain>
-    # Auto-approve: the user already chose to navigate to the remote instance,
-    # so sign the challenge immediately and redirect back.
+    # Show brief confirmation with profile info, then auto-approve after a moment.
     def show
       @requesting_domain = params[:requesting_domain]
       @challenge = params[:challenge]
       @callback = params[:callback]
-
-      # Auto-approve — skip the manual confirmation page
-      create
     end
 
     # POST /auth/nostr/sign
