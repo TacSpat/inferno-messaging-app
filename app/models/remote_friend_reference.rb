@@ -7,6 +7,18 @@ class RemoteFriendReference < ApplicationRecord
   scope :ordered, -> { order(:friend_display_name, :friend_username) }
   scope :online, -> { where.not(online_state: "offline") }
 
+  # Filter out http:// duplicates when an https:// version of the same friend exists
+  scope :prefer_https, -> {
+    where.not(
+      "remote_instance_url LIKE 'http://%' AND EXISTS (" \
+        "SELECT 1 FROM remote_friend_references r2 " \
+        "WHERE r2.user_id = remote_friend_references.user_id " \
+        "AND r2.friend_public_key = remote_friend_references.friend_public_key " \
+        "AND r2.remote_instance_url LIKE 'https://%'" \
+      ")"
+    )
+  }
+
   def display_name
     friend_display_name.presence || friend_username.presence || "Unknown"
   end
