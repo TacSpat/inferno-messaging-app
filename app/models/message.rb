@@ -3,7 +3,7 @@ require "uri"
 
 class Message < ApplicationRecord
   include HasPublicId
-  belongs_to :user
+  belongs_to :user, optional: true
   belongs_to :channel, optional: true
   belongs_to :conversation, optional: true
   belongs_to :parent, class_name: "Message", optional: true
