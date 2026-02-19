@@ -212,7 +212,7 @@ class FederationService
 
   def self.normalize_instance_url(url)
     url = url.to_s.strip
-    url = "#{Rails.env.development? ? 'http' : 'https'}://#{url}" unless url.start_with?("http")
+    url = "#{federation_protocol(url)}://#{url}" unless url.start_with?("http")
     url.chomp("/")
   end
 
@@ -289,8 +289,14 @@ class FederationService
     raise FederationError, "Could not reach that instance: #{e.message}"
   end
 
+  def self.federation_protocol(home_instance)
+    return "https" unless Rails.env.development?
+    # In dev, explicit port means direct HTTP; no port means reverse proxy (HTTPS)
+    home_instance.include?(":") ? "http" : "https"
+  end
+
   def self.fetch_federation_json(home_instance, path, token: nil)
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = federation_protocol(home_instance)
     requesting_instance = Rails.application.config.x.instance_domain
     url = "#{protocol}://#{home_instance}#{path}?requesting_instance=#{CGI.escape(requesting_instance)}"
 
@@ -313,7 +319,7 @@ class FederationService
   end
 
   def self.post_federation_json(home_instance, path, token: nil, body: {})
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = federation_protocol(home_instance)
     requesting_instance = Rails.application.config.x.instance_domain
     url = "#{protocol}://#{home_instance}#{path}?requesting_instance=#{CGI.escape(requesting_instance)}"
 

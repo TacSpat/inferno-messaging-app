@@ -118,7 +118,7 @@ class Api::FederationSyncController < ApplicationController
   def sync_friend_references(user, home_instance, data)
     friends = data["friends"] || []
     synced_ids = []
-    protocol = Rails.env.development? ? "http" : "https"
+    protocol = home_instance.to_s.include?(":") ? "http" : "https"
     home_url = "#{protocol}://#{home_instance}"
 
     friends.each do |friend_data|

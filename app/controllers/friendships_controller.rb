@@ -131,7 +131,7 @@ class FriendshipsController < ApplicationController
     username, discriminator = tag.split("#", 2)
 
     # Normalize instance URL
-    instance_url = "#{Rails.env.development? ? 'http' : 'https'}://#{instance_url}" unless instance_url.start_with?("http")
+    instance_url = "#{instance_url.include?(':') ? 'http' : 'https'}://#{instance_url}" unless instance_url.start_with?("http")
     instance_url = instance_url.chomp("/")
 
     # Check local blocklist

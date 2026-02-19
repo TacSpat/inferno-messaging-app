@@ -77,8 +77,9 @@ class FederationProfileSyncJob < ApplicationJob
   def sync_friend_references(shadow_user, data)
     friends = data["friends"] || []
     synced_ids = []
-    protocol = Rails.env.development? ? "http" : "https"
-    home_url = "#{protocol}://#{shadow_user.remote_user_detail&.home_instance}"
+    home = shadow_user.remote_user_detail&.home_instance.to_s
+    protocol = home.include?(":") ? "http" : "https"
+    home_url = "#{protocol}://#{home}"
 
     friends.each do |friend_data|
       ref = shadow_user.remote_friend_references.find_or_initialize_by(

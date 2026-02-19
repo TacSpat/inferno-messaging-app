@@ -56,7 +56,8 @@ module Nostr
       )
 
       # Redirect to home instance's signing endpoint
-      protocol = Rails.env.development? ? "http" : "https"
+      # No explicit port = reverse proxy (HTTPS); explicit port = direct dev (HTTP)
+      protocol = home_instance.include?(":") ? "http" : "https"
       home_signing_url = "#{protocol}://#{home_instance}/auth/nostr/sign?" + {
         challenge: challenge.nonce,
         callback: challenge.callback_url,
