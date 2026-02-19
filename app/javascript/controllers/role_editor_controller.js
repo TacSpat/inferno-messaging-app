@@ -140,11 +140,11 @@ export default class extends Controller {
         hoistToggle.closest("[data-hoist-row]").classList.remove("hidden")
         if (role.hoist) {
           hoistToggle.classList.remove("bg-gray-600")
-          hoistToggle.classList.add("bg-orange-600")
+          hoistToggle.classList.add("bg-red-600")
           hoistToggle.firstElementChild.classList.remove("translate-x-0.5")
           hoistToggle.firstElementChild.classList.add("translate-x-5")
         } else {
-          hoistToggle.classList.remove("bg-orange-600")
+          hoistToggle.classList.remove("bg-red-600")
           hoistToggle.classList.add("bg-gray-600")
           hoistToggle.firstElementChild.classList.remove("translate-x-5")
           hoistToggle.firstElementChild.classList.add("translate-x-0.5")
@@ -165,8 +165,9 @@ export default class extends Controller {
       return
     }
 
+    const rowTemplate = document.getElementById("tpl-permission-row")
+
     for (const [groupName, perms] of Object.entries(PERMISSION_GROUPS)) {
-      // Skip manage_server for non-owner display (it's owner-only)
       const groupDiv = document.createElement("div")
       groupDiv.className = "mb-6"
 
@@ -178,37 +179,22 @@ export default class extends Controller {
       for (const [key, description] of Object.entries(perms)) {
         const enabled = role.permissions && role.permissions[key] === true
 
-        const row = document.createElement("div")
-        row.className = "flex items-center justify-between py-2 border-b border-gray-700/50"
+        const clone = rowTemplate.content.cloneNode(true)
+        clone.querySelector('[data-slot="label"]').textContent = key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
+        clone.querySelector('[data-slot="description"]').textContent = description
 
-        const labelDiv = document.createElement("div")
-        labelDiv.className = "flex-1 mr-4"
-
-        const label = document.createElement("p")
-        label.className = "text-sm text-white"
-        label.textContent = key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase())
-        labelDiv.appendChild(label)
-
-        const desc = document.createElement("p")
-        desc.className = "text-xs text-gray-500"
-        desc.textContent = description
-        labelDiv.appendChild(desc)
-
-        row.appendChild(labelDiv)
-
-        // Toggle switch
-        const toggle = document.createElement("button")
-        toggle.type = "button"
-        toggle.className = `relative w-11 h-6 rounded-full transition-colors focus:outline-none ${enabled ? "bg-orange-600" : "bg-gray-600"}`
+        const toggle = clone.querySelector('[data-slot="toggle"]')
         toggle.dataset.permission = key
         toggle.dataset.action = "click->role-editor#togglePermission"
 
-        const knob = document.createElement("span")
-        knob.className = `block w-5 h-5 bg-white rounded-full shadow transform transition-transform ${enabled ? "translate-x-5" : "translate-x-0.5"}`
-        toggle.appendChild(knob)
+        if (enabled) {
+          toggle.classList.remove("bg-gray-600")
+          toggle.classList.add("bg-red-600")
+          toggle.firstElementChild.classList.remove("translate-x-0.5")
+          toggle.firstElementChild.classList.add("translate-x-5")
+        }
 
-        row.appendChild(toggle)
-        groupDiv.appendChild(row)
+        groupDiv.appendChild(clone)
       }
 
       container.appendChild(groupDiv)
@@ -228,11 +214,11 @@ export default class extends Controller {
     // Update toggle visual
     if (newVal) {
       btn.classList.remove("bg-gray-600")
-      btn.classList.add("bg-orange-600")
+      btn.classList.add("bg-red-600")
       btn.firstElementChild.classList.remove("translate-x-0.5")
       btn.firstElementChild.classList.add("translate-x-5")
     } else {
-      btn.classList.remove("bg-orange-600")
+      btn.classList.remove("bg-red-600")
       btn.classList.add("bg-gray-600")
       btn.firstElementChild.classList.remove("translate-x-5")
       btn.firstElementChild.classList.add("translate-x-0.5")
@@ -250,11 +236,11 @@ export default class extends Controller {
 
     if (role.hoist) {
       btn.classList.remove("bg-gray-600")
-      btn.classList.add("bg-orange-600")
+      btn.classList.add("bg-red-600")
       btn.firstElementChild.classList.remove("translate-x-0.5")
       btn.firstElementChild.classList.add("translate-x-5")
     } else {
-      btn.classList.remove("bg-orange-600")
+      btn.classList.remove("bg-red-600")
       btn.classList.add("bg-gray-600")
       btn.firstElementChild.classList.remove("translate-x-5")
       btn.firstElementChild.classList.add("translate-x-0.5")
@@ -472,16 +458,14 @@ export default class extends Controller {
   }
 
   appendRoleToList(role) {
-    const item = document.createElement("div")
-    item.className = "flex items-center px-3 py-2 rounded cursor-pointer bg-gray-800 hover:bg-gray-700 transition-colors"
+    const clone = document.getElementById("tpl-role-list-item").content.cloneNode(true)
+    const item = clone.firstElementChild
+
     item.dataset.roleId = role.id
     item.dataset.action = "click->role-editor#selectRole"
-
-    item.innerHTML = `
-      <span class="w-3 h-3 rounded-full mr-3 shrink-0" data-color-dot style="background-color: ${this.escapeHtml(role.color || "#99aab5")}"></span>
-      <span class="flex-1 text-sm text-white truncate" data-role-name>${this.escapeHtml(role.name)}</span>
-      <span class="text-xs text-gray-500 ml-2">${role.member_count}</span>
-    `
+    item.querySelector("[data-color-dot]").style.backgroundColor = role.color || "#99aab5"
+    item.querySelector("[data-role-name]").textContent = role.name
+    item.querySelector('[data-slot="member-count"]').textContent = role.member_count
 
     // Insert before @everyone (last item) or at end
     const everyoneItem = Array.from(this.roleListTarget.children).find(el => {
@@ -493,12 +477,6 @@ export default class extends Controller {
     } else {
       this.roleListTarget.appendChild(item)
     }
-  }
-
-  escapeHtml(str) {
-    const div = document.createElement("div")
-    div.textContent = str
-    return div.innerHTML
   }
 
   showToast(msg, isError = false) {

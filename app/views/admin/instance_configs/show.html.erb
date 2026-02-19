@@ -63,11 +63,11 @@
         <div class="space-y-3">
           <div>
             <%= f.label :instance_name, "Instance Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-            <%= f.text_field :instance_name, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+            <%= f.text_field :instance_name, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
           </div>
           <div>
             <%= f.label :instance_description, "Description", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-            <%= f.text_area :instance_description, rows: 2, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm resize-none", placeholder: "A short description of this instance" %>
+            <%= f.text_area :instance_description, rows: 2, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "A short description of this instance" %>
           </div>
         </div>
       </div>
@@ -85,7 +85,7 @@
                   ["Closed — no remote authentication", "closed"]
                 ], @config.federation_mode),
                 {},
-                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
           </div>
 
           <div>
@@ -98,7 +98,7 @@
                 </span>
               </span>
             </div>
-            <%= f.text_field :instance_relay_url, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm", placeholder: "wss://relay.example.com" %>
+            <%= f.text_field :instance_relay_url, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", placeholder: "wss://relay.example.com" %>
           </div>
 
           <!-- Lockdown controls -->
@@ -112,7 +112,7 @@
               <% else %>
                 <%= link_to "Lock Everything", emergency_lockdown_admin_instance_config_path,
                     data: { turbo_method: :post, turbo_confirm: "This will immediately block all remote auth, registrations, remote joins, and invite creation. Continue?" },
-                    class: "bg-red-600 hover:bg-red-700 text-white font-semibold px-3 py-1 rounded transition cursor-pointer text-xs w-fit inline-block" %>
+                    class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-3 py-1 rounded transition cursor-pointer text-xs w-fit inline-block" %>
               <% end %>
             </div>
 
@@ -125,19 +125,19 @@
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div class="flex items-center gap-2">
-                <%= f.check_box :lockdown_remote_auth, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-orange-500 focus:ring-orange-500" %>
+                <%= f.check_box :lockdown_remote_auth, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-400 focus:ring-red-500" %>
                 <%= f.label :lockdown_remote_auth, "Block remote auth", class: "text-sm text-gray-300" %>
               </div>
               <div class="flex items-center gap-2">
-                <%= f.check_box :lockdown_remote_joins, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-orange-500 focus:ring-orange-500" %>
+                <%= f.check_box :lockdown_remote_joins, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-400 focus:ring-red-500" %>
                 <%= f.label :lockdown_remote_joins, "Block remote joins", class: "text-sm text-gray-300" %>
               </div>
               <div class="flex items-center gap-2">
-                <%= f.check_box :lockdown_local_signups, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-orange-500 focus:ring-orange-500" %>
+                <%= f.check_box :lockdown_local_signups, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-400 focus:ring-red-500" %>
                 <%= f.label :lockdown_local_signups, "Block registrations", class: "text-sm text-gray-300" %>
               </div>
               <div class="flex items-center gap-2">
-                <%= f.check_box :lockdown_invite_creation, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-orange-500 focus:ring-orange-500" %>
+                <%= f.check_box :lockdown_invite_creation, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-400 focus:ring-red-500" %>
                 <%= f.label :lockdown_invite_creation, "Block invites", class: "text-sm text-gray-300" %>
               </div>
             </div>
@@ -163,11 +163,11 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <%= f.label :max_users, "Max Total Users", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_users, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_users, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_servers_per_user, "Servers Per User", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_servers_per_user, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_servers_per_user, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
             </div>
           </div>
@@ -177,23 +177,23 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               <div>
                 <%= f.label :max_servers, "Max Total Servers", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_servers, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_servers, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_channels_per_server, "Channels Per Server", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_channels_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_channels_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_categories_per_server, "Categories Per Server", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_categories_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_categories_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_members_per_server, "Members Per Server", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_members_per_server, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_members_per_server, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_roles_per_server, "Roles Per Server", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_roles_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_roles_per_server, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
             </div>
           </div>
@@ -203,11 +203,11 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <%= f.label :max_upload_size_mb, "Max Upload (MB)", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_upload_size_mb, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_upload_size_mb, min: 1, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
               <div>
                 <%= f.label :max_storage_per_user_mb, "Per User (MB)", class: "block text-xs text-gray-400 mb-1" %>
-                <%= f.number_field :max_storage_per_user_mb, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                <%= f.number_field :max_storage_per_user_mb, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
               </div>
             </div>
           </div>
@@ -227,22 +227,22 @@
                   ["Storage-Based — prune attachments first", "storage_based"]
                 ], @config.pruning_strategy),
                 {},
-                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
           </div>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <%= f.label :message_retention_days, "Message Retention (days)", class: "block text-xs text-gray-400 mb-1" %>
-              <%= f.number_field :message_retention_days, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm", placeholder: "0 = forever" %>
+              <%= f.number_field :message_retention_days, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", placeholder: "0 = forever" %>
             </div>
             <div>
               <%= f.label :attachment_retention_days, "Attachment Retention (days)", class: "block text-xs text-gray-400 mb-1" %>
-              <%= f.number_field :attachment_retention_days, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm", placeholder: "0 = forever" %>
+              <%= f.number_field :attachment_retention_days, min: 0, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", placeholder: "0 = forever" %>
             </div>
           </div>
 
           <div class="flex items-center gap-2">
-            <%= f.check_box :keep_pinned_messages, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-amber-500 focus:ring-amber-500" %>
+            <%= f.check_box :keep_pinned_messages, class: "w-4 h-4 rounded border-gray-600 bg-gray-900 text-red-500 focus:ring-red-500" %>
             <%= f.label :keep_pinned_messages, "Keep pinned messages (never prune)", class: "text-sm text-gray-300" %>
           </div>
         </div>
@@ -255,7 +255,7 @@
             <p class="text-xs sm:text-sm text-gray-300">Unsaved changes</p>
             <div class="flex items-center gap-2 sm:gap-3 shrink-0">
               <button type="button" id="admin-reset-btn" class="text-xs sm:text-sm text-gray-400 hover:text-white cursor-pointer">Reset</button>
-              <%= f.submit "Save", class: "bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 sm:px-5 py-1.5 rounded transition cursor-pointer text-xs sm:text-sm" %>
+              <%= f.submit "Save", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 sm:px-5 py-1.5 rounded transition cursor-pointer text-xs sm:text-sm" %>
             </div>
           </div>
         </div>
@@ -332,8 +332,8 @@
       </div>
 
       <%= form_with url: admin_relay_connections_path, method: :post, class: "flex flex-col sm:flex-row gap-2 mb-3" do |f| %>
-        <%= f.text_field :url, placeholder: "wss://relay.example.com", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
-        <%= f.submit "Add", class: "bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm sm:w-auto" %>
+        <%= f.text_field :url, placeholder: "wss://relay.example.com", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.submit "Add", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm sm:w-auto" %>
       <% end %>
 
       <% relays = RelayConnection.order(created_at: :desc) %>
@@ -376,9 +376,9 @@
       <h2 class="text-base font-semibold text-white mb-3">Blocked Instances</h2>
 
       <%= form_with url: admin_instance_blocklists_path, method: :post, class: "flex flex-col sm:flex-row gap-2 mb-3" do |f| %>
-        <%= f.text_field :domain, placeholder: "spam.example.com", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
-        <%= f.text_field :reason, placeholder: "Reason (optional)", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
-        <%= f.submit "Block", class: "bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm sm:w-auto" %>
+        <%= f.text_field :domain, placeholder: "spam.example.com", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.text_field :reason, placeholder: "Reason (optional)", class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.submit "Block", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm sm:w-auto" %>
       <% end %>
 
       <% blocked = InstanceBlocklist.ordered %>

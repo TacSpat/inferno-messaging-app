@@ -38,8 +38,8 @@ export default class extends Controller {
       this.inputTarget.focus()
     }
     this._reactHandler = (e) => {
-      const { messageId } = e.detail
-      this.openReactionPickerForMessage(messageId)
+      const { messageId, clientX, clientY } = e.detail
+      this.openReactionPickerForMessage(messageId, clientX, clientY)
     }
     document.addEventListener("inferno:reply", this._replyHandler)
     document.addEventListener("inferno:react", this._reactHandler)
@@ -539,56 +539,17 @@ export default class extends Controller {
     })
   }
 
-  openReactionPickerForMessage(messageId) {
-    const existing = document.getElementById("reaction-picker-popup")
-    if (existing) existing.remove()
-    const common = ["😀","😂","❤️","👍","👎","😮","😢","😡","😍","🤔","🙏","🙌","🔥","🎉","✨","💯","💀","🤣","😎","🙄"]
-    const popup = document.createElement("div")
-    popup.id = "reaction-picker-popup"
-    popup.className = "fixed z-50 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 flex flex-wrap gap-0.5 w-64 context-pop"
-    // Position near the message
-    const msgEl = document.getElementById(`message_${messageId}`)
-    if (msgEl) {
-      const rect = msgEl.getBoundingClientRect()
-      // Place above the message, or below if not enough room
-      const popupHeight = 120
-      if (rect.top > popupHeight + 10) {
-        popup.style.top = (rect.top - popupHeight - 4) + "px"
-      } else {
-        popup.style.top = (rect.bottom + 4) + "px"
+  openReactionPickerForMessage(messageId, clientX, clientY) {
+    document.getElementById("reaction-picker-panel")?.remove()
+    document.dispatchEvent(new CustomEvent("inferno:open-reaction-picker", {
+      detail: {
+        messageId,
+        reactionUrl: `/channels/${this.channelIdValue}/messages/${messageId}/toggle_reaction`,
+        anchorSelector: `#message_${messageId}`,
+        clientX,
+        clientY
       }
-      popup.style.right = "80px"
-    } else {
-      popup.style.top = "50%"
-      popup.style.left = "50%"
-      popup.style.transform = "translate(-50%, -50%)"
-    }
-    const channelId = this.channelIdValue
-    common.forEach(emoji => {
-      const b = document.createElement("button")
-      b.type = "button"
-      b.className = "w-8 h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer"
-      b.textContent = emoji
-      b.onclick = () => {
-        popup.remove()
-        const token = document.querySelector("meta[name=csrf-token]")?.content
-        const fd = new FormData()
-        fd.append("emoji", emoji)
-        fetch(`/channels/${channelId}/messages/${messageId}/toggle_reaction`, {
-          method: "POST",
-          headers: { "X-CSRF-Token": token },
-          body: fd
-        })
-      }
-      popup.appendChild(b)
-    })
-    document.body.appendChild(popup)
-    setTimeout(() => {
-      const handler = (e) => {
-        if (!popup.contains(e.target)) { popup.remove(); document.removeEventListener("click", handler) }
-      }
-      document.addEventListener("click", handler)
-    }, 0)
+    }))
   }
 
   openReactionPicker(event) {
@@ -602,7 +563,7 @@ export default class extends Controller {
     // Escape HTML
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     // Highlight URLs
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-red-400">$1</span>')
     // Highlight bold **text**
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     // Highlight italic *text*
@@ -610,9 +571,11 @@ export default class extends Controller {
     // Highlight ~~strikethrough~~
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
     // Highlight `inline code`
-    html = html.replace(/`([^`]+)`/g, '<span class="text-orange-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
+    html = html.replace(/`([^`]+)`/g, '<span class="text-red-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
     // Highlight code blocks
-    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-orange-300">$1</span>')
+    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-red-300">$1</span>')
+    // Highlight @mentions
+    html = html.replace(/(^|[\s])(@\w+)/g, '$1<span class="text-red-400 bg-red-400/15 rounded px-0.5">$2</span>')
     // Replace emoji placeholders (em-space + PUA char) with inline images
     if (window._emojiReverse && window._emojiMap) {
       html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {

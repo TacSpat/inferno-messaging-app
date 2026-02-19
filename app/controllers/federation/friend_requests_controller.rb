@@ -110,10 +110,16 @@ class Federation::FriendRequestsController < ApplicationController
     end
 
     # Notify target via ActionCable
+    protocol = Rails.env.development? ? "http" : "https"
+    host = request.host_with_port
     ActionCable.server.broadcast("user_notifications_#{target.id}", {
       type: "friend_request",
       from_user: shadow_sender.display_name.presence || shadow_sender.username,
-      from_user_id: shadow_sender.public_id
+      from_user_id: shadow_sender.public_id,
+      friendship_id: friendship.id,
+      avatar_url: shadow_sender.avatar.attached? ? rails_blob_url(shadow_sender.avatar, host: host, protocol: protocol) : shadow_sender.try(:effective_avatar_url),
+      profile_color: shadow_sender.profile_color,
+      from_user_initial: shadow_sender.username[0].upcase
     })
 
     render json: {

@@ -20,7 +20,7 @@
                 when 'spam' then 'bg-yellow-900 text-yellow-300'
                 when 'illegal' then 'bg-red-900 text-red-300'
                 when 'impersonation' then 'bg-purple-900 text-purple-300'
-                when 'harassment' then 'bg-orange-900 text-orange-300'
+                when 'harassment' then 'bg-red-900 text-red-300'
                 else 'bg-gray-700 text-gray-300'
                 end %>">
             <%= @report.report_type.capitalize %>
@@ -30,7 +30,7 @@
           <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Status</p>
           <span class="text-sm font-medium px-2 py-1 rounded
             <%= case @report.status
-                when 'open' then 'bg-amber-900 text-amber-300'
+                when 'open' then 'bg-red-900 text-red-400'
                 when 'reviewed' then 'bg-gray-700 text-gray-300'
                 when 'dismissed' then 'bg-gray-700 text-gray-400'
                 when 'actioned' then 'bg-green-900 text-green-300'
@@ -119,10 +119,10 @@
           <%= form_with url: review_admin_moderation_report_path(@report), method: :post, class: "inline-flex items-center gap-2" do |f| %>
             <%= f.hidden_field :status, value: "actioned" %>
             <label class="flex items-center gap-1 text-sm text-gray-300">
-              <%= f.check_box :publish_to_relays, class: "w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-amber-500" %>
+              <%= f.check_box :publish_to_relays, class: "w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-red-500" %>
               Publish NIP-56
             </label>
-            <%= f.submit "Action & Resolve", class: "bg-red-600 hover:bg-red-700 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+            <%= f.submit "Action & Resolve", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
           <% end %>
         </div>
       </div>

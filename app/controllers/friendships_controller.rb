@@ -38,11 +38,23 @@ class FriendshipsController < ApplicationController
       ActionCable.server.broadcast("user_notifications_#{friend.id}", {
         type: "friend_request",
         from_user: current_user.display_name.presence || current_user.username,
-        from_user_id: current_user.public_id
+        from_user_id: current_user.public_id,
+        friendship_id: friendship.id,
+        avatar_url: current_user.avatar.attached? ? rails_blob_url(current_user.avatar) : nil,
+        profile_color: current_user.profile_color,
+        from_user_initial: current_user.username[0].upcase
       })
-      redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{friend.tag}!"
+      if params[:source] == "context"
+        redirect_back fallback_location: root_path, notice: "Friend request sent to #{friend.tag}!"
+      else
+        redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{friend.tag}!"
+      end
     else
-      redirect_to conversations_path(tab: "add_friend"), alert: friendship.errors.full_messages.join(", ")
+      if params[:source] == "context"
+        redirect_back fallback_location: root_path, alert: friendship.errors.full_messages.join(", ")
+      else
+        redirect_to conversations_path(tab: "add_friend"), alert: friendship.errors.full_messages.join(", ")
+      end
     end
   end
 
@@ -50,9 +62,15 @@ class FriendshipsController < ApplicationController
     friendship = Friendship.find(params[:id])
     if friendship.friend == current_user
       friendship.accept!
-      redirect_to conversations_path(tab: "all"), notice: "Friend request accepted!"
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "all"), notice: "Friend request accepted!" }
+        format.json { render json: { status: "accepted" } }
+      end
     else
-      redirect_to conversations_path(tab: "pending"), alert: "Not authorized"
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "pending"), alert: "Not authorized" }
+        format.json { render json: { error: "Not authorized" }, status: :forbidden }
+      end
     end
   end
 
@@ -60,18 +78,45 @@ class FriendshipsController < ApplicationController
     friendship = Friendship.find(params[:id])
     if friendship.friend == current_user
       friendship.update!(status: :declined)
-      redirect_to conversations_path(tab: "pending"), notice: "Friend request declined."
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request declined." }
+        format.json { render json: { status: "declined" } }
+      end
     else
-      redirect_to conversations_path(tab: "pending"), alert: "Not authorized"
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "pending"), alert: "Not authorized" }
+        format.json { render json: { error: "Not authorized" }, status: :forbidden }
+      end
+    end
+  end
+
+  def ignore
+    friendship = Friendship.find(params[:id])
+    if friendship.friend == current_user
+      friendship.update!(status: :ignored)
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request ignored." }
+        format.json { render json: { status: "ignored" } }
+      end
+    else
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "pending"), alert: "Not authorized" }
+        format.json { render json: { error: "Not authorized" }, status: :forbidden }
+      end
     end
   end
 
   def destroy
     friendship = current_user.friendships.find(params[:id])
     friend = friendship.friend
+    was_pending = friendship.pending?
     Friendship.where(user_id: current_user.id, friend_id: friend.id).destroy_all
     Friendship.where(user_id: friend.id, friend_id: current_user.id).destroy_all
-    redirect_to conversations_path(tab: "all"), notice: "Removed #{friend.tag} from friends."
+    if was_pending
+      redirect_to conversations_path(tab: "pending"), notice: "Friend request to #{friend.tag} cancelled."
+    else
+      redirect_to conversations_path(tab: "all"), notice: "Removed #{friend.tag} from friends."
+    end
   end
 
   private

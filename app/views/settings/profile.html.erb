@@ -31,7 +31,7 @@
           </div>
           <div>
             <%= f.file_field :avatar, accept: "image/*",
-                class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700 file:cursor-pointer",
+                class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-red-600 hover:file:bg-red-700 file:cursor-pointer",
                 data: { action: "change->banner-editor#previewAvatarFile", banner_editor_target: "avatarInput" } %>
             <p class="text-xs text-gray-500 mt-1">Recommended: 128Ã128 or larger</p>
           </div>
@@ -99,37 +99,37 @@
       <div class="bg-gray-800 rounded-lg p-4 space-y-4">
         <div>
           <%= f.label :display_name, "Display Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-          <%= f.text_field :display_name, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+          <%= f.text_field :display_name, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
         </div>
 
         <div>
           <%= f.label :username, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
           <div class="flex items-center">
-            <%= f.text_field :username, class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm" %>
+            <%= f.text_field :username, class: "flex-1 bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
             <span class="ml-2 text-gray-400 text-sm font-mono">#<%= @user.remote? && @user.remote_user_detail&.discriminator.present? ? @user.remote_user_detail.discriminator : @user.discriminator %></span>
           </div>
         </div>
 
         <div>
           <%= f.label :bio, "About Me", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-          <%= f.text_area :bio, rows: 3, maxlength: 500, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm resize-none", placeholder: "Tell others about yourself" %>
+          <%= f.text_area :bio, rows: 3, maxlength: 500, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "Tell others about yourself" %>
           <p class="text-xs text-gray-500 mt-1"><%= @user.bio&.length || 0 %>/500</p>
         </div>
 
         <div class="flex gap-3">
           <div class="w-16">
             <%= f.label :status_emoji, "Emoji", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-            <%= f.text_field :status_emoji, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm text-center", maxlength: 2 %>
+            <%= f.text_field :status_emoji, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm text-center", maxlength: 2 %>
           </div>
           <div class="flex-1">
             <%= f.label :status, "Custom Status", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-            <%= f.text_field :status, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-amber-500 text-sm", placeholder: "What are you up to?" %>
+            <%= f.text_field :status, class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", placeholder: "What are you up to?" %>
           </div>
         </div>
       </div>
 
       <div class="flex justify-end">
-        <%= f.submit "Save Changes", class: "bg-amber-600 hover:bg-amber-700 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+        <%= f.submit "Save Changes", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
       </div>
     <% end %>
   </div>

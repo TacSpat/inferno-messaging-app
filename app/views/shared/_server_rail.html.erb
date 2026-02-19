@@ -8,10 +8,10 @@
       home_badge_count += cp.unread_count
     end
   %>
-  <a href="<%= root_path %>" data-home-button class="group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all duration-200 <%= home_active ? 'bg-orange-600 rounded-xl' : 'bg-gray-700 hover:bg-orange-600 hover:rounded-xl' %>">
+  <a href="<%= root_path %>" data-home-button class="group relative flex items-center justify-center w-12 h-12 rounded-2xl transition-all duration-200 <%= home_active ? 'bg-gradient-to-br from-red-700 to-red-500 rounded-xl' : 'bg-gray-700 hover:bg-gradient-to-br hover:from-red-700 hover:to-red-500 hover:rounded-xl' %>">
     <svg class="w-6 h-6 <%= home_active ? 'text-white' : 'text-gray-300 group-hover:text-white' %>" fill="currentColor" viewBox="0 0 24 24"><path d="M17.6 11.48l1.34-5.02a.5.5 0 00-.61-.6l-5.02 1.34a.5.5 0 00-.27.83l1.17 1.17-3.54 3.54a1 1 0 101.42 1.42l3.54-3.54 1.17 1.17a.5.5 0 00.83-.27zM6.4 12.52l-1.34 5.02a.5.5 0 00.61.6l5.02-1.34a.5.5 0 00.27-.83l-1.17-1.17 3.54-3.54a1 1 0 10-1.42-1.42l-3.54 3.54-1.17-1.17a.5.5 0 00-.83.27z"/></svg>
     <% if home_active %>
-      <div class="absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-10 bg-amber-300 rounded-r-full"></div>
+      <div class="absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-10 bg-red-400 rounded-r-full"></div>
     <% end %>
     <% if home_badge_count > 0 %>
       <div class="home-badge mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950">

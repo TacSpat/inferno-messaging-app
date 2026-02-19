@@ -1,0 +1,8 @@
+<% fr_count = current_user.pending_friend_requests.count %>
+<div class="flex items-center gap-1 shrink-0">
+  <%# Friend requests toggle %>
+  <button type="button" class="relative text-gray-400 hover:text-white p-1 transition cursor-pointer" data-toolbar-action="toggle-friends" title="Friend Requests">
+    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+    <span data-toolbar-friend-badge class="<%= 'hidden' if fr_count == 0 %> absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-600 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-0.5 border border-gray-700"><%= fr_count %></span>
+  </button>
+</div>

@@ -1,4 +1,4 @@
-<div class="w-72 rounded-lg shadow-2xl border border-gray-700 overflow-hidden">
+<div class="w-72 rounded-lg shadow-2xl border border-gray-700 overflow-hidden" data-user-card-id="<%= member.public_id %>">
   <div class="h-[80px] relative">
     <% if member.banner.attached? %>
       <%= image_tag member.banner, class: "w-full h-full object-cover",
@@ -12,8 +12,9 @@
   </div>
   <div class="relative px-3 pb-3 pt-1" style="<%= profile_card_bg_style(member) %>">
     <div class="relative -mt-[35px] mb-2">
-      <div class="w-[66px] h-[66px] rounded-full p-[5px] inline-block"
-           style="background: <%= member.profile_color_2.presence || member.profile_color || '#1e1c1b' %>">
+      <div class="w-[66px] h-[66px] rounded-full p-[5px] inline-block cursor-pointer"
+           style="background: <%= member.profile_color_2.presence || member.profile_color || '#1e1c1b' %>"
+           data-profile-overlay-trigger data-user-id="<%= member.public_id %>"<%= " data-server-id=\"#{server.public_id}\"".html_safe if server %>>
         <% if member.avatar.attached? %>
           <%= image_tag member.avatar, class: "w-full h-full rounded-full object-cover" %>
         <% elsif member.effective_avatar_url.present? %>
@@ -36,7 +37,7 @@
     </div>
     <div class="bg-black/30 rounded-lg p-3 space-y-2">
       <div>
-        <h3 class="text-base font-bold text-white leading-tight"><%= member.display_name_for(server) %></h3>
+        <h3 class="text-base font-bold text-white leading-tight"><%= server ? member.display_name_for(server) : (member.display_name.presence || member.username) %></h3>
         <p class="text-xs text-white/60"><%= member.tag %></p>
         <% if member.remote? %>
           <p class="text-[10px] text-red-400 flex items-center gap-1">
@@ -54,24 +55,30 @@
           <p class="text-xs text-white/80"><%= member.bio %></p>
         </div>
       <% end %>
-      <% membership = server.server_memberships.find_by(user: member) %>
-      <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
-      <% if visible_roles.any? %>
-        <div class="border-t border-white/10 pt-2">
-          <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>
-          <div class="flex flex-wrap gap-1">
-            <% visible_roles.each do |role| %>
-              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
-                <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
-                <%= role.name %>
-              </span>
-            <% end %>
+      <% if server %>
+        <% membership = server.server_memberships.find_by(user: member) %>
+        <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+        <% if visible_roles.any? %>
+          <div class="border-t border-white/10 pt-2">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>
+            <div class="flex flex-wrap gap-1">
+              <% visible_roles.each do |role| %>
+                <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
+                  <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                  <%= role.name %>
+                </span>
+              <% end %>
+            </div>
           </div>
+        <% end %>
+        <div class="border-t border-white/10 pt-2">
+          <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
+          <p class="text-[11px] text-white/50"><%= membership&.joined_at&.strftime("%b %d, %Y") || "Unknown" %></p>
         </div>
       <% end %>
       <div class="border-t border-white/10 pt-2">
-        <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
-        <p class="text-[11px] text-white/50"><%= membership&.joined_at&.strftime("%b %d, %Y") || "Unknown" %></p>
+        <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Account Created</h4>
+        <p class="text-[11px] text-white/50"><%= member.created_at.strftime("%b %d, %Y") %></p>
       </div>
     </div>
   </div>

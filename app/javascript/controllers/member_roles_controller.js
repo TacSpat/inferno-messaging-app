@@ -71,19 +71,16 @@ export default class extends Controller {
       return
     }
 
-    badgesEl.innerHTML = roles.map(role => {
-      const bgClass = role.name === "Admin" ? "bg-red-600/20 text-red-400" : "bg-gray-700 text-gray-400"
-      return `<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full ${bgClass}">
-        <span class="w-2 h-2 rounded-full mr-1" style="background-color: ${role.color || '#ffffff'}"></span>
-        ${this.escapeHtml(role.name)}
-      </span>`
-    }).join("")
-  }
-
-  escapeHtml(text) {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
+    badgesEl.innerHTML = ""
+    const tpl = document.getElementById("tpl-role-badge")
+    roles.forEach(role => {
+      const clone = tpl.content.cloneNode(true)
+      const badge = clone.querySelector("span")
+      badge.className = `inline-flex items-center text-xs px-2 py-0.5 rounded-full ${role.name === "Admin" ? "bg-red-600/20 text-red-400" : "bg-gray-700 text-gray-400"}`
+      clone.querySelector('[data-slot="color-dot"]').style.backgroundColor = role.color || "#ffffff"
+      clone.querySelector('[data-slot="name"]').textContent = role.name
+      badgesEl.appendChild(clone)
+    })
   }
 
   showToast(message, type) {

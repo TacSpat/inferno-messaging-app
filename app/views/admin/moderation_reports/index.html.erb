@@ -9,11 +9,11 @@
       </div>
       <div class="flex items-center gap-2">
         <%= link_to "Open", admin_moderation_reports_path,
-            class: "text-sm px-3 py-1 rounded transition #{params[:filter].blank? ? 'bg-amber-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
+            class: "text-sm px-3 py-1 rounded transition #{params[:filter].blank? ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
         <%= link_to "Resolved", admin_moderation_reports_path(filter: "resolved"),
-            class: "text-sm px-3 py-1 rounded transition #{params[:filter] == 'resolved' ? 'bg-amber-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
+            class: "text-sm px-3 py-1 rounded transition #{params[:filter] == 'resolved' ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
         <%= link_to "All", admin_moderation_reports_path(filter: "all"),
-            class: "text-sm px-3 py-1 rounded transition #{params[:filter] == 'all' ? 'bg-amber-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
+            class: "text-sm px-3 py-1 rounded transition #{params[:filter] == 'all' ? 'bg-red-600 text-white' : 'bg-gray-700 text-gray-300 hover:text-white'}" %>
         <%= link_to "Back to Admin", admin_instance_config_path, class: "text-sm text-gray-400 hover:text-white transition ml-4" %>
       </div>
     </div>
@@ -30,7 +30,7 @@
                         when 'spam' then 'bg-yellow-900 text-yellow-300'
                         when 'illegal' then 'bg-red-900 text-red-300'
                         when 'impersonation' then 'bg-purple-900 text-purple-300'
-                        when 'harassment' then 'bg-orange-900 text-orange-300'
+                        when 'harassment' then 'bg-red-900 text-red-300'
                         else 'bg-gray-700 text-gray-300'
                         end %>">
                     <%= report.report_type.capitalize %>
@@ -48,7 +48,7 @@
               <div class="text-right">
                 <span class="text-xs font-medium px-2 py-1 rounded
                   <%= case report.status
-                      when 'open' then 'bg-amber-900 text-amber-300'
+                      when 'open' then 'bg-red-900 text-red-400'
                       when 'reviewed' then 'bg-gray-700 text-gray-300'
                       when 'dismissed' then 'bg-gray-700 text-gray-400'
                       when 'actioned' then 'bg-green-900 text-green-300'

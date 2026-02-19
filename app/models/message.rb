@@ -9,6 +9,7 @@ class Message < ApplicationRecord
   belongs_to :parent, class_name: "Message", optional: true
   has_many :replies, class_name: "Message", foreign_key: :parent_id, dependent: :nullify
   has_many :reactions, dependent: :destroy
+  has_many :notifications, dependent: :destroy
   has_many_attached :files
 
   validates :content, presence: true, unless: :has_files?
@@ -112,14 +113,14 @@ def unfurl_links(html, sync_tenor: true)
           avatar_html = %(<img src="#{avatar_url}" class="w-5 h-5 rounded-full shrink-0 object-cover" />)
         else
           avatar_initial = ERB::Util.html_escape(author.username[0].upcase)
-          avatar_html = %(<div class="w-5 h-5 rounded-full bg-amber-600 flex items-center justify-center text-white text-xs font-bold shrink-0">#{avatar_initial}</div>)
+          avatar_html = %(<div class="w-5 h-5 rounded-full bg-red-600 flex items-center justify-center text-white text-xs font-bold shrink-0">#{avatar_initial}</div>)
         end
       else
         display = "Deleted User"
         avatar_html = %(<div class="w-5 h-5 rounded-full bg-gray-600 flex items-center justify-center text-white text-xs font-bold shrink-0">?</div>)
       end
 
-      embeds << %(<a href="#{link_url}" data-turbo="false" class="mt-2 block border-l-4 border-amber-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
+      embeds << %(<a href="#{link_url}" data-turbo="false" class="mt-2 block border-l-4 border-red-500 bg-gray-800/60 hover:bg-gray-700/60 rounded-r-lg pl-3 pr-3 py-2 no-underline transition-colors cursor-pointer" data-message-link="true"><div class="flex items-center gap-2 mb-1">#{avatar_html}<span class="text-white font-semibold text-sm">#{display}</span><span class="text-gray-400 text-xs">#{time}</span></div><div class="text-sm text-gray-300">#{ERB::Util.html_escape(preview)}</div><div class="text-xs text-gray-500 mt-1">#{ERB::Util.html_escape(server_name)} &middot; ##{ERB::Util.html_escape(ch_name)}</div></a>)
     end
   end
 # Collect Discord message link embeds
@@ -166,11 +167,11 @@ embeds << %(<div class="mt-2 max-w-sm rounded-lg overflow-hidden border border-g
       if gif_src
         embeds << %(<div class="mt-2 inline-block relative group/gif" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}" data-gif-url="#{gif_src}" data-preview-url="#{gif_src}"><img src="#{gif_src}" alt="GIF" class="max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-animated-gif data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif"></div>)
       else
-        embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-amber-400 text-sm">View GIF on Tenor</span></a>)
+        embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-red-400 text-sm">View GIF on Tenor</span></a>)
       end
     else
       # Placeholder for async path (new messages — TenorUnfurlJob resolves later)
-      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-amber-400 text-sm">Loading GIF...</span></a></div>)
+      embeds << %(<div class="mt-2 tenor-placeholder" data-tenor-id="#{gif_id}" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}"><a href="#{tenor_url}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><div class="w-8 h-8 rounded border border-gray-600 bg-gray-700 flex items-center justify-center"><svg class="w-4 h-4 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg></div><span class="text-red-400 text-sm">Loading GIF...</span></a></div>)
     end
   end
 
@@ -215,7 +216,7 @@ end
     next if seen_urls.include?(url)
     seen_urls << url
     domain = begin; URI.parse(url).host; rescue; url; end
-    embeds << %(<div class="mt-2 border-l-4 border-gray-600 pl-3 py-1"><a href="#{ERB::Util.html_escape(url)}" target="_blank" rel="noopener" class="text-amber-400 hover:underline text-sm break-all">#{ERB::Util.html_escape(domain)}</a></div>)
+    embeds << %(<div class="mt-2 border-l-4 border-gray-600 pl-3 py-1"><a href="#{ERB::Util.html_escape(url)}" target="_blank" rel="noopener" class="text-red-400 hover:underline text-sm break-all">#{ERB::Util.html_escape(domain)}</a></div>)
   end
   html + embeds.join
 end
@@ -422,7 +423,7 @@ end
     server.roles.where.not(name: "@everyone").where("LOWER(REPLACE(name, '@', '')) IN (?)", mentioned_names).each do |role|
       role_name = role.name.delete_prefix("@")
       html = html.gsub(/@#{Regexp.escape(role_name)}\b/i) do
-        color = role.color.present? ? role.color : "#f97316"
+        color = role.color.present? ? role.color : "#dc2626"
         %(<span class="mention mention-role" style="color: #{color}">@#{ERB::Util.html_escape(role_name)}</span>)
       end
     end

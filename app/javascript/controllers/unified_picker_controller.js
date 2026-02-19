@@ -1,14 +1,8 @@
 import { Controller } from "@hotwired/stimulus"
+import { positionPopup } from "../utils/popup_positioning"
 
-const EMOJI_CATEGORIES = {
-  "Smileys": ["😀","😃","😄","😁","😆","😅","🤣","😂","🙂","🙃","😉","😊","😇","🥰","😍","🤩","😘","😗","😚","😙","🥲","😋","😛","😜","🤪","😝","🤑","🤗","🤭","🤫","🤔","🫡","🤐","🤨","😐","😑","😶","🫥","😏","😒","🙄","😬","🤥","😌","😔","😪","🤤","😴","😷","🤒","🤕","🤢","🤮","🥵","🥶","🥴","😵","🤯","🤠","🥳","🥸","😎","🤓","🧐","😡","😠","🤬","😈","👿","💀","💩","🤡","👻","👽","🤖"],
-  "Gestures": ["👍","👎","👊","✊","🤛","🤜","👏","🙌","👐","🤲","🤝","🙏","✌️","🤞","🤟","🤘","👌","🤌","🤏","👈","👉","👆","👇","☝️","✋","🤚","🖐️","🖖","👋","🤙","💪","🦾","🖕"],
-  "Hearts": ["❤️","🧡","💛","💚","💙","💜","🖤","🤍","🤎","💔","❤️‍🔥","❤️‍🩹","💕","💞","💓","💗","💖","💘","💝","💟"],
-  "Objects": ["🔥","⭐","🌟","✨","💫","🎉","🎊","🎈","🎁","🏆","🥇","🎮","🎯","🎲","🔮","💎","💰","💡","📌","📎","✏️","📝","💻","⌨️","🖥️","📱","☎️","📷","🎵","🎶","🎸","🎹","🍕","🍔","🍺","🍷","☕"]
-}
-
-const FREQUENTLY_USED_KEY = "unified_picker_frequently_used"
 const LAST_TAB_KEY = "unified_picker_last_tab"
+const FREQUENTLY_USED_KEY = "unified_picker_frequently_used"
 const MAX_FREQUENT = 24
 
 export default class extends Controller {
@@ -70,6 +64,15 @@ export default class extends Controller {
     }
     document.addEventListener("gif-favorites-changed", this.boundOnFavoritesChanged)
 
+    // Reaction mode state
+    this._reactionMode = null // { reactionUrl, anchorSelector, messageId }
+    this._openReactionPicker = (e) => {
+      const { messageId, reactionUrl, anchorSelector, clientX, clientY } = e.detail
+      this._reactionMode = { messageId, reactionUrl, anchorSelector, clientX, clientY }
+      this.openInReactionMode()
+    }
+    document.addEventListener("inferno:open-reaction-picker", this._openReactionPicker)
+
     // Eagerly populate window._emojiMap so input previews work without opening the picker
     this._eagerLoadEmojiMap()
   }
@@ -98,6 +101,7 @@ export default class extends Controller {
   disconnect() {
     document.removeEventListener("mousedown", this.boundClose)
     document.removeEventListener("gif-favorites-changed", this.boundOnFavoritesChanged)
+    if (this._openReactionPicker) document.removeEventListener("inferno:open-reaction-picker", this._openReactionPicker)
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     this.dismissContextMenu()
   }
@@ -117,11 +121,24 @@ export default class extends Controller {
   }
 
   close() {
+    if (this._reactionMode) {
+      this._exitReactionMode()
+      return
+    }
     this.panelTarget.classList.add("hidden")
     this.panelTarget.classList.remove("context-pop")
   }
 
   closeOnClickOutside(event) {
+    // In reaction mode, check the floating reaction panel
+    if (this._reactionMode) {
+      const reactionPanel = document.getElementById("reaction-picker-panel")
+      if (reactionPanel && reactionPanel.contains(event.target)) return
+      // Clicking a reaction button should not dismiss
+      if (event.target.closest(".reaction-picker-btn")) return
+      this._exitReactionMode()
+      return
+    }
     if (this.panelTarget.contains(event.target)) return
     const toggleBtn = this.panelTarget.parentElement
     if (toggleBtn && toggleBtn.contains(event.target)) return
@@ -151,10 +168,10 @@ export default class extends Controller {
     const tabs = { gifs: this.tabGifsTarget, stickers: this.tabStickersTarget, emoji: this.tabEmojiTarget }
     Object.entries(tabs).forEach(([name, el]) => {
       if (name === this.activeTab) {
-        el.classList.add("text-white", "border-orange-500")
+        el.classList.add("text-white", "border-red-500")
         el.classList.remove("text-gray-400", "border-transparent")
       } else {
-        el.classList.remove("text-white", "border-orange-500")
+        el.classList.remove("text-white", "border-red-500")
         el.classList.add("text-gray-400", "border-transparent")
       }
     })
@@ -357,11 +374,11 @@ export default class extends Controller {
 
       // Fire icon save button — shown on all GIF items, reflects default Favorites state
       const isFav = this.userFavoriteIds.has(gif.id)
-      const iconClass = isFav ? "text-orange-500" : "text-white/80"
+      const iconClass = isFav ? "text-red-400" : "text-white/80"
       const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"'
       const saveBtn = `<button type="button" class="gif-picker-save absolute top-1 left-1 z-10 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center cursor-pointer" data-action="click->unified-picker#togglePickerFavorite:stop:prevent" data-tenor-gif-id="${this.escapeAttr(gif.id)}"><svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg></button>`
 
-      return `<div class="gif-grid-item relative cursor-pointer rounded overflow-hidden hover:ring-2 hover:ring-orange-500 transition" data-action="${actions}" data-gif-url="${this.escapeAttr(gif.url)}" data-tenor-gif-id="${this.escapeAttr(gif.id)}"${favAttr} data-preview-url="${this.escapeAttr(gif.preview_url || "")}" data-full-gif-url="${this.escapeAttr(gif.gif_url || "")}"><img src="${this.escapeAttr(previewUrl)}" alt="${this.escapeAttr(gif.description || "GIF")}" class="w-full h-auto" loading="lazy">${saveBtn}</div>`
+      return `<div class="gif-grid-item relative cursor-pointer rounded overflow-hidden hover:ring-2 hover:ring-red-500 transition" data-action="${actions}" data-gif-url="${this.escapeAttr(gif.url)}" data-tenor-gif-id="${this.escapeAttr(gif.id)}"${favAttr} data-preview-url="${this.escapeAttr(gif.preview_url || "")}" data-full-gif-url="${this.escapeAttr(gif.gif_url || "")}"><img src="${this.escapeAttr(previewUrl)}" alt="${this.escapeAttr(gif.description || "GIF")}" class="w-full h-auto" loading="lazy">${saveBtn}</div>`
     }).join("")
 
     if (results.length === 0) {
@@ -443,7 +460,7 @@ export default class extends Controller {
 
       // Update the button icon
       const isFav = data.favorited
-      const iconClass = isFav ? "text-orange-500" : "text-white/80"
+      const iconClass = isFav ? "text-red-400" : "text-white/80"
       const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"'
       btn.innerHTML = `<svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg>`
 
@@ -487,7 +504,7 @@ export default class extends Controller {
       html += this.collapsibleSection(`sticker_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
         if (filtered.length === 0) return `<div class="text-gray-500 text-xs px-2 py-1">No stickers yet</div>`
         return `<div class="grid grid-cols-3 gap-1">${filtered.map(s =>
-          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-orange-500 transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
+          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-red-500 transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
         ).join("")}</div>`
       })
     }
@@ -551,19 +568,26 @@ export default class extends Controller {
       }
     }
 
-    // Standard emoji categories
-    Object.entries(EMOJI_CATEGORIES).forEach(([category, emojis]) => {
-      const filtered = this.searchQuery
-        ? emojis.filter(e => e.includes(this.searchQuery))
-        : emojis
-      if (filtered.length === 0 && this.searchQuery) return
+    // Standard emoji categories from server-rendered template
+    const emojiGrid = document.getElementById("tpl-emoji-grid").content.cloneNode(true)
+    emojiGrid.querySelectorAll("[data-emoji-category]").forEach(catDiv => {
+      const category = catDiv.dataset.emojiCategory
+      const buttonsWrap = catDiv.querySelector(".flex.flex-wrap")
+      const buttons = buttonsWrap.querySelectorAll("[data-emoji]")
+
+      // Add Stimulus action to all buttons
+      buttons.forEach(btn => { btn.dataset.action = "click->unified-picker#selectEmoji" })
+
+      if (this.searchQuery) {
+        let visibleCount = 0
+        buttons.forEach(btn => {
+          if (btn.dataset.emoji.includes(this.searchQuery)) { visibleCount++ } else { btn.remove() }
+        })
+        if (visibleCount === 0) return
+      }
 
       const collapsed = this.collapsedSections[`cat_${category}`]
-      html += this.collapsibleSection(`cat_${category}`, category, collapsed, () => {
-        return `<div class="flex flex-wrap gap-0.5">${filtered.map(emoji =>
-          `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectEmoji" data-emoji="${emoji}">${emoji}</button>`
-        ).join("")}</div>`
-      })
+      html += this.collapsibleSection(`cat_${category}`, category, collapsed, () => buttonsWrap.outerHTML)
     })
 
     if (!html) {
@@ -576,6 +600,10 @@ export default class extends Controller {
   selectEmoji(event) {
     const emoji = event.currentTarget.dataset.emoji
     this.trackFrequentlyUsed({ type: "standard", emoji })
+    if (this._reactionMode) {
+      this._submitReaction(emoji)
+      return
+    }
     const input = this.inputTarget
     const start = input.selectionStart
     const end = input.selectionEnd
@@ -590,6 +618,10 @@ export default class extends Controller {
     const name = event.currentTarget.dataset.emojiName
     const url = event.currentTarget.dataset.emojiUrl
     this.trackFrequentlyUsed({ type: "custom", name, url })
+    if (this._reactionMode) {
+      this._submitReaction(`:${name}:`)
+      return
+    }
     const input = this.inputTarget
     const text = `:${name}:`
     const start = input.selectionStart
@@ -765,15 +797,10 @@ export default class extends Controller {
     menu.appendChild(removeBtn)
 
     document.body.appendChild(menu)
-
-    // Reposition if overflowing viewport
-    const rect = menu.getBoundingClientRect()
-    if (rect.right > window.innerWidth) {
-      menu.style.left = `${window.innerWidth - rect.width - 8}px`
-    }
-    if (rect.bottom > window.innerHeight) {
-      menu.style.top = `${window.innerHeight - rect.height - 8}px`
-    }
+    positionPopup(menu, { x: event.clientX, y: event.clientY }, {
+      preferredSide: "below",
+      horizontalAlign: "left"
+    })
 
     // Attach dismiss listeners (deferred so the current event doesn't trigger them)
     setTimeout(() => {
@@ -812,7 +839,7 @@ export default class extends Controller {
 
     const input = document.createElement("input")
     input.type = "text"
-    input.className = "flex-1 min-w-0 bg-gray-700 text-white text-sm rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-orange-500"
+    input.className = "flex-1 min-w-0 bg-gray-700 text-white text-sm rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-red-500"
     input.placeholder = "Collection name"
     row.appendChild(input)
     wrapper.appendChild(row)
@@ -871,16 +898,17 @@ export default class extends Controller {
       grid.appendChild(serverGrid)
     }
 
-    // Standard emoji categories
-    Object.entries(EMOJI_CATEGORIES).forEach(([category, emojis]) => {
+    // Standard emoji categories from server-rendered template
+    const emojiGridClone = document.getElementById("tpl-emoji-grid").content.cloneNode(true)
+    emojiGridClone.querySelectorAll("[data-emoji-category]").forEach(catDiv => {
       const label = document.createElement("div")
       label.className = "text-gray-500 text-[10px] uppercase font-semibold px-0.5 pt-1 pb-0.5"
-      label.textContent = category
+      label.textContent = catDiv.dataset.emojiCategory
       grid.appendChild(label)
 
       const catGrid = document.createElement("div")
       catGrid.className = "flex flex-wrap gap-0.5"
-      emojis.forEach(e => catGrid.appendChild(makeEmojiBtn(e)))
+      catDiv.querySelectorAll("[data-emoji]").forEach(btn => catGrid.appendChild(makeEmojiBtn(btn.dataset.emoji)))
       grid.appendChild(catGrid)
     })
 
@@ -902,7 +930,7 @@ export default class extends Controller {
     // Create button
     const createBtn = document.createElement("button")
     createBtn.type = "button"
-    createBtn.className = "w-full mt-2 py-1.5 bg-orange-600 hover:bg-orange-500 text-white text-xs font-medium rounded cursor-pointer transition"
+    createBtn.className = "w-full mt-2 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded cursor-pointer transition"
     createBtn.textContent = "Create"
     createBtn.addEventListener("click", submit)
     wrapper.appendChild(createBtn)
@@ -1015,14 +1043,10 @@ export default class extends Controller {
     menu.appendChild(deleteBtn)
 
     document.body.appendChild(menu)
-
-    const rect = menu.getBoundingClientRect()
-    if (rect.right > window.innerWidth) {
-      menu.style.left = `${window.innerWidth - rect.width - 8}px`
-    }
-    if (rect.bottom > window.innerHeight) {
-      menu.style.top = `${window.innerHeight - rect.height - 8}px`
-    }
+    positionPopup(menu, { x: event.clientX, y: event.clientY }, {
+      preferredSide: "below",
+      horizontalAlign: "left"
+    })
 
     setTimeout(() => {
       document.addEventListener("mousedown", this.boundDismissCtxOnClick)
@@ -1065,5 +1089,167 @@ export default class extends Controller {
 
   escapeAttr(str) {
     return (str || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+  }
+
+  // ─── Reaction Mode ──────────────────────────────────────────
+
+  openInReactionMode() {
+    // Remove any old reaction panel
+    document.getElementById("reaction-picker-panel")?.remove()
+
+    // Force emoji tab
+    this.activeTab = "emoji"
+    this.searchQuery = ""
+    if (this.hasSearchInputTarget) this.searchInputTarget.value = ""
+
+    // Clone floating panel from template
+    const tpl = document.getElementById("tpl-reaction-picker").content.cloneNode(true)
+    const panel = tpl.querySelector("div")
+    panel.id = "reaction-picker-panel"
+
+    const searchInput = panel.querySelector("input")
+    const contentDiv = panel.querySelector('[data-slot="content"]')
+
+    searchInput.addEventListener("input", () => {
+      if (this._reactionDebounce) clearTimeout(this._reactionDebounce)
+      this._reactionDebounce = setTimeout(() => {
+        this.searchQuery = searchInput.value.trim()
+        this._renderReactionEmojiContent(contentDiv)
+      }, 150)
+    })
+
+    document.body.appendChild(panel)
+
+    // Position: prefer click coordinates (from context menu), fall back to message element
+    const { clientX, clientY, anchorSelector } = this._reactionMode
+    if (clientX != null && clientY != null) {
+      positionPopup(panel, { x: clientX, y: clientY }, {
+        preferredSide: "below",
+        gap: 4,
+        horizontalAlign: "left"
+      })
+    } else {
+      const anchor = document.querySelector(anchorSelector)
+      if (anchor) {
+        positionPopup(panel, anchor.getBoundingClientRect(), {
+          preferredSide: "above",
+          gap: 8,
+          horizontalAlign: "right"
+        })
+      }
+    }
+
+    panel.style.visibility = ""
+
+    // Render emoji content
+    this._renderReactionEmojiContent(contentDiv)
+
+    requestAnimationFrame(() => searchInput.focus())
+  }
+
+  async _renderReactionEmojiContent(container) {
+    let html = ""
+
+    // Frequently Used section
+    if (this.frequentlyUsed.length > 0 && !this.searchQuery) {
+      html += `<div class="mb-2"><div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1">🕐 Frequently Used</div><div class="flex flex-wrap gap-0.5">`
+      this.frequentlyUsed.forEach(e => {
+        if (e.type === "custom") {
+          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+        } else {
+          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-reaction-emoji="${e.emoji}">${e.emoji}</button>`
+        }
+      })
+      html += `</div></div>`
+    }
+
+    // Custom emojis
+    if (this.canSendCustomEmojisValue) {
+      const servers = this.getUserServers()
+      for (const server of servers) {
+        const emojis = await this.fetchServerEmojis(server.id)
+        const filtered = this.searchQuery
+          ? emojis.filter(e => e.name.toLowerCase().includes(this.searchQuery.toLowerCase()))
+          : emojis
+        if (filtered.length === 0) continue
+
+        html += `<div class="mb-2"><div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1">${this.escapeHtml(server.name)}</div><div class="flex flex-wrap gap-0.5">`
+        filtered.forEach(e => {
+          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" data-reaction-custom-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+        })
+        html += `</div></div>`
+      }
+    }
+
+    // Standard categories from server-rendered template
+    const emojiGrid = document.getElementById("tpl-emoji-grid").content.cloneNode(true)
+    emojiGrid.querySelectorAll("[data-emoji-category]").forEach(catDiv => {
+      const category = catDiv.dataset.emojiCategory
+      const buttons = catDiv.querySelectorAll("[data-emoji]")
+
+      // Convert data-emoji to data-reaction-emoji for reaction click handling
+      buttons.forEach(btn => {
+        btn.dataset.reactionEmoji = btn.dataset.emoji
+        delete btn.dataset.emoji
+      })
+
+      if (this.searchQuery) {
+        let visibleCount = 0
+        buttons.forEach(btn => {
+          if (btn.dataset.reactionEmoji.includes(this.searchQuery)) { visibleCount++ } else { btn.remove() }
+        })
+        if (visibleCount === 0) return
+      }
+
+      html += `<div class="mb-2"><div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1">${category}</div>${catDiv.querySelector(".flex.flex-wrap").outerHTML}</div>`
+    })
+
+    if (!html) {
+      html = `<div class="text-center text-gray-500 text-sm py-8">No matches found</div>`
+    }
+
+    container.innerHTML = html
+
+    // Bind click handlers
+    container.querySelectorAll("[data-reaction-emoji]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const emoji = btn.dataset.reactionEmoji
+        this.trackFrequentlyUsed({ type: "standard", emoji })
+        this._submitReaction(emoji)
+      })
+    })
+    container.querySelectorAll("[data-reaction-custom]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const name = btn.dataset.reactionCustom
+        const url = btn.dataset.reactionCustomUrl || ""
+        this.trackFrequentlyUsed({ type: "custom", name, url })
+        this._submitReaction(`:${name}:`)
+      })
+    })
+  }
+
+  async _submitReaction(emoji) {
+    if (!this._reactionMode) return
+    const { reactionUrl } = this._reactionMode
+    const token = this.csrfToken()
+    const formData = new FormData()
+    formData.append("emoji", emoji)
+    try {
+      await fetch(reactionUrl, {
+        method: "POST",
+        headers: { "X-CSRF-Token": token },
+        body: formData
+      })
+    } catch(e) {
+      console.error("Failed to toggle reaction:", e)
+    }
+    this._exitReactionMode()
+  }
+
+  _exitReactionMode() {
+    this._reactionMode = null
+    document.getElementById("reaction-picker-panel")?.remove()
+    if (this._reactionDebounce) clearTimeout(this._reactionDebounce)
+    this.searchQuery = ""
   }
 }

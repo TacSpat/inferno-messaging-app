@@ -1,0 +1,433 @@
+<%# Static HTML templates cloned by Stimulus controllers via document.getElementById("tpl-...").content.cloneNode(true) %>
+
+<%# Mobile action sheet (message_actions_controller) %>
+<template id="tpl-action-sheet">
+  <div class="w-10 h-1 bg-gray-600 rounded-full mx-auto mt-3 mb-2"></div>
+  <div class="px-4 pb-2">
+    <p class="text-xs text-gray-400 truncate mb-3" data-slot="preview"></p>
+  </div>
+  <div class="px-2 pb-6 space-y-1">
+    <button data-sheet-action="reply" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+      <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+      Reply
+    </button>
+    <button data-sheet-action="react" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+      <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Add Reaction
+    </button>
+    <button data-sheet-action="copy" class="flex items-center w-full px-4 py-3 text-sm text-gray-200 hover:bg-gray-700 rounded-lg active:bg-gray-600 transition">
+      <svg class="w-5 h-5 mr-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      Copy Text
+    </button>
+  </div>
+</template>
+
+<%# Confirm modal (notification_badge_controller) %>
+<template id="tpl-confirm-modal">
+  <div class="bg-gray-800 rounded-lg shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+    <div class="p-4">
+      <h3 class="text-xl font-bold text-white mb-2" data-slot="title"></h3>
+      <p class="text-sm text-gray-300" data-slot="message"></p>
+    </div>
+    <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #1e1c1b;">
+      <button data-slot="cancel" class="px-4 py-2 text-sm font-medium text-white hover:underline cursor-pointer">Cancel</button>
+      <button data-slot="confirm" class="px-4 py-2 text-sm font-medium text-white rounded cursor-pointer"></button>
+    </div>
+  </div>
+</template>
+
+<%# Reactions viewer modal (notification_badge_controller) %>
+<template id="tpl-reactions-modal">
+  <div class="bg-gray-800 rounded-lg shadow-xl max-w-sm w-full mx-4 overflow-hidden">
+    <div class="px-4 py-3 border-b border-gray-700 flex items-center justify-between">
+      <h3 class="text-white font-semibold">Reactions</h3>
+      <button class="text-gray-400 hover:text-white text-xl" data-slot="close">&times;</button>
+    </div>
+    <div class="px-4 py-3 max-h-80 overflow-y-auto space-y-3" data-slot="body"></div>
+  </div>
+</template>
+
+<%# Reaction group row (used inside tpl-reactions-modal) %>
+<template id="tpl-reaction-group">
+  <div>
+    <div class="text-lg mb-1"><span data-slot="emoji"></span> <span class="text-sm text-gray-400" data-slot="count"></span></div>
+    <div class="space-y-1" data-slot="users"></div>
+  </div>
+</template>
+
+<%# Reaction user row (used inside tpl-reaction-group) %>
+<template id="tpl-reaction-user">
+  <div class="text-sm text-gray-300 pl-2" data-slot="name"></div>
+</template>
+
+<%# Reaction picker panel (unified_picker_controller) %>
+<template id="tpl-reaction-picker">
+  <div class="fixed z-[60] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col context-pop" style="width:320px;max-height:380px;">
+    <div class="px-2 pt-2 pb-1">
+      <input type="text" placeholder="Search emoji..." class="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-red-500 border border-gray-700">
+    </div>
+    <div class="flex-1 overflow-y-auto px-2 pb-2" data-slot="content"></div>
+  </div>
+</template>
+
+<%# Edit message form (notification_badge_controller) %>
+<template id="tpl-edit-form">
+  <form class="flex gap-2 items-center">
+    <input type="text" class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-red-500">
+    <button type="submit" class="text-xs text-green-400 hover:text-green-300">Save</button>
+    <button type="button" class="text-xs text-gray-400 hover:text-gray-200 cancel-edit-btn">Cancel</button>
+  </form>
+</template>
+
+<%# Pre-rendered standard emoji grid (used by unified_picker_controller) %>
+<template id="tpl-emoji-grid">
+  <% EmojiHelper::EMOJIS.each do |category, emojis| %>
+    <div class="mb-2" data-emoji-category="<%= category %>">
+      <div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1"><%= category %></div>
+      <div class="flex flex-wrap gap-0.5">
+        <% emojis.each do |emoji| %>
+          <button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-emoji="<%= emoji %>"><%= emoji %></button>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</template>
+
+<%# Permission row with toggle switch (role_editor_controller) %>
+<template id="tpl-permission-row">
+  <div class="flex items-center justify-between py-2 border-b border-gray-700/50">
+    <div class="flex-1 mr-4">
+      <p class="text-sm text-white" data-slot="label"></p>
+      <p class="text-xs text-gray-500" data-slot="description"></p>
+    </div>
+    <button type="button" class="relative w-11 h-6 rounded-full transition-colors focus:outline-none bg-gray-600" data-slot="toggle">
+      <span class="block w-5 h-5 bg-white rounded-full shadow transform transition-transform translate-x-0.5"></span>
+    </button>
+  </div>
+</template>
+
+<%# Role list item (role_editor_controller) %>
+<template id="tpl-role-list-item">
+  <div class="flex items-center px-3 py-2 rounded cursor-pointer bg-gray-800 hover:bg-gray-700 transition-colors">
+    <span class="w-3 h-3 rounded-full mr-3 shrink-0" data-color-dot></span>
+    <span class="flex-1 text-sm text-white truncate" data-role-name></span>
+    <span class="text-xs text-gray-500 ml-2" data-slot="member-count"></span>
+  </div>
+</template>
+
+<%# Sidebar channel link (channel_sidebar_controller) %>
+<template id="tpl-sidebar-channel">
+  <a data-turbo-frame="main-content"
+     class="flex items-center px-2 py-1.5 rounded group relative text-gray-400 hover:bg-gray-700 hover:text-gray-200">
+    <span class="text-lg mr-1.5 opacity-60">#</span>
+    <span class="truncate text-sm font-medium flex-1" data-slot="name"></span>
+  </a>
+</template>
+
+<%# Sidebar category (channel_sidebar_controller) %>
+<template id="tpl-sidebar-category">
+  <div class="mb-1">
+    <div class="flex items-center justify-between px-2 pt-4 pb-1 cursor-pointer group"
+         data-action="click->category-collapse#toggle">
+      <div class="flex items-center">
+        <svg data-category-collapse-target="arrow" class="w-3 h-3 text-gray-400 mr-0.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide group-hover:text-gray-200" data-slot="name"></span>
+      </div>
+    </div>
+    <div data-category-collapse-target="channels" class="space-y-0.5"></div>
+  </div>
+</template>
+
+<%# Voice empty state (channel_sidebar_controller, voice_channel_controller) %>
+<template id="tpl-voice-empty-state">
+  <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
+    <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
+      <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
+    </div>
+    <h2 class="text-xl font-bold text-white mb-1" data-slot="channel-name"></h2>
+    <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
+  </div>
+</template>
+
+<%# Voice participant card (channel_sidebar_controller, voice_channel_controller) %>
+<template id="tpl-voice-card">
+  <div class="voice-card group">
+    <div class="voice-card-inner">
+      <div class="voice-avatar-wrapper" data-slot="avatar"></div>
+      <div class="voice-username-pill">
+        <span class="truncate" data-slot="username"></span>
+      </div>
+    </div>
+  </div>
+</template>
+
+<%# Role badge (member_roles_controller) %>
+<template id="tpl-role-badge">
+  <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full">
+    <span class="w-2 h-2 rounded-full mr-1" data-slot="color-dot"></span>
+    <span data-slot="name"></span>
+  </span>
+</template>
+
+<%# Sync overlay (instance_sync_controller) %>
+<template id="tpl-sync-overlay">
+  <div class="modal-overlay fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center backdrop-blur-sm">
+    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
+      <div class="flex justify-center mb-4">
+        <svg class="w-8 h-8 text-red-400 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-white mb-1">Syncing instance data</h3>
+      <p class="text-sm text-gray-400" data-sync-status>Fetching latest profile, servers, and collections...</p>
+    </div>
+  </div>
+</template>
+
+<%# Move-to dropdown shell (voice_context_controller) %>
+<template id="tpl-move-dropdown">
+  <div class="absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop">
+    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Move to</p>
+    <div data-slot="channels"></div>
+  </div>
+</template>
+
+<%# Move-to channel item (voice_context_controller) %>
+<template id="tpl-move-channel-item">
+  <button class="flex items-center w-full px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded-sm">
+    <svg class="w-4 h-4 text-gray-500 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
+    <span class="truncate" data-slot="name"></span>
+  </button>
+</template>
+
+<%# Folder context menu (server_rail_controller) %>
+<template id="tpl-folder-menu">
+  <button data-menu-action="rename" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Rename Folder</button>
+  <button data-menu-action="color" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Folder Color</button>
+  <button data-menu-action="delete" class="w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 hover:text-red-300 transition">Delete Folder</button>
+</template>
+
+<%# Folder rename form (server_rail_controller) %>
+<template id="tpl-folder-rename">
+  <div class="px-3 py-2">
+    <label class="text-[10px] text-gray-500 uppercase font-semibold mb-1 block">Folder Name</label>
+    <input type="text" maxlength="50"
+           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-red-500"
+           data-rename-input>
+    <button class="mt-2 w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white text-xs font-semibold py-1 rounded transition" data-rename-save>Save</button>
+  </div>
+</template>
+
+<%# Folder color picker (server_rail_controller) %>
+<template id="tpl-folder-color-picker">
+  <div class="px-3 py-2">
+    <label class="text-[10px] text-gray-500 uppercase font-semibold mb-2 block">Folder Color</label>
+    <div class="grid grid-cols-4 gap-2 mb-2">
+      <button data-color-swatch="#4f545c" title="Gray" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #4f545c"></button>
+      <button data-color-swatch="#b45309" title="Ember" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #b45309"></button>
+      <button data-color-swatch="#57f287" title="Green" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #57f287"></button>
+      <button data-color-swatch="#fee75c" title="Yellow" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #fee75c"></button>
+      <button data-color-swatch="#eb459e" title="Pink" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #eb459e"></button>
+      <button data-color-swatch="#ed4245" title="Red" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #ed4245"></button>
+      <button data-color-swatch="#f47b67" title="Orange" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #f47b67"></button>
+      <button data-color-swatch="#9b59b6" title="Purple" class="w-8 h-8 rounded-full hover:scale-110 transition-transform" style="background-color: #9b59b6"></button>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="color" class="w-8 h-8 rounded cursor-pointer border-0 p-0 bg-transparent" data-custom-color>
+      <span class="text-xs text-gray-400">Custom</span>
+    </div>
+  </div>
+</template>
+
+<%# Video player big play button (video_player_controller) %>
+<template id="tpl-video-big-play">
+  <div class="vp-big-play">
+    <svg class="w-16 h-16 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+  </div>
+</template>
+
+<%# Video player controls bar (video_player_controller) %>
+<template id="tpl-video-controls">
+  <div class="vp-controls vp-controls-hidden">
+    <button class="vp-btn" data-slot="play-btn">
+      <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+    </button>
+    <span class="vp-time" data-slot="time">0:00 / 0:00</span>
+    <div class="vp-seek-wrap" data-slot="seek">
+      <div class="vp-buffered" data-slot="buffered"></div>
+      <div class="vp-progress" data-slot="progress"></div>
+    </div>
+    <div class="vp-vol-wrap">
+      <button class="vp-btn" data-slot="vol-btn">
+        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+      </button>
+      <input type="range" min="0" max="1" step="0.05" value="1" class="vp-volume-slider" data-slot="vol-slider">
+    </div>
+    <button class="vp-btn" data-slot="fs-btn">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/></svg>
+    </button>
+  </div>
+</template>
+
+<%# Image lightbox (image_preview_controller) %>
+<template id="tpl-image-lightbox">
+  <div class="modal-overlay fixed inset-0 z-[200] bg-black/80 flex items-center justify-center" style="touch-action: none;">
+    <div class="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" data-slot="container">
+      <button class="absolute -top-2 -right-2 w-8 h-8 bg-gray-800 rounded-full flex items-center justify-center text-gray-400 hover:text-white border border-gray-600 cursor-pointer z-10" data-slot="close">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      <div style="overflow:hidden;display:flex;align-items:center;justify-content:center;max-width:90vw;max-height:85vh;" data-slot="img-wrap">
+        <img class="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl" style="transform-origin:center center;transition:transform 0.2s ease;cursor:zoom-in;touch-action:none;" draggable="false" data-slot="img">
+      </div>
+      <div class="flex items-center gap-3 mt-3">
+        <span class="text-sm text-gray-300" data-slot="filename"></span>
+        <a class="text-sm text-red-400 hover:text-red-400 flex items-center gap-1" data-slot="download">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+          Download
+        </a>
+      </div>
+    </div>
+  </div>
+</template>
+
+<%# Image context menu (image_preview_controller) %>
+<template id="tpl-image-context-menu">
+  <div class="fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop">
+    <button data-action="copy-image" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+      Copy Image
+    </button>
+    <button data-action="copy-link" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+      Copy Image Link
+    </button>
+    <button data-action="save" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      Save Image
+    </button>
+  </div>
+</template>
+
+<%# Video context menu (image_preview_controller) %>
+<template id="tpl-video-context-menu">
+  <div class="fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1.5 px-1.5 min-w-[180px] context-pop">
+    <button data-action="copy-link" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+      Copy Media Link
+    </button>
+    <button data-action="save" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+      Save Video
+    </button>
+    <button data-action="open-tab" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
+      <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+      Open in New Tab
+    </button>
+  </div>
+</template>
+
+<%# Friend request bar item (notification_badge_controller) %>
+<template id="tpl-friend-request-item">
+  <div class="flex items-center h-11 px-4 gap-3" data-friend-request-row data-dynamic="true">
+    <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0" data-slot="avatar"></div>
+    <span class="text-sm text-gray-200 truncate">
+      <strong class="text-white" data-slot="name"></strong> wants to be friends
+    </span>
+    <div class="ml-auto flex items-center gap-1 shrink-0">
+      <button type="button" data-friend-action="accept" class="p-1.5 rounded hover:bg-green-600/20 text-green-400 hover:text-green-300 transition cursor-pointer" title="Accept">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </button>
+      <button type="button" data-friend-action="decline" class="p-1.5 rounded hover:bg-red-600/20 text-red-400 hover:text-red-300 transition cursor-pointer" title="Decline">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+  </div>
+</template>
+
+<%# Profile overlay (notification_badge_controller) %>
+<template id="tpl-profile-overlay">
+  <div class="modal-overlay fixed inset-0 z-[200] bg-black/60 flex items-center justify-center" data-profile-overlay>
+    <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden relative">
+      <button class="absolute top-3 right-3 z-10 w-8 h-8 bg-black/40 hover:bg-black/60 rounded-full flex items-center justify-center text-gray-300 hover:text-white transition cursor-pointer" data-slot="close">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      <div class="h-[120px] relative" data-slot="banner">
+        <div class="w-full h-full bg-gray-700"></div>
+      </div>
+      <div class="relative px-5 pb-5 pt-1" data-slot="body-bg">
+        <div class="relative -mt-[45px] mb-3">
+          <div class="w-[90px] h-[90px] rounded-full p-[5px] inline-block cursor-pointer" data-slot="avatar-ring">
+            <div class="w-full h-full rounded-full flex items-center justify-center text-2xl font-bold text-white bg-gray-700" data-slot="avatar"></div>
+          </div>
+          <div class="absolute bottom-[3px] left-[63px] w-[22px] h-[22px] rounded-full border-[4px] bg-gray-500" data-slot="status-dot"></div>
+        </div>
+        <div class="bg-black/30 rounded-lg p-4 space-y-3">
+          <div>
+            <h2 class="text-xl font-bold text-white leading-tight" data-slot="display-name"></h2>
+            <p class="text-sm text-white/60" data-slot="tag"></p>
+            <p class="text-[10px] text-red-400 hidden items-center gap-1 mt-0.5" data-slot="remote-badge">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              <span data-slot="remote-domain"></span>
+            </p>
+          </div>
+          <div class="hidden" data-slot="status-section">
+            <p class="text-sm text-white/70" data-slot="status"></p>
+          </div>
+          <div class="border-t border-white/10 pt-2 hidden" data-slot="bio-section">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">About Me</h4>
+            <p class="text-sm text-white/80" data-slot="bio"></p>
+          </div>
+          <div class="border-t border-white/10 pt-2 hidden" data-slot="roles-section">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>
+            <div class="flex flex-wrap gap-1" data-slot="roles"></div>
+          </div>
+          <div class="border-t border-white/10 pt-2 hidden" data-slot="member-since-section">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
+            <p class="text-[11px] text-white/50" data-slot="member-since"></p>
+          </div>
+          <div class="border-t border-white/10 pt-2">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Account Created</h4>
+            <p class="text-[11px] text-white/50" data-slot="account-created"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<%# Crop modal (banner_editor_controller) %>
+<template id="tpl-crop-modal">
+  <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4">
+    <div class="px-5 pt-5 pb-3">
+      <h3 class="text-white text-lg font-semibold" data-slot="title"></h3>
+      <p class="text-gray-400 text-sm mt-1">Drag to reposition, use slider to zoom</p>
+    </div>
+    <div class="relative mx-5 rounded-lg overflow-hidden bg-gray-900" data-crop-vp style="cursor: grab;">
+      <img data-crop-img style="position: absolute; left: 0; top: 0; pointer-events: none; user-select: none;" />
+      <div class="absolute inset-0 pointer-events-none hidden" data-slot="avatar-overlay">
+        <svg class="w-full h-full" viewBox="0 0 480 300" preserveAspectRatio="none">
+          <defs>
+            <mask id="crop-hole">
+              <rect width="480" height="300" fill="white"/>
+              <circle cx="240" cy="150" r="110" fill="black"/>
+            </mask>
+          </defs>
+          <rect width="480" height="300" fill="rgba(0,0,0,0.55)" mask="url(#crop-hole)"/>
+          <circle cx="240" cy="150" r="110" fill="none" stroke="white" stroke-width="2" opacity="0.5"/>
+        </svg>
+      </div>
+    </div>
+    <div class="px-5 py-3 flex items-center gap-3">
+      <span class="text-gray-400 text-xs">Zoom</span>
+      <input type="range" min="100" max="300" value="100" class="flex-1 accent-red-500" data-crop-zoom />
+      <span class="text-gray-400 text-xs w-10 text-right" data-crop-zoom-label>1.0x</span>
+    </div>
+    <div class="px-5 pb-5 flex justify-end gap-3">
+      <button type="button" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition" data-crop-cancel>Cancel</button>
+      <button type="button" class="px-5 py-2 text-sm bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
+    </div>
+  </div>
+</template>

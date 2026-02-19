@@ -175,7 +175,11 @@ Rails.application.routes.draw do
     member do
       post :accept
     end
-    resources :dm_messages, only: [ :create, :update, :destroy ]
+    resources :dm_messages, only: [ :create, :update, :destroy ] do
+      member do
+        post :toggle_reaction, controller: "dm_reactions", action: "toggle"
+      end
+    end
   end
 
   # Friends
@@ -183,6 +187,7 @@ Rails.application.routes.draw do
     member do
       post :accept
       post :decline
+      post :ignore
     end
   end
 
@@ -225,4 +230,11 @@ Rails.application.routes.draw do
   post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
   post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
   resource :profile, only: [ :show, :edit, :update ]
+
+  # User cards (profile popups from message clicks)
+  resources :users, only: [] do
+    member do
+      get :card, to: "user_cards#show"
+    end
+  end
 end

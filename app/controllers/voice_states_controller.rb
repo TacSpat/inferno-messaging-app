@@ -15,7 +15,9 @@ class VoiceStatesController < ApplicationController
     if !@voice_state.self_deaf
       @voice_state.update!(self_deaf: true, self_mute: true)
     else
-      @voice_state.update!(self_deaf: false)
+      # On undeafen, client sends the desired mute state (restores pre-deafen mute)
+      restore_mute = params[:self_mute] == true || params[:self_mute] == "true"
+      @voice_state.update!(self_deaf: false, self_mute: restore_mute)
     end
     broadcast_state_update(@voice_state)
     render json: { self_mute: @voice_state.self_mute, self_deaf: @voice_state.self_deaf }

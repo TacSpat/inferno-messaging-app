@@ -2,7 +2,7 @@ class Friendship < ApplicationRecord
   belongs_to :user
   belongs_to :friend, class_name: "User"
 
-  enum :status, { pending: 0, accepted: 1, declined: 2 }
+  enum :status, { pending: 0, accepted: 1, declined: 2, ignored: 3 }
 
   validates :friend_id, uniqueness: { scope: :user_id }
   validate :not_self

@@ -37,91 +37,49 @@ export default class extends Controller {
   // ---- Build UI ----
 
   _buildOverlay(video) {
-    // Big centered play button overlay
-    const bigPlay = document.createElement("div")
-    bigPlay.className = "vp-big-play"
-    bigPlay.innerHTML = `<svg class="w-16 h-16 text-white drop-shadow-lg" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`
+    // Big play button
+    const bigPlayTpl = document.getElementById("tpl-video-big-play").content.cloneNode(true)
+    const bigPlay = bigPlayTpl.firstElementChild
     bigPlay.addEventListener("click", () => this._togglePlay(video))
     this.element.appendChild(bigPlay)
     this._bigPlay = bigPlay
 
-    // Controls bar (hidden initially, slides in on hover)
-    const bar = document.createElement("div")
-    bar.className = "vp-controls vp-controls-hidden"
+    // Controls bar
+    const ctrlTpl = document.getElementById("tpl-video-controls").content.cloneNode(true)
+    const bar = ctrlTpl.firstElementChild
 
-    // Play/Pause button
-    const playBtn = document.createElement("button")
-    playBtn.className = "vp-btn"
-    playBtn.innerHTML = this._playIcon()
+    const playBtn = bar.querySelector('[data-slot="play-btn"]')
     playBtn.addEventListener("click", () => this._togglePlay(video))
-    bar.appendChild(playBtn)
     this._playBtn = playBtn
 
-    // Time display
-    const time = document.createElement("span")
-    time.className = "vp-time"
-    time.textContent = "0:00 / 0:00"
-    bar.appendChild(time)
-    this._timeDisplay = time
+    this._timeDisplay = bar.querySelector('[data-slot="time"]')
 
-    // Seek bar container
-    const seekWrap = document.createElement("div")
-    seekWrap.className = "vp-seek-wrap"
-
-    const buffered = document.createElement("div")
-    buffered.className = "vp-buffered"
-    seekWrap.appendChild(buffered)
-    this._bufferedBar = buffered
-
-    const progress = document.createElement("div")
-    progress.className = "vp-progress"
-    seekWrap.appendChild(progress)
-    this._progressBar = progress
-
+    const seekWrap = bar.querySelector('[data-slot="seek"]')
+    this._bufferedBar = bar.querySelector('[data-slot="buffered"]')
+    this._progressBar = bar.querySelector('[data-slot="progress"]')
     seekWrap.addEventListener("click", (e) => {
       const rect = seekWrap.getBoundingClientRect()
       const pct = (e.clientX - rect.left) / rect.width
       video.currentTime = pct * video.duration
     })
-    bar.appendChild(seekWrap)
 
-    // Volume wrapper (button + slider)
-    const volWrap = document.createElement("div")
-    volWrap.className = "vp-vol-wrap"
-
-    const volBtn = document.createElement("button")
-    volBtn.className = "vp-btn"
-    volBtn.innerHTML = this._volumeIcon(1)
+    const volBtn = bar.querySelector('[data-slot="vol-btn"]')
     volBtn.addEventListener("click", () => {
       video.muted = !video.muted
       this._saveVolume(video.volume, video.muted)
     })
-    volWrap.appendChild(volBtn)
     this._volBtn = volBtn
 
-    // Volume slider
-    const volSlider = document.createElement("input")
-    volSlider.type = "range"
-    volSlider.min = "0"
-    volSlider.max = "1"
-    volSlider.step = "0.05"
-    volSlider.value = "1"
-    volSlider.className = "vp-volume-slider"
+    const volSlider = bar.querySelector('[data-slot="vol-slider"]')
     volSlider.addEventListener("input", () => {
       const v = parseFloat(volSlider.value)
       video.volume = v
       video.muted = v === 0
       this._saveVolume(v, v === 0)
     })
-    volWrap.appendChild(volSlider)
     this._volSlider = volSlider
 
-    bar.appendChild(volWrap)
-
-    // Fullscreen button
-    const fsBtn = document.createElement("button")
-    fsBtn.className = "vp-btn"
-    fsBtn.innerHTML = this._fullscreenIcon()
+    const fsBtn = bar.querySelector('[data-slot="fs-btn"]')
     fsBtn.addEventListener("click", () => {
       if (document.fullscreenElement) {
         document.exitFullscreen()
@@ -129,7 +87,6 @@ export default class extends Controller {
         this.element.requestFullscreen()
       }
     })
-    bar.appendChild(fsBtn)
 
     this.element.appendChild(bar)
     this._controlsBar = bar

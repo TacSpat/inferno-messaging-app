@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { positionPopup } from "../utils/popup_positioning"
 
 export default class extends Controller {
   static values = { serverId: String }
@@ -20,6 +21,9 @@ export default class extends Controller {
     event.stopPropagation()
     this.closeMenu()
 
+    // Close any open profile card
+    document.querySelectorAll("[data-profile-card]").forEach(el => el.remove())
+
     const target = event.currentTarget
     const userId = target.dataset.userId
     if (!userId || !this.serverIdValue) return
@@ -35,14 +39,11 @@ export default class extends Controller {
     this.menu.setAttribute("data-context-menu", "member")
     this.menu.innerHTML = html
 
-    let left = event.clientX
-    let top = event.clientY
-    if (left + 220 > window.innerWidth) left = window.innerWidth - 220
-    if (top + 300 > window.innerHeight) top = window.innerHeight - 300
-    this.menu.style.left = `${left}px`
-    this.menu.style.top = `${top}px`
-
     document.body.appendChild(this.menu)
+    positionPopup(this.menu, { x: event.clientX, y: event.clientY }, {
+      preferredSide: "below",
+      horizontalAlign: "left"
+    })
     this.bindMenuActions()
     setTimeout(() => document.addEventListener("click", this.boundClose), 10)
   }
@@ -55,6 +56,10 @@ export default class extends Controller {
         btn.addEventListener("click", (e) => this.showRoles(e))
       } else if (action === "changeNickname") {
         btn.addEventListener("click", (e) => this.changeNickname(e))
+      } else if (action === "mention") {
+        btn.addEventListener("click", (e) => this.insertMention(e))
+      } else if (action === "viewProfile") {
+        btn.addEventListener("click", (e) => this.viewProfile(e))
       }
     })
   }
@@ -113,7 +118,7 @@ export default class extends Controller {
         const escapedName = this.escapeHtml(role.name)
         html += `<label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
           <input type="checkbox" value="${role.id}" ${checked}
-                 class="mr-2 accent-orange-500 context-role-checkbox">
+                 class="mr-2 accent-red-500 context-role-checkbox">
           <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: ${role.color || '#ffffff'}"></span>
           <span class="text-gray-300 text-sm">${escapedName}</span>
         </label>`
@@ -179,11 +184,11 @@ export default class extends Controller {
         <h3 class="text-lg font-bold text-white mb-1">Change Nickname</h3>
         <p class="text-xs text-gray-400 mb-4">Leave empty to reset to display name.</p>
         <input type="text" value="${this.escapeAttr(currentNickname)}" maxlength="32" placeholder="Enter nickname..."
-               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-orange-500 mb-4"
+               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500 mb-4"
                data-nickname-input>
         <div class="flex justify-end gap-2">
           <button class="text-sm text-gray-400 hover:text-white px-4 py-1.5 rounded transition" data-nickname-cancel>Cancel</button>
-          <button class="text-sm bg-orange-600 hover:bg-orange-700 text-white font-semibold px-4 py-1.5 rounded transition" data-nickname-save>Save</button>
+          <button class="text-sm bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-1.5 rounded transition" data-nickname-save>Save</button>
         </div>
       </div>
     `
@@ -242,6 +247,56 @@ export default class extends Controller {
     } catch (error) {
       this.showToast("Failed to update nickname", "error")
     }
+  }
+
+  // --- Mention: insert @username at caret ---
+
+  insertMention(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const username = event.currentTarget.dataset.username
+    if (!username) return
+
+    this.closeMenu()
+
+    const mention = `@${username} `
+
+    // Find the message input (server channels or DMs)
+    const input = document.querySelector('[data-message-form-target="input"]')
+      || document.querySelector('[data-dm-message-form-target="input"]')
+
+    if (!input) return
+
+    input.focus()
+    const start = input.selectionStart || 0
+    const end = input.selectionEnd || 0
+    const value = input.value || ""
+
+    input.value = value.substring(0, start) + mention + value.substring(end)
+    const newPos = start + mention.length
+    input.setSelectionRange(newPos, newPos)
+
+    // Trigger input event so Stimulus controllers pick up the change
+    input.dispatchEvent(new Event("input", { bubbles: true }))
+  }
+
+  // --- Profile: open full overlay ---
+
+  viewProfile(event) {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const userId = event.currentTarget.dataset.userId
+    const serverId = event.currentTarget.dataset.serverId
+
+    this.closeMenu()
+
+    // Dispatch a custom event that notification_badge_controller listens for
+    document.dispatchEvent(new CustomEvent("inferno:open-profile-overlay", {
+      detail: { userId, serverId },
+      bubbles: true
+    }))
   }
 
   closeNicknameModal() {

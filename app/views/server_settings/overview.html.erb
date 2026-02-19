@@ -19,18 +19,18 @@
           <%= @server.name.split.map(&:first).join[0..1].upcase %>
         <% end %>
       </div>
-      <%= f.file_field :icon, accept: "image/*", class: "mt-2 text-xs text-gray-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-orange-600 file:text-white hover:file:bg-orange-700 file:cursor-pointer w-24" %>
+      <%= f.file_field :icon, accept: "image/*", class: "mt-2 text-xs text-gray-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-red-600 hover:file:bg-red-700 file:cursor-pointer w-24" %>
     </div>
 
     <div class="flex-1 space-y-4">
       <div>
         <%= f.label :name, "Server Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm" %>
+        <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
         <p class="text-xs text-gray-500 mt-1">Hosted on <%= Rails.application.config.x.instance_domain %></p>
       </div>
       <div>
         <%= f.label :description, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm resize-none" %>
+        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none" %>
       </div>
     </div>
   </div>
@@ -41,22 +41,22 @@
 
     <div class="space-y-4">
       <div class="flex items-center gap-3">
-        <%= f.check_box :welcome_message_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-700 text-orange-600 focus:ring-orange-500" %>
+        <%= f.check_box :welcome_message_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-700 text-red-500 focus:ring-red-500" %>
         <%= f.label :welcome_message_enabled, "Send a welcome message when someone joins", class: "text-sm text-gray-300" %>
       </div>
 
       <div>
         <%= f.label :welcome_channel_id, "Welcome Channel", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.collection_select :welcome_channel_id, @server.channels.text.ordered, :id, :name, { include_blank: "Default (#general)" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm" %>
+        <%= f.collection_select :welcome_channel_id, @server.channels.text.ordered, :id, :name, { include_blank: "Default (#general)" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
       </div>
 
       <div>
         <%= f.label :welcome_message_template, "Message Template", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_area :welcome_message_template, rows: 2, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-orange-500 text-sm resize-none", placeholder: "Welcome to the server, {user}!" %>
+        <%= f.text_area :welcome_message_template, rows: 2, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "Welcome to the server, {user}!" %>
         <p class="text-xs text-gray-500 mt-1">Use {user} for display name, {tag} for username#discriminator, {server} for server name</p>
       </div>
     </div>
   </div>
 
-  <%= f.submit "Save Changes", class: "bg-orange-600 hover:bg-orange-700 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+  <%= f.submit "Save Changes", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
 <% end %>

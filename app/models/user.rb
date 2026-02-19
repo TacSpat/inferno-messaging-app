@@ -30,6 +30,7 @@ class User < ApplicationRecord
   has_many :accepted_friendships, -> { accepted }, class_name: "Friendship"
   has_many :friends, through: :accepted_friendships, source: :friend
   has_many :pending_friend_requests, -> { pending }, class_name: "Friendship", foreign_key: :friend_id
+  has_many :incoming_friend_requests, -> { where(status: [:pending, :ignored]) }, class_name: "Friendship", foreign_key: :friend_id
   has_many :sent_friend_requests, -> { pending }, class_name: "Friendship"
 
   # Blocks

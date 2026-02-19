@@ -153,37 +153,35 @@ export default class extends Controller {
     }
   }
 
-  buildChannelHtml(data) {
-    const serverId = this.serverIdValue
-    return `<a href="/servers/${serverId}/channels/${data.channel_id}"
-               data-turbo-frame="main-content"
-               data-channel-id="${data.channel_id}"
-               class="flex items-center px-2 py-1.5 rounded group relative text-gray-400 hover:bg-gray-700 hover:text-gray-200">
-              <span class="text-lg mr-1.5 opacity-60">#</span>
-              <span class="truncate text-sm font-medium flex-1">${this.escapeHtml(data.name)}</span>
-            </a>`
+  buildChannelEl(data) {
+    const tpl = document.getElementById("tpl-sidebar-channel").content.cloneNode(true)
+    const link = tpl.querySelector("a")
+    link.href = `/servers/${this.serverIdValue}/channels/${data.channel_id}`
+    link.dataset.channelId = data.channel_id
+    link.querySelector('[data-slot="name"]').textContent = data.name
+    return link
   }
 
   addChannel(data) {
     // Don't add if already exists
     if (this.element.querySelector(`[data-channel-id="${data.channel_id}"]`)) return
-    const html = this.buildChannelHtml(data)
+    const el = this.buildChannelEl(data)
 
     if (data.category_id) {
       const categoryEl = this.element.querySelector(`[data-category-id="${data.category_id}"]`)
       if (categoryEl) {
         const channelsDiv = categoryEl.querySelector("[data-category-collapse-target='channels']")
         if (channelsDiv) {
-          channelsDiv.insertAdjacentHTML("beforeend", html)
+          channelsDiv.appendChild(el)
           return
         }
       }
     }
     const firstCategory = this.element.querySelector("[data-category-id]")
     if (firstCategory) {
-      firstCategory.insertAdjacentHTML("beforebegin", html)
+      firstCategory.before(el)
     } else {
-      this.element.insertAdjacentHTML("beforeend", html)
+      this.element.appendChild(el)
     }
   }
 
@@ -199,26 +197,20 @@ export default class extends Controller {
     if (el) el.remove()
   }
 
-  buildCategoryHtml(data) {
-    const serverId = this.serverIdValue
-    return `<div data-controller="category-collapse" data-category-collapse-id-value="${data.category_id}" data-category-id="${data.category_id}" class="mb-1">
-              <div class="flex items-center justify-between px-2 pt-4 pb-1 cursor-pointer group"
-                   data-action="click->category-collapse#toggle">
-                <div class="flex items-center">
-                  <svg data-category-collapse-target="arrow" class="w-3 h-3 text-gray-400 mr-0.5 transition-transform duration-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-                  </svg>
-                  <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide group-hover:text-gray-200">${this.escapeHtml(data.name)}</span>
-                </div>
-              </div>
-              <div data-category-collapse-target="channels" class="space-y-0.5"></div>
-            </div>`
+  buildCategoryEl(data) {
+    const tpl = document.getElementById("tpl-sidebar-category").content.cloneNode(true)
+    const wrapper = tpl.querySelector(".mb-1")
+    wrapper.dataset.controller = "category-collapse"
+    wrapper.dataset.categoryCollapseIdValue = data.category_id
+    wrapper.dataset.categoryId = data.category_id
+    wrapper.querySelector('[data-slot="name"]').textContent = data.name
+    return wrapper
   }
 
   addCategory(data) {
     if (this.element.querySelector(`[data-category-id="${data.category_id}"]`)) return
-    const html = this.buildCategoryHtml(data)
-    this.element.insertAdjacentHTML("beforeend", html)
+    const el = this.buildCategoryEl(data)
+    this.element.appendChild(el)
   }
 
   updateCategory(data) {
@@ -317,28 +309,21 @@ export default class extends Controller {
       const emptyState = document.querySelector("[data-voice-empty-state]")
 
       const color = data.profile_color || "#1e1c1b"
-      const initial = data.username?.[0]?.toUpperCase() || "?"
-      const avatarHtml = data.avatar_url
-        ? `<img src="${data.avatar_url}" class="voice-avatar" />`
-        : `<div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, ${color}, white 20%)">${initial}</div>`
-
-      const vsId = data.voice_state_id || ""
-      const cardHtml = `
-        <div class="voice-card group" data-voice-participant-id="${data.user_id}" data-voice-state-id="${vsId}" data-action="contextmenu->voice-context#show" style="--card-color: ${color}">
-          <div class="voice-card-inner">
-            <div class="voice-avatar-wrapper">${avatarHtml}</div>
-            <div class="voice-username-pill">
-              <span class="truncate">${this.escapeHtml(data.username)}</span>
-            </div>
-          </div>
-        </div>`
+      const cardEl = this._buildVoiceCard(data, color)
 
       if (emptyState) {
-        emptyState.outerHTML = `<div class="flex-1 p-3 overflow-y-auto" data-voice-participant-grid><div class="voice-grid h-full">${cardHtml}</div></div>`
+        const gridOuter = document.createElement("div")
+        gridOuter.className = "flex-1 p-3 overflow-y-auto"
+        gridOuter.dataset.voiceParticipantGrid = ""
+        const gridInner = document.createElement("div")
+        gridInner.className = "voice-grid h-full"
+        gridInner.appendChild(cardEl)
+        gridOuter.appendChild(gridInner)
+        emptyState.replaceWith(gridOuter)
       } else if (gridContainer) {
         const grid = gridContainer.querySelector(".voice-grid") || gridContainer
         if (!grid.querySelector(`[data-voice-participant-id="${data.user_id}"]`)) {
-          grid.insertAdjacentHTML("beforeend", cardHtml)
+          grid.appendChild(cardEl)
         }
       }
     }
@@ -364,67 +349,63 @@ export default class extends Controller {
       const voiceGrid = gridContainer?.querySelector(".voice-grid")
       if (gridContainer && voiceGrid && voiceGrid.children.length === 0) {
         const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
-        gridContainer.outerHTML = `
-          <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
-            <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-              <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-            </div>
-            <h2 class="text-xl font-bold text-white mb-1">${this.escapeHtml(channelName)}</h2>
-            <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
-          </div>`
+        gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
       }
     }
   }
 
   handleVoiceUpdate(data) {
-    // Update sidebar participant icons
-    const participant = this.element.querySelector(`[data-voice-user-id="${data.user_id}"]`)
-    if (participant) {
-      // Remove all existing state icons
-      participant.querySelectorAll(".voice-mute-icon, .voice-deaf-icon, .voice-server-mute-icon, .voice-server-deaf-icon").forEach(el => el.remove())
-
-      const nameSpan = participant.querySelector("span")
-      // Server mute takes priority over self mute for display
-      if (data.server_mute && nameSpan) {
-        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-mute-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/></svg>')
-      } else if (data.self_mute && nameSpan) {
-        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-mute-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>')
-      }
-      // Server deaf takes priority over self deaf
-      if (data.server_deaf && nameSpan) {
-        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-deaf-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
-      } else if (data.self_deaf && nameSpan) {
-        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-deaf-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
-      }
-    }
-
-    // Update main voice view card status icons
-    const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
-    if (card) {
-      const existingIcons = card.querySelector(".voice-status-icons")
-      if (existingIcons) existingIcons.remove()
-
-      const hasMute = data.server_mute || data.self_mute
-      const hasDeaf = data.server_deaf || data.self_deaf
-      if (hasMute || hasDeaf) {
-        let badgesHtml = ""
-        if (hasMute) {
-          const color = data.server_mute ? "text-red-400" : ""
-          badgesHtml += `<div class="voice-status-badge ${data.server_mute ? 'server-muted' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg></div>`
-        }
-        if (hasDeaf) {
-          const color = data.server_deaf ? "text-red-400" : ""
-          badgesHtml += `<div class="voice-status-badge ${data.server_deaf ? 'server-deafened' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg></div>`
-        }
-        const inner = card.querySelector(".voice-card-inner")
-        if (inner) {
-          inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
-        }
-      }
-    }
-
-    // Dispatch window events for the voice channel controller to handle
     const currentUserId = document.body.dataset.currentUserId
+
+    // For the current user, voice_channel_controller._updateSelfVoiceIndicators()
+    // is the source of truth. Skip broadcast-driven icon updates to avoid race
+    // conditions (e.g. mute broadcast arriving after a local deafen toggle).
+    if (data.user_id !== currentUserId) {
+      // Update sidebar participant icons
+      const participant = this.element.querySelector(`[data-voice-user-id="${data.user_id}"]`)
+      if (participant) {
+        participant.querySelectorAll(".voice-mute-icon, .voice-deaf-icon, .voice-server-mute-icon, .voice-server-deaf-icon").forEach(el => el.remove())
+
+        const nameSpan = participant.querySelector("span")
+        if (data.server_mute && nameSpan) {
+          nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-mute-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/></svg>')
+        } else if (data.self_mute && nameSpan) {
+          nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-mute-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>')
+        }
+        if (data.server_deaf && nameSpan) {
+          nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-deaf-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
+        } else if (data.self_deaf && nameSpan) {
+          nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-deaf-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
+        }
+      }
+
+      // Update main voice view card status icons
+      const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
+      if (card) {
+        const existingIcons = card.querySelector(".voice-status-icons")
+        if (existingIcons) existingIcons.remove()
+
+        const hasMute = data.server_mute || data.self_mute
+        const hasDeaf = data.server_deaf || data.self_deaf
+        if (hasMute || hasDeaf) {
+          let badgesHtml = ""
+          if (hasMute) {
+            const color = data.server_mute ? "text-red-400" : ""
+            badgesHtml += `<div class="voice-status-badge ${data.server_mute ? 'server-muted' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg></div>`
+          }
+          if (hasDeaf) {
+            const color = data.server_deaf ? "text-red-400" : ""
+            badgesHtml += `<div class="voice-status-badge ${data.server_deaf ? 'server-deafened' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg></div>`
+          }
+          const inner = card.querySelector(".voice-card-inner")
+          if (inner) {
+            inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
+          }
+        }
+      }
+    }
+
+    // Server moderation events still dispatched for the current user
     if (data.user_id === currentUserId) {
       if (data.server_mute !== undefined) {
         window.dispatchEvent(new CustomEvent("voice:server-mute", { detail: { serverMute: data.server_mute } }))
@@ -514,20 +495,40 @@ export default class extends Controller {
     const voiceGrid = gridContainer?.querySelector(".voice-grid")
     if (gridContainer && voiceGrid && voiceGrid.children.length === 0) {
       const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
-      gridContainer.outerHTML = `
-        <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
-          <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-            <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-          </div>
-          <h2 class="text-xl font-bold text-white mb-1">${this.escapeHtml(channelName)}</h2>
-          <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
-        </div>`
+      gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
     }
   }
 
-  escapeHtml(text) {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
+  _buildVoiceCard(data, color) {
+    const tpl = document.getElementById("tpl-voice-card").content.cloneNode(true)
+    const card = tpl.querySelector(".voice-card")
+    card.dataset.voiceParticipantId = data.user_id
+    card.dataset.voiceStateId = data.voice_state_id || ""
+    card.dataset.action = "contextmenu->voice-context#show"
+    card.style.setProperty("--card-color", color)
+
+    const initial = data.username?.[0]?.toUpperCase() || "?"
+    const avatarSlot = card.querySelector('[data-slot="avatar"]')
+    if (data.avatar_url) {
+      const img = document.createElement("img")
+      img.src = data.avatar_url
+      img.className = "voice-avatar"
+      avatarSlot.appendChild(img)
+    } else {
+      const fallback = document.createElement("div")
+      fallback.className = "voice-avatar-fallback"
+      fallback.style.backgroundColor = `color-mix(in srgb, ${color}, white 20%)`
+      fallback.textContent = initial
+      avatarSlot.appendChild(fallback)
+    }
+
+    card.querySelector('[data-slot="username"]').textContent = data.username
+    return card
+  }
+
+  _buildVoiceEmptyState(channelName) {
+    const tpl = document.getElementById("tpl-voice-empty-state").content.cloneNode(true)
+    tpl.querySelector('[data-slot="channel-name"]').textContent = channelName
+    return tpl.firstElementChild
   }
 }

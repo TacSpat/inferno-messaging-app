@@ -29,7 +29,12 @@ export default class extends Controller {
       if (this.hasReplyBarTarget) this.replyBarTarget.classList.remove("hidden")
       this.inputTarget.focus()
     }
+    this._reactHandler = (e) => {
+      const { messageId, clientX, clientY } = e.detail
+      this.openReactionPickerForMessage(messageId, clientX, clientY)
+    }
     document.addEventListener("inferno:reply", this._replyHandler)
+    document.addEventListener("inferno:react", this._reactHandler)
 
     // Measure emoji placeholder width for pixel-perfect overlay
     this._measureEmojiWidth()
@@ -54,6 +59,7 @@ export default class extends Controller {
     this.teardownFileIntercept()
     if (this._emojiMapReady) document.removeEventListener("inferno:emoji-map-ready", this._emojiMapReady)
     if (this._replyHandler) document.removeEventListener("inferno:reply", this._replyHandler)
+    if (this._reactHandler) document.removeEventListener("inferno:react", this._reactHandler)
   }
 
   // --- Paste ---
@@ -280,6 +286,40 @@ export default class extends Controller {
     this.replyBarTarget.classList.add("hidden")
   }
 
+  // --- Reactions ---
+
+  openReactionPicker(event) {
+    const messageId = event.currentTarget.dataset.messageId
+    this.openReactionPickerForMessage(messageId)
+  }
+
+  openReactionPickerForMessage(messageId, clientX, clientY) {
+    document.getElementById("reaction-picker-panel")?.remove()
+    document.dispatchEvent(new CustomEvent("inferno:open-reaction-picker", {
+      detail: {
+        messageId,
+        reactionUrl: `/conversations/${this.conversationIdValue}/dm_messages/${messageId}/toggle_reaction`,
+        anchorSelector: `#message_${messageId}`,
+        clientX,
+        clientY
+      }
+    }))
+  }
+
+  toggleReaction(event) {
+    const btn = event.currentTarget
+    const messageId = btn.dataset.messageId
+    const emoji = btn.dataset.emoji
+    const token = document.querySelector("meta[name=csrf-token]")?.content
+    const formData = new FormData()
+    formData.append("emoji", emoji)
+    fetch(`/conversations/${this.conversationIdValue}/dm_messages/${messageId}/toggle_reaction`, {
+      method: "POST",
+      headers: { "X-CSRF-Token": token },
+      body: formData
+    })
+  }
+
   // --- Input handling ---
 
   handleKeydown(event) {
@@ -360,6 +400,13 @@ export default class extends Controller {
         const toDelete = document.getElementById(`message_${data.message_id}`)
         if (toDelete) toDelete.remove()
         break
+      case "update_reactions":
+        const reactMsg = document.getElementById(`message_${data.message_id}`)
+        if (reactMsg) {
+          const rc = reactMsg.querySelector(".reactions-container")
+          if (rc) rc.outerHTML = data.html
+        }
+        break
       case "typing":
         this.showTypingIndicator(data.username, data.user_id)
         break
@@ -384,12 +431,12 @@ export default class extends Controller {
     if (!this.hasHighlightTarget) return
     const text = this.inputTarget.value
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-amber-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-red-400">$1</span>')
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>')
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
-    html = html.replace(/`([^`]+)`/g, '<span class="text-orange-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
-    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-orange-300">$1</span>')
+    html = html.replace(/`([^`]+)`/g, '<span class="text-red-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
+    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-red-300">$1</span>')
     // Replace emoji placeholders (em-space + PUA char) with inline images
     if (window._emojiReverse && window._emojiMap) {
       html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {

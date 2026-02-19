@@ -26,7 +26,7 @@
             <% end %>
           </select>
         </div>
-        <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white text-sm px-4 py-1.5 rounded transition">
+        <button type="submit" class="bg-red-600 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded transition">
           Request Export
         </button>
       <% end %>
@@ -42,7 +42,7 @@
                 <span class="text-xs font-semibold px-2 py-0.5 rounded
                   <%= case export.status
                       when 'pending' then 'bg-yellow-900 text-yellow-300'
-                      when 'processing' then 'bg-amber-900 text-amber-300'
+                      when 'processing' then 'bg-red-900 text-red-400'
                       when 'completed' then 'bg-green-900 text-green-300'
                       when 'failed' then 'bg-red-900 text-red-300'
                       when 'expired' then 'bg-gray-700 text-gray-400'
@@ -63,7 +63,7 @@
             </div>
             <% if export.status == "completed" && !export.expired? %>
               <%= link_to "Download", download_admin_data_export_path(export),
-                  class: "bg-amber-600 hover:bg-amber-500 text-white text-xs px-3 py-1 rounded transition" %>
+                  class: "bg-red-600 hover:bg-red-600 text-white text-xs px-3 py-1 rounded transition" %>
             <% end %>
           </div>
         <% end %>

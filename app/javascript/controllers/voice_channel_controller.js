@@ -17,6 +17,7 @@ export default class extends Controller {
     this.room = null
     this.muted = false
     this.deafened = false
+    this._mutedBeforeDeafen = false // tracks mute state prior to deafening
     this.channelId = null
     this.channelDisplayName = null
 
@@ -51,12 +52,16 @@ export default class extends Controller {
       this.muted = this.selfMuteValue
       this.deafened = this.selfDeafValue
 
+      // Restore pre-deafen mute memory from localStorage
+      try {
+        this._mutedBeforeDeafen = localStorage.getItem("voice_muted_before_deafen") === "true"
+      } catch {}
+
       if (this.hasChannelNameTarget) {
         this.channelNameTarget.textContent = this.channelDisplayName
       }
 
-      this.updateMuteUI()
-      this.updateDeafenUI()
+      this.syncAllVoiceUI()
 
       // Reconnect to LiveKit so audio actually works
       this.reconnectToLiveKit()
@@ -64,6 +69,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this._stopAudioLevelMonitor()
     window.removeEventListener("voice:join", this._onJoinRequest)
     window.removeEventListener("voice:disconnect", this._onDisconnectRequest)
     window.removeEventListener("voice:force-disconnect", this._onForceDisconnect)
@@ -88,7 +94,7 @@ export default class extends Controller {
           console.warn("[Voice] navigator.mediaDevices unavailable — requires HTTPS or localhost")
           this.showToast("Microphone requires a secure connection (HTTPS or localhost)", true)
           this.muted = true
-          this.updateMuteUI()
+          this.syncAllVoiceUI()
         } else {
           try {
             micStream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -96,7 +102,7 @@ export default class extends Controller {
           } catch (micErr) {
             console.warn("[Voice] Microphone denied:", micErr.name, micErr.message)
             this.muted = true
-            this.updateMuteUI()
+            this.syncAllVoiceUI()
             if (micErr.name === "NotAllowedError") {
               this.showToast("Microphone blocked — check browser permissions", true)
             } else {
@@ -154,6 +160,7 @@ export default class extends Controller {
   async connectToLiveKit(url, token) {
     try {
       // Always tear down any existing room first to prevent orphaned connections
+      this._stopAudioLevelMonitor()
       if (this.room) {
         try { this.room.disconnect() } catch {}
         this.room = null
@@ -250,7 +257,7 @@ export default class extends Controller {
         } catch (micErr) {
           console.warn("[Voice] Microphone access denied:", micErr.message)
           this.muted = true
-          this.updateMuteUI()
+          this.syncAllVoiceUI()
         }
       } else {
         console.log("[Voice] Microphone stays muted")
@@ -258,6 +265,9 @@ export default class extends Controller {
 
       // Attach any already-subscribed remote audio tracks
       this._attachExistingTracks()
+
+      // Start polling audio levels for speaking indicators
+      this._startAudioLevelMonitor()
 
       return true
     } catch (err) {
@@ -281,6 +291,7 @@ export default class extends Controller {
 
   _cleanUpAfterFailedReconnect() {
     // Disconnect any lingering room connection
+    this._stopAudioLevelMonitor()
     if (this.room) {
       try { this.room.disconnect() } catch {}
       this.room = null
@@ -297,6 +308,8 @@ export default class extends Controller {
     this.updateMainViewDisconnected()
     this.muted = false
     this.deafened = false
+    this._mutedBeforeDeafen = false
+    this._clearMuteMemory()
     this.channelId = null
   }
 
@@ -368,6 +381,7 @@ export default class extends Controller {
   }
 
   async disconnectVoice() {
+    this._stopAudioLevelMonitor()
     if (this.room) {
       this.room.disconnect()
       this.room = null
@@ -397,6 +411,8 @@ export default class extends Controller {
     this.updateMainViewDisconnected()
     this.muted = false
     this.deafened = false
+    this._mutedBeforeDeafen = false
+    this._clearMuteMemory()
     this.channelId = null
   }
 
@@ -408,6 +424,15 @@ export default class extends Controller {
   async toggleMute() {
     this.muted = !this.muted
 
+    // If deafened, only change the remembered state for undeafen — don't
+    // touch the mic or server state since deafen overrides everything
+    if (this.deafened) {
+      this._mutedBeforeDeafen = this.muted
+      this._saveMuteMemory()
+      // Control bar still shows muted (deafen implies mute), no visual change
+      return
+    }
+
     try {
       if (this.room?.localParticipant) {
         await this.room.localParticipant.setMicrophoneEnabled(!this.muted)
@@ -416,7 +441,12 @@ export default class extends Controller {
       console.warn("[Voice] setMicrophoneEnabled failed:", err.message)
     }
 
-    this.updateMuteUI()
+    // Re-setup local analyser when unmuting (track may be new)
+    if (!this.muted && !this._localAnalyser) {
+      this._setupLocalAnalyser()
+    }
+
+    this.syncAllVoiceUI()
 
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
     try {
@@ -430,8 +460,19 @@ export default class extends Controller {
   }
 
   async toggleDeafen() {
+    const wasDeafened = this.deafened
     this.deafened = !this.deafened
-    if (this.deafened) this.muted = true
+
+    if (this.deafened) {
+      // Deafening: remember current mute state, then force mute
+      this._mutedBeforeDeafen = this.muted
+      this._saveMuteMemory()
+      this.muted = true
+    } else {
+      // Undeafening: restore the mute state from before deafening
+      this.muted = this._mutedBeforeDeafen
+      this._clearMuteMemory()
+    }
 
     try {
       if (this.room?.localParticipant) {
@@ -439,6 +480,11 @@ export default class extends Controller {
       }
     } catch (err) {
       console.warn("[Voice] setMicrophoneEnabled failed:", err.message)
+    }
+
+    // Re-setup local analyser when undeafening with mic active
+    if (!this.deafened && !this.muted && !this._localAnalyser) {
+      this._setupLocalAnalyser()
     }
 
     // Mute/unmute all remote audio tracks locally
@@ -461,28 +507,31 @@ export default class extends Controller {
       })
     }
 
-    this.updateMuteUI()
-    this.updateDeafenUI()
+    this.syncAllVoiceUI()
 
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
     try {
-      const res = await fetch("/voice_states/self_deafen", {
+      const body = this.deafened ? {} : { self_mute: this.muted }
+      await fetch("/voice_states/self_deafen", {
         method: "PATCH",
-        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" }
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" },
+        body: JSON.stringify(body)
       })
-      if (res.ok) {
-        const data = await res.json()
-        this.muted = data.self_mute
-        this.deafened = data.self_deaf
-        this.updateMuteUI()
-        this.updateDeafenUI()
-      }
     } catch (err) {
       console.error("Failed to update deafen state:", err)
     }
   }
 
+  _saveMuteMemory() {
+    try { localStorage.setItem("voice_muted_before_deafen", String(this._mutedBeforeDeafen)) } catch {}
+  }
+
+  _clearMuteMemory() {
+    try { localStorage.removeItem("voice_muted_before_deafen") } catch {}
+  }
+
   handleDisconnected() {
+    this._stopAudioLevelMonitor()
     this.room = null
     const currentUserId = document.body.dataset.currentUserId
     if (this.channelId && currentUserId) {
@@ -492,6 +541,8 @@ export default class extends Controller {
     this.updateMainViewDisconnected()
     this.muted = false
     this.deafened = false
+    this._mutedBeforeDeafen = false
+    this._clearMuteMemory()
     this.channelId = null
   }
 
@@ -583,14 +634,7 @@ export default class extends Controller {
     if (gridContainer && voiceGrid && voiceGrid.children.length === 0) {
       const wrapper = document.querySelector("[data-current-channel-id]")
       const channelName = wrapper?.querySelector("h1")?.textContent || "Voice Channel"
-      gridContainer.outerHTML = `
-        <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
-          <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-            <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-          </div>
-          <h2 class="text-xl font-bold text-white mb-1">${this.escapeHtml(channelName)}</h2>
-          <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
-        </div>`
+      gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
     }
 
     // Replace "connected" text with the join button
@@ -613,7 +657,10 @@ export default class extends Controller {
   updateMuteUI() {
     if (!this.hasMuteBtnTarget) return
 
-    if (this.muted) {
+    // Deafen implies mute — always show muted visual when deafened
+    const effectivelyMuted = this.muted || this.deafened
+
+    if (effectivelyMuted) {
       this.muteBtnTarget.classList.add("text-red-400")
       this.muteBtnTarget.classList.remove("text-gray-300")
       if (this.hasMuteIconTarget) {
@@ -646,6 +693,67 @@ export default class extends Controller {
     }
   }
 
+  // Update all voice UI at once: control bar buttons + sidebar/main view indicators
+  syncAllVoiceUI() {
+    this.updateMuteUI()
+    this.updateDeafenUI()
+    this._updateSelfVoiceIndicators()
+  }
+
+  // Immediately sync sidebar participant + main view card icons for the current user
+  _updateSelfVoiceIndicators() {
+    const currentUserId = document.body.dataset.currentUserId
+    if (!currentUserId) return
+
+    const effectiveMute = this.muted || this.deafened
+    const effectiveDeaf = this.deafened
+
+    // --- Sidebar participant icons ---
+    const participant = document.querySelector(`[data-voice-user-id="${currentUserId}"]`)
+    if (participant) {
+      participant.querySelectorAll(".voice-mute-icon, .voice-deaf-icon, .voice-server-mute-icon, .voice-server-deaf-icon").forEach(el => el.remove())
+      const nameSpan = participant.querySelector("span")
+
+      if (this.serverMuted && nameSpan) {
+        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-mute-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/></svg>')
+      } else if (effectiveMute && nameSpan) {
+        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-mute-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>')
+      }
+
+      if (this.serverDeafened && nameSpan) {
+        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-server-deaf-icon w-3 h-3 text-red-400 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
+      } else if (effectiveDeaf && nameSpan) {
+        nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-deaf-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
+      }
+    }
+
+    // --- Main voice view card status badges ---
+    const card = document.querySelector(`[data-voice-participant-id="${currentUserId}"]`)
+    if (card) {
+      const existingIcons = card.querySelector(".voice-status-icons")
+      if (existingIcons) existingIcons.remove()
+
+      const hasMute = this.serverMuted || effectiveMute
+      const hasDeaf = this.serverDeafened || effectiveDeaf
+
+      if (hasMute || hasDeaf) {
+        let badgesHtml = ""
+        if (hasMute) {
+          const color = this.serverMuted ? "text-red-400" : ""
+          badgesHtml += `<div class="voice-status-badge ${this.serverMuted ? 'server-muted' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg></div>`
+        }
+        if (hasDeaf) {
+          const color = this.serverDeafened ? "text-red-400" : ""
+          badgesHtml += `<div class="voice-status-badge ${this.serverDeafened ? 'server-deafened' : ''}"><svg class="w-3.5 h-3.5 ${color}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg></div>`
+        }
+        const inner = card.querySelector(".voice-card-inner")
+        if (inner) {
+          inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
+        }
+      }
+    }
+  }
+
   buildParticipantCard(data) {
     const color = data.profile_color || "#1e1c1b"
     const initial = data.username?.[0]?.toUpperCase() || "?"
@@ -653,27 +761,27 @@ export default class extends Controller {
       ? `<img src="${data.avatar_url}" class="voice-avatar" />`
       : `<div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, ${color}, white 20%)">${initial}</div>`
 
-    const vsId = data.voice_state_id || ""
-    return `
-      <div class="voice-card group" data-voice-participant-id="${data.user_id}" data-voice-state-id="${vsId}" data-action="contextmenu->voice-context#show" style="--card-color: ${color}">
-        <div class="voice-card-inner">
-          <div class="voice-avatar-wrapper">${avatarHtml}</div>
-          <div class="voice-username-pill">
-            <span class="truncate">${this.escapeHtml(data.username)}</span>
-          </div>
-        </div>
-      </div>`
+    const tpl = document.getElementById("tpl-voice-card").content.cloneNode(true)
+    const card = tpl.querySelector(".voice-card")
+    card.dataset.voiceParticipantId = data.user_id
+    card.dataset.voiceStateId = data.voice_state_id || ""
+    card.dataset.action = "contextmenu->voice-context#show"
+    card.style.setProperty("--card-color", color)
+    card.querySelector('[data-slot="avatar"]').innerHTML = avatarHtml
+    card.querySelector('[data-slot="username"]').textContent = data.username
+    return card.outerHTML
   }
 
-  escapeHtml(text) {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
+  _buildVoiceEmptyState(channelName) {
+    const tpl = document.getElementById("tpl-voice-empty-state").content.cloneNode(true)
+    tpl.querySelector('[data-slot="channel-name"]').textContent = channelName
+    return tpl.firstElementChild
   }
 
   // --- Moderation event handlers ---
 
   handleForceDisconnect() {
+    this._stopAudioLevelMonitor()
     if (this.room) {
       this.room.disconnect()
       this.room = null
@@ -683,6 +791,8 @@ export default class extends Controller {
     this.updateMainViewDisconnected()
     this.muted = false
     this.deafened = false
+    this._mutedBeforeDeafen = false
+    this._clearMuteMemory()
     this.serverMuted = false
     this.serverDeafened = false
     this.channelId = null
@@ -738,6 +848,9 @@ export default class extends Controller {
   }
 
   async handleServerMute({ serverMute }) {
+    // Ignore echoed broadcasts where the value hasn't changed — prevents
+    // self-action broadcasts from overwriting local state.
+    if (this.serverMuted === serverMute) return
     this.serverMuted = serverMute
     if (serverMute) {
       // Force-disable mic
@@ -745,16 +858,17 @@ export default class extends Controller {
         await this.room.localParticipant.setMicrophoneEnabled(false)
       }
       this.muted = true
-      this.updateMuteUI()
+      this.syncAllVoiceUI()
     } else {
       // Re-enable mic only if not self-muted
-      if (!this.muted || this.serverMuted === false) {
-        // User can manually unmute now — just update indicator
-      }
+      this.syncAllVoiceUI()
     }
   }
 
   async handleServerDeafen({ serverDeaf }) {
+    // Ignore echoed broadcasts where the value hasn't changed — prevents
+    // self-action broadcasts from overwriting local state.
+    if (this.serverDeafened === serverDeaf) return
     this.serverDeafened = serverDeaf
     if (serverDeaf) {
       // Disable mic + all remote audio
@@ -773,8 +887,7 @@ export default class extends Controller {
           })
         })
       }
-      this.updateMuteUI()
-      this.updateDeafenUI()
+      this.syncAllVoiceUI()
     } else {
       // Re-enable remote audio
       this.deafened = false
@@ -787,7 +900,124 @@ export default class extends Controller {
           })
         })
       }
-      this.updateDeafenUI()
+      this.syncAllVoiceUI()
+    }
+  }
+
+  // --- Speaking indicators (audio-level driven) ---
+
+  _startAudioLevelMonitor() {
+    if (this._audioLevelRAF) return
+    this._setupLocalAnalyser()
+
+    const tick = () => {
+      if (!this.room) { this._audioLevelRAF = null; return }
+      this._pollAudioLevels()
+      this._audioLevelRAF = requestAnimationFrame(tick)
+    }
+    this._audioLevelRAF = requestAnimationFrame(tick)
+  }
+
+  _stopAudioLevelMonitor() {
+    if (this._audioLevelRAF) {
+      cancelAnimationFrame(this._audioLevelRAF)
+      this._audioLevelRAF = null
+    }
+    this._teardownLocalAnalyser()
+    // Clear all speaking indicators
+    document.querySelectorAll(".speaking").forEach(el => {
+      el.classList.remove("speaking")
+      el.style.removeProperty("--audio-level")
+    })
+    document.querySelectorAll(".voice-speaking").forEach(el => {
+      el.classList.remove("voice-speaking")
+      el.style.removeProperty("--audio-level")
+    })
+  }
+
+  // Web Audio analyser for instant local mic feedback (per-frame)
+  _setupLocalAnalyser() {
+    try {
+      if (!this.room?.localParticipant) return
+      const pub = Array.from(this.room.localParticipant.audioTrackPublications.values())
+        .find(p => p.track)
+      const mst = pub?.track?.mediaStreamTrack
+      if (!mst || mst.readyState !== "live") return
+
+      this._localAudioCtx = new (window.AudioContext || window.webkitAudioContext)()
+      if (this._localAudioCtx.state === "suspended") this._localAudioCtx.resume()
+      const source = this._localAudioCtx.createMediaStreamSource(new MediaStream([mst]))
+      this._localAnalyser = this._localAudioCtx.createAnalyser()
+      this._localAnalyser.fftSize = 256
+      this._localAnalyser.smoothingTimeConstant = 0.4
+      source.connect(this._localAnalyser)
+      this._localAnalyserBuf = new Float32Array(this._localAnalyser.fftSize)
+    } catch (e) {
+      console.warn("[Voice] Local analyser setup failed:", e)
+    }
+  }
+
+  _teardownLocalAnalyser() {
+    if (this._localAudioCtx) {
+      try { this._localAudioCtx.close() } catch {}
+      this._localAudioCtx = null
+      this._localAnalyser = null
+      this._localAnalyserBuf = null
+    }
+  }
+
+  _getLocalRMS() {
+    if (!this._localAnalyser) return -1
+    try {
+      this._localAnalyser.getFloatTimeDomainData(this._localAnalyserBuf)
+      let sum = 0
+      for (let i = 0; i < this._localAnalyserBuf.length; i++) {
+        sum += this._localAnalyserBuf[i] * this._localAnalyserBuf[i]
+      }
+      // RMS → normalized 0-1 (raw mic RMS is typically 0-0.3)
+      return Math.min(Math.sqrt(sum / this._localAnalyserBuf.length) * 4, 1)
+    } catch {
+      return -1
+    }
+  }
+
+  _pollAudioLevels() {
+    if (!this.room) return
+    const THRESHOLD = 0.01
+
+    // Local participant — use Web Audio analyser for instant feedback
+    const localP = this.room.localParticipant
+    let localLevel = this._getLocalRMS()
+    if (localLevel < 0) localLevel = localP.audioLevel || 0
+    const localSpeaking = localLevel > THRESHOLD && !this.muted && !this.deafened
+    this._applySpeakingIndicator(localP.identity, localLevel, localSpeaking)
+
+    // Remote participants — use LiveKit's audioLevel directly (no isSpeaking hysteresis)
+    for (const [, p] of this.room.remoteParticipants) {
+      const level = p.audioLevel || 0
+      this._applySpeakingIndicator(p.identity, level, level > THRESHOLD)
+    }
+  }
+
+  _applySpeakingIndicator(identity, level, speaking) {
+    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
+    if (card) {
+      card.classList.toggle("speaking", speaking)
+      if (speaking) {
+        card.style.setProperty("--audio-level", level.toFixed(3))
+      } else {
+        card.style.removeProperty("--audio-level")
+      }
+    }
+
+    const sidebar = document.querySelector(`[data-voice-user-id="${identity}"]`)
+    if (sidebar) {
+      sidebar.classList.toggle("voice-speaking", speaking)
+      if (speaking) {
+        sidebar.style.setProperty("--audio-level", level.toFixed(3))
+      } else {
+        sidebar.style.removeProperty("--audio-level")
+      }
     }
   }
 

@@ -375,11 +375,8 @@ export default class extends Controller {
 
     const currentColor = folderEl.querySelector("[data-folder-color]")?.dataset.folderColor || "#4f545c"
 
-    this.folderMenu.innerHTML = `
-      <button data-menu-action="rename" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Rename Folder</button>
-      <button data-menu-action="color" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Folder Color</button>
-      <button data-menu-action="delete" class="w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 hover:text-red-300 transition">Delete Folder</button>
-    `
+    const tpl = document.getElementById("tpl-folder-menu").content.cloneNode(true)
+    this.folderMenu.appendChild(tpl)
 
     document.body.appendChild(this.folderMenu)
 
@@ -408,17 +405,11 @@ export default class extends Controller {
   showRenameInput(folderId, currentName, folderEl) {
     if (!this.folderMenu) return
 
-    this.folderMenu.innerHTML = `
-      <div class="px-3 py-2">
-        <label class="text-[10px] text-gray-500 uppercase font-semibold mb-1 block">Folder Name</label>
-        <input type="text" value="${this.escapeAttr(currentName)}" maxlength="50"
-               class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-orange-500"
-               data-rename-input>
-        <button class="mt-2 w-full bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold py-1 rounded transition" data-rename-save>Save</button>
-      </div>
-    `
-
-    const input = this.folderMenu.querySelector("[data-rename-input]")
+    this.folderMenu.innerHTML = ""
+    const tpl = document.getElementById("tpl-folder-rename").content.cloneNode(true)
+    const input = tpl.querySelector("[data-rename-input]")
+    input.value = currentName
+    this.folderMenu.appendChild(tpl)
     input.focus()
     input.select()
 
@@ -445,32 +436,18 @@ export default class extends Controller {
   showColorPicker(folderId, currentColor, folderEl) {
     if (!this.folderMenu) return
 
-    const presets = [
-      { color: "#4f545c", label: "Gray" },
-      { color: "#b45309", label: "Ember" },
-      { color: "#57f287", label: "Green" },
-      { color: "#fee75c", label: "Yellow" },
-      { color: "#eb459e", label: "Pink" },
-      { color: "#ed4245", label: "Red" },
-      { color: "#f47b67", label: "Orange" },
-      { color: "#9b59b6", label: "Purple" }
-    ]
+    this.folderMenu.innerHTML = ""
+    const tpl = document.getElementById("tpl-folder-color-picker").content.cloneNode(true)
 
-    const swatchesHtml = presets.map(p => {
-      const ring = p.color.toLowerCase() === currentColor.toLowerCase() ? "ring-2 ring-white" : ""
-      return `<button data-color-swatch="${p.color}" title="${p.label}" class="w-8 h-8 rounded-full ${ring} hover:scale-110 transition-transform" style="background-color: ${p.color}"></button>`
-    }).join("")
+    // Highlight current color swatch
+    const currentSwatch = tpl.querySelector(`[data-color-swatch="${currentColor.toLowerCase()}"]`) ||
+                          tpl.querySelector(`[data-color-swatch="${currentColor}"]`)
+    if (currentSwatch) currentSwatch.classList.add("ring-2", "ring-white")
 
-    this.folderMenu.innerHTML = `
-      <div class="px-3 py-2">
-        <label class="text-[10px] text-gray-500 uppercase font-semibold mb-2 block">Folder Color</label>
-        <div class="grid grid-cols-4 gap-2 mb-2">${swatchesHtml}</div>
-        <div class="flex items-center gap-2">
-          <input type="color" value="${currentColor}" class="w-8 h-8 rounded cursor-pointer border-0 p-0 bg-transparent" data-custom-color>
-          <span class="text-xs text-gray-400">Custom</span>
-        </div>
-      </div>
-    `
+    // Set custom color input value
+    tpl.querySelector("[data-custom-color]").value = currentColor
+
+    this.folderMenu.appendChild(tpl)
 
     const applyColor = (color) => this.applyFolderColor(folderId, color, folderEl)
 

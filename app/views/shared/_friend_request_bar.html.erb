@@ -1,0 +1,98 @@
+<% pending = current_user.pending_friend_requests.includes(user: { avatar_attachment: :blob }) %>
+<div id="friend-request-bar" class="hidden fr-bar" data-fr-index="0">
+  <%# Hidden data store for all pending requests — JS filters dismissed via localStorage %>
+  <div data-fr-items class="hidden">
+    <% pending.each do |fr| %>
+      <% sender = fr.user %>
+      <div data-friendship-id="<%= fr.id %>"
+           data-fr-name="<%= sender.display_name.presence || sender.username %>"
+           data-fr-color="<%= sender.profile_color || '#b45309' %>"
+           data-fr-initial="<%= sender.username[0].upcase %>"
+           data-fr-avatar="<%= sender.avatar.attached? ? url_for(sender.avatar) : (sender.respond_to?(:effective_avatar_url) && sender.effective_avatar_url.presence || '') %>">
+      </div>
+    <% end %>
+  </div>
+
+  <%# Carousel %>
+  <div data-fr-expanded class="flex items-center h-12 sm:h-11 px-2 sm:px-3 gap-1.5 sm:gap-2">
+    <%# Prev arrow %>
+    <button type="button" class="text-gray-500 hover:text-gray-300 active:text-white transition p-1.5 sm:p-1 -m-1 sm:m-0 cursor-pointer shrink-0" data-fr-prev title="Previous">
+      <svg class="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    </button>
+
+    <%# Current request display %>
+    <div data-fr-display class="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+      <div data-fr-avatar-slot class="w-7 h-7 sm:w-6 sm:h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0"></div>
+      <span class="text-xs sm:text-sm text-gray-200 truncate">
+        <strong class="text-white" data-fr-name-slot></strong>
+        <span class="hidden sm:inline"> wants to be friends</span>
+      </span>
+    </div>
+
+    <%# Counter %>
+    <span data-fr-counter class="text-[10px] sm:text-xs text-gray-500 font-medium tabular-nums shrink-0"></span>
+
+    <%# Next arrow %>
+    <button type="button" class="text-gray-500 hover:text-gray-300 active:text-white transition p-1.5 sm:p-1 -m-1 sm:m-0 cursor-pointer shrink-0" data-fr-next title="Next">
+      <svg class="w-4 h-4 sm:w-3.5 sm:h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+    </button>
+
+    <%# Divider %>
+    <div class="w-px h-5 bg-gray-600/50 shrink-0"></div>
+
+    <%# Action buttons — min 44px touch targets on mobile %>
+    <div class="flex items-center shrink-0">
+      <button type="button" data-friend-action="accept" class="p-2 sm:p-1.5 rounded-lg sm:rounded active:bg-green-600/30 hover:bg-green-600/20 text-green-400 hover:text-green-300 transition cursor-pointer" title="Accept">
+        <svg class="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+      </button>
+      <button type="button" data-friend-action="decline" class="p-2 sm:p-1.5 rounded-lg sm:rounded active:bg-red-600/30 hover:bg-red-600/20 text-red-400 hover:text-red-300 transition cursor-pointer" title="Decline">
+        <svg class="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+      <button type="button" data-friend-action="ignore" class="p-2 sm:p-1.5 rounded-lg sm:rounded active:bg-gray-600/40 hover:bg-gray-600/30 text-gray-500 hover:text-gray-300 transition cursor-pointer" title="Dismiss">
+        <svg class="w-5 h-5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M3 3l18 18"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+<style>
+  .fr-bar {
+    position: relative;
+    background: linear-gradient(135deg, rgba(31,29,28,0.97) 0%, rgba(50,22,10,0.97) 100%);
+    border-bottom: 2px solid transparent;
+    border-image: linear-gradient(90deg, #7c2d12, #c2410c, #ea580c, #c2410c, #7c2d12) 1;
+    animation: frBarSlideIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    overflow: hidden;
+  }
+  .fr-bar::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #7f1d1d, #991b1b, #b91c1c, #dc2626, #ef4444, #dc2626, #b91c1c, #991b1b, #7f1d1d);
+    background-size: 200% 100%;
+    animation: frFireShimmer 3s linear infinite;
+  }
+  .fr-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 15% 100%, rgba(185,28,28,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 85% 100%, rgba(153,27,27,0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 80%, rgba(220,38,38,0.03) 0%, transparent 40%);
+    pointer-events: none;
+  }
+  .fr-bar > div { position: relative; z-index: 1; }
+  @keyframes frBarSlideIn {
+    from { transform: translateY(-100%); opacity: 0; }
+    to   { transform: translateY(0); opacity: 1; }
+  }
+  @keyframes frFireShimmer {
+    0%   { background-position: 0% 0; }
+    100% { background-position: 200% 0; }
+  }
+  [data-fr-display] {
+    transition: opacity 0.15s ease;
+  }
+</style>

@@ -34,7 +34,7 @@
   <div class="ml-2 flex-1 min-w-0">
     <span class="text-sm truncate block" style="color: <%= member.role_color_for(server) %>"><%= member.display_name_for(server) %></span>
     <% if member.remote? %>
-      <span class="text-[10px] text-amber-400/70 truncate block"><%= member.home_instance_domain %></span>
+      <span class="text-[10px] text-red-400/70 truncate block"><%= member.home_instance_domain %></span>
     <% end %>
     <% if member.status.present? && !is_offline %>
       <span class="text-xs text-gray-500 truncate block"><%= member.status_emoji %> <%= member.status %></span>

@@ -19,7 +19,7 @@ class ConversationsController < ApplicationController
       @friends = current_user.friends.includes(avatar_attachment: :blob).order(:display_name)
       @remote_friends = current_user.remote_friend_references.ordered if current_user.remote?
     when "pending"
-      @incoming = current_user.pending_friend_requests.includes(user: { avatar_attachment: :blob })
+      @incoming = current_user.incoming_friend_requests.includes(user: { avatar_attachment: :blob })
       @outgoing = current_user.sent_friend_requests.includes(friend: { avatar_attachment: :blob })
     when "blocked"
       @blocked = current_user.blocked_users.includes(avatar_attachment: :blob)

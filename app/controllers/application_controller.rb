@@ -8,7 +8,7 @@ class ApplicationController < ActionController::Base
   protected
 
   def set_current_voice_state
-    @current_voice_state = current_user&.voice_states&.includes(:channel)&.first
+    @current_voice_state = current_user&.voice_states&.includes(:channel, :server)&.first
   end
 
   def configure_permitted_parameters

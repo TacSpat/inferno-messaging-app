@@ -39,7 +39,7 @@
           <input type="date" name="date_to" value="<%= params[:date_to] %>"
                  class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
         </div>
-        <button type="submit" class="bg-amber-600 hover:bg-amber-500 text-white text-sm px-4 py-1.5 rounded transition">
+        <button type="submit" class="bg-red-600 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded transition">
           Filter
         </button>
         <% if params[:event_type].present? || params[:domain].present? || params[:date_from].present? %>
@@ -60,11 +60,11 @@
                   <%= case log.event_type
                       when 'auth_success' then 'bg-green-900 text-green-300'
                       when 'auth_failure' then 'bg-red-900 text-red-300'
-                      when 'auth_attempt' then 'bg-amber-900 text-amber-300'
+                      when 'auth_attempt' then 'bg-red-900 text-red-400'
                       when 'token_issued' then 'bg-purple-900 text-purple-300'
                       when 'domain_block' then 'bg-red-900 text-red-300'
                       when 'domain_unblock' then 'bg-green-900 text-green-300'
-                      when 'lockdown_activated' then 'bg-orange-900 text-orange-300'
+                      when 'lockdown_activated' then 'bg-red-900 text-red-300'
                       when 'lockdown_lifted' then 'bg-teal-900 text-teal-300'
                       when 'moderation_report_reviewed' then 'bg-yellow-900 text-yellow-300'
                       else 'bg-gray-700 text-gray-300'

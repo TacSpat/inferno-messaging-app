@@ -138,9 +138,22 @@ export default class extends Controller {
 
     if (!this.menu || !channels.length) return
 
-    this.moveDropdown = document.createElement("div")
-    this.moveDropdown.className = "absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop"
+    const tpl = document.getElementById("tpl-move-dropdown").content.cloneNode(true)
+    this.moveDropdown = tpl.firstElementChild
+    const channelsContainer = this.moveDropdown.querySelector('[data-slot="channels"]')
 
+    const itemTpl = document.getElementById("tpl-move-channel-item")
+    channels.forEach(ch => {
+      const itemClone = itemTpl.content.cloneNode(true)
+      const itemBtn = itemClone.querySelector("button")
+      itemBtn.dataset.contextAction = "move"
+      itemBtn.dataset.voiceStateId = voiceStateId
+      itemBtn.dataset.targetChannelId = ch.id
+      itemBtn.querySelector('[data-slot="name"]').textContent = ch.name
+      channelsContainer.appendChild(itemClone)
+    })
+
+    // Position dropdown
     const wrapper = btn.closest(".context-move-wrapper")
     const btnRect = wrapper.getBoundingClientRect()
 
@@ -157,18 +170,6 @@ export default class extends Controller {
     this.moveDropdown.style.left = `${ddLeft}px`
     this.moveDropdown.style.top = `${ddTop}px`
 
-    let html = '<p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Move to</p>'
-    channels.forEach(ch => {
-      html += `<button class="flex items-center w-full px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded-sm"
-                       data-context-action="move"
-                       data-voice-state-id="${voiceStateId}"
-                       data-target-channel-id="${ch.id}">
-                 <svg class="w-4 h-4 text-gray-500 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
-                 <span class="truncate">${this.escapeHtml(ch.name)}</span>
-               </button>`
-    })
-
-    this.moveDropdown.innerHTML = html
     document.body.appendChild(this.moveDropdown)
 
     // Bind move actions
@@ -213,12 +214,6 @@ export default class extends Controller {
       this.menu = null
     }
     document.removeEventListener("click", this.boundClose)
-  }
-
-  escapeHtml(text) {
-    const div = document.createElement("div")
-    div.textContent = text
-    return div.innerHTML
   }
 
   showToast(msg, isError = false) {

@@ -15,7 +15,7 @@ class ReactionsController < ApplicationController
       @message.reactions.create!(user: current_user, emoji: emoji)
     end
 
-    html = render_to_string(partial: "messages/reactions", locals: { message: @message.reload })
+    html = render_to_string(partial: "messages/reactions", locals: { message: @message.reload, reaction_controller: "message-form" })
     ChannelChatChannel.broadcast_to(
       @channel,
       { type: "update_reactions", message_id: @message.public_id, html: html }

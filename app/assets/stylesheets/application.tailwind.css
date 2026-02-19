@@ -43,7 +43,7 @@
     color: #cccbca;
   }
   .message-content a {
-    color: rgb(217 158 80);
+    color: rgb(96 165 250);
     text-decoration: none;
     word-break: break-all;
   }
@@ -68,14 +68,14 @@
   }
   .message-content th { background-color: rgb(44 42 41); font-weight: 600; }
   .mention {
-    background-color: rgba(249, 115, 22, 0.15);
-    color: #f97316;
+    background-color: rgba(220, 38, 38, 0.15);
+    color: #dc2626;
     padding: 0 0.25rem;
     border-radius: 0.25rem;
     font-weight: 500;
     cursor: pointer;
   }
-  .mention:hover { background-color: rgba(249, 115, 22, 0.3); text-decoration: underline; }
+  .mention:hover { background-color: rgba(220, 38, 38, 0.3); text-decoration: underline; }
   .mention-everyone, .mention-here { background-color: rgba(250, 204, 21, 0.15); color: #facc15; }
   .mention-everyone:hover, .mention-here:hover { background-color: rgba(250, 204, 21, 0.3); }
   .code-block-wrapper { position: relative; margin: 0.5rem 0; }
@@ -188,15 +188,15 @@
 
   /* Server folder drop-zone highlight */
   .folder-drop-target {
-    outline: 2px dashed #f97316;
+    outline: 2px dashed #dc2626;
     outline-offset: 2px;
     border-radius: 0.75rem;
   }
   .folder-drop-ready {
-    outline: 2px solid #f97316;
+    outline: 2px solid #dc2626;
     outline-offset: 2px;
     border-radius: 0.75rem;
-    background-color: rgba(249, 115, 22, 0.15);
+    background-color: rgba(220, 38, 38, 0.15);
   }
 
   /* Mobile navigation drawers */
@@ -252,43 +252,43 @@
   .text-transparent::selection {
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
-    background: rgba(249, 115, 22, 0.25);
+    background: rgba(220, 38, 38, 0.25);
   }
   .text-transparent::-moz-selection {
     color: transparent !important;
-    background: rgba(249, 115, 22, 0.25);
+    background: rgba(220, 38, 38, 0.25);
   }
 
   /* ═══════════════════════════════════════════
      INFERNO — Magma glow effects
      ═══════════════════════════════════════════ */
 
-  /* Ember border: subtle orange seam between major panels */
-  .bg-gray-800 { border-color: rgba(249, 115, 22, 0.08); }
-  .bg-gray-950 { border-color: rgba(249, 115, 22, 0.06); }
+  /* Ember border: subtle red seam between major panels */
+  .bg-gray-800 { border-color: rgba(220, 38, 38, 0.08); }
+  .bg-gray-950 { border-color: rgba(220, 38, 38, 0.06); }
 
   /* Sidebar dividers glow faintly like cooling cracks */
   .border-gray-900 {
-    border-color: rgba(249, 115, 22, 0.10);
+    border-color: rgba(220, 38, 38, 0.10);
   }
 
   /* Channel items + member items — ember hover */
   aside a:hover, aside button:hover {
-    background-color: rgba(249, 115, 22, 0.08) !important;
+    background-color: rgba(220, 38, 38, 0.08) !important;
   }
 
   /* Active channel glow — magma seeping through (channels use bg-gray-600, DMs use bg-gray-700) */
   aside a.bg-gray-600.text-white,
   aside a.bg-gray-700.text-white {
-    background: linear-gradient(135deg, rgba(249, 115, 22, 0.18), rgba(234, 88, 12, 0.08)) !important;
-    border-left: 2px solid #f97316;
-    box-shadow: inset 3px 0 8px -3px rgba(249, 115, 22, 0.3);
+    background: linear-gradient(135deg, rgba(220, 38, 38, 0.18), rgba(185, 28, 28, 0.08)) !important;
+    border-left: 2px solid #dc2626;
+    box-shadow: inset 3px 0 8px -3px rgba(220, 38, 38, 0.3);
   }
 
   /* Server icons — molten ring on hover */
   nav a:hover > :not(.mention-badge),
   nav div[class*="cursor-pointer"]:hover {
-    box-shadow: 0 0 8px rgba(249, 115, 22, 0.4), 0 0 2px rgba(249, 115, 22, 0.6);
+    box-shadow: 0 0 8px rgba(220, 38, 38, 0.4), 0 0 2px rgba(220, 38, 38, 0.6);
   }
 
   /* Active server icon pill — tall amber blip, matches home button */
@@ -296,38 +296,38 @@
   /* ── MESSAGE INPUT ── */
   /* The input bar: persistent ember border + glow on focus */
   .bg-gray-600.rounded-lg {
-    border: 1px solid rgba(249, 115, 22, 0.2);
+    border: 1px solid rgba(220, 38, 38, 0.2);
     transition: box-shadow 0.25s ease, border-color 0.25s ease;
   }
   .bg-gray-600.rounded-lg:focus-within {
-    border-color: rgba(249, 115, 22, 0.5);
-    box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.12),
-                0 0 20px rgba(249, 115, 22, 0.1),
-                inset 0 0 12px rgba(249, 115, 22, 0.04);
+    border-color: rgba(220, 38, 38, 0.5);
+    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12),
+                0 0 20px rgba(220, 38, 38, 0.1),
+                inset 0 0 12px rgba(220, 38, 38, 0.04);
   }
   /* Send button — fire up on hover */
   .bg-gray-600.rounded-lg button[type="submit"]:hover {
-    color: #f97316 !important;
-    filter: drop-shadow(0 0 6px rgba(249, 115, 22, 0.6));
+    color: #dc2626 !important;
+    filter: drop-shadow(0 0 6px rgba(220, 38, 38, 0.6));
   }
   /* Emoji/picker button glow */
   .bg-gray-600.rounded-lg button:hover {
-    color: #f97316 !important;
+    color: #dc2626 !important;
   }
   /* File upload label glow */
   .bg-gray-600.rounded-lg label:hover {
-    color: #f97316 !important;
-    filter: drop-shadow(0 0 4px rgba(249, 115, 22, 0.4));
+    color: #dc2626 !important;
+    filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.4));
   }
   /* Reply bar — ember accent */
   [data-message-form-target="replyBar"] {
-    border-left: 2px solid rgba(249, 115, 22, 0.5);
-    background: linear-gradient(90deg, rgba(249, 115, 22, 0.06), transparent) !important;
+    border-left: 2px solid rgba(220, 38, 38, 0.5);
+    background: linear-gradient(90deg, rgba(220, 38, 38, 0.06), transparent) !important;
   }
   /* File preview bar */
   [data-message-form-target="filePreview"] {
-    border-left: 2px solid rgba(249, 115, 22, 0.3);
-    background: linear-gradient(90deg, rgba(249, 115, 22, 0.04), transparent) !important;
+    border-left: 2px solid rgba(220, 38, 38, 0.3);
+    background: linear-gradient(90deg, rgba(220, 38, 38, 0.04), transparent) !important;
   }
 
   /* ── MESSAGES ── */
@@ -337,18 +337,18 @@
     border-left: 2px solid transparent;
   }
   [data-message-id]:hover {
-    background-color: rgba(249, 115, 22, 0.06) !important;
-    border-left-color: rgba(249, 115, 22, 0.4);
-    box-shadow: inset 4px 0 12px -4px rgba(249, 115, 22, 0.15);
+    background-color: rgba(220, 38, 38, 0.06) !important;
+    border-left-color: rgba(220, 38, 38, 0.4);
+    box-shadow: inset 4px 0 12px -4px rgba(220, 38, 38, 0.15);
   }
   /* Message action toolbar — ember-bordered floating bar */
   [data-message-id] .group-hover\:flex {
-    border-color: rgba(249, 115, 22, 0.25) !important;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgba(249, 115, 22, 0.1);
+    border-color: rgba(220, 38, 38, 0.25) !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgba(220, 38, 38, 0.1);
   }
   [data-message-id] .group-hover\:flex button:hover {
-    color: #f97316 !important;
-    background-color: rgba(249, 115, 22, 0.1);
+    color: #dc2626 !important;
+    background-color: rgba(220, 38, 38, 0.1);
     border-radius: 4px;
   }
   /* Message avatars — ember ring on hover */
@@ -356,7 +356,7 @@
     transition: box-shadow 0.15s ease;
   }
   [data-message-id]:hover img.rounded-full {
-    box-shadow: 0 0 8px rgba(249, 115, 22, 0.35);
+    box-shadow: 0 0 8px rgba(220, 38, 38, 0.35);
   }
 
   /* ── ATTACHMENTS ── */
@@ -365,26 +365,26 @@
     transition: box-shadow 0.2s ease;
   }
   [data-attachment-id] img:hover {
-    box-shadow: 0 0 16px rgba(249, 115, 22, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 16px rgba(220, 38, 38, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
   }
   /* Audio player container */
   .message-content + div .bg-gray-800.rounded-lg,
   [data-message-id] .bg-gray-800.rounded-lg {
-    border: 1px solid rgba(249, 115, 22, 0.1);
+    border: 1px solid rgba(220, 38, 38, 0.1);
     transition: border-color 0.2s ease;
   }
   [data-message-id] .bg-gray-800.rounded-lg:hover {
-    border-color: rgba(249, 115, 22, 0.3);
-    box-shadow: 0 0 10px rgba(249, 115, 22, 0.08);
+    border-color: rgba(220, 38, 38, 0.3);
+    box-shadow: 0 0 10px rgba(220, 38, 38, 0.08);
   }
   /* Video player — ember border */
   [data-controller="video-player"] {
-    border: 1px solid rgba(249, 115, 22, 0.1);
+    border: 1px solid rgba(220, 38, 38, 0.1);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   [data-controller="video-player"]:hover {
-    border-color: rgba(249, 115, 22, 0.35);
-    box-shadow: 0 0 14px rgba(249, 115, 22, 0.15);
+    border-color: rgba(220, 38, 38, 0.35);
+    box-shadow: 0 0 14px rgba(220, 38, 38, 0.15);
   }
 
   /* ── MEMBER LIST ── */
@@ -394,9 +394,9 @@
     border-left: 2px solid transparent;
   }
   #member-sidebar [data-user-id]:hover {
-    background: linear-gradient(90deg, rgba(249, 115, 22, 0.1), rgba(249, 115, 22, 0.03)) !important;
-    border-left-color: rgba(249, 115, 22, 0.5);
-    box-shadow: inset 4px 0 10px -4px rgba(249, 115, 22, 0.2);
+    background: linear-gradient(90deg, rgba(220, 38, 38, 0.1), rgba(220, 38, 38, 0.03)) !important;
+    border-left-color: rgba(220, 38, 38, 0.5);
+    box-shadow: inset 4px 0 10px -4px rgba(220, 38, 38, 0.2);
   }
   /* Member avatar — ember ring on hover */
   #member-sidebar [data-user-id] img.rounded-full,
@@ -405,7 +405,7 @@
   }
   #member-sidebar [data-user-id]:hover img.rounded-full,
   #member-sidebar [data-user-id]:hover > div > div.rounded-full {
-    box-shadow: 0 0 8px rgba(249, 115, 22, 0.35);
+    box-shadow: 0 0 8px rgba(220, 38, 38, 0.35);
   }
   /* Online status dot — glow when green */
   #member-sidebar .bg-green-500 {
@@ -413,20 +413,20 @@
   }
   /* Role section headers — ember underline */
   #member-sidebar h3 {
-    border-bottom: 1px solid rgba(249, 115, 22, 0.08);
+    border-bottom: 1px solid rgba(220, 38, 38, 0.08);
     padding-bottom: 4px;
   }
   /* Member sidebar top edge — lava seam */
   #member-sidebar {
-    border-left: 1px solid rgba(249, 115, 22, 0.15) !important;
-    box-shadow: -2px 0 16px rgba(249, 115, 22, 0.06);
+    border-left: 1px solid rgba(220, 38, 38, 0.15) !important;
+    box-shadow: -2px 0 16px rgba(220, 38, 38, 0.06);
   }
 
   /* Buttons — fire glow on hover */
-  .bg-orange-600:hover, .bg-amber-600:hover {
-    box-shadow: 0 0 14px rgba(249, 115, 22, 0.5), 0 2px 8px rgba(249, 115, 22, 0.3);
+  .bg-red-600:hover, .bg-red-600:hover {
+    box-shadow: 0 0 14px rgba(220, 38, 38, 0.5), 0 2px 8px rgba(220, 38, 38, 0.3);
   }
-  .bg-orange-600, .bg-amber-600 {
+  .bg-red-600, .bg-red-600 {
     transition: box-shadow 0.2s ease;
   }
 
@@ -434,42 +434,42 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(249, 115, 22, 0.25);
+    background: rgba(220, 38, 38, 0.25);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(249, 115, 22, 0.45);
+    background: rgba(220, 38, 38, 0.45);
   }
 
-  /* Text selection — orange ember */
+  /* Text selection — red ember */
   ::selection {
-    background: rgba(249, 115, 22, 0.3);
+    background: rgba(220, 38, 38, 0.3);
     color: #fff;
   }
 
   /* Focus rings — fire instead of default blue */
   *:focus-visible {
-    outline-color: rgba(249, 115, 22, 0.6) !important;
+    outline-color: rgba(220, 38, 38, 0.6) !important;
   }
 
   /* Animated lava border for server header */
   .border-b.border-gray-900.shadow-sm {
     border-bottom-color: transparent;
     background-image: linear-gradient(var(--tw-gradient-stops, #282625, #282625)),
-                      linear-gradient(90deg, rgba(249,115,22,0.0), rgba(249,115,22,0.3), rgba(234,88,12,0.1));
+                      linear-gradient(90deg, rgba(220,38,38,0.0), rgba(220,38,38,0.3), rgba(185,28,28,0.1));
     background-clip: padding-box, border-box;
     background-origin: padding-box, border-box;
     border-bottom: 1px solid transparent;
   }
 
   /* Pulsing ember glow on the active server rail pill */
-  .bg-amber-300.rounded-r-full {
-    box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);
+  .bg-red-400.rounded-r-full {
+    box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
     animation: ember-pulse 2s ease-in-out infinite;
   }
   @keyframes ember-pulse {
-    0%, 100% { box-shadow: 0 0 6px rgba(251, 191, 36, 0.4); }
-    50% { box-shadow: 0 0 10px rgba(249, 115, 22, 0.7); }
+    0%, 100% { box-shadow: 0 0 6px rgba(248, 113, 113, 0.4); }
+    50% { box-shadow: 0 0 10px rgba(220, 38, 38, 0.7); }
   }
 
   /* Active server pill — fire flare on hover */
@@ -478,21 +478,21 @@
   }
   .server-icon-wrap:hover .active-server-pill {
     width: 5px;
-    background-color: #f97316;
-    box-shadow: 0 0 12px rgba(249, 115, 22, 0.7),
-                0 0 24px rgba(251, 146, 36, 0.35);
+    background-color: #dc2626;
+    box-shadow: 0 0 12px rgba(220, 38, 38, 0.7),
+                0 0 24px rgba(239, 68, 68, 0.35);
     animation: pill-fire-flare 2.5s ease-in-out infinite;
   }
   @keyframes pill-fire-flare {
     0%, 100% {
-      box-shadow: 0 0 12px rgba(249, 115, 22, 0.7),
-                  0 0 24px rgba(251, 146, 36, 0.35);
-      background-color: #f97316;
+      box-shadow: 0 0 12px rgba(220, 38, 38, 0.7),
+                  0 0 24px rgba(239, 68, 68, 0.35);
+      background-color: #dc2626;
     }
     50% {
-      box-shadow: 0 0 16px rgba(251, 191, 36, 0.8),
-                  0 0 30px rgba(249, 115, 22, 0.45);
-      background-color: #fb923c;
+      box-shadow: 0 0 16px rgba(248, 113, 113, 0.8),
+                  0 0 30px rgba(220, 38, 38, 0.45);
+      background-color: #ef4444;
     }
   }
 
@@ -503,42 +503,55 @@
 
   /* Magma cracks between panels */
   nav.bg-gray-950 {
-    border-right: 1px solid rgba(249, 115, 22, 0.15);
-    box-shadow: 1px 0 12px rgba(249, 115, 22, 0.06);
+    border-right: 1px solid rgba(220, 38, 38, 0.15);
+    box-shadow: 1px 0 12px rgba(220, 38, 38, 0.06);
   }
   aside.bg-gray-800 {
-    box-shadow: 1px 0 8px rgba(249, 115, 22, 0.04);
+    box-shadow: 1px 0 8px rgba(220, 38, 38, 0.04);
   }
   /* Channel header bar — subtle bottom ember line */
   .border-b.shadow-sm.bg-gray-800 {
-    border-bottom-color: rgba(249, 115, 22, 0.12);
+    border-bottom-color: rgba(220, 38, 38, 0.12);
   }
 
   /* Voice controls bar — inferno styling */
   .voice-controls-inferno {
-    border-top: 1px solid rgba(249, 115, 22, 0.25);
-    background: linear-gradient(180deg, rgba(249, 115, 22, 0.06), transparent) !important;
+    border-top: 1px solid rgba(220, 38, 38, 0.25);
+    background: linear-gradient(180deg, rgba(220, 38, 38, 0.06), transparent) !important;
     animation: voice-bar-ember 3s ease-in-out infinite;
   }
   @keyframes voice-bar-ember {
-    0%, 100% { border-top-color: rgba(249, 115, 22, 0.2); }
-    50% { border-top-color: rgba(251, 191, 36, 0.4); }
+    0%, 100% { border-top-color: rgba(220, 38, 38, 0.2); }
+    50% { border-top-color: rgba(248, 113, 113, 0.4); }
   }
   .voice-controls-inferno button {
     transition: all 0.15s ease;
   }
   .voice-controls-inferno button:hover {
-    box-shadow: 0 0 8px rgba(249, 115, 22, 0.3);
+    box-shadow: 0 0 8px rgba(220, 38, 38, 0.3);
+  }
+
+  /* Sidebar voice speaking indicator — audio-level responsive ring */
+  .voice-sidebar-avatar {
+    transition: box-shadow 0.1s ease-out;
+  }
+  .voice-speaking .voice-sidebar-avatar {
+    box-shadow: 0 0 0 2px #dc2626,
+                0 0 calc(3px + 8px * var(--audio-level, 0)) rgba(220, 38, 38, calc(0.3 + 0.5 * var(--audio-level, 0)));
+  }
+  .voice-speaking {
+    background: rgba(220, 38, 38, calc(0.03 + 0.05 * var(--audio-level, 0)));
+    transition: background 0.1s ease-out;
   }
 
   /* Message jump highlight */
   .message-highlight {
     animation: message-flash 4s ease-out !important;
-    background-color: rgba(249, 115, 22, 0.15) !important;
+    background-color: rgba(220, 38, 38, 0.15) !important;
     border-radius: 4px;
   }
   @keyframes message-flash {
-    0%, 30% { background-color: rgba(249, 115, 22, 0.3) !important; }
+    0%, 30% { background-color: rgba(220, 38, 38, 0.3) !important; }
     100% { background-color: transparent !important; }
   }
 

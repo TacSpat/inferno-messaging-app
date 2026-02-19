@@ -17,6 +17,9 @@ export default class extends Controller {
     event.stopPropagation()
     this.closeCard()
 
+    // Close any other profile cards (e.g. from message clicks)
+    document.querySelectorAll("[data-profile-card]").forEach(el => el.remove())
+
     const target = event.currentTarget
     const userId = target.dataset.userId
     if (!userId || !this.serverIdValue) return
@@ -26,9 +29,15 @@ export default class extends Controller {
     })
     if (!response.ok) return
 
+    // Close any open member context menu
+    document.querySelectorAll("[data-context-menu='member']").forEach(el => el.remove())
+    const notifMenu = document.getElementById("notif-context-menu")
+    if (notifMenu) notifMenu.remove()
+
     const html = await response.text()
     this.card = document.createElement("div")
     this.card.className = "fixed z-50 context-pop"
+    this.card.setAttribute("data-profile-card", "")
     this.card.innerHTML = html
 
     // Position to the left of the member sidebar

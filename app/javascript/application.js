@@ -18,7 +18,7 @@ Turbo.setConfirmMethod((message) => {
         </div>
         <div class="flex justify-end gap-3 px-5 py-4 bg-gray-850 bg-gray-900/50">
           <button data-action="cancel" class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:underline cursor-pointer">Cancel</button>
-          <button data-action="confirm" class="px-4 py-2 text-sm font-medium bg-red-600 hover:bg-red-700 text-white rounded transition cursor-pointer">Confirm</button>
+          <button data-action="confirm" class="px-4 py-2 text-sm font-medium bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white rounded transition cursor-pointer">Confirm</button>
         </div>
       </div>
     `

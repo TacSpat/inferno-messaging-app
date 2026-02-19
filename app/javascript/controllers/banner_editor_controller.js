@@ -47,41 +47,21 @@ export default class extends Controller {
 
     this.modal = document.createElement("div")
     this.modal.className = "modal-overlay fixed inset-0 z-[300] flex items-center justify-center bg-black/70"
-    this.modal.innerHTML = `
-      <div class="bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg mx-4">
-        <div class="px-5 pt-5 pb-3">
-          <h3 class="text-white text-lg font-semibold">${title}</h3>
-          <p class="text-gray-400 text-sm mt-1">Drag to reposition, use slider to zoom</p>
-        </div>
-        <div class="relative mx-5 rounded-lg overflow-hidden bg-gray-900" data-crop-vp
-             style="height: ${vpHeight}px; cursor: grab;">
-          <img src="${src}" data-crop-img
-               style="position: absolute; left: 0; top: 0; pointer-events: none; user-select: none;" />
-          ${mode === "avatar" ? `
-          <div class="absolute inset-0 pointer-events-none">
-            <svg class="w-full h-full" viewBox="0 0 480 300" preserveAspectRatio="none">
-              <defs>
-                <mask id="crop-hole">
-                  <rect width="480" height="300" fill="white"/>
-                  <circle cx="240" cy="150" r="110" fill="black"/>
-                </mask>
-              </defs>
-              <rect width="480" height="300" fill="rgba(0,0,0,0.55)" mask="url(#crop-hole)"/>
-              <circle cx="240" cy="150" r="110" fill="none" stroke="white" stroke-width="2" opacity="0.5"/>
-            </svg>
-          </div>` : ""}
-        </div>
-        <div class="px-5 py-3 flex items-center gap-3">
-          <span class="text-gray-400 text-xs">Zoom</span>
-          <input type="range" min="100" max="300" value="100" class="flex-1 accent-amber-500" data-crop-zoom />
-          <span class="text-gray-400 text-xs w-10 text-right" data-crop-zoom-label>1.0x</span>
-        </div>
-        <div class="px-5 pb-5 flex justify-end gap-3">
-          <button type="button" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition" data-crop-cancel>Cancel</button>
-          <button type="button" class="px-5 py-2 text-sm bg-amber-600 hover:bg-amber-700 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
-        </div>
-      </div>
-    `
+
+    const tpl = document.getElementById("tpl-crop-modal").content.cloneNode(true)
+    tpl.querySelector('[data-slot="title"]').textContent = title
+
+    const viewport = tpl.querySelector("[data-crop-vp]")
+    viewport.style.height = vpHeight + "px"
+
+    const cropImg = tpl.querySelector("[data-crop-img]")
+    cropImg.src = src
+
+    if (mode === "avatar") {
+      tpl.querySelector('[data-slot="avatar-overlay"]').classList.remove("hidden")
+    }
+
+    this.modal.appendChild(tpl)
     document.body.appendChild(this.modal)
 
     this.cropImg = this.modal.querySelector("[data-crop-img]")
