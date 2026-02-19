@@ -132,7 +132,7 @@ class ServersController < ApplicationController
   end
 
   def server_params
-    params.require(:server).permit(:name, :description, :icon)
+    params.require(:server).permit(:name, :description, :icon, :banner)
   end
 
   def set_no_cache

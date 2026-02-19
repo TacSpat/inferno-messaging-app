@@ -6,8 +6,7 @@ class FederationService
     raise FederationError, "User has no Nostr keypair" unless user.nostr_private_key.present?
 
     # Normalize instance URL
-    instance_url = "https://#{instance_url}" unless instance_url.start_with?("http")
-    instance_url = instance_url.chomp("/")
+    instance_url = normalize_instance_url_for_storage(instance_url)
 
     # Build the signed event
     event = build_create_server_event(user: user, instance_url: instance_url, name: name, description: description)
@@ -206,6 +205,23 @@ class FederationService
         other_profile_color: other_user.profile_color
       }
     )
+  end
+
+  # Canonical URL normalization for storage — strips default ports, ensures scheme.
+  # All sync code should call this before find_or_initialize_by with remote_instance_url.
+  def self.normalize_instance_url_for_storage(url)
+    url = url.to_s.strip
+    url = "#{federation_protocol(url)}://#{url}" unless url.start_with?("http")
+    url = url.chomp("/")
+    uri = URI.parse(url)
+    default = uri.scheme == "https" ? 443 : 80
+    if uri.port == default
+      "#{uri.scheme}://#{uri.host}"
+    else
+      "#{uri.scheme}://#{uri.host}:#{uri.port}"
+    end
+  rescue URI::InvalidURIError
+    url
   end
 
   private

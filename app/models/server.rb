@@ -15,6 +15,7 @@ class Server < ApplicationRecord
   has_many :server_stickers, dependent: :destroy
   has_many :voice_states, dependent: :destroy
   has_one_attached :icon
+  has_one_attached :banner
 
   validates :name, presence: true, length: { maximum: 100 }
   validate :within_instance_server_limit, on: :create

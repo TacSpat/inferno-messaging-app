@@ -232,6 +232,6 @@ class ServerSettingsController < ApplicationController
   end
 
   def server_params
-    params.require(:server).permit(:name, :description, :icon, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
+    params.require(:server).permit(:name, :description, :icon, :banner, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
   end
 end

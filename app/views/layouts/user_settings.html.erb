@@ -9,7 +9,7 @@
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
   </head>
-  <body class="h-full overflow-hidden text-gray-100">
+  <body class="h-full overflow-hidden text-gray-100" data-current-user-id="<%= current_user&.public_id %>">
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
 
@@ -17,8 +17,8 @@
       <!-- Mobile sidebar backdrop -->
       <div data-settings-sidebar-target="backdrop" class="hidden fixed inset-0 bg-black/50 z-40 md:hidden" data-action="click->settings-sidebar#close"></div>
       <!-- Settings sidebar -->
-      <div data-settings-sidebar-target="sidebar" class="hidden md:block w-56 shrink-0 bg-gray-800 overflow-y-auto fixed top-0 left-0 bottom-0 z-50 md:relative md:z-auto">
-        <nav class="py-8 px-4">
+      <div data-settings-sidebar-target="sidebar" class="hidden md:flex flex-col w-56 shrink-0 bg-gray-800 fixed top-0 left-0 bottom-0 z-50 md:relative md:z-auto">
+        <nav class="flex-1 overflow-y-auto py-8 px-4">
           <!-- Mobile close button -->
           <button type="button" class="md:hidden flex items-center text-gray-400 hover:text-white mb-4 px-2" data-action="click->settings-sidebar#close">
             <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
@@ -56,6 +56,7 @@
                 class: "flex items-center w-full px-2 py-1.5 rounded text-sm text-red-400 hover:bg-red-600/20 cursor-pointer" %>
           </div>
         </nav>
+
       </div>
 
       <!-- Settings content -->
@@ -67,21 +68,23 @@
           </button>
           <span class="font-semibold text-white text-sm capitalize"><%= action_name.tr('_', ' ') %></span>
           <div class="flex-1"></div>
-          <%= link_to root_path, class: "flex items-center justify-center w-8 h-8 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+          <button type="button" onclick="history.back()" class="flex items-center justify-center w-8 h-8 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          <% end %>
+          </button>
         </div>
 
         <div class="py-4 sm:py-8 px-4 sm:px-10">
           <!-- Close button (desktop) -->
           <div class="hidden md:flex justify-end mb-4">
-            <%= link_to root_path, class: "flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+            <button type="button" onclick="history.back()" class="flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition cursor-pointer">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-            <% end %>
+            </button>
           </div>
           <%= yield %>
         </div>
       </div>
     </div>
+
+    <%= render "shared/js_templates" %>
   </body>
 </html>

@@ -184,9 +184,8 @@ module Nostr
       FederationProfileSyncJob.perform_later(remote_user.id)
 
       # Auto-create relay connection for home instance
-      if params[:home_relay].present?
-        RelayConnection.find_or_create_for_relay(params[:home_relay])
-      end
+      relay_url = params[:home_relay].presence || derive_relay_url(home_instance)
+      RelayConnection.find_or_create_for_relay(relay_url) if relay_url.present?
 
       # Redeem pending invite
       if (code = session.delete(:pending_invite_code))
@@ -212,6 +211,16 @@ module Nostr
     end
 
     private
+
+    def derive_relay_url(domain)
+      return nil if domain.blank?
+      # Explicit port = dev with direct HTTP → ws://; otherwise wss://
+      if domain.include?(":")
+        "ws://#{domain}"
+      else
+        "wss://#{domain}"
+      end
+    end
 
     def extract_home_instance(relay_url)
       return nil if relay_url.blank?

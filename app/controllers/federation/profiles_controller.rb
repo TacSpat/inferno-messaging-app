@@ -143,9 +143,12 @@ class Federation::ProfilesController < ApplicationController
     synced_ids = []
 
     servers.each do |server_data|
+      instance_url = FederationService.normalize_instance_url_for_storage(
+        server_data[:instance_url] || server_data["instance_url"]
+      )
       ref = user.remote_server_references.find_or_initialize_by(
-        remote_instance_url: server_data[:instance_url],
-        remote_server_id: server_data[:server_id]
+        remote_instance_url: instance_url,
+        remote_server_id: server_data[:server_id] || server_data["server_id"]
       )
       ref.update!(
         name: server_data[:name],
@@ -156,7 +159,8 @@ class Federation::ProfilesController < ApplicationController
     end
 
     # Clean up stale references from the reporting instance
-    reporting_url = servers.first&.dig(:instance_url) || servers.first&.dig("instance_url")
+    raw_reporting_url = servers.first&.dig(:instance_url) || servers.first&.dig("instance_url")
+    reporting_url = raw_reporting_url.present? ? FederationService.normalize_instance_url_for_storage(raw_reporting_url) : nil
     if reporting_url.present?
       user.remote_server_references
         .where(remote_instance_url: reporting_url)
@@ -303,8 +307,19 @@ class Federation::ProfilesController < ApplicationController
     requesting = params[:requesting_instance]&.strip&.downcase
     if requesting.present? && payload["instance"] != requesting
       render json: { error: "Token instance mismatch" }, status: :forbidden
-      nil
+      return
     end
+
+    # Auto-link relay for the requesting instance
+    auto_link_relay_for(requesting) if requesting.present?
+  end
+
+  def auto_link_relay_for(domain)
+    return if domain.blank?
+    relay_url = domain.include?(":") ? "ws://#{domain}" : "wss://#{domain}"
+    RelayConnection.find_or_create_for_relay(relay_url)
+  rescue StandardError => e
+    Rails.logger.warn("Failed to auto-link relay for #{domain}: #{e.message}")
   end
 
   def verify_federation_open

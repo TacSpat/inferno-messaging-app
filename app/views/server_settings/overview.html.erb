@@ -1,62 +1,131 @@
-<h1 class="text-xl font-bold text-white mb-6">Server Overview</h1>
+<% online_count = @server.members.where(online_state: :online).count %>
+<% member_count = @server.members.count %>
 
-<%= form_with model: @server, url: server_settings_update_overview_path(@server), method: :patch, html: { multipart: true }, class: "space-y-6" do |f| %>
-  <% if @server.errors.any? %>
-    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4">
-      <% @server.errors.full_messages.each do |msg| %>
-        <p class="text-sm text-red-300"><%= msg %></p>
+<div class="flex flex-col lg:flex-row gap-8" data-controller="server-profile-preview">
+  <!-- Left: Form -->
+  <div class="flex-1 min-w-0">
+    <h1 class="text-xl font-bold text-white mb-1">Server Profile</h1>
+    <p class="text-sm text-gray-400 mb-6">Customize how your server appears in invite links</p>
+
+    <%= form_with model: @server, url: server_settings_update_overview_path(@server), method: :patch, html: { multipart: true }, class: "space-y-6" do |f| %>
+      <% if @server.errors.any? %>
+        <div class="bg-red-900/50 border border-red-700 rounded-lg p-4">
+          <% @server.errors.full_messages.each do |msg| %>
+            <p class="text-sm text-red-300"><%= msg %></p>
+          <% end %>
+        </div>
       <% end %>
-    </div>
-  <% end %>
 
-  <div class="flex gap-6">
-    <!-- Icon -->
-    <div class="shrink-0">
-      <div class="w-24 h-24 rounded-2xl bg-gray-700 flex items-center justify-center text-3xl font-bold text-white overflow-hidden">
-        <% if @server.icon.attached? %>
-          <%= image_tag @server.icon, class: "w-full h-full object-cover" %>
-        <% else %>
-          <%= @server.name.split.map(&:first).join[0..1].upcase %>
+      <!-- Name -->
+      <div>
+        <%= f.label :name, "Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", data: { server_profile_preview_target: "nameInput", action: "input->server-profile-preview#updateName" } %>
+      </div>
+
+      <!-- Description -->
+      <div>
+        <%= f.label :description, "Description", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "What's this server about?" %>
+      </div>
+
+      <div class="border-t border-gray-700 pt-6"></div>
+
+      <!-- Icon -->
+      <div>
+        <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Icon</h3>
+        <p class="text-xs text-gray-500 mb-3">We recommend an image of at least 512x512.</p>
+        <div class="flex items-center gap-3">
+          <label class="inline-flex items-center px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer transition">
+            Change Server Icon
+            <%= f.file_field :icon, accept: "image/*", class: "hidden", data: { server_profile_preview_target: "iconInput", action: "change->server-profile-preview#previewIcon" } %>
+          </label>
+          <% if @server.icon.attached? %>
+            <button type="button" class="text-xs text-red-400 hover:text-red-300 font-medium" data-action="click->server-profile-preview#removeIcon">Remove Icon</button>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="border-t border-gray-700 pt-6"></div>
+
+      <!-- Banner -->
+      <div>
+        <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Banner</h3>
+        <p class="text-xs text-gray-500 mb-3">Recommended size: 960x540. Shown on your invite page.</p>
+        <div class="flex items-center gap-3">
+          <label class="inline-flex items-center px-4 py-1.5 rounded bg-red-600 hover:bg-red-700 text-white text-xs font-semibold cursor-pointer transition">
+            Upload Banner
+            <%= f.file_field :banner, accept: "image/*", class: "hidden", data: { server_profile_preview_target: "bannerInput", action: "change->server-profile-preview#previewBanner" } %>
+          </label>
+          <% if @server.banner.attached? %>
+            <button type="button" class="text-xs text-red-400 hover:text-red-300 font-medium" data-action="click->server-profile-preview#removeBanner">Remove Banner</button>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="border-t border-gray-700 pt-6"></div>
+
+      <!-- Welcome Message Settings -->
+      <div>
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4">Welcome Message</h2>
+        <div class="space-y-4">
+          <div class="flex items-center gap-3">
+            <%= f.check_box :welcome_message_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-700 text-red-500 focus:ring-red-500" %>
+            <%= f.label :welcome_message_enabled, "Send a welcome message when someone joins", class: "text-sm text-gray-300" %>
+          </div>
+          <div>
+            <%= f.label :welcome_channel_id, "Welcome Channel", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+            <%= f.collection_select :welcome_channel_id, @server.channels.text.ordered, :id, :name, { include_blank: "Default (#general)" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+          </div>
+          <div>
+            <%= f.label :welcome_message_template, "Message Template", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+            <%= f.text_area :welcome_message_template, rows: 2, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "Welcome to the server, {user}!" %>
+            <p class="text-xs text-gray-500 mt-1">Use {user} for display name, {tag} for username#discriminator, {server} for server name</p>
+          </div>
+        </div>
+      </div>
+
+      <%= f.submit "Save Changes", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+    <% end %>
+  </div>
+
+  <!-- Right: Live Preview Card -->
+  <div class="lg:w-72 shrink-0">
+    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Preview</h3>
+    <div class="w-72 rounded-lg overflow-hidden bg-gray-900 shadow-xl">
+      <!-- Banner area -->
+      <div class="relative h-28 bg-gray-700" data-server-profile-preview-target="bannerPreview">
+        <% if @server.banner.attached? %>
+          <%= image_tag @server.banner, class: "w-full h-full object-cover", data: { server_profile_preview_target: "bannerImage" } %>
         <% end %>
       </div>
-      <%= f.file_field :icon, accept: "image/*", class: "mt-2 text-xs text-gray-400 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:bg-red-600 hover:file:bg-red-700 file:cursor-pointer w-24" %>
-    </div>
-
-    <div class="flex-1 space-y-4">
-      <div>
-        <%= f.label :name, "Server Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
-        <p class="text-xs text-gray-500 mt-1">Hosted on <%= Rails.application.config.x.instance_domain %></p>
-      </div>
-      <div>
-        <%= f.label :description, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none" %>
-      </div>
-    </div>
-  </div>
-
-  <!-- Welcome Message Settings -->
-  <div class="border-t border-gray-700 pt-6">
-    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4">Welcome Message</h2>
-
-    <div class="space-y-4">
-      <div class="flex items-center gap-3">
-        <%= f.check_box :welcome_message_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-700 text-red-500 focus:ring-red-500" %>
-        <%= f.label :welcome_message_enabled, "Send a welcome message when someone joins", class: "text-sm text-gray-300" %>
-      </div>
-
-      <div>
-        <%= f.label :welcome_channel_id, "Welcome Channel", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.collection_select :welcome_channel_id, @server.channels.text.ordered, :id, :name, { include_blank: "Default (#general)" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
-      </div>
-
-      <div>
-        <%= f.label :welcome_message_template, "Message Template", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_area :welcome_message_template, rows: 2, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm resize-none", placeholder: "Welcome to the server, {user}!" %>
-        <p class="text-xs text-gray-500 mt-1">Use {user} for display name, {tag} for username#discriminator, {server} for server name</p>
+      <!-- Icon + Info -->
+      <div class="relative px-4 pb-4">
+        <!-- Icon overlapping banner -->
+        <div class="-mt-8 mb-2">
+          <div class="w-16 h-16 rounded-2xl bg-gray-700 border-4 border-gray-900 flex items-center justify-center text-xl font-bold text-white overflow-hidden" data-server-profile-preview-target="iconPreview">
+            <% if @server.icon.attached? %>
+              <%= image_tag @server.icon, class: "w-full h-full object-cover", data: { server_profile_preview_target: "iconImage" } %>
+            <% else %>
+              <span data-server-profile-preview-target="iconInitial"><%= @server.name[0].upcase %></span>
+            <% end %>
+          </div>
+        </div>
+        <!-- Server name -->
+        <p class="text-white font-bold text-sm truncate" data-server-profile-preview-target="namePreview"><%= @server.name %></p>
+        <!-- Member counts -->
+        <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-400">
+          <div class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-green-500"></span>
+            <span><%= online_count %> Online</span>
+          </div>
+          <div class="flex items-center gap-1">
+            <span class="w-2 h-2 rounded-full bg-gray-500"></span>
+            <span><%= member_count %> Members</span>
+          </div>
+        </div>
+        <!-- Established date -->
+        <p class="text-xs text-gray-500 mt-1">Est. <%= @server.created_at.strftime("%b %Y") %></p>
       </div>
     </div>
   </div>
-
-  <%= f.submit "Save Changes", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
-<% end %>
+</div>

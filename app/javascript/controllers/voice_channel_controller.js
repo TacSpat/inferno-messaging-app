@@ -15,11 +15,19 @@ export default class extends Controller {
 
   connect() {
     this.room = null
-    this.muted = false
-    this.deafened = false
-    this._mutedBeforeDeafen = false // tracks mute state prior to deafening
     this.channelId = null
     this.channelDisplayName = null
+
+    // Restore mute/deafen preference from last session
+    try {
+      this.muted = localStorage.getItem("voice_pref_muted") === "true"
+      this.deafened = localStorage.getItem("voice_pref_deafened") === "true"
+      this._mutedBeforeDeafen = localStorage.getItem("voice_muted_before_deafen") === "true"
+    } catch {
+      this.muted = false
+      this.deafened = false
+      this._mutedBeforeDeafen = false
+    }
 
     // Listen for join requests from the turbo frame
     this._onJoinRequest = (e) => this.handleJoinRequest(e.detail)
@@ -44,6 +52,28 @@ export default class extends Controller {
 
     this.serverMuted = false
     this.serverDeafened = false
+
+    // Restore LiveKit room preserved from a previous navigation
+    if (window._voiceState?.room) {
+      const vs = window._voiceState
+      delete window._voiceState
+      this.room = vs.room
+      this.channelId = vs.channelId
+      this.channelDisplayName = vs.channelDisplayName
+      this.muted = vs.muted
+      this.deafened = vs.deafened
+      this._mutedBeforeDeafen = vs.mutedBeforeDeafen
+      this.serverMuted = vs.serverMuted || false
+      this.serverDeafened = vs.serverDeafened || false
+
+      if (this.hasChannelNameTarget) {
+        this.channelNameTarget.textContent = this.channelDisplayName
+      }
+      this.showControlsBar()
+      this._startAudioLevelMonitor()
+      this.syncAllVoiceUI()
+      return
+    }
 
     // Restore state from server-rendered values (page load while already in a call)
     if (this.connectedValue) {
@@ -76,8 +106,19 @@ export default class extends Controller {
     window.removeEventListener("voice:force-move", this._onForceMove)
     window.removeEventListener("voice:server-mute", this._onServerMute)
     window.removeEventListener("voice:server-deafen", this._onServerDeafen)
+    // Preserve the LiveKit room across page navigations instead of disconnecting.
+    // The next connect() will pick it up from window._voiceState.
     if (this.room) {
-      this.room.disconnect()
+      window._voiceState = {
+        room: this.room,
+        channelId: this.channelId,
+        channelDisplayName: this.channelDisplayName,
+        muted: this.muted,
+        deafened: this.deafened,
+        mutedBeforeDeafen: this._mutedBeforeDeafen,
+        serverMuted: this.serverMuted,
+        serverDeafened: this.serverDeafened
+      }
       this.room = null
     }
   }
@@ -144,6 +185,25 @@ export default class extends Controller {
 
       // Show voice controls bar
       this.showControlsBar()
+      this.syncAllVoiceUI()
+
+      // Notify server of initial mute/deafen state if joining muted/deafened
+      if (this.muted || this.deafened) {
+        const csrf2 = document.querySelector("meta[name=csrf-token]")?.content
+        try {
+          if (this.deafened) {
+            await fetch("/voice_states/self_deafen", {
+              method: "PATCH",
+              headers: { "X-CSRF-Token": csrf2, "Content-Type": "application/json" }
+            })
+          } else {
+            await fetch("/voice_states/self_mute", {
+              method: "PATCH",
+              headers: { "X-CSRF-Token": csrf2, "Content-Type": "application/json" }
+            })
+          }
+        } catch {}
+      }
 
       // Update sidebar with participant
       this.addSidebarParticipant(channelId, data)
@@ -382,6 +442,7 @@ export default class extends Controller {
 
   async disconnectVoice() {
     this._stopAudioLevelMonitor()
+    delete window._voiceState // Clear any preserved state
     if (this.room) {
       this.room.disconnect()
       this.room = null
@@ -457,6 +518,8 @@ export default class extends Controller {
     } catch (err) {
       console.error("Failed to update mute state:", err)
     }
+
+    this._saveVoicePrefs()
   }
 
   async toggleDeafen() {
@@ -520,6 +583,15 @@ export default class extends Controller {
     } catch (err) {
       console.error("Failed to update deafen state:", err)
     }
+
+    this._saveVoicePrefs()
+  }
+
+  _saveVoicePrefs() {
+    try {
+      localStorage.setItem("voice_pref_muted", String(this.muted))
+      localStorage.setItem("voice_pref_deafened", String(this.deafened))
+    } catch {}
   }
 
   _saveMuteMemory() {
@@ -782,6 +854,7 @@ export default class extends Controller {
 
   handleForceDisconnect() {
     this._stopAudioLevelMonitor()
+    delete window._voiceState
     if (this.room) {
       this.room.disconnect()
       this.room = null

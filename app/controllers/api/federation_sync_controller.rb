@@ -103,8 +103,9 @@ class Api::FederationSyncController < ApplicationController
 
   def sync_server_references(user, data)
     (data["servers"] || []).each do |server_data|
+      instance_url = FederationService.normalize_instance_url_for_storage(server_data["instance_url"])
       ref = user.remote_server_references.find_or_initialize_by(
-        remote_instance_url: server_data["instance_url"],
+        remote_instance_url: instance_url,
         remote_server_id: server_data["server_id"]
       )
       ref.update!(
@@ -118,8 +119,7 @@ class Api::FederationSyncController < ApplicationController
   def sync_friend_references(user, home_instance, data)
     friends = data["friends"] || []
     synced_ids = []
-    protocol = home_instance.to_s.include?(":") ? "http" : "https"
-    home_url = "#{protocol}://#{home_instance}"
+    home_url = FederationService.normalize_instance_url_for_storage(home_instance)
 
     friends.each do |friend_data|
       ref = user.remote_friend_references.find_or_initialize_by(
@@ -145,8 +145,9 @@ class Api::FederationSyncController < ApplicationController
   def sync_conversation_references(user, data)
     (data["conversations"] || []).each do |conv_data|
       other = conv_data["other_user"] || {}
+      instance_url = FederationService.normalize_instance_url_for_storage(conv_data["instance_url"])
       ref = user.remote_conversation_references.find_or_initialize_by(
-        remote_instance_url: conv_data["instance_url"],
+        remote_instance_url: instance_url,
         remote_conversation_id: conv_data["conversation_id"]
       )
       ref.update!(

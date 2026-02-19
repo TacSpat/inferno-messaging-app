@@ -88,6 +88,7 @@ import VoiceChannelController from "./controllers/voice_channel_controller"
 import VoiceContextController from "./controllers/voice_context_controller"
 import InstanceSyncController from "./controllers/instance_sync_controller"
 import EmojiInputController from "./controllers/emoji_input_controller"
+import ServerProfilePreviewController from "./controllers/server_profile_preview_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -122,4 +123,5 @@ application.register("voice-channel", VoiceChannelController)
 application.register("voice-context", VoiceContextController)
 application.register("instance-sync", InstanceSyncController)
 application.register("emoji-input", EmojiInputController)
+application.register("server-profile-preview", ServerProfilePreviewController)
 // rebuild trigger
