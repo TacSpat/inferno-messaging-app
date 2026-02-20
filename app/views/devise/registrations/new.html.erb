@@ -10,31 +10,31 @@
 
       <div>
         <%= f.label :email, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.email_field :email, autofocus: true, autocomplete: "email", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.email_field :email, autofocus: true, autocomplete: "email", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div>
         <%= f.label :username, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :username, autocomplete: "username", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.text_field :username, autocomplete: "username", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div>
         <%= f.label :password, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.password_field :password, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.password_field :password, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div>
         <%= f.label :password_confirmation, "Confirm Password", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.password_field :password_confirmation, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.password_field :password_confirmation, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div>
-        <%= f.submit "Continue", class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+        <%= f.submit "Continue", class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
       </div>
     <% end %>
 
     <p class="text-center text-sm text-gray-400 mt-4">
-      Already have an account? <%= link_to "Log In", new_session_path(resource_name), class: "text-red-400 hover:underline" %>
+      Already have an account? <%= link_to "Log In", new_session_path(resource_name), class: "text-accent-light hover:underline" %>
     </p>
   </div>
 </div>

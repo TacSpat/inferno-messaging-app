@@ -1,10 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 import { positionPopup } from "../utils/popup_positioning"
 
 export default class extends Controller {
   connect() {
-    this.subscription = createConsumer().subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "NotificationChannel" },
       {
         received: (data) => this.handleNotification(data)
@@ -117,6 +117,10 @@ export default class extends Controller {
   // ---- Notification handling ----
 
   handleNotification(data) {
+    if (data.type === "presence") {
+      this._updateUserPresence(data)
+      return
+    }
     if (data.type === "mention") {
       const currentChannelId = document.querySelector("[data-current-channel-id]")
         ?.dataset?.currentChannelId
@@ -171,7 +175,7 @@ export default class extends Controller {
     let badge = homeBtn.querySelector(".home-badge")
     if (!badge) {
       badge = document.createElement("div")
-      badge.className = "home-badge mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950"
+      badge.className = "home-badge mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950"
       badge.textContent = "1"
       homeBtn.appendChild(badge)
     } else {
@@ -193,7 +197,7 @@ export default class extends Controller {
     let badge = convEl.querySelector(".mention-badge")
     if (!badge) {
       badge = document.createElement("div")
-      badge.className = "mention-badge ml-auto min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0"
+      badge.className = "mention-badge ml-auto min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0"
       badge.textContent = "1"
       convEl.appendChild(badge)
     } else {
@@ -250,7 +254,7 @@ export default class extends Controller {
     let badge = serverIcon.querySelector(".mention-badge")
     if (!badge) {
       badge = document.createElement("div")
-      badge.className = "mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950"
+      badge.className = "mention-badge absolute -bottom-0.5 -right-0.5 min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 border-2 border-gray-950"
       badge.textContent = "1"
       serverIcon.style.position = "relative"
       serverIcon.appendChild(badge)
@@ -266,7 +270,7 @@ export default class extends Controller {
     let badge = channelItem.querySelector(".mention-badge")
     if (!badge) {
       badge = document.createElement("div")
-      badge.className = "mention-badge ml-auto min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0"
+      badge.className = "mention-badge ml-auto min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0"
       badge.textContent = "1"
       channelItem.appendChild(badge)
     } else {
@@ -322,7 +326,7 @@ export default class extends Controller {
     // Add grey pill on the left
     if (!channelItem.querySelector(".unread-pill")) {
       const pill = document.createElement("div")
-      pill.className = "unread-pill absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 bg-red-500 rounded-r-full"
+      pill.className = "unread-pill absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 bg-accent rounded-r-full"
       channelItem.appendChild(pill)
     }
   }
@@ -354,9 +358,9 @@ export default class extends Controller {
     if (serverIcon.querySelector(".mention-badge")) return
     if (serverIcon.querySelector(".server-unread-pill")) return
     // Don't add if this is the active server
-    if (serverIcon.classList.contains("from-red-700")) return
+    if (serverIcon.classList.contains("from-accent-dark")) return
     const pill = document.createElement("div")
-    pill.className = "server-unread-pill absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-2 bg-red-500 rounded-r-full"
+    pill.className = "server-unread-pill absolute -left-[10px] top-1/2 -translate-y-1/2 w-[3px] h-2 bg-accent rounded-r-full"
     serverIcon.appendChild(pill)
   }
 
@@ -913,7 +917,7 @@ export default class extends Controller {
     const messageId = messageEl.dataset.messageId
     const serverId = this.currentServerId
     const currentUserId = document.body.dataset.currentUserId
-    const authorEl = messageEl.querySelector(".text-red-400")
+    const authorEl = messageEl.querySelector(".text-accent-light")
     const contentEl = messageEl.querySelector(".message-content")
     const content = contentEl?.textContent?.trim() || ""
 
@@ -928,7 +932,7 @@ export default class extends Controller {
         icon: this.icons.reply,
         label: "Reply",
         action: () => {
-          const authorName = messageEl.querySelector(".text-red-400")?.textContent?.trim() || ""
+          const authorName = messageEl.querySelector(".text-accent-light")?.textContent?.trim() || ""
           let rawPreview = messageEl.querySelector(".message-content")?.textContent?.trim() || ""
           // Strip code block markers for cleaner preview
           const preview = rawPreview.replace(/```\w*/g, "").replace(/```/g, "").replace(/\s+/g, " ").trim().substring(0, 80)
@@ -1126,7 +1130,7 @@ export default class extends Controller {
         wrapper.style.position = "relative"
         const removeBtn = document.createElement("button")
         removeBtn.type = "button"
-        removeBtn.className = "remove-attachment-btn absolute top-1 right-1 bg-red-600 hover:bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold z-10"
+        removeBtn.className = "remove-attachment-btn absolute top-1 right-1 bg-danger hover:bg-danger-light text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold z-10"
         removeBtn.innerHTML = "\u00d7"
         removeBtn.addEventListener("click", () => {
           // Find the file ID from the image src (Active Storage blob URL)
@@ -1242,7 +1246,7 @@ export default class extends Controller {
       if (item.disabled) {
         btn.className = `${baseClass} text-gray-500 cursor-not-allowed`
       } else if (item.danger) {
-        btn.className = `${baseClass} text-red-400 hover:bg-red-600/20 hover:text-red-300`
+        btn.className = `${baseClass} text-danger-light hover:bg-danger/20 hover:text-danger`
       } else {
         btn.className = `${baseClass} text-gray-300 hover:bg-gray-700 hover:text-white`
       }
@@ -1542,6 +1546,24 @@ export default class extends Controller {
     }
   }
 
+  _updateUserPresence(data) {
+    const colorMap = { online: "bg-green-500", idle: "bg-yellow-500", dnd: "bg-red-500", offline: "bg-gray-500" }
+    const cls = colorMap[data.state] || "bg-gray-500"
+    const allColors = ["bg-green-500", "bg-yellow-500", "bg-red-500", "bg-gray-500"]
+
+    // Update sidebar/friends list presence dots
+    document.querySelectorAll(`[data-user-presence="${data.user_id}"]`).forEach(dot => {
+      dot.classList.remove(...allColors)
+      dot.classList.add(cls)
+    })
+
+    // Update text labels (friends list "Online"/"Offline" etc.)
+    document.querySelectorAll(`[data-user-presence-text="${data.user_id}"]`).forEach(el => {
+      const state = data.state
+      el.textContent = state && state !== "offline" ? state.charAt(0).toUpperCase() + state.slice(1) : "Offline"
+    })
+  }
+
   _escHtml(str) {
     const div = document.createElement("div")
     div.textContent = str || ""
@@ -1564,7 +1586,7 @@ export default class extends Controller {
     }
   }
 
-  showConfirm(title, message, confirmText = "Delete", confirmClass = "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400") {
+  showConfirm(title, message, confirmText = "Delete", confirmClass = "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light") {
     return new Promise((resolve) => {
       const overlay = document.createElement("div")
       overlay.className = "modal-overlay fixed inset-0 z-[200] bg-black/70 flex items-center justify-center"

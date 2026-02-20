@@ -18,7 +18,7 @@ Turbo.setConfirmMethod((message) => {
         </div>
         <div class="flex justify-end gap-3 px-5 py-4 bg-gray-850 bg-gray-900/50">
           <button data-action="cancel" class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:underline cursor-pointer">Cancel</button>
-          <button data-action="confirm" class="px-4 py-2 text-sm font-medium bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white rounded transition cursor-pointer">Confirm</button>
+          <button data-action="confirm" class="px-4 py-2 text-sm font-medium bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light text-white rounded transition cursor-pointer">Confirm</button>
         </div>
       </div>
     `
@@ -86,9 +86,12 @@ import DirtyFormController from "./controllers/dirty_form_controller"
 import FrameLoadingController from "./controllers/frame_loading_controller"
 import VoiceChannelController from "./controllers/voice_channel_controller"
 import VoiceContextController from "./controllers/voice_context_controller"
+import VoiceSettingsController from "./controllers/voice_settings_controller"
 import InstanceSyncController from "./controllers/instance_sync_controller"
 import EmojiInputController from "./controllers/emoji_input_controller"
 import ServerProfilePreviewController from "./controllers/server_profile_preview_controller"
+import SettingsOverlayController from "./controllers/settings_overlay_controller"
+import ThemePickerController from "./controllers/theme_picker_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -121,7 +124,10 @@ application.register("dirty-form", DirtyFormController)
 application.register("frame-loading", FrameLoadingController)
 application.register("voice-channel", VoiceChannelController)
 application.register("voice-context", VoiceContextController)
+application.register("voice-settings", VoiceSettingsController)
 application.register("instance-sync", InstanceSyncController)
 application.register("emoji-input", EmojiInputController)
 application.register("server-profile-preview", ServerProfilePreviewController)
+application.register("settings-overlay", SettingsOverlayController)
+application.register("theme-picker", ThemePickerController)
 // rebuild trigger

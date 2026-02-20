@@ -235,7 +235,7 @@ export default class extends Controller {
 
   highlightMessage(el, afterScroll = false) {
     const doHighlight = () => {
-      el.style.backgroundColor = "rgba(220, 38, 38, 0.3)"
+      el.style.backgroundColor = "rgb(var(--accent) / 0.3)"
       el.style.borderRadius = "4px"
       setTimeout(() => {
         el.style.transition = "background-color 0.8s ease-out"

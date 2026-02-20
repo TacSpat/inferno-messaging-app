@@ -1,12 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 
 export default class extends Controller {
   static values = { serverId: String }
   static targets = ["list"]
 
   connect() {
-    this.subscription = createConsumer().subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "ServerChannel", server_id: this.serverIdValue },
       {
         received: (data) => this.handleMessage(data)
@@ -28,6 +28,9 @@ export default class extends Controller {
         break
       case "presence":
         this.updatePresence(data)
+        break
+      case "presence_sync":
+        this.syncPresence(data)
         break
       case "member_update":
         this.updateMember(data)
@@ -61,6 +64,21 @@ export default class extends Controller {
       el.remove()
       this.recountAllGroups()
     }
+  }
+
+  syncPresence(data) {
+    if (!this.hasListTarget || !data.members) return
+
+    // Build a set of online user IDs for quick lookup
+    const onlineMap = new Map()
+    data.members.forEach(m => onlineMap.set(String(m.user_id), m.state))
+
+    // Update every member element in the list
+    this.listTarget.querySelectorAll("[data-user-id]").forEach(el => {
+      const userId = el.dataset.userId
+      const state = onlineMap.get(String(userId)) || "offline"
+      this.updatePresence({ user_id: userId, state: state })
+    })
   }
 
   updatePresence(data) {

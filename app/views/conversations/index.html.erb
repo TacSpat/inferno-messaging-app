@@ -26,7 +26,7 @@
             class: "px-3 py-1.5 rounded text-sm font-medium transition-colors whitespace-nowrap #{@tab == tab[:key] ? 'bg-gray-600 text-white' : 'text-gray-300 hover:bg-gray-600/50 hover:text-white'}" do %>
         <%= tab[:label] %>
         <% if tab[:key] == 'pending' && @pending_count && @pending_count > 0 %>
-          <span class="ml-1 bg-red-500 text-white text-xs rounded-full px-1.5 min-w-[18px] inline-flex items-center justify-center"><%= @pending_count %></span>
+          <span class="ml-1 bg-accent text-white text-xs rounded-full px-1.5 min-w-[18px] inline-flex items-center justify-center"><%= @pending_count %></span>
         <% end %>
       <% end %>
     <% end %>
@@ -46,11 +46,11 @@
       <h3 class="text-white font-semibold mb-1">Add Friend</h3>
       <p class="text-sm text-gray-400 mb-3">You can add friends with their username. It's cAsE sEnSiTiVe!</p>
       <%= form_with url: friendships_path, method: :post, class: "space-y-2", data: { turbo_confirm: "Send this friend request?" } do |f| %>
-        <div class="flex flex-col sm:flex-row sm:items-center gap-2 bg-gray-900 rounded-lg px-3 sm:px-4 py-2.5 border border-gray-700 focus-within:border-red-500">
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2 bg-gray-900 rounded-lg px-3 sm:px-4 py-2.5 border border-gray-700 focus-within:border-accent">
           <%= f.text_field :tag, placeholder: "Username#0000", class: "flex-1 bg-transparent text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none py-1", autocomplete: "off" %>
-          <%= f.submit "Send Friend Request", class: "px-4 py-2 sm:py-1.5 bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white text-sm font-medium rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap" %>
+          <%= f.submit "Send Friend Request", class: "px-4 py-2 sm:py-1.5 bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white text-sm font-medium rounded cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap" %>
         </div>
-        <div class="flex items-center gap-2 bg-gray-900 rounded-lg px-3 sm:px-4 py-2 border border-gray-700 focus-within:border-red-500">
+        <div class="flex items-center gap-2 bg-gray-900 rounded-lg px-3 sm:px-4 py-2 border border-gray-700 focus-within:border-accent">
           <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
           <%= f.text_field :instance_url, placeholder: "Instance URL (optional, for cross-instance)", class: "flex-1 bg-transparent text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none py-1", autocomplete: "off" %>
         </div>
@@ -84,7 +84,7 @@
               <%= button_to accept_friendship_path(request), method: :post, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-green-400 cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
               <% end %>
-              <%= button_to decline_friendship_path(request), method: :post, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-red-400 cursor-pointer" do %>
+              <%= button_to decline_friendship_path(request), method: :post, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-danger-light cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               <% end %>
             </div>
@@ -112,7 +112,7 @@
               <p class="text-xs text-gray-400">Outgoing Friend Request</p>
             </div>
             <div class="flex items-center gap-2">
-              <%= button_to friendship_path(request), method: :delete, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-red-400 cursor-pointer" do %>
+              <%= button_to friendship_path(request), method: :delete, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-danger-light cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               <% end %>
             </div>
@@ -184,17 +184,23 @@
                   <%= friend.username[0].upcase %>
                 </div>
               <% end %>
-              <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-700 <%= friend.online_state.present? && friend.online_state != 'offline' ? 'bg-green-500' : 'bg-gray-500' %>"></div>
+              <% friend_status = case friend.online_state
+                                 when "online" then "bg-green-500"
+                                 when "idle" then "bg-yellow-500"
+                                 when "dnd" then "bg-red-500"
+                                 else "bg-gray-500"
+                                 end %>
+              <div data-user-presence="<%= friend.public_id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-700 <%= friend_status %>"></div>
             </div>
             <div class="ml-3 flex-1 min-w-0">
               <p class="text-sm font-medium text-white truncate"><%= friend.display_name.presence || friend.username %></p>
-              <p class="text-xs text-gray-400 truncate"><%= friend.online_state.present? && friend.online_state != 'offline' ? friend.online_state.capitalize : 'Offline' %></p>
+              <p data-user-presence-text="<%= friend.public_id %>" class="text-xs text-gray-400 truncate"><%= friend.online_state.present? && friend.online_state != 'offline' ? friend.online_state.capitalize : 'Offline' %></p>
             </div>
             <div class="flex items-center gap-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
               <%= button_to conversations_path(user_id: friend.public_id), method: :post, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
               <% end %>
-              <%= button_to friendship_path(current_user.friendships.find_by(friend: friend) || current_user.friendships.find_by(user: friend)), method: :delete, data: { turbo_confirm: "Remove #{friend.display_name.presence || friend.username} from your friends?" }, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-red-400 cursor-pointer" do %>
+              <%= button_to friendship_path(current_user.friendships.find_by(friend: friend) || current_user.friendships.find_by(user: friend)), method: :delete, data: { turbo_confirm: "Remove #{friend.display_name.presence || friend.username} from your friends?" }, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-danger-light cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               <% end %>
             </div>

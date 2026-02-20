@@ -140,11 +140,11 @@ export default class extends Controller {
         hoistToggle.closest("[data-hoist-row]").classList.remove("hidden")
         if (role.hoist) {
           hoistToggle.classList.remove("bg-gray-600")
-          hoistToggle.classList.add("bg-red-600")
+          hoistToggle.classList.add("bg-toggle-on")
           hoistToggle.firstElementChild.classList.remove("translate-x-0.5")
           hoistToggle.firstElementChild.classList.add("translate-x-5")
         } else {
-          hoistToggle.classList.remove("bg-red-600")
+          hoistToggle.classList.remove("bg-toggle-on")
           hoistToggle.classList.add("bg-gray-600")
           hoistToggle.firstElementChild.classList.remove("translate-x-5")
           hoistToggle.firstElementChild.classList.add("translate-x-0.5")
@@ -189,7 +189,7 @@ export default class extends Controller {
 
         if (enabled) {
           toggle.classList.remove("bg-gray-600")
-          toggle.classList.add("bg-red-600")
+          toggle.classList.add("bg-toggle-on")
           toggle.firstElementChild.classList.remove("translate-x-0.5")
           toggle.firstElementChild.classList.add("translate-x-5")
         }
@@ -214,11 +214,11 @@ export default class extends Controller {
     // Update toggle visual
     if (newVal) {
       btn.classList.remove("bg-gray-600")
-      btn.classList.add("bg-red-600")
+      btn.classList.add("bg-toggle-on")
       btn.firstElementChild.classList.remove("translate-x-0.5")
       btn.firstElementChild.classList.add("translate-x-5")
     } else {
-      btn.classList.remove("bg-red-600")
+      btn.classList.remove("bg-toggle-on")
       btn.classList.add("bg-gray-600")
       btn.firstElementChild.classList.remove("translate-x-5")
       btn.firstElementChild.classList.add("translate-x-0.5")
@@ -236,11 +236,11 @@ export default class extends Controller {
 
     if (role.hoist) {
       btn.classList.remove("bg-gray-600")
-      btn.classList.add("bg-red-600")
+      btn.classList.add("bg-toggle-on")
       btn.firstElementChild.classList.remove("translate-x-0.5")
       btn.firstElementChild.classList.add("translate-x-5")
     } else {
-      btn.classList.remove("bg-red-600")
+      btn.classList.remove("bg-toggle-on")
       btn.classList.add("bg-gray-600")
       btn.firstElementChild.classList.remove("translate-x-5")
       btn.firstElementChild.classList.add("translate-x-0.5")
@@ -481,7 +481,7 @@ export default class extends Controller {
 
   showToast(msg, isError = false) {
     const toast = document.createElement("div")
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-toggle-on" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
     toast.textContent = msg
     document.body.appendChild(toast)
     setTimeout(() => {

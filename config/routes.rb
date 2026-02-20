@@ -207,6 +207,7 @@ Rails.application.routes.draw do
   # Voice state self-updates
   patch "voice_states/self_mute", to: "voice_states#self_mute"
   patch "voice_states/self_deafen", to: "voice_states#self_deafen"
+  patch "voice_states/self_screen_share", to: "voice_states#self_screen_share"
 
   # Voice participant context menu & moderation
   resources :voice_states, only: [] do
@@ -229,7 +230,10 @@ Rails.application.routes.draw do
   get "settings/profile", to: "settings#profile", as: :user_settings_profile
   patch "settings/profile", to: "settings#update_profile", as: :settings_profile
   get "settings/appearance", to: "settings#appearance", as: :user_settings_appearance
+  patch "settings/appearance", to: "settings#update_appearance", as: :settings_update_appearance
   get "settings/notifications", to: "settings#notifications", as: :user_settings_notifications
+  get "settings/voice", to: "settings#voice", as: :user_settings_voice
+  patch "settings/voice", to: "settings#update_voice", as: :settings_update_voice
   get "settings/keybinds", to: "settings#keybinds", as: :user_settings_keybinds
   get "settings/password", to: "settings#change_password", as: :user_settings_password
   patch "settings/password", to: "settings#update_password", as: :settings_update_password

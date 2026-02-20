@@ -1,2 +1,39 @@
 <h2 class="text-xl font-bold text-white mb-6">Appearance</h2>
-<p class="text-gray-400 text-sm">Coming soon.</p>
+
+<%
+  theme_swatches = {
+    "inferno"  => "linear-gradient(135deg, #1e1c1b 0%, #2c2a29 40%, #dc2626 100%)",
+    "frostfire"  => "linear-gradient(135deg, #0f1b2d 0%, #243b53 40%, #3b82f6 100%)",
+    "boron"      => "linear-gradient(135deg, #0f1f15 0%, #1a3328 40%, #10b981 100%)",
+    "brimstone"  => "linear-gradient(135deg, #1a1025 0%, #2d1f42 40%, #a855f7 100%)",
+    "plasma"     => "linear-gradient(135deg, #1c0f1c 0%, #3d2438 40%, #ec4899 100%)",
+    "pulsar"     => "linear-gradient(135deg, #1e141e 0%, #3e2a3c 40%, #f9a8d4 100%)",
+    "obsidian" => "linear-gradient(135deg, #111827 0%, #1e293b 40%, #94a3b8 100%)"
+  }
+%>
+
+<div class="max-w-lg" data-controller="theme-picker" data-theme-picker-current-value="<%= @user.theme %>">
+  <%= form_tag settings_update_appearance_path, method: :patch do %>
+    <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Theme</h3>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+      <% User::THEMES.each do |theme_name| %>
+        <label class="cursor-pointer">
+          <input type="radio" name="theme" value="<%= theme_name %>"
+                 <%= 'checked' if @user.theme == theme_name %>
+                 class="sr-only peer"
+                 data-action="change->theme-picker#preview">
+          <div class="border-2 border-gray-600 peer-checked:border-white/60 rounded-lg p-3 transition
+                      peer-checked:ring-2 peer-checked:ring-white/20 hover:border-gray-500">
+            <div class="h-8 rounded mb-2" style="background: <%= theme_swatches[theme_name] %>"></div>
+            <span class="text-sm text-gray-300 capitalize"><%= theme_name %></span>
+          </div>
+        </label>
+      <% end %>
+    </div>
+    <button type="submit" class="w-full bg-gradient-to-r from-confirm-dark to-confirm
+           hover:from-confirm hover:to-confirm-light text-white font-semibold
+           py-2.5 rounded transition cursor-pointer text-sm">
+      Save Changes
+    </button>
+  <% end %>
+</div>

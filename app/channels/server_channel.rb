@@ -2,8 +2,18 @@ class ServerChannel < ApplicationCable::Channel
   def subscribed
     @server = Server.find_by!(public_id: params[:server_id])
     stream_for @server
+    send_presence_sync
   end
 
   def unsubscribed
+  end
+
+  private
+
+  def send_presence_sync
+    members = @server.members.where.not(online_state: :offline)
+                     .select(:public_id, :online_state)
+    states = members.map { |m| { user_id: m.public_id, state: m.online_state } }
+    transmit({ type: "presence_sync", members: states })
   end
 end

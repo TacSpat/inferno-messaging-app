@@ -4,7 +4,7 @@
   <% @memberships.each do |membership| %>
     <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
       <div class="flex items-center">
-        <div class="w-10 h-10 rounded-full bg-red-600 flex items-center justify-center text-sm font-bold text-white">
+        <div class="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-sm font-bold text-white">
           <%= membership.user.username[0].upcase %>
         </div>
         <div class="ml-3">
@@ -32,7 +32,7 @@
                data-member-roles-membership-id-value="<%= membership.public_id %>"
                data-member-roles-all-roles-value="<%= @all_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
                data-member-roles-current-role-ids-value="<%= membership.roles.reject(&:owner?).map(&:public_id).to_json %>">
-            <button class="text-xs text-red-400 hover:text-red-300 cursor-pointer"
+            <button class="text-xs text-accent-light hover:text-accent cursor-pointer"
                     data-action="click->member-roles#toggle">
               Manage Roles
             </button>
@@ -42,7 +42,7 @@
               <% @all_roles.reject(&:everyone?).each do |role| %>
                 <label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
                   <input type="checkbox" value="<%= role.public_id %>"
-                         class="mr-2 accent-red-500"
+                         class="mr-2 accent-accent"
                          data-action="change->member-roles#toggleRole"
                          <%= 'checked' if membership.roles.include?(role) %>>
                   <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
@@ -52,8 +52,8 @@
             </div>
           </div>
           <% unless membership.owner? %>
-            <%= button_to "Kick", server_settings_kick_member_path(@server, membership), method: :delete, data: { turbo_confirm: "Kick #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
-            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: membership.user.public_id }, method: :post, data: { turbo_confirm: "Ban #{membership.user.username}?" }, class: "text-xs text-red-400 hover:text-red-300 cursor-pointer" %>
+            <%= button_to "Kick", server_settings_kick_member_path(@server, membership), method: :delete, data: { turbo_confirm: "Kick #{membership.user.username}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
+            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: membership.user.public_id }, method: :post, data: { turbo_confirm: "Ban #{membership.user.username}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
           <% end %>
         <% end %>
       </div>

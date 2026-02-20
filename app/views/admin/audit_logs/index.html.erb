@@ -39,7 +39,7 @@
           <input type="date" name="date_to" value="<%= params[:date_to] %>"
                  class="bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600">
         </div>
-        <button type="submit" class="bg-red-600 hover:bg-red-600 text-white text-sm px-4 py-1.5 rounded transition">
+        <button type="submit" class="bg-accent hover:bg-accent text-white text-sm px-4 py-1.5 rounded transition">
           Filter
         </button>
         <% if params[:event_type].present? || params[:domain].present? || params[:date_from].present? %>

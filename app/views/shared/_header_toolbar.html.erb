@@ -1,8 +1,22 @@
 <% fr_count = current_user.pending_friend_requests.count %>
+<% dm_user = local_assigns[:dm_user] %>
 <div class="flex items-center gap-1 shrink-0">
-  <%# Friend requests toggle %>
-  <button type="button" class="relative text-gray-400 hover:text-white p-1 transition cursor-pointer" data-toolbar-action="toggle-friends" title="Friend Requests">
-    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
-    <span data-toolbar-friend-badge class="<%= 'hidden' if fr_count == 0 %> absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-red-600 rounded-full flex items-center justify-center text-[10px] font-bold text-white px-0.5 border border-gray-700"><%= fr_count %></span>
-  </button>
+  <% if fr_count > 0 %>
+    <%# Friend requests toggle — only shown with pending requests %>
+    <button type="button" class="relative text-gray-400 hover:text-white p-1 transition cursor-pointer" data-toolbar-action="toggle-friends" title="Friend Requests">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+      <span data-toolbar-friend-badge class="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-accent rounded-full flex items-center justify-center text-[10px] font-bold text-white px-0.5 border border-gray-700"><%= fr_count %></span>
+    </button>
+  <% end %>
+  <% if dm_user %>
+    <%# View profile toggle (DMs only) %>
+    <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer" id="dm-profile-toggle-btn" onclick="var p=document.getElementById('dm-profile-panel');if(p){p.classList.toggle('hidden');this.classList.toggle('text-white',!p.classList.contains('hidden'))}" title="View Profile">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+    </button>
+  <% else %>
+    <%# Member list toggle (server channels only) %>
+    <button type="button" class="hidden lg:inline-flex text-gray-400 hover:text-white p-1 transition cursor-pointer" id="member-toggle-btn" onclick="window._toggleMemberSidebar()" title="Toggle Member List">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+    </button>
+  <% end %>
 </div>

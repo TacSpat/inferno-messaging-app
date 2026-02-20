@@ -6,10 +6,10 @@
     <%= form_with model: [@server, @channel], class: "space-y-4" do |f| %>
       <div>
         <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Channel Type</label>
-        <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {}, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {}, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
       <div>
         <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Category</label>
-        <%= f.collection_select :category_id, @server.categories.ordered, :id, :name, { include_blank: "No Category" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.collection_select :category_id, @server.categories.ordered, :id, :name, { include_blank: "No Category" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
@@ -28,12 +28,12 @@
 
       <div>
         <%= f.label :topic, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm", placeholder: "What's this channel about?" %>
+        <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm", placeholder: "What's this channel about?" %>
       </div>
 
       <div class="flex items-center gap-3 pt-2">
         <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-400 hover:text-gray-200" %>
-        <%= f.submit "Create Channel", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+        <%= f.submit "Create Channel", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
       </div>
     <% end %>
   </div>

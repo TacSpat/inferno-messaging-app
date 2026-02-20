@@ -8,8 +8,8 @@ class ChannelsController < ApplicationController
     # Ensure current user appears online (WebSocket reconnects after page render)
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current) if current_user.offline?
 
-    @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
     @current_membership = current_user.server_memberships.find_by(server: @server)
+    @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
 
     if @channel.voice?
       @voice_states = @channel.voice_states.includes(user: { avatar_attachment: :blob })

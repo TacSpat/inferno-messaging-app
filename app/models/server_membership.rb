@@ -65,6 +65,7 @@ class ServerMembership < ApplicationRecord
   end
 
   def broadcast_member_leave
+    return unless user
     ServerChannel.broadcast_to(server, {
       type: "member_leave",
       user_id: user.public_id,

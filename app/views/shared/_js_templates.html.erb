@@ -64,7 +64,7 @@
 <template id="tpl-reaction-picker">
   <div class="fixed z-[60] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col context-pop" style="width:320px;max-height:380px;">
     <div class="px-2 pt-2 pb-1">
-      <input type="text" placeholder="Search emoji..." class="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-red-500 border border-gray-700">
+      <input type="text" placeholder="Search emoji..." class="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-accent border border-gray-700">
     </div>
     <div class="flex-1 overflow-y-auto px-2 pb-2" data-slot="content"></div>
   </div>
@@ -73,7 +73,7 @@
 <%# Edit message form (notification_badge_controller) %>
 <template id="tpl-edit-form">
   <form class="flex gap-2 items-center">
-    <input type="text" class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-red-500">
+    <input type="text" class="flex-1 bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-accent">
     <button type="submit" class="text-xs text-green-400 hover:text-green-300">Save</button>
     <button type="button" class="text-xs text-gray-400 hover:text-gray-200 cancel-edit-btn">Cancel</button>
   </form>
@@ -176,7 +176,7 @@
   <div class="modal-overlay fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center backdrop-blur-sm">
     <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
       <div class="flex justify-center mb-4">
-        <svg class="w-8 h-8 text-red-400 animate-spin" fill="none" viewBox="0 0 24 24">
+        <svg class="w-8 h-8 text-accent-light animate-spin" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
@@ -207,7 +207,7 @@
 <template id="tpl-folder-menu">
   <button data-menu-action="rename" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Rename Folder</button>
   <button data-menu-action="color" class="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white transition">Folder Color</button>
-  <button data-menu-action="delete" class="w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 hover:text-red-300 transition">Delete Folder</button>
+  <button data-menu-action="delete" class="w-full text-left px-3 py-1.5 text-danger-light hover:bg-gray-700 hover:text-danger transition">Delete Folder</button>
 </template>
 
 <%# Folder rename form (server_rail_controller) %>
@@ -215,9 +215,9 @@
   <div class="px-3 py-2">
     <label class="text-[10px] text-gray-500 uppercase font-semibold mb-1 block">Folder Name</label>
     <input type="text" maxlength="50"
-           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-red-500"
+           class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-accent"
            data-rename-input>
-    <button class="mt-2 w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white text-xs font-semibold py-1 rounded transition" data-rename-save>Save</button>
+    <button class="mt-2 w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white text-xs font-semibold py-1 rounded transition" data-rename-save>Save</button>
   </div>
 </template>
 
@@ -238,6 +238,72 @@
     <div class="flex items-center gap-2">
       <input type="color" class="w-8 h-8 rounded cursor-pointer border-0 p-0 bg-transparent" data-custom-color>
       <span class="text-xs text-gray-400">Custom</span>
+    </div>
+  </div>
+</template>
+
+<%# Screen share picker overlay (voice_channel_controller) %>
+<template id="tpl-screen-share-picker">
+  <div class="modal-overlay fixed inset-0 z-[200] bg-black/60 flex items-center justify-center" data-ss-picker-overlay>
+    <div class="bg-[#1a1918] rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden border border-gray-700/50">
+      <!-- Header -->
+      <div class="px-5 pt-5 pb-3 flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-white">Screen Share Settings</h3>
+        <button type="button" class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition cursor-pointer" data-ss-close>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="px-5 pb-5 space-y-4">
+        <!-- Resolution -->
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">Resolution</label>
+          <div class="flex gap-1.5" data-ss-group="resolution">
+            <button type="button" class="ss-pill" data-value="480">480p</button>
+            <button type="button" class="ss-pill" data-value="720">720p</button>
+            <button type="button" class="ss-pill" data-value="1080">1080p</button>
+            <button type="button" class="ss-pill" data-value="1440">1440p</button>
+            <button type="button" class="ss-pill" data-value="2160">4K</button>
+          </div>
+        </div>
+
+        <!-- Frame Rate -->
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">Frame Rate</label>
+          <div class="flex gap-1.5" data-ss-group="frameRate">
+            <button type="button" class="ss-pill" data-value="15">15 fps</button>
+            <button type="button" class="ss-pill" data-value="30">30 fps</button>
+            <button type="button" class="ss-pill" data-value="60">60 fps</button>
+          </div>
+        </div>
+
+        <!-- Content Type -->
+        <div>
+          <label class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 block">Content Type</label>
+          <div class="flex gap-1.5" data-ss-group="contentType">
+            <button type="button" class="ss-pill ss-content-toggle" data-value="smoothness">Prefer Smoothness</button>
+            <button type="button" class="ss-pill ss-content-toggle" data-value="clarity">Prefer Clarity</button>
+          </div>
+          <p class="text-[11px] text-gray-500 mt-1.5">Choosing 'Prefer Clarity' will result in a lower framerate for a sharper image.</p>
+        </div>
+
+        <!-- Include Audio -->
+        <div class="flex items-center justify-between">
+          <label class="text-sm text-gray-300">Include Audio</label>
+          <button type="button" class="relative w-11 h-6 rounded-full transition-colors bg-gray-600 cursor-pointer" data-ss-audio-toggle>
+            <span class="block w-5 h-5 bg-white rounded-full shadow transform transition-transform translate-x-0.5"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="px-5 py-3 flex justify-end gap-3" style="background: #141312;">
+        <button type="button" class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white transition cursor-pointer" data-ss-cancel>Cancel</button>
+        <button type="button" class="ss-go-live-btn" data-ss-go-live>
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Go Live
+        </button>
+      </div>
     </div>
   </div>
 </template>
@@ -284,7 +350,7 @@
       </div>
       <div class="flex items-center gap-3 mt-3">
         <span class="text-sm text-gray-300" data-slot="filename"></span>
-        <a class="text-sm text-red-400 hover:text-red-400 flex items-center gap-1" data-slot="download">
+        <a class="text-sm text-accent-light hover:text-accent-light flex items-center gap-1" data-slot="download">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
           Download
         </a>
@@ -340,7 +406,7 @@
       <button type="button" data-friend-action="accept" class="p-1.5 rounded hover:bg-green-600/20 text-green-400 hover:text-green-300 transition cursor-pointer" title="Accept">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
       </button>
-      <button type="button" data-friend-action="decline" class="p-1.5 rounded hover:bg-red-600/20 text-red-400 hover:text-red-300 transition cursor-pointer" title="Decline">
+      <button type="button" data-friend-action="decline" class="p-1.5 rounded hover:bg-danger/20 text-danger-light hover:text-danger transition cursor-pointer" title="Decline">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     </div>
@@ -368,7 +434,7 @@
           <div>
             <h2 class="text-xl font-bold text-white leading-tight" data-slot="display-name"></h2>
             <p class="text-sm text-white/60" data-slot="tag"></p>
-            <p class="text-[10px] text-red-400 hidden items-center gap-1 mt-0.5" data-slot="remote-badge">
+            <p class="text-[10px] text-accent-light hidden items-center gap-1 mt-0.5" data-slot="remote-badge">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
               <span data-slot="remote-domain"></span>
             </p>
@@ -422,12 +488,12 @@
     </div>
     <div class="px-5 py-3 flex items-center gap-3">
       <span class="text-gray-400 text-xs">Zoom</span>
-      <input type="range" min="100" max="300" value="100" class="flex-1 accent-red-500" data-crop-zoom />
+      <input type="range" min="100" max="300" value="100" class="flex-1 accent-accent" data-crop-zoom />
       <span class="text-gray-400 text-xs w-10 text-right" data-crop-zoom-label>1.0x</span>
     </div>
     <div class="px-5 pb-5 flex justify-end gap-3">
       <button type="button" class="px-4 py-2 text-sm text-gray-300 hover:text-white transition" data-crop-cancel>Cancel</button>
-      <button type="button" class="px-5 py-2 text-sm bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white rounded font-semibold transition" data-crop-apply>Apply</button>
+      <button type="button" class="px-5 py-2 text-sm bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white rounded font-semibold transition" data-crop-apply>Apply</button>
     </div>
   </div>
 </template>

@@ -6,7 +6,7 @@
   <%= form_tag server_settings_create_invite_path(@server), method: :post, class: "flex flex-wrap items-end gap-3" do %>
     <div>
       <label class="block text-xs text-gray-400 mb-1">Expire After</label>
-      <select name="expires_in" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-red-500">
+      <select name="expires_in" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-accent">
         <option value="">Never</option>
         <option value="30m">30 minutes</option>
         <option value="1h">1 hour</option>
@@ -18,7 +18,7 @@
     </div>
     <div>
       <label class="block text-xs text-gray-400 mb-1">Max Uses</label>
-      <select name="max_uses" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-red-500">
+      <select name="max_uses" class="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-300 focus:outline-none focus:border-accent">
         <option value="">Unlimited</option>
         <option value="1">1 use</option>
         <option value="5">5 uses</option>
@@ -28,7 +28,7 @@
         <option value="100">100 uses</option>
       </select>
     </div>
-    <button type="submit" class="bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm">
+    <button type="submit" class="bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm">
       Generate Invite
     </button>
   <% end %>
@@ -48,7 +48,7 @@
             <div class="flex items-center gap-2 mb-1">
               <% invite_link = "#{request.base_url}/inferno/invite/#{invite.code}?from=#{Rails.application.config.x.instance_domain}" %>
               <span class="text-sm text-gray-300 font-mono select-all truncate"><%= invite_link %></span>
-              <button type="button" onclick="navigator.clipboard.writeText('<%= invite_link %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-red-400 hover:text-red-300 text-xs font-semibold shrink-0">Copy</button>
+              <button type="button" onclick="navigator.clipboard.writeText('<%= invite_link %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-accent-light hover:text-accent text-xs font-semibold shrink-0">Copy</button>
             </div>
             <div class="flex items-center gap-3 text-xs text-gray-500">
               <span>by <%= invite.creator.username %></span>
@@ -74,7 +74,7 @@
             </div>
           </div>
           <% if invite.creator == current_user || @current_membership.has_permission?("manage_invites") %>
-            <%= button_to "Revoke", server_settings_destroy_invite_path(@server, invite_id: invite.id), method: :delete, class: "text-red-400 hover:text-red-300 text-xs font-semibold cursor-pointer shrink-0", data: { turbo_confirm: "Revoke this invite?" } %>
+            <%= button_to "Revoke", server_settings_destroy_invite_path(@server, invite_id: invite.id), method: :delete, class: "text-danger-light hover:text-danger text-xs font-semibold cursor-pointer shrink-0", data: { turbo_confirm: "Revoke this invite?" } %>
           <% end %>
         </div>
       <% end %>

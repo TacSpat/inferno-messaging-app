@@ -168,10 +168,10 @@ export default class extends Controller {
     const tabs = { gifs: this.tabGifsTarget, stickers: this.tabStickersTarget, emoji: this.tabEmojiTarget }
     Object.entries(tabs).forEach(([name, el]) => {
       if (name === this.activeTab) {
-        el.classList.add("text-white", "border-red-500")
+        el.classList.add("text-white", "border-accent")
         el.classList.remove("text-gray-400", "border-transparent")
       } else {
-        el.classList.remove("text-white", "border-red-500")
+        el.classList.remove("text-white", "border-accent")
         el.classList.add("text-gray-400", "border-transparent")
       }
     })
@@ -374,11 +374,11 @@ export default class extends Controller {
 
       // Fire icon save button — shown on all GIF items, reflects default Favorites state
       const isFav = this.userFavoriteIds.has(gif.id)
-      const iconClass = isFav ? "text-red-400" : "text-white/80"
+      const iconClass = isFav ? "text-accent-light" : "text-white/80"
       const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"'
       const saveBtn = `<button type="button" class="gif-picker-save absolute top-1 left-1 z-10 w-6 h-6 rounded-full bg-black/60 hover:bg-black/80 flex items-center justify-center cursor-pointer" data-action="click->unified-picker#togglePickerFavorite:stop:prevent" data-tenor-gif-id="${this.escapeAttr(gif.id)}"><svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg></button>`
 
-      return `<div class="gif-grid-item relative cursor-pointer rounded overflow-hidden hover:ring-2 hover:ring-red-500 transition" data-action="${actions}" data-gif-url="${this.escapeAttr(gif.url)}" data-tenor-gif-id="${this.escapeAttr(gif.id)}"${favAttr} data-preview-url="${this.escapeAttr(gif.preview_url || "")}" data-full-gif-url="${this.escapeAttr(gif.gif_url || "")}"><img src="${this.escapeAttr(previewUrl)}" alt="${this.escapeAttr(gif.description || "GIF")}" class="w-full h-auto" loading="lazy">${saveBtn}</div>`
+      return `<div class="gif-grid-item relative cursor-pointer rounded overflow-hidden hover:ring-2 hover:ring-accent transition" data-action="${actions}" data-gif-url="${this.escapeAttr(gif.url)}" data-tenor-gif-id="${this.escapeAttr(gif.id)}"${favAttr} data-preview-url="${this.escapeAttr(gif.preview_url || "")}" data-full-gif-url="${this.escapeAttr(gif.gif_url || "")}"><img src="${this.escapeAttr(previewUrl)}" alt="${this.escapeAttr(gif.description || "GIF")}" class="w-full h-auto" loading="lazy">${saveBtn}</div>`
     }).join("")
 
     if (results.length === 0) {
@@ -460,7 +460,7 @@ export default class extends Controller {
 
       // Update the button icon
       const isFav = data.favorited
-      const iconClass = isFav ? "text-red-400" : "text-white/80"
+      const iconClass = isFav ? "text-accent-light" : "text-white/80"
       const fillAttr = isFav ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2"'
       btn.innerHTML = `<svg class="w-3.5 h-3.5 ${iconClass}" ${fillAttr} viewBox="0 0 24 24"><path ${isFav ? "" : 'stroke-linecap="round" stroke-linejoin="round" '}d="M12 23c-4.97 0-9-2.69-9-6 0-2.4 1.68-4.47 2.64-5.27.32-.27.8-.04.8.39v.51c0 1.28.49 2.52 1.38 3.46.09.1.25.1.34 0 .37-.4.65-.87.82-1.39.09-.27.42-.37.63-.18C11.4 16.18 12.5 17.88 12.5 20c0 .28.22.5.5.5s.5-.22.5-.5c0-2.98-1.63-5.58-4.07-6.97a.249.249 0 01-.01-.43C11.26 11.45 13 9.13 13 6.5c0-.99-.16-1.94-.47-2.83a.252.252 0 01.34-.31C16.68 5.38 21 9.49 21 14c0 5.38-4.03 9-9 9z"/></svg>`
 
@@ -504,7 +504,7 @@ export default class extends Controller {
       html += this.collapsibleSection(`sticker_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
         if (filtered.length === 0) return `<div class="text-gray-500 text-xs px-2 py-1">No stickers yet</div>`
         return `<div class="grid grid-cols-3 gap-1">${filtered.map(s =>
-          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-red-500 transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
+          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-accent transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
         ).join("")}</div>`
       })
     }
@@ -791,7 +791,7 @@ export default class extends Controller {
     // Remove from this collection
     const removeBtn = document.createElement("button")
     removeBtn.type = "button"
-    removeBtn.className = "w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 cursor-pointer flex items-center gap-2"
+    removeBtn.className = "w-full text-left px-3 py-1.5 text-accent-light hover:bg-gray-700 cursor-pointer flex items-center gap-2"
     removeBtn.innerHTML = `<span>🗑️</span> Remove`
     removeBtn.addEventListener("click", () => this.removeFromFavorites(favoriteId, gifData.id))
     menu.appendChild(removeBtn)
@@ -839,7 +839,7 @@ export default class extends Controller {
 
     const input = document.createElement("input")
     input.type = "text"
-    input.className = "flex-1 min-w-0 bg-gray-700 text-white text-sm rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-red-500"
+    input.className = "flex-1 min-w-0 bg-gray-700 text-white text-sm rounded px-2 py-1.5 outline-none focus:ring-1 focus:ring-accent"
     input.placeholder = "Collection name"
     row.appendChild(input)
     wrapper.appendChild(row)
@@ -930,7 +930,7 @@ export default class extends Controller {
     // Create button
     const createBtn = document.createElement("button")
     createBtn.type = "button"
-    createBtn.className = "w-full mt-2 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-medium rounded cursor-pointer transition"
+    createBtn.className = "w-full mt-2 py-1.5 bg-confirm hover:bg-confirm-light text-white text-xs font-medium rounded cursor-pointer transition"
     createBtn.textContent = "Create"
     createBtn.addEventListener("click", submit)
     wrapper.appendChild(createBtn)
@@ -1037,7 +1037,7 @@ export default class extends Controller {
 
     const deleteBtn = document.createElement("button")
     deleteBtn.type = "button"
-    deleteBtn.className = "w-full text-left px-3 py-1.5 text-red-400 hover:bg-gray-700 cursor-pointer flex items-center gap-2"
+    deleteBtn.className = "w-full text-left px-3 py-1.5 text-accent-light hover:bg-gray-700 cursor-pointer flex items-center gap-2"
     deleteBtn.innerHTML = `<span>🗑️</span> Delete Collection`
     deleteBtn.addEventListener("click", () => this.deleteCollection(collectionId))
     menu.appendChild(deleteBtn)

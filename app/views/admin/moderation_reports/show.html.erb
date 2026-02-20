@@ -119,10 +119,10 @@
           <%= form_with url: review_admin_moderation_report_path(@report), method: :post, class: "inline-flex items-center gap-2" do |f| %>
             <%= f.hidden_field :status, value: "actioned" %>
             <label class="flex items-center gap-1 text-sm text-gray-300">
-              <%= f.check_box :publish_to_relays, class: "w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-red-500" %>
+              <%= f.check_box :publish_to_relays, class: "w-3.5 h-3.5 rounded border-gray-600 bg-gray-900 text-accent" %>
               Publish NIP-56
             </label>
-            <%= f.submit "Action & Resolve", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+            <%= f.submit "Action & Resolve", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
           <% end %>
         </div>
       </div>

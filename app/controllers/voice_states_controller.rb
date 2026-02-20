@@ -1,6 +1,6 @@
 class VoiceStatesController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_own_voice_state, only: [ :self_mute, :self_deafen ]
+  before_action :set_own_voice_state, only: [ :self_mute, :self_deafen, :self_screen_share ]
   before_action :set_target_voice_state, only: [ :context_menu, :server_mute, :server_deafen, :kick, :move ]
 
   # --- Self-actions (existing) ---
@@ -9,6 +9,12 @@ class VoiceStatesController < ApplicationController
     @voice_state.update!(self_mute: !@voice_state.self_mute)
     broadcast_state_update(@voice_state)
     render json: { self_mute: @voice_state.self_mute }
+  end
+
+  def self_screen_share
+    @voice_state.update!(screen_share_on: !@voice_state.screen_share_on)
+    broadcast_state_update(@voice_state)
+    render json: { screen_share_on: @voice_state.screen_share_on }
   end
 
   def self_deafen
@@ -165,7 +171,8 @@ class VoiceStatesController < ApplicationController
       self_mute: voice_state.self_mute,
       self_deaf: voice_state.self_deaf,
       server_mute: voice_state.server_mute,
-      server_deaf: voice_state.server_deaf
+      server_deaf: voice_state.server_deaf,
+      screen_share_on: voice_state.screen_share_on
     })
   end
 end

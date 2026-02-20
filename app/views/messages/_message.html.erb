@@ -34,7 +34,7 @@
           <%= author ? author.display_name_for(server) : "Deleted User" %>
         </span>
         <% if author&.remote? %>
-          <span class="ml-1 text-[10px] text-red-400/70 bg-red-600/10 px-1 rounded"><%= author.home_instance_domain %></span>
+          <span class="ml-1 text-[10px] text-accent-light/70 bg-accent/10 px-1 rounded"><%= author.home_instance_domain %></span>
         <% end %>
         <span class="ml-2 text-xs text-gray-500 shrink-0">
           <%= message.created_at.strftime("%l:%M %p").strip %>
@@ -62,7 +62,7 @@
     <div class="flex-1 min-w-0">
       <% if message.parent %>
         <% parent_author = message.parent.user %>
-        <div class="flex items-center text-xs text-gray-400 mb-0.5 cursor-pointer hover:text-gray-200" onclick="const el=document.getElementById('message_<%= message.parent.public_id %>'); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.backgroundColor='rgba(220,38,38,0.3)';el.style.borderRadius='4px';setTimeout(function(){el.style.transition='background-color 0.8s ease-out';el.style.backgroundColor='transparent';setTimeout(function(){el.style.backgroundColor='';el.style.borderRadius='';el.style.transition=''},800)},1000)}">
+        <div class="flex items-center text-xs text-gray-400 mb-0.5 cursor-pointer hover:text-gray-200" onclick="const el=document.getElementById('message_<%= message.parent.public_id %>'); if(el){el.scrollIntoView({behavior:'smooth',block:'center'});el.style.backgroundColor='rgb(var(--accent) / 0.3)';el.style.borderRadius='4px';setTimeout(function(){el.style.transition='background-color 0.8s ease-out';el.style.backgroundColor='transparent';setTimeout(function(){el.style.backgroundColor='';el.style.borderRadius='';el.style.transition=''},800)},1000)}">
           <svg class="w-3 h-3 mr-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
           <span class="font-medium mr-1" style="color: <%= parent_author ? parent_author.role_color_for(server) : '#6b7280' %>"><%= parent_author&.username || "Deleted User" %></span>
           <span class="truncate max-w-xs"><%= truncate(message.parent.content.to_s.gsub(/```\w*\n?/, "").gsub(/```/, "").strip, length: 60) %></span>
@@ -76,7 +76,7 @@
             <%= author ? author.display_name_for(server) : "Deleted User" %>
           </span>
           <% if author&.remote? %>
-            <span class="ml-1 text-[10px] text-red-400/70 bg-red-600/10 px-1 rounded"><%= author.home_instance_domain %></span>
+            <span class="ml-1 text-[10px] text-accent-light/70 bg-accent/10 px-1 rounded"><%= author.home_instance_domain %></span>
           <% end %>
           <span class="ml-2 text-xs text-gray-500">
             <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
@@ -112,7 +112,7 @@
 <% else %>
               <a href="<%= url_for(file) %>" data-turbo-frame="_top" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
                 <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                <span class="text-sm text-red-400"><%= file.filename %></span>
+                <span class="text-sm text-accent-light"><%= file.filename %></span>
               </a>
             <% end %>
           <% end %>

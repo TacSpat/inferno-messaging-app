@@ -9,10 +9,10 @@
     <button class="flex items-center justify-between w-full px-2.5 py-1.5 rounded hover:bg-gray-700 group/btn"
             data-context-action="serverMute"
             data-voice-state-id="<%= voice_state.public_id %>">
-      <span class="<%= voice_state.server_mute ? 'text-red-400' : 'text-gray-300' %> group-hover/btn:text-white">
+      <span class="<%= voice_state.server_mute ? 'text-danger-light' : 'text-gray-300' %> group-hover/btn:text-white">
         <%= voice_state.server_mute ? 'Unmute' : 'Server Mute' %>
       </span>
-      <svg class="w-4 h-4 <%= voice_state.server_mute ? 'text-red-400' : 'text-gray-500' %>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg class="w-4 h-4 <%= voice_state.server_mute ? 'text-danger-light' : 'text-gray-500' %>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
         <% if voice_state.server_mute %>
           <line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/>
@@ -25,10 +25,10 @@
     <button class="flex items-center justify-between w-full px-2.5 py-1.5 rounded hover:bg-gray-700 group/btn"
             data-context-action="serverDeafen"
             data-voice-state-id="<%= voice_state.public_id %>">
-      <span class="<%= voice_state.server_deaf ? 'text-red-400' : 'text-gray-300' %> group-hover/btn:text-white">
+      <span class="<%= voice_state.server_deaf ? 'text-danger-light' : 'text-gray-300' %> group-hover/btn:text-white">
         <%= voice_state.server_deaf ? 'Undeafen' : 'Server Deafen' %>
       </span>
-      <svg class="w-4 h-4 <%= voice_state.server_deaf ? 'text-red-400' : 'text-gray-500' %>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg class="w-4 h-4 <%= voice_state.server_deaf ? 'text-danger-light' : 'text-gray-500' %>" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/>
         <% if voice_state.server_deaf %>
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>
@@ -54,7 +54,7 @@
 
   <% if can_move || is_self %>
     <div class="border-t border-gray-700 my-1"></div>
-    <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-red-400 hover:bg-red-600/20 rounded"
+    <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded"
             data-context-action="kick"
             data-voice-state-id="<%= voice_state.public_id %>">
       <span>Disconnect from Voice</span>

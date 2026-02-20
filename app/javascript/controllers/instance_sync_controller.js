@@ -136,7 +136,7 @@ export default class extends Controller {
       const cancelBtn = content.querySelector('[data-slot="cancel"]')
       const confirmBtn = content.querySelector('[data-slot="confirm"]')
       confirmBtn.textContent = "Disconnect & Switch"
-      confirmBtn.className = "px-4 py-2 text-sm font-medium text-white rounded cursor-pointer bg-red-600 hover:bg-red-500"
+      confirmBtn.className = "px-4 py-2 text-sm font-medium text-white rounded cursor-pointer bg-danger hover:bg-danger-light"
 
       const cleanup = (result) => { backdrop.remove(); resolve(result) }
       cancelBtn.addEventListener("click", () => cleanup(false))
@@ -163,12 +163,12 @@ export default class extends Controller {
               <strong class="text-white">${this._escapeHtml(domain)}</strong> is currently offline or cannot be reached. You can try again later, or remove this server from your list.
             </p>
             <label class="flex items-center gap-2 mt-4 cursor-pointer select-none">
-              <input type="checkbox" data-dismiss-check class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-red-500 focus:ring-red-500 focus:ring-offset-0 cursor-pointer accent-red-500">
+              <input type="checkbox" data-dismiss-check class="w-4 h-4 rounded border-gray-600 bg-gray-700 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer accent-accent">
               <span class="text-xs text-gray-400">Don\u2019t show this again for ${this._escapeHtml(domain)}</span>
             </label>
           </div>
           <div class="px-4 py-3 flex justify-end gap-3" style="background-color: #1e1c1b;">
-            <button data-action="remove" class="px-4 py-2 text-sm font-medium text-red-400 hover:text-red-300 cursor-pointer">Remove Server</button>
+            <button data-action="remove" class="px-4 py-2 text-sm font-medium text-danger-light hover:text-danger cursor-pointer">Remove Server</button>
             <button data-action="ok" class="px-4 py-2 text-sm font-medium text-white rounded cursor-pointer bg-gray-600 hover:bg-gray-500">OK</button>
           </div>
         </div>`
@@ -224,7 +224,7 @@ export default class extends Controller {
 
   showError(message) {
     const toast = document.createElement("div")
-    toast.className = "fixed top-4 right-4 z-[9999] bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium max-w-sm"
+    toast.className = "fixed top-4 right-4 z-[9999] bg-danger text-white px-4 py-2 rounded-lg shadow-lg text-sm font-medium max-w-sm"
     toast.textContent = message
     document.body.appendChild(toast)
     setTimeout(() => {

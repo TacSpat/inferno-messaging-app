@@ -118,7 +118,7 @@ export default class extends Controller {
         const escapedName = this.escapeHtml(role.name)
         html += `<label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
           <input type="checkbox" value="${role.id}" ${checked}
-                 class="mr-2 accent-red-500 context-role-checkbox">
+                 class="mr-2 accent-accent context-role-checkbox">
           <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: ${role.color || '#ffffff'}"></span>
           <span class="text-gray-300 text-sm">${escapedName}</span>
         </label>`
@@ -184,11 +184,11 @@ export default class extends Controller {
         <h3 class="text-lg font-bold text-white mb-1">Change Nickname</h3>
         <p class="text-xs text-gray-400 mb-4">Leave empty to reset to display name.</p>
         <input type="text" value="${this.escapeAttr(currentNickname)}" maxlength="32" placeholder="Enter nickname..."
-               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500 mb-4"
+               class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent mb-4"
                data-nickname-input>
         <div class="flex justify-end gap-2">
           <button class="text-sm text-gray-400 hover:text-white px-4 py-1.5 rounded transition" data-nickname-cancel>Cancel</button>
-          <button class="text-sm bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-1.5 rounded transition" data-nickname-save>Save</button>
+          <button class="text-sm bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-4 py-1.5 rounded transition" data-nickname-save>Save</button>
         </div>
       </div>
     `
@@ -322,7 +322,7 @@ export default class extends Controller {
     const toast = document.getElementById("toast")
     if (!toast) return
     toast.textContent = message
-    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 ${type === "success" ? "bg-success text-white" : "bg-danger text-white"}`
     toast.classList.remove("hidden", "opacity-0")
     setTimeout(() => {
       toast.classList.add("opacity-0")

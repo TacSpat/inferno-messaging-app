@@ -4,7 +4,7 @@
       <% message.reactions.group_by(&:emoji).each do |emoji, reactions| %>
         <% user_reacted = defined?(current_user) && current_user && reactions.any? { |r| r.user_id == current_user.id } %>
         <% ctrl = local_assigns[:reaction_controller] || 'message-form' %>
-        <button class="flex items-center rounded-md px-2.5 py-1 text-sm hover:bg-gray-750 border cursor-pointer <%= user_reacted ? 'bg-red-600/15 border-red-500' : 'bg-gray-800 border-gray-700' %>"
+        <button class="flex items-center rounded-md px-2.5 py-1 text-sm hover:bg-gray-750 border cursor-pointer <%= user_reacted ? 'bg-accent/15 border-accent' : 'bg-gray-800 border-gray-700' %>"
                 data-action="click-><%= ctrl %>#toggleReaction"
                 data-message-id="<%= message.public_id %>"
                 data-emoji="<%= emoji %>">

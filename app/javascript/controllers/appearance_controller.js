@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 
 export default class extends Controller {
   connect() {
@@ -9,7 +9,7 @@ export default class extends Controller {
     this.IDLE_MS = 15 * 60 * 1000 // 15 minutes
     this.PING_MS = 30 * 1000 // 30 seconds
 
-    this.subscription = createConsumer().subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "AppearanceChannel" },
       {
         connected: () => {

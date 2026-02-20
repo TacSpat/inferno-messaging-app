@@ -1,11 +1,11 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 
 export default class extends Controller {
-  static values = { serverId: String }
+  static values = { serverId: String, autoJoinVoice: { type: Boolean, default: true } }
 
   connect() {
-    this.subscription = createConsumer().subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "ServerChannel", server_id: this.serverIdValue },
       {
         received: (data) => this.handleMessage(data)
@@ -13,6 +13,7 @@ export default class extends Controller {
     )
 
     this._channelCache = new Map()
+    this._activeChannelId = this._getCurrentChannelId(document.getElementById("main-content"))
 
     // Use capture phase so we fire before Turbo's bubble-phase handler
     this._onChannelClick = this._handleChannelClick.bind(this)
@@ -55,41 +56,77 @@ export default class extends Controller {
     if (!link) return
 
     const targetId = link.dataset.channelId
-    const frame = document.getElementById("main-content")
-    const currentId = this._getCurrentChannelId(frame)
+    const isVoice = link.dataset.voiceChannel === "true"
+    const sameChannel = targetId === this._activeChannelId
 
-    // Same channel — no-op
-    if (targetId === currentId) {
+    // Same channel — no-op (but voice channels still try to join below)
+    if (sameChannel) {
       e.preventDefault()
       e.stopPropagation()
-      return
+      if (!isVoice) return
     }
 
-    // If target is cached: prevent Turbo fetch, restore from cache
-    if (this._channelCache.has(targetId)) {
-      e.preventDefault()
-      e.stopPropagation()
+    if (!sameChannel) {
+      const frame = document.getElementById("main-content")
+      const currentId = this._activeChannelId || this._getCurrentChannelId(frame)
 
-      // Cache current channel first
-      if (currentId && frame) {
-        this._channelCache.set(currentId, frame.innerHTML)
-        this._enforceCacheLimit()
+      // If target is cached: prevent Turbo fetch, restore from cache
+      if (this._channelCache.has(targetId)) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        // Cache current channel first
+        if (currentId && frame) {
+          this._channelCache.set(currentId, frame.innerHTML)
+          this._enforceCacheLimit()
+        }
+
+        // Restore cached channel
+        frame.innerHTML = this._channelCache.get(targetId)
+        this._channelCache.delete(targetId)
+
+        // Update URL
+        history.pushState({}, "", link.getAttribute("href"))
       }
+      // Non-cached: turbo:before-frame-render will cache current content automatically
 
-      // Restore cached channel
-      frame.innerHTML = this._channelCache.get(targetId)
-      this._channelCache.delete(targetId)
-
-      // Update URL
-      history.pushState({}, "", link.getAttribute("href"))
+      // Update active channel styling
+      this._updateActiveChannel(link)
     }
-    // Non-cached: turbo:before-frame-render will cache current content automatically
 
-    // Always update active channel styling
-    this._updateActiveChannel(link)
+    // Toggle member sidebar: hide for voice, respect user preference for text
+    const memberSidebar = document.getElementById("member-sidebar")
+    if (memberSidebar) {
+      if (isVoice) {
+        memberSidebar.classList.add("!hidden")
+      } else if (localStorage.getItem("members_hidden") !== "1") {
+        memberSidebar.classList.remove("!hidden")
+      }
+    }
+
+    // Voice channels: join if not already in a call
+    if (isVoice) {
+      const bar = document.getElementById("voice-controls-bar")
+      const inCall = bar && !bar.classList.contains("hidden")
+      if (inCall) return
+
+      if (this.autoJoinVoiceValue) {
+        window.dispatchEvent(new CustomEvent("voice:join", {
+          detail: { channelId: targetId, serverId: this.serverIdValue }
+        }))
+      } else {
+        const name = link.querySelector(".truncate")?.textContent?.trim() || "this channel"
+        if (confirm(`Join voice channel "${name}"?`)) {
+          window.dispatchEvent(new CustomEvent("voice:join", {
+            detail: { channelId: targetId, serverId: this.serverIdValue }
+          }))
+        }
+      }
+    }
   }
 
   _updateActiveChannel(link) {
+    this._activeChannelId = link.dataset.channelId
     const active = this.element.querySelector("a[data-channel-id].bg-gray-600")
     if (active && active !== link) {
       active.classList.remove("bg-gray-600")
@@ -327,6 +364,27 @@ export default class extends Controller {
         }
       }
     }
+
+    // For the current user: swap join button and show voice controls bar
+    const currentUserId = document.body.dataset.currentUserId
+    if (data.user_id === currentUserId) {
+      // Swap "Join Voice" button → "You're connected" text
+      const joinBtn = document.querySelector("[data-voice-join-btn]")
+      if (joinBtn) {
+        joinBtn.outerHTML = '<p class="text-green-400 text-sm font-medium" data-voice-connected-text>You\'re connected to this voice channel</p>'
+      }
+
+      // Show voice controls bar
+      const bar = document.getElementById("voice-controls-bar")
+      if (bar) {
+        bar.classList.remove("hidden")
+        const channelNameEl = bar.querySelector("[data-voice-channel-target='channelName']")
+        if (channelNameEl) {
+          const name = document.querySelector(`a[data-channel-id="${data.channel_id}"] span.truncate`)?.textContent || "Voice"
+          channelNameEl.textContent = name
+        }
+      }
+    }
   }
 
   handleVoiceLeave(data) {
@@ -351,6 +409,27 @@ export default class extends Controller {
         const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
         gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
       }
+    }
+
+    // For the current user: swap connected text back to join button and hide controls bar
+    const currentUserId = document.body.dataset.currentUserId
+    if (data.user_id === currentUserId) {
+      const connectedText = document.querySelector("[data-voice-connected-text]")
+      if (connectedText && wrapper) {
+        const channelId = wrapper.dataset.currentChannelId || ""
+        const serverId = wrapper.dataset.currentServerId || ""
+        connectedText.outerHTML = `
+          <button type="button"
+                  class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition flex items-center gap-2 cursor-pointer text-sm"
+                  data-voice-join-btn
+                  onclick="window.dispatchEvent(new CustomEvent('voice:join', { detail: { channelId: '${channelId}', serverId: '${serverId}' } }))">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
+            Join Voice
+          </button>`
+      }
+
+      const bar = document.getElementById("voice-controls-bar")
+      if (bar) bar.classList.add("hidden")
     }
   }
 

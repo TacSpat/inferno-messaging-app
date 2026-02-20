@@ -20,12 +20,12 @@
 
       <div>
         <%= f.label :topic, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+        <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
       </div>
 
       <div class="flex items-center gap-3 pt-2">
         <%= link_to "Cancel", server_channel_path(@server, @channel), class: "text-sm text-gray-400 hover:text-gray-200" %>
-        <%= f.submit "Save Changes", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+        <%= f.submit "Save Changes", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
       </div>
     <% end %>
 
@@ -46,7 +46,7 @@
         </div>
         <%= button_to "Disable Sharing", unbridge_server_channel_path(@server, @channel), method: :delete,
             data: { turbo_confirm: "Stop sharing this channel? Remote participants will no longer see new messages." },
-            class: "text-sm text-red-400 hover:text-red-300 cursor-pointer" %>
+            class: "text-sm text-danger-light hover:text-danger cursor-pointer" %>
       <% else %>
         <p class="text-xs text-gray-400 mb-3">Share this channel via a NIP-29 relay group so users on other instances can participate.</p>
 
@@ -56,22 +56,22 @@
             <%= f.text_field :relay_url,
                 value: InstanceConfig.current.instance_relay_url,
                 placeholder: "wss://relay.example.com",
-                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
           </div>
           <div>
             <%= f.label :group_id, "Group ID (optional)", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
             <%= f.text_field :group_id,
                 placeholder: "Leave empty to create a new group",
-                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm" %>
+                class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
             <p class="text-xs text-gray-500 mt-1">Provide a group ID to bridge to an existing NIP-29 group on another instance.</p>
           </div>
-          <%= f.submit "Enable Sharing", class: "bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
+          <%= f.submit "Enable Sharing", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-4 py-2 rounded transition cursor-pointer text-sm" %>
         <% end %>
       <% end %>
     </div>
 
     <div class="mt-6 pt-4 border-t border-gray-700">
-      <%= button_to "Delete Channel", server_channel_path(@server, @channel), method: :delete, data: { turbo_confirm: "Delete ##{@channel.name}?" }, class: "text-sm text-red-400 hover:text-red-300 cursor-pointer" %>
+      <%= button_to "Delete Channel", server_channel_path(@server, @channel), method: :delete, data: { turbo_confirm: "Delete ##{@channel.name}?" }, class: "text-sm text-danger-light hover:text-danger cursor-pointer" %>
     </div>
   </div>
 </div>

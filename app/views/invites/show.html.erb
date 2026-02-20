@@ -15,7 +15,7 @@
     <!-- Server card -->
     <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
       <!-- Banner -->
-      <div class="relative h-32 bg-gradient-to-br from-red-900/60 to-gray-800">
+      <div class="relative h-32 bg-gradient-to-br from-accent-dark/60 to-gray-800">
         <% if @server.respond_to?(:banner) && @server.banner.attached? %>
           <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
         <% end %>
@@ -58,12 +58,12 @@
         <% if @already_member %>
           <%= link_to "Open #{@server.name}",
                 server_channel_path(@server, @server.channels.ordered.first),
-                class: "block w-full text-center bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition text-sm" %>
+                class: "block w-full text-center bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition text-sm" %>
         <% elsif user_signed_in? %>
           <%= button_to "Accept Invite",
                 accept_invite_path(@invite.code),
                 method: :post,
-                class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+                class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
         <% else %>
           <% if @detected_home_instance %>
             <!-- Remote user detected — only show federation login -->
@@ -71,7 +71,7 @@
               <%= hidden_field_tag :home_instance, @detected_home_instance %>
               <p class="text-xs text-gray-400 mb-2">Joining from <strong class="text-gray-200"><%= @detected_home_instance %></strong></p>
               <%= submit_tag "Continue from #{@detected_home_instance}",
-                    class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+                    class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
             <% end %>
 
             <div class="mt-4 pt-4 border-t border-gray-700">
@@ -79,7 +79,7 @@
               <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2", data: { turbo: false } do %>
                 <%= text_field_tag :home_instance, nil,
                       placeholder: "home.instance.com",
-                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
+                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" %>
                 <%= submit_tag "Login via Home Instance",
                       class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
               <% end %>
@@ -90,10 +90,10 @@
               <%= button_to "Accept Invite",
                     accept_invite_path(@invite.code),
                     method: :post,
-                    class: "w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+                    class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
               <p class="text-xs text-gray-500 text-center">
                 Already have an account?
-                <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-red-400 hover:text-red-300" %>
+                <%= link_to "Log in", new_user_session_path(invite: @invite.code), class: "text-accent-light hover:text-accent" %>
               </p>
             </div>
 
@@ -102,7 +102,7 @@
               <%= form_tag accept_invite_path(@invite.code), method: :post, class: "space-y-2", data: { turbo: false } do %>
                 <%= text_field_tag :home_instance, nil,
                       placeholder: "home.instance.com",
-                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-red-500" %>
+                      class: "w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-accent" %>
                 <%= submit_tag "Login via Home Instance",
                       class: "w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 px-3 rounded transition cursor-pointer text-sm" %>
               <% end %>

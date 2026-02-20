@@ -54,7 +54,7 @@ export default class extends Controller {
       let icon = ""
       let detail = ""
       if (r.type === "user") {
-        icon = `<div class="w-6 h-6 rounded-full bg-red-600 flex items-center justify-center text-xs font-bold text-white shrink-0">${r.name[0].toUpperCase()}</div>`
+        icon = `<div class="w-6 h-6 rounded-full bg-accent flex items-center justify-center text-xs font-bold text-white shrink-0">${r.name[0].toUpperCase()}</div>`
         detail = `<span class="text-xs text-gray-500">#${r.discriminator}</span>`
       } else if (r.type === "role") {
         const color = r.color || "#99aab5"

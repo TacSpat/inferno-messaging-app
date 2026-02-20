@@ -1,13 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 
 export default class extends Controller {
   static targets = ["highlight", "input", "filePreview", "dropzone", "replyBar", "replyAuthor", "replyPreview", "parentId"]
   static values = { conversationId: String }
 
   connect() {
-    this.consumer = createConsumer()
-    this.subscription = this.consumer.subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "ConversationChannel", conversation_id: this.conversationIdValue },
       {
         received: (data) => this.handleReceived(data),
@@ -57,7 +56,6 @@ export default class extends Controller {
 
   disconnect() {
     this.subscription?.unsubscribe()
-    this.consumer?.disconnect()
     this.teardownDragAndDrop()
     this.teardownPaste()
     this.teardownFileIntercept()
@@ -273,7 +271,7 @@ export default class extends Controller {
 
       const btn = document.createElement("button")
       btn.type = "button"
-      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
+      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger hover:bg-danger-light rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
       btn.innerHTML = "&times;"
       btn.dataset.index = i
       btn.dataset.action = "click->dm-message-form#removeFile"
@@ -392,6 +390,14 @@ export default class extends Controller {
   // --- ActionCable ---
 
   handleReceived(data) {
+    if (data.type === "presence") {
+      const currentUserId = document.body.dataset.currentUserId
+      if (String(data.user_id) !== String(currentUserId)) {
+        this._updatePresenceDots(data.state)
+      }
+      return
+    }
+
     const messagesDiv = document.getElementById("messages")
     if (!messagesDiv) return
 
@@ -429,6 +435,15 @@ export default class extends Controller {
     }
   }
 
+  _updatePresenceDots(state) {
+    const colorMap = { online: "bg-green-500", idle: "bg-yellow-500", dnd: "bg-red-500", offline: "bg-gray-500" }
+    const cls = colorMap[state] || "bg-gray-500"
+    document.querySelectorAll("[data-dm-presence-dot]").forEach(dot => {
+      dot.classList.remove("bg-green-500", "bg-yellow-500", "bg-red-500", "bg-gray-500")
+      dot.classList.add(cls)
+    })
+  }
+
   showTypingIndicator(username, userId) {
     const currentUserId = document.body.dataset.currentUserId
     if (String(userId) === String(currentUserId)) return
@@ -447,19 +462,19 @@ export default class extends Controller {
     if (!this.hasHighlightTarget) return
     const text = this.inputTarget.value
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-red-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-accent-light">$1</span>')
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>')
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
-    html = html.replace(/`([^`]+)`/g, '<span class="text-red-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
-    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-red-300">$1</span>')
+    html = html.replace(/`([^`]+)`/g, '<span class="text-accent bg-gray-700/50 rounded px-0.5">`$1`</span>')
+    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-accent">$1</span>')
     // Replace emoji placeholders (em-space + PUA char) with inline images
     if (window._emojiReverse && window._emojiMap) {
       html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {
         const name = window._emojiReverse[ch]
         if (name && window._emojiMap[name]) {
           const w = this._emojiCharWidth || 20
-          return `<img src="${window._emojiMap[name]}" style="display:inline;height:${w}px;width:${w}px;object-fit:contain;vertical-align:middle;pointer-events:none">`
+          return `<img src="${window._emojiMap[name]}" style="display:inline-block;height:${w}px;width:${w}px;object-fit:contain;vertical-align:text-bottom;pointer-events:none">`
         }
         return _
       })

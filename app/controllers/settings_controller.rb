@@ -24,8 +24,36 @@ class SettingsController < ApplicationController
     @user = current_user
   end
 
+  def update_appearance
+    @user = current_user
+    if @user.update(theme: params[:theme])
+      redirect_to user_settings_appearance_path, notice: "Appearance updated!"
+    else
+      render :appearance, status: :unprocessable_entity
+    end
+  end
+
   def notifications
     @user = current_user
+  end
+
+  def voice
+    @user = current_user
+  end
+
+  def update_voice
+    @user = current_user
+    permitted = params.permit(:input_mode, :input_sensitivity, :noise_suppression, :auto_join_voice, :ptt_key, :ptt_key_code)
+    new_settings = (@user.voice_settings || {}).merge(permitted.to_h)
+    # Coerce types
+    new_settings["input_sensitivity"] = new_settings["input_sensitivity"].to_f if new_settings["input_sensitivity"]
+    new_settings["noise_suppression"] = ActiveModel::Type::Boolean.new.cast(new_settings["noise_suppression"])
+    new_settings["auto_join_voice"] = ActiveModel::Type::Boolean.new.cast(new_settings["auto_join_voice"])
+    if @user.update(voice_settings: new_settings)
+      redirect_to user_settings_voice_path, notice: "Voice settings saved!"
+    else
+      render :voice, status: :unprocessable_entity
+    end
   end
 
   def keybinds

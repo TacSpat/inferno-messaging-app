@@ -9,6 +9,7 @@
     "@hotwired/stimulus": "^3.2.2",
     "@hotwired/turbo-rails": "^8.0.12",
     "@rails/actioncable": "^7.2.0",
+    "@sapphi-red/web-noise-suppressor": "^0.3.5",
     "@tailwindcss/cli": "^4.1.18",
     "livekit-client": "^2.0.0",
     "sortablejs": "^1.15.7",

@@ -11,12 +11,18 @@ class AppearanceOfflineJob < ApplicationJob
 
     user.update_columns(online_state: User.online_states[:offline])
 
+    payload = { type: "presence", user_id: user.public_id, state: "offline" }
+
     user.servers.each do |server|
-      ServerChannel.broadcast_to(server, {
-        type: "presence",
-        user_id: user.public_id,
-        state: "offline"
-      })
+      ServerChannel.broadcast_to(server, payload)
+    end
+
+    user.conversations.each do |conversation|
+      ConversationChannel.broadcast_to(conversation, payload)
+    end
+
+    user.friends.select(:id).each do |friend|
+      ActionCable.server.broadcast("user_notifications_#{friend.id}", payload)
     end
   end
 end

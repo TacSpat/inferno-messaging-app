@@ -12,7 +12,255 @@
   --color-gray-800: #1e1c1b;
   --color-gray-900: #141312;
   --color-gray-950: #0a0a09;
+
+  --color-accent: #dc2626;
+  --color-accent-light: #f87171;
+  --color-accent-dark: #b91c1c;
+  --color-confirm: #ea580c;
+  --color-confirm-light: #fb923c;
+  --color-confirm-dark: #c2410c;
+  --color-danger: #dc2626;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #b91c1c;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #dc2626;
 }
+
+/* ═══════════════════════════════════════════
+   ACCENT COLOR SYSTEM — Theme-aware variables
+   ═══════════════════════════════════════════ */
+
+:root, [data-theme="inferno"] {
+  --accent: 220 38 38;
+  --accent-light: 248 113 113;
+  --accent-medium: 239 68 68;
+  --accent-dark: 185 28 28;
+}
+
+/* ── Frostfire: cool blue-grays + blue accent ── */
+[data-theme="frostfire"] {
+  --color-gray-50: #f0f4f8;
+  --color-gray-100: #d9e2ec;
+  --color-gray-200: #bcccdc;
+  --color-gray-300: #9fb3c8;
+  --color-gray-400: #829ab1;
+  --color-gray-500: #627d98;
+  --color-gray-600: #3d5a80;
+  --color-gray-700: #243b53;
+  --color-gray-800: #1a2a3a;
+  --color-gray-900: #0f1b2d;
+  --color-gray-950: #080f1a;
+  --accent: 59 130 246;
+  --accent-light: 147 197 253;
+  --accent-medium: 96 165 250;
+  --accent-dark: 29 78 216;
+  --color-accent: #3b82f6;
+  --color-accent-light: #93c5fd;
+  --color-accent-dark: #1d4ed8;
+  --color-confirm: #2563eb;
+  --color-confirm-light: #60a5fa;
+  --color-confirm-dark: #1d4ed8;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #2563eb;
+}
+
+/* ── Boron: olive-tinted grays + emerald accent ── */
+[data-theme="boron"] {
+  --color-gray-50: #f0f4f0;
+  --color-gray-100: #d6e4d6;
+  --color-gray-200: #b8cfb8;
+  --color-gray-300: #93ad93;
+  --color-gray-400: #748c74;
+  --color-gray-500: #577057;
+  --color-gray-600: #3a5040;
+  --color-gray-700: #253328;
+  --color-gray-800: #1a261c;
+  --color-gray-900: #0f1f15;
+  --color-gray-950: #070f0a;
+  --accent: 16 185 129;
+  --accent-light: 110 231 183;
+  --accent-medium: 52 211 153;
+  --accent-dark: 5 150 105;
+  --color-accent: #10b981;
+  --color-accent-light: #6ee7b7;
+  --color-accent-dark: #059669;
+  --color-confirm: #059669;
+  --color-confirm-light: #34d399;
+  --color-confirm-dark: #047857;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #059669;
+}
+
+/* ── Brimstone: purple-tinted grays + purple accent ── */
+[data-theme="brimstone"] {
+  --color-gray-50: #f5f0fa;
+  --color-gray-100: #e4d9f0;
+  --color-gray-200: #ccb8e0;
+  --color-gray-300: #ad93c8;
+  --color-gray-400: #9078ab;
+  --color-gray-500: #705a8a;
+  --color-gray-600: #4d3a6a;
+  --color-gray-700: #352750;
+  --color-gray-800: #241a38;
+  --color-gray-900: #1a1025;
+  --color-gray-950: #0d0814;
+  --accent: 168 85 247;
+  --accent-light: 216 180 254;
+  --accent-medium: 192 132 252;
+  --accent-dark: 126 34 206;
+  --color-accent: #a855f7;
+  --color-accent-light: #d8b4fe;
+  --color-accent-dark: #7e22ce;
+  --color-confirm: #7c3aed;
+  --color-confirm-light: #a78bfa;
+  --color-confirm-dark: #6d28d9;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #7c3aed;
+}
+
+/* ── Plasma: rose-tinted grays + pink accent ── */
+[data-theme="plasma"] {
+  --color-gray-50: #fdf2f8;
+  --color-gray-100: #f0d4e8;
+  --color-gray-200: #dbb4d0;
+  --color-gray-300: #b8899e;
+  --color-gray-400: #9b7089;
+  --color-gray-500: #7d5570;
+  --color-gray-600: #5c3a52;
+  --color-gray-700: #3d2438;
+  --color-gray-800: #2b1828;
+  --color-gray-900: #1c0f1c;
+  --color-gray-950: #0e0710;
+  --accent: 236 72 153;
+  --accent-light: 249 168 212;
+  --accent-medium: 244 114 182;
+  --accent-dark: 219 39 119;
+  --color-accent: #ec4899;
+  --color-accent-light: #f9a8d4;
+  --color-accent-dark: #db2777;
+  --color-confirm: #db2777;
+  --color-confirm-light: #f472b6;
+  --color-confirm-dark: #be185d;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #db2777;
+}
+
+/* ── Pulsar: soft pink-tinted grays + pastel pink accent ── */
+[data-theme="pulsar"] {
+  --color-gray-50: #fdf4f8;
+  --color-gray-100: #f2dfe9;
+  --color-gray-200: #e0c4d4;
+  --color-gray-300: #c09cb2;
+  --color-gray-400: #a07d94;
+  --color-gray-500: #806078;
+  --color-gray-600: #5a3e54;
+  --color-gray-700: #3e2a3c;
+  --color-gray-800: #2c1e2a;
+  --color-gray-900: #1e141e;
+  --color-gray-950: #110c12;
+  --accent: 249 168 212;
+  --accent-light: 252 207 232;
+  --accent-medium: 244 182 218;
+  --accent-dark: 244 114 182;
+  --color-accent: #f9a8d4;
+  --color-accent-light: #fccfe8;
+  --color-accent-dark: #f472b6;
+  --color-confirm: #f472b6;
+  --color-confirm-light: #f9a8d4;
+  --color-confirm-dark: #ec4899;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #f472b6;
+}
+
+/* ── Obsidian: pure neutral grays + slate accent, clean minimal ── */
+[data-theme="obsidian"] {
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #e2e8f0;
+  --color-gray-200: #cbd5e1;
+  --color-gray-300: #94a3b8;
+  --color-gray-400: #64748b;
+  --color-gray-500: #475569;
+  --color-gray-600: #334155;
+  --color-gray-700: #1e293b;
+  --color-gray-800: #1a2332;
+  --color-gray-900: #111827;
+  --color-gray-950: #0a0f1a;
+  --accent: 148 163 184;
+  --accent-light: 203 213 225;
+  --accent-medium: 176 190 207;
+  --accent-dark: 100 116 139;
+  --color-accent: #94a3b8;
+  --color-accent-light: #cbd5e1;
+  --color-accent-dark: #64748b;
+  --color-confirm: #3b82f6;
+  --color-confirm-light: #60a5fa;
+  --color-confirm-dark: #2563eb;
+  --color-danger: #ef4444;
+  --color-danger-light: #f87171;
+  --color-danger-dark: #dc2626;
+  --color-success: #16a34a;
+  --color-success-light: #4ade80;
+  --color-success-dark: #15803d;
+  --color-warning: #eab308;
+  --color-warning-light: #facc15;
+  --color-warning-dark: #ca8a04;
+  --color-toggle-on: #3b82f6;
+}
+
+/* Theme switch crossfade via View Transitions API */
+::view-transition-old(root) {
+  animation: vt-fade-out 0.4s ease-in-out both;
+}
+::view-transition-new(root) {
+  animation: vt-fade-in 0.4s ease-in-out both;
+}
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-fade-in { from { opacity: 0; } }
 
 @layer base {
   .message-content { overflow-wrap: break-word; overflow-x: hidden; }
@@ -68,14 +316,14 @@
   }
   .message-content th { background-color: rgb(44 42 41); font-weight: 600; }
   .mention {
-    background-color: rgba(220, 38, 38, 0.15);
-    color: #dc2626;
+    background-color: rgb(var(--accent) / 0.15);
+    color: rgb(var(--accent));
     padding: 0 0.25rem;
     border-radius: 0.25rem;
     font-weight: 500;
     cursor: pointer;
   }
-  .mention:hover { background-color: rgba(220, 38, 38, 0.3); text-decoration: underline; }
+  .mention:hover { background-color: rgb(var(--accent) / 0.3); text-decoration: underline; }
   .mention-everyone, .mention-here { background-color: rgba(250, 204, 21, 0.15); color: #facc15; }
   .mention-everyone:hover, .mention-here:hover { background-color: rgba(250, 204, 21, 0.3); }
   .code-block-wrapper { position: relative; margin: 0.5rem 0; }
@@ -188,15 +436,15 @@
 
   /* Server folder drop-zone highlight */
   .folder-drop-target {
-    outline: 2px dashed #dc2626;
+    outline: 2px dashed rgb(var(--accent));
     outline-offset: 2px;
     border-radius: 0.75rem;
   }
   .folder-drop-ready {
-    outline: 2px solid #dc2626;
+    outline: 2px solid rgb(var(--accent));
     outline-offset: 2px;
     border-radius: 0.75rem;
-    background-color: rgba(220, 38, 38, 0.15);
+    background-color: rgb(var(--accent) / 0.15);
   }
 
   /* Mobile navigation drawers */
@@ -252,43 +500,44 @@
   .text-transparent::selection {
     color: transparent !important;
     -webkit-text-fill-color: transparent !important;
-    background: rgba(220, 38, 38, 0.25);
+    background: rgb(var(--accent) / 0.25);
   }
   .text-transparent::-moz-selection {
     color: transparent !important;
-    background: rgba(220, 38, 38, 0.25);
+    background: rgb(var(--accent) / 0.25);
   }
 
   /* ═══════════════════════════════════════════
      INFERNO — Magma glow effects
+     (All colors driven by --accent CSS variables)
      ═══════════════════════════════════════════ */
 
-  /* Ember border: subtle red seam between major panels */
-  .bg-gray-800 { border-color: rgba(220, 38, 38, 0.08); }
-  .bg-gray-950 { border-color: rgba(220, 38, 38, 0.06); }
+  /* Ember border: subtle accent seam between major panels */
+  .bg-gray-800 { border-color: rgb(var(--accent) / 0.08); }
+  .bg-gray-950 { border-color: rgb(var(--accent) / 0.06); }
 
   /* Sidebar dividers glow faintly like cooling cracks */
   .border-gray-900 {
-    border-color: rgba(220, 38, 38, 0.10);
+    border-color: rgb(var(--accent) / 0.10);
   }
 
   /* Channel items + member items — ember hover */
   aside a:hover, aside button:hover {
-    background-color: rgba(220, 38, 38, 0.08) !important;
+    background-color: rgb(var(--accent) / 0.08) !important;
   }
 
   /* Active channel glow — magma seeping through (channels use bg-gray-600, DMs use bg-gray-700) */
   aside a.bg-gray-600.text-white,
   aside a.bg-gray-700.text-white {
-    background: linear-gradient(135deg, rgba(220, 38, 38, 0.18), rgba(185, 28, 28, 0.08)) !important;
-    border-left: 2px solid #dc2626;
-    box-shadow: inset 3px 0 8px -3px rgba(220, 38, 38, 0.3);
+    background: linear-gradient(135deg, rgb(var(--accent) / 0.18), rgb(var(--accent-dark) / 0.08)) !important;
+    border-left: 2px solid rgb(var(--accent));
+    box-shadow: inset 3px 0 8px -3px rgb(var(--accent) / 0.3);
   }
 
   /* Server icons — molten ring on hover */
   nav a:hover > :not(.mention-badge),
   nav div[class*="cursor-pointer"]:hover {
-    box-shadow: 0 0 8px rgba(220, 38, 38, 0.4), 0 0 2px rgba(220, 38, 38, 0.6);
+    box-shadow: 0 0 8px rgb(var(--accent) / 0.4), 0 0 2px rgb(var(--accent) / 0.6);
   }
 
   /* Active server icon pill — tall amber blip, matches home button */
@@ -296,38 +545,38 @@
   /* ── MESSAGE INPUT ── */
   /* The input bar: persistent ember border + glow on focus */
   .bg-gray-600.rounded-lg {
-    border: 1px solid rgba(220, 38, 38, 0.2);
+    border: 1px solid rgb(var(--accent) / 0.2);
     transition: box-shadow 0.25s ease, border-color 0.25s ease;
   }
   .bg-gray-600.rounded-lg:focus-within {
-    border-color: rgba(220, 38, 38, 0.5);
-    box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12),
-                0 0 20px rgba(220, 38, 38, 0.1),
-                inset 0 0 12px rgba(220, 38, 38, 0.04);
+    border-color: rgb(var(--accent) / 0.5);
+    box-shadow: 0 0 0 2px rgb(var(--accent) / 0.12),
+                0 0 20px rgb(var(--accent) / 0.1),
+                inset 0 0 12px rgb(var(--accent) / 0.04);
   }
   /* Send button — fire up on hover */
   .bg-gray-600.rounded-lg button[type="submit"]:hover {
-    color: #dc2626 !important;
-    filter: drop-shadow(0 0 6px rgba(220, 38, 38, 0.6));
+    color: rgb(var(--accent)) !important;
+    filter: drop-shadow(0 0 6px rgb(var(--accent) / 0.6));
   }
   /* Emoji/picker button glow */
   .bg-gray-600.rounded-lg button:hover {
-    color: #dc2626 !important;
+    color: rgb(var(--accent)) !important;
   }
   /* File upload label glow */
   .bg-gray-600.rounded-lg label:hover {
-    color: #dc2626 !important;
-    filter: drop-shadow(0 0 4px rgba(220, 38, 38, 0.4));
+    color: rgb(var(--accent)) !important;
+    filter: drop-shadow(0 0 4px rgb(var(--accent) / 0.4));
   }
   /* Reply bar — ember accent */
   [data-message-form-target="replyBar"] {
-    border-left: 2px solid rgba(220, 38, 38, 0.5);
-    background: linear-gradient(90deg, rgba(220, 38, 38, 0.06), transparent) !important;
+    border-left: 2px solid rgb(var(--accent) / 0.5);
+    background: linear-gradient(90deg, rgb(var(--accent) / 0.06), transparent) !important;
   }
   /* File preview bar */
   [data-message-form-target="filePreview"] {
-    border-left: 2px solid rgba(220, 38, 38, 0.3);
-    background: linear-gradient(90deg, rgba(220, 38, 38, 0.04), transparent) !important;
+    border-left: 2px solid rgb(var(--accent) / 0.3);
+    background: linear-gradient(90deg, rgb(var(--accent) / 0.04), transparent) !important;
   }
 
   /* ── MESSAGES ── */
@@ -337,18 +586,18 @@
     border-left: 2px solid transparent;
   }
   [data-message-id]:hover {
-    background-color: rgba(220, 38, 38, 0.06) !important;
-    border-left-color: rgba(220, 38, 38, 0.4);
-    box-shadow: inset 4px 0 12px -4px rgba(220, 38, 38, 0.15);
+    background-color: rgb(var(--accent) / 0.06) !important;
+    border-left-color: rgb(var(--accent) / 0.4);
+    box-shadow: inset 4px 0 12px -4px rgb(var(--accent) / 0.15);
   }
   /* Message action toolbar — ember-bordered floating bar */
   [data-message-id] .group-hover\:flex {
-    border-color: rgba(220, 38, 38, 0.25) !important;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgba(220, 38, 38, 0.1);
+    border-color: rgb(var(--accent) / 0.25) !important;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4), 0 0 8px rgb(var(--accent) / 0.1);
   }
   [data-message-id] .group-hover\:flex button:hover {
-    color: #dc2626 !important;
-    background-color: rgba(220, 38, 38, 0.1);
+    color: rgb(var(--accent)) !important;
+    background-color: rgb(var(--accent) / 0.1);
     border-radius: 4px;
   }
   /* Message avatars — ember ring on hover */
@@ -356,7 +605,7 @@
     transition: box-shadow 0.15s ease;
   }
   [data-message-id]:hover img.rounded-full {
-    box-shadow: 0 0 8px rgba(220, 38, 38, 0.35);
+    box-shadow: 0 0 8px rgb(var(--accent) / 0.35);
   }
 
   /* ── ATTACHMENTS ── */
@@ -365,26 +614,26 @@
     transition: box-shadow 0.2s ease;
   }
   [data-attachment-id] img:hover {
-    box-shadow: 0 0 16px rgba(220, 38, 38, 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 0 16px rgb(var(--accent) / 0.2), 0 4px 12px rgba(0, 0, 0, 0.3);
   }
   /* Audio player container */
   .message-content + div .bg-gray-800.rounded-lg,
   [data-message-id] .bg-gray-800.rounded-lg {
-    border: 1px solid rgba(220, 38, 38, 0.1);
+    border: 1px solid rgb(var(--accent) / 0.1);
     transition: border-color 0.2s ease;
   }
   [data-message-id] .bg-gray-800.rounded-lg:hover {
-    border-color: rgba(220, 38, 38, 0.3);
-    box-shadow: 0 0 10px rgba(220, 38, 38, 0.08);
+    border-color: rgb(var(--accent) / 0.3);
+    box-shadow: 0 0 10px rgb(var(--accent) / 0.08);
   }
   /* Video player — ember border */
   [data-controller="video-player"] {
-    border: 1px solid rgba(220, 38, 38, 0.1);
+    border: 1px solid rgb(var(--accent) / 0.1);
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   [data-controller="video-player"]:hover {
-    border-color: rgba(220, 38, 38, 0.35);
-    box-shadow: 0 0 14px rgba(220, 38, 38, 0.15);
+    border-color: rgb(var(--accent) / 0.35);
+    box-shadow: 0 0 14px rgb(var(--accent) / 0.15);
   }
 
   /* ── MEMBER LIST ── */
@@ -394,9 +643,9 @@
     border-left: 2px solid transparent;
   }
   #member-sidebar [data-user-id]:hover {
-    background: linear-gradient(90deg, rgba(220, 38, 38, 0.1), rgba(220, 38, 38, 0.03)) !important;
-    border-left-color: rgba(220, 38, 38, 0.5);
-    box-shadow: inset 4px 0 10px -4px rgba(220, 38, 38, 0.2);
+    background: linear-gradient(90deg, rgb(var(--accent) / 0.1), rgb(var(--accent) / 0.03)) !important;
+    border-left-color: rgb(var(--accent) / 0.5);
+    box-shadow: inset 4px 0 10px -4px rgb(var(--accent) / 0.2);
   }
   /* Member avatar — ember ring on hover */
   #member-sidebar [data-user-id] img.rounded-full,
@@ -405,7 +654,7 @@
   }
   #member-sidebar [data-user-id]:hover img.rounded-full,
   #member-sidebar [data-user-id]:hover > div > div.rounded-full {
-    box-shadow: 0 0 8px rgba(220, 38, 38, 0.35);
+    box-shadow: 0 0 8px rgb(var(--accent) / 0.35);
   }
   /* Online status dot — glow when green */
   #member-sidebar .bg-green-500 {
@@ -413,20 +662,20 @@
   }
   /* Role section headers — ember underline */
   #member-sidebar h3 {
-    border-bottom: 1px solid rgba(220, 38, 38, 0.08);
+    border-bottom: 1px solid rgb(var(--accent) / 0.08);
     padding-bottom: 4px;
   }
   /* Member sidebar top edge — lava seam */
   #member-sidebar {
-    border-left: 1px solid rgba(220, 38, 38, 0.15) !important;
-    box-shadow: -2px 0 16px rgba(220, 38, 38, 0.06);
+    border-left: 1px solid rgb(var(--accent) / 0.15) !important;
+    box-shadow: -2px 0 16px rgb(var(--accent) / 0.06);
   }
 
   /* Buttons — fire glow on hover */
-  .bg-red-600:hover, .bg-red-600:hover {
-    box-shadow: 0 0 14px rgba(220, 38, 38, 0.5), 0 2px 8px rgba(220, 38, 38, 0.3);
+  .bg-confirm:hover, .bg-danger:hover {
+    box-shadow: 0 0 14px rgb(var(--accent) / 0.5), 0 2px 8px rgb(var(--accent) / 0.3);
   }
-  .bg-red-600, .bg-red-600 {
+  .bg-confirm, .bg-danger {
     transition: box-shadow 0.2s ease;
   }
 
@@ -434,42 +683,42 @@
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(220, 38, 38, 0.25);
+    background: rgb(var(--accent) / 0.25);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(220, 38, 38, 0.45);
+    background: rgb(var(--accent) / 0.45);
   }
 
-  /* Text selection — red ember */
+  /* Text selection — accent ember */
   ::selection {
-    background: rgba(220, 38, 38, 0.3);
+    background: rgb(var(--accent) / 0.3);
     color: #fff;
   }
 
   /* Focus rings — fire instead of default blue */
   *:focus-visible {
-    outline-color: rgba(220, 38, 38, 0.6) !important;
+    outline-color: rgb(var(--accent) / 0.6) !important;
   }
 
   /* Animated lava border for server header */
   .border-b.border-gray-900.shadow-sm {
     border-bottom-color: transparent;
     background-image: linear-gradient(var(--tw-gradient-stops, #282625, #282625)),
-                      linear-gradient(90deg, rgba(220,38,38,0.0), rgba(220,38,38,0.3), rgba(185,28,28,0.1));
+                      linear-gradient(90deg, rgb(var(--accent) / 0), rgb(var(--accent) / 0.3), rgb(var(--accent-dark) / 0.1));
     background-clip: padding-box, border-box;
     background-origin: padding-box, border-box;
     border-bottom: 1px solid transparent;
   }
 
   /* Pulsing ember glow on the active server rail pill */
-  .bg-red-400.rounded-r-full {
-    box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);
+  .bg-accent-light.rounded-r-full {
+    box-shadow: 0 0 6px rgb(var(--accent-light) / 0.6);
     animation: ember-pulse 2s ease-in-out infinite;
   }
   @keyframes ember-pulse {
-    0%, 100% { box-shadow: 0 0 6px rgba(248, 113, 113, 0.4); }
-    50% { box-shadow: 0 0 10px rgba(220, 38, 38, 0.7); }
+    0%, 100% { box-shadow: 0 0 6px rgb(var(--accent-light) / 0.4); }
+    50% { box-shadow: 0 0 10px rgb(var(--accent) / 0.7); }
   }
 
   /* Active server pill — fire flare on hover */
@@ -478,57 +727,57 @@
   }
   .server-icon-wrap:hover .active-server-pill {
     width: 5px;
-    background-color: #dc2626;
-    box-shadow: 0 0 12px rgba(220, 38, 38, 0.7),
-                0 0 24px rgba(239, 68, 68, 0.35);
+    background-color: rgb(var(--accent));
+    box-shadow: 0 0 12px rgb(var(--accent) / 0.7),
+                0 0 24px rgb(var(--accent-medium) / 0.35);
     animation: pill-fire-flare 2.5s ease-in-out infinite;
   }
   @keyframes pill-fire-flare {
     0%, 100% {
-      box-shadow: 0 0 12px rgba(220, 38, 38, 0.7),
-                  0 0 24px rgba(239, 68, 68, 0.35);
-      background-color: #dc2626;
+      box-shadow: 0 0 12px rgb(var(--accent) / 0.7),
+                  0 0 24px rgb(var(--accent-medium) / 0.35);
+      background-color: rgb(var(--accent));
     }
     50% {
-      box-shadow: 0 0 16px rgba(248, 113, 113, 0.8),
-                  0 0 30px rgba(220, 38, 38, 0.45);
-      background-color: #ef4444;
+      box-shadow: 0 0 16px rgb(var(--accent-light) / 0.8),
+                  0 0 30px rgb(var(--accent) / 0.45);
+      background-color: rgb(var(--accent-medium));
     }
   }
 
-  /* Notification badges — hot red glow */
+  /* Notification badges — hot accent glow */
   .mention-badge, .home-badge {
-    box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 8px rgb(var(--accent-medium) / 0.5);
   }
 
   /* Magma cracks between panels */
   nav.bg-gray-950 {
-    border-right: 1px solid rgba(220, 38, 38, 0.15);
-    box-shadow: 1px 0 12px rgba(220, 38, 38, 0.06);
+    border-right: 1px solid rgb(var(--accent) / 0.15);
+    box-shadow: 1px 0 12px rgb(var(--accent) / 0.06);
   }
   aside.bg-gray-800 {
-    box-shadow: 1px 0 8px rgba(220, 38, 38, 0.04);
+    box-shadow: 1px 0 8px rgb(var(--accent) / 0.04);
   }
   /* Channel header bar — subtle bottom ember line */
   .border-b.shadow-sm.bg-gray-800 {
-    border-bottom-color: rgba(220, 38, 38, 0.12);
+    border-bottom-color: rgb(var(--accent) / 0.12);
   }
 
   /* Voice controls bar — inferno styling */
   .voice-controls-inferno {
-    border-top: 1px solid rgba(220, 38, 38, 0.25);
-    background: linear-gradient(180deg, rgba(220, 38, 38, 0.06), transparent) !important;
+    border-top: 1px solid rgb(var(--accent) / 0.25);
+    background: linear-gradient(180deg, rgb(var(--accent) / 0.06), transparent) !important;
     animation: voice-bar-ember 3s ease-in-out infinite;
   }
   @keyframes voice-bar-ember {
-    0%, 100% { border-top-color: rgba(220, 38, 38, 0.2); }
-    50% { border-top-color: rgba(248, 113, 113, 0.4); }
+    0%, 100% { border-top-color: rgb(var(--accent) / 0.2); }
+    50% { border-top-color: rgb(var(--accent-light) / 0.4); }
   }
   .voice-controls-inferno button {
     transition: all 0.15s ease;
   }
   .voice-controls-inferno button:hover {
-    box-shadow: 0 0 8px rgba(220, 38, 38, 0.3);
+    box-shadow: 0 0 8px rgb(var(--accent) / 0.3);
   }
 
   /* Sidebar voice speaking indicator — audio-level responsive ring */
@@ -536,22 +785,22 @@
     transition: box-shadow 0.1s ease-out;
   }
   .voice-speaking .voice-sidebar-avatar {
-    box-shadow: 0 0 0 2px #dc2626,
-                0 0 calc(3px + 8px * var(--audio-level, 0)) rgba(220, 38, 38, calc(0.3 + 0.5 * var(--audio-level, 0)));
+    box-shadow: 0 0 0 2px rgb(var(--accent)),
+                0 0 calc(3px + 8px * var(--audio-level, 0)) rgb(var(--accent) / calc(0.3 + 0.5 * var(--audio-level, 0)));
   }
   .voice-speaking {
-    background: rgba(220, 38, 38, calc(0.03 + 0.05 * var(--audio-level, 0)));
+    background: rgb(var(--accent) / calc(0.03 + 0.05 * var(--audio-level, 0)));
     transition: background 0.1s ease-out;
   }
 
   /* Message jump highlight */
   .message-highlight {
     animation: message-flash 4s ease-out !important;
-    background-color: rgba(220, 38, 38, 0.15) !important;
+    background-color: rgb(var(--accent) / 0.15) !important;
     border-radius: 4px;
   }
   @keyframes message-flash {
-    0%, 30% { background-color: rgba(220, 38, 38, 0.3) !important; }
+    0%, 30% { background-color: rgb(var(--accent) / 0.3) !important; }
     100% { background-color: transparent !important; }
   }
 
@@ -625,5 +874,32 @@
   @keyframes bar-slide-up {
     from { opacity: 1; transform: translateY(0); }
     to { opacity: 0; transform: translateY(-100%); }
+  }
+
+  /* ═══════════════════════════════════════════
+     OBSIDIAN — Disable glow/animation effects
+     ═══════════════════════════════════════════ */
+  [data-theme="obsidian"] .bg-accent-light.rounded-r-full {
+    animation: none;
+  }
+  [data-theme="obsidian"] .server-icon-wrap:hover .active-server-pill {
+    animation: none;
+  }
+  [data-theme="obsidian"] .voice-controls-inferno {
+    animation: none;
+  }
+  [data-theme="obsidian"] nav a:hover > :not(.mention-badge),
+  [data-theme="obsidian"] nav div[class*="cursor-pointer"]:hover {
+    box-shadow: 0 0 4px rgb(var(--accent) / 0.2);
+  }
+  [data-theme="obsidian"] [data-message-id]:hover img.rounded-full {
+    box-shadow: none;
+  }
+  [data-theme="obsidian"] #member-sidebar [data-user-id]:hover img.rounded-full,
+  [data-theme="obsidian"] #member-sidebar [data-user-id]:hover > div > div.rounded-full {
+    box-shadow: none;
+  }
+  [data-theme="obsidian"] .mention-badge, [data-theme="obsidian"] .home-badge {
+    box-shadow: none;
   }
 }

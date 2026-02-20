@@ -54,7 +54,7 @@ export default class extends Controller {
     panel.style.cssText = "width: 320px; max-height: 380px;"
     panel.innerHTML = `
       <div class="px-2 pt-2 pb-1">
-        <input type="text" placeholder="Search emoji..." class="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-red-500 border border-gray-700" data-emoji-search>
+        <input type="text" placeholder="Search emoji..." class="w-full bg-gray-800 text-gray-200 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-1 focus:ring-accent border border-gray-700" data-emoji-search>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2" data-emoji-content></div>`
 

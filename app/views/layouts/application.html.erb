@@ -1,9 +1,10 @@
 <!DOCTYPE html>
-<html class="h-full bg-gray-900">
+<html class="h-full bg-gray-900" data-theme="<%= current_user&.theme || 'inferno' %>">
   <head>
     <title>Inferno</title>
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <script>var t=localStorage.getItem("theme");if(t)document.documentElement.dataset.theme=t;</script>
     <%= csrf_meta_tags %>
     <%= csp_meta_tag %>
     <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
@@ -66,8 +67,8 @@
     </style>
   </head>
   <body class="h-full overflow-hidden text-gray-100" <% if user_signed_in? %>data-controller="appearance notification-badge" data-current-user-id="<%= current_user.public_id %>"<% end %>>
-    <% if notice %><div class="fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
-    <% if alert %><div class="fixed top-4 right-4 z-50 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
+    <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
+    <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
     <% if user_signed_in? && current_user.instance_admin? && !request.ssl? && !request.host.in?(%w[localhost 127.0.0.1]) %>
       <div class="bg-yellow-800 text-yellow-100 text-xs text-center px-3 py-1.5 font-medium z-50 relative">
         <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
@@ -113,7 +114,7 @@
               <% end %>
               <div class="border-t border-gray-700 my-1"></div>
               <% if @server.owner != current_user %>
-                <%= button_to "Leave Server", leave_server_path(@server), method: :delete, class: "flex items-center w-full px-2.5 py-1.5 text-sm text-red-400 hover:bg-red-600/20 rounded cursor-pointer", data: { turbo_confirm: "Leave #{@server.name}?" } %>
+                <%= button_to "Leave Server", leave_server_path(@server), method: :delete, class: "flex items-center w-full px-2.5 py-1.5 text-sm text-danger-light hover:bg-danger/20 rounded cursor-pointer", data: { turbo_confirm: "Leave #{@server.name}?" } %>
               <% end %>
               <% if membership&.has_permission?("create_invite") %>
                 <div data-controller="invite-menu" data-invite-menu-base-url-value="<%= request.base_url %>" data-invite-menu-server-id-value="<%= @server.public_id %>">
@@ -126,15 +127,15 @@
                     <% if active_invite %>
                       <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
                         <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono flex-1 select-all truncate"><%= request.base_url %>/inferno/invite/<%= active_invite.code %></span>
-                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-red-400 hover:text-red-300 text-xs font-semibold shrink-0 cursor-pointer">Copy</button>
+                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-accent-light hover:text-accent text-xs font-semibold shrink-0 cursor-pointer">Copy</button>
                       </div>
                     <% else %>
                       <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
                         <span data-invite-menu-target="linkText" class="text-xs text-gray-500 italic truncate flex-1">No active invite</span>
-                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-red-400 hover:text-red-300 text-xs font-semibold shrink-0 cursor-pointer hidden">Copy</button>
+                        <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-accent-light hover:text-accent text-xs font-semibold shrink-0 cursor-pointer hidden">Copy</button>
                       </div>
                     <% end %>
-                    <button type="button" data-invite-menu-target="generateBtn" data-action="invite-menu#generate" class="w-full text-center text-xs text-red-400 hover:text-red-300 font-semibold py-1 cursor-pointer">
+                    <button type="button" data-invite-menu-target="generateBtn" data-action="invite-menu#generate" class="w-full text-center text-xs text-accent-light hover:text-accent font-semibold py-1 cursor-pointer">
                       Create New Invite
                     </button>
                   </div>
@@ -145,7 +146,7 @@
 
 
           <!-- Channels list -->
-          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder voice-context" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>" data-voice-context-server-id-value="<%= @server.public_id %>">
+          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder voice-context" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-auto-join-voice-value="<%= current_user.voice_setting('auto_join_voice') %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>" data-voice-context-server-id-value="<%= @server.public_id %>">
             <%# Uncategorized channels first (text + voice) %>
             <% @server.channels.uncategorized.where(channel_type: [:text, :voice]).ordered.each do |channel| %>
               <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel) } %>
@@ -177,7 +178,7 @@
               <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>
               <p class="text-xs text-gray-400 truncate"><%= current_user.tag %></p>
             </div>
-            <%= link_to user_settings_account_path, class: "text-gray-400 hover:text-gray-200 p-1" do %>
+            <%= link_to user_settings_account_path, data: { turbo_frame: "settings-frame" }, onclick: "document.getElementById('settings-overlay')?.classList.remove('hidden'); document.body.style.overflow='hidden'", class: "text-gray-400 hover:text-gray-200 p-1" do %>
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
             <% end %>
           </div>
@@ -287,5 +288,43 @@
     <% end %>
 
     <%= render "shared/js_templates" if user_signed_in? %>
+
+    <script>
+      window._toggleMemberSidebar = function() {
+        var sb = document.getElementById("member-sidebar");
+        if (!sb) return;
+        var hidden = sb.classList.toggle("!hidden");
+        localStorage.setItem("members_hidden", hidden ? "1" : "");
+        var btn = document.getElementById("member-toggle-btn");
+        if (btn) btn.classList.toggle("text-white", !hidden);
+      };
+      // Apply saved preference on load and after turbo frame navigations
+      function _applyMemberPref() {
+        var sb = document.getElementById("member-sidebar");
+        if (!sb) return;
+        // Always hide for voice channels
+        var activeLink = document.querySelector("a[data-channel-id].bg-gray-600");
+        var isVoice = activeLink && activeLink.dataset.voiceChannel === "true";
+        if (isVoice) {
+          sb.classList.add("!hidden");
+        } else if (localStorage.getItem("members_hidden") === "1") {
+          sb.classList.add("!hidden");
+        } else {
+          sb.classList.remove("!hidden");
+        }
+        var btn = document.getElementById("member-toggle-btn");
+        if (btn) btn.classList.toggle("text-white", !sb.classList.contains("!hidden"));
+      }
+      _applyMemberPref();
+      document.addEventListener("turbo:frame-load", function(e) {
+        if (e.target.id === "main-content") _applyMemberPref();
+      });
+    </script>
+
+    <% if user_signed_in? %>
+      <div id="settings-overlay" class="hidden fixed inset-0 z-[80] bg-gray-900" data-controller="settings-overlay" data-action="keydown@document->settings-overlay#escClose">
+        <turbo-frame id="settings-frame" class="block h-full" data-settings-overlay-target="frame" data-action="turbo:frame-load->settings-overlay#frameLoaded"></turbo-frame>
+      </div>
+    <% end %>
   </body>
 </html>

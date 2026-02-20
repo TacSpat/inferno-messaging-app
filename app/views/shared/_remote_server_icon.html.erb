@@ -6,7 +6,7 @@
      data-instance-sync-url-value="<%= ref.remote_server_url || ref.remote_instance_url %>">
   <a href="<%= ref.remote_server_url || ref.remote_instance_url %>"
      data-action="click->instance-sync#navigate"
-     class="group relative flex items-center justify-center w-12 h-12 rounded-2xl overflow-hidden bg-gray-700 hover:bg-gradient-to-br hover:from-red-700 hover:to-red-500 hover:rounded-xl transition-all duration-200 cursor-pointer<%= ' server-icon-gif' if is_remote_gif %>"
+     class="group relative flex items-center justify-center w-12 h-12 rounded-2xl overflow-hidden bg-gray-700 hover:bg-gradient-to-br hover:from-accent-dark hover:to-accent hover:rounded-xl transition-all duration-200 cursor-pointer<%= ' server-icon-gif' if is_remote_gif %>"
      title="<%= ref.name %> — <%= ref.instance_domain %>">
     <% if ref.icon_url.present? %>
       <% if is_remote_gif %>
@@ -18,7 +18,7 @@
     <% else %>
       <span class="text-white font-semibold text-sm"><%= ref.name&.split&.map(&:first)&.join&.slice(0, 2)&.upcase || "?" %></span>
     <% end %>
-    <div class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-red-600 rounded-full flex items-center justify-center border-2 border-gray-950">
+    <div class="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-accent rounded-full flex items-center justify-center border-2 border-gray-950">
       <svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
     </div>
   </a>

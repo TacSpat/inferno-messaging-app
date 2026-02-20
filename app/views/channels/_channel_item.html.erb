@@ -4,6 +4,7 @@
 <a href="<%= server_channel_path(server, channel) %>"
    data-turbo-frame="main-content"
    data-channel-id="<%= channel.public_id %>"
+   <% if is_voice %>data-voice-channel="true"<% end %>
    class="flex items-center px-2 py-1.5 rounded group relative
           <%= active ? 'bg-gray-600 text-white' : (unread ? 'text-white hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200') %>">
   <% if unread && !active %>
@@ -16,7 +17,7 @@
   <% end %>
   <span class="truncate text-sm flex-1 <%= unread ? 'font-bold' : 'font-medium' %>"><%= render_name_with_emojis(channel.name, server) %></span>
   <% if mention_count > 0 %>
-    <div class="mention-badge ml-auto min-w-[18px] h-[18px] bg-red-500 rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0">
+    <div class="mention-badge ml-auto min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0">
       <%= mention_count > 99 ? '99+' : mention_count %>
     </div>
   <% end %>

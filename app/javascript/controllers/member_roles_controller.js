@@ -76,7 +76,7 @@ export default class extends Controller {
     roles.forEach(role => {
       const clone = tpl.content.cloneNode(true)
       const badge = clone.querySelector("span")
-      badge.className = `inline-flex items-center text-xs px-2 py-0.5 rounded-full ${role.name === "Admin" ? "bg-red-600/20 text-red-400" : "bg-gray-700 text-gray-400"}`
+      badge.className = `inline-flex items-center text-xs px-2 py-0.5 rounded-full ${role.name === "Admin" ? "bg-accent/20 text-accent-light" : "bg-gray-700 text-gray-400"}`
       clone.querySelector('[data-slot="color-dot"]').style.backgroundColor = role.color || "#ffffff"
       clone.querySelector('[data-slot="name"]').textContent = role.name
       badgesEl.appendChild(clone)
@@ -87,7 +87,7 @@ export default class extends Controller {
     const toast = document.getElementById("toast")
     if (!toast) return
     toast.textContent = message
-    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 context-pop ${type === "success" ? "bg-green-600 text-white" : "bg-red-600 text-white"}`
+    toast.className = `fixed top-4 right-4 px-4 py-2 rounded-lg shadow-lg text-sm font-medium z-[100] transition-opacity duration-300 context-pop ${type === "success" ? "bg-success text-white" : "bg-danger text-white"}`
     toast.classList.remove("hidden", "opacity-0")
     setTimeout(() => {
       toast.classList.add("opacity-0")

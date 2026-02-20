@@ -12,127 +12,212 @@
   <span class="text-gray-400 text-xl mr-2">@</span>
   <% if @other_user %>
     <h1 class="font-semibold text-white"><%= @other_user.display_name.presence || @other_user.username %></h1>
-    <div class="ml-2 w-2.5 h-2.5 rounded-full shrink-0 <%= @other_user.online_state.present? && @other_user.online_state != 'offline' ? 'bg-green-500' : 'bg-gray-500' %>"></div>
+    <% header_status = case @other_user.online_state
+                       when "online" then "bg-green-500"
+                       when "idle" then "bg-yellow-500"
+                       when "dnd" then "bg-red-500"
+                       else "bg-gray-500"
+                       end %>
+    <div data-dm-presence-dot class="ml-2 w-2.5 h-2.5 rounded-full shrink-0 <%= header_status %>"></div>
   <% else %>
     <h1 class="font-semibold text-white"><%= @conversation.display_name(current_user) %></h1>
   <% end %>
 
   <div class="flex-1"></div>
-  <%= render "shared/header_toolbar" %>
+  <%= render "shared/header_toolbar", dm_user: @other_user %>
 </div>
 
-<!-- Messages area -->
-<div id="messages"
-     class="flex-1 overflow-y-auto px-2 sm:px-4 py-4 space-y-0.5 relative"
-     data-controller="scroll-position image-preview gif-save message-actions"
-     data-scroll-position-channel-id-value="dm_<%= @conversation.public_id %>">
-  <% if @messages.empty? %>
-    <div class="flex flex-col items-center justify-center h-full text-center">
-      <% if @other_user %>
-        <div class="w-20 h-20 rounded-full flex items-center justify-center text-3xl mb-4 overflow-hidden">
-          <% if @other_user.avatar.attached? %>
-            <%= image_tag @other_user.avatar, class: "w-full h-full object-cover" %>
-          <% else %>
-            <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
-              <%= @other_user.username[0].upcase %>
+<!-- Content area: messages + optional profile panel -->
+<div class="flex flex-1 min-h-0">
+  <!-- Messages column -->
+  <div class="flex flex-col flex-1 min-h-0">
+    <!-- Messages area -->
+    <div id="messages"
+         class="flex-1 overflow-y-auto px-2 sm:px-4 py-4 space-y-0.5 relative"
+         data-controller="scroll-position image-preview gif-save message-actions"
+         data-scroll-position-channel-id-value="dm_<%= @conversation.public_id %>">
+      <% if @messages.empty? %>
+        <div class="flex flex-col items-center justify-center h-full text-center">
+          <% if @other_user %>
+            <div class="w-20 h-20 rounded-full flex items-center justify-center text-3xl mb-4 overflow-hidden">
+              <% if @other_user.avatar.attached? %>
+                <%= image_tag @other_user.avatar, class: "w-full h-full object-cover" %>
+              <% else %>
+                <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
+                  <%= @other_user.username[0].upcase %>
+                </div>
+              <% end %>
             </div>
+            <h2 class="text-2xl font-bold text-white"><%= @other_user.display_name.presence || @other_user.username %></h2>
+            <p class="text-gray-400 mt-1"><%= @other_user.tag %></p>
+            <p class="text-gray-400 mt-2 text-sm">This is the beginning of your direct message history with <strong class="text-white"><%= @other_user.display_name.presence || @other_user.username %></strong>.</p>
+          <% else %>
+            <h2 class="text-2xl font-bold text-white"><%= @conversation.display_name(current_user) %></h2>
+            <p class="text-gray-400 mt-1">This is the beginning of this conversation.</p>
           <% end %>
         </div>
-        <h2 class="text-2xl font-bold text-white"><%= @other_user.display_name.presence || @other_user.username %></h2>
-        <p class="text-gray-400 mt-1"><%= @other_user.tag %></p>
-        <p class="text-gray-400 mt-2 text-sm">This is the beginning of your direct message history with <strong class="text-white"><%= @other_user.display_name.presence || @other_user.username %></strong>.</p>
       <% else %>
-        <h2 class="text-2xl font-bold text-white"><%= @conversation.display_name(current_user) %></h2>
-        <p class="text-gray-400 mt-1">This is the beginning of this conversation.</p>
+        <% @messages.each do |message| %>
+          <%= render partial: "messages/dm_message", locals: { message: message } %>
+        <% end %>
       <% end %>
     </div>
-  <% else %>
-    <% @messages.each do |message| %>
-      <%= render partial: "messages/dm_message", locals: { message: message } %>
-    <% end %>
-  <% end %>
-</div>
 
-<!-- New messages bar -->
-<div data-scroll-position-target="newMessageBar" class="hidden">
-  <button class="w-full bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white text-sm py-1.5 px-4 flex items-center justify-center gap-2 cursor-pointer transition"
-          data-action="click->scroll-position#jumpToBottom">
-    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
-    <span data-count>New message</span>
-  </button>
-</div>
-
-<!-- Typing indicator -->
-<div id="typing-indicator" class="px-4 h-6 text-xs text-gray-400"></div>
-
-<!-- Message input -->
-<div class="px-2 sm:px-4 pb-4 mt-auto shrink-0 relative">
-  <!-- Reply bar -->
-  <div data-dm-message-form-target="replyBar" class="hidden bg-gray-700 rounded-t-lg px-4 py-2 flex items-center text-sm border-b border-gray-600">
-    <span class="text-gray-400 mr-1">Replying to</span>
-    <span data-dm-message-form-target="replyAuthor" class="text-red-400 font-medium mr-2"></span>
-    <span data-dm-message-form-target="replyPreview" class="text-gray-400 truncate flex-1"></span>
-    <button type="button" class="text-gray-400 hover:text-gray-200 ml-2 shrink-0" data-action="click->dm-message-form#clearReply">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-    </button>
-  </div>
-
-  <!-- File preview area -->
-  <div data-dm-message-form-target="filePreview" class="hidden bg-gray-700 px-4 py-2 flex flex-wrap border-b border-gray-600"></div>
-
-  <%= form_with model: @message, url: conversation_dm_messages_path(@conversation), html: { multipart: true, class: "relative" }, data: { action: "turbo:submit-end->dm-message-form#handleSubmit" } do |f| %>
-    <%= f.hidden_field :parent_id, data: { dm_message_form_target: "parentId" } %>
-    <div class="flex items-center bg-gray-600 rounded-lg px-2 sm:px-4">
-      <!-- File upload -->
-      <label class="text-gray-400 hover:text-gray-200 mr-2 sm:mr-3 shrink-0 cursor-pointer p-1">
-        <%= f.file_field :files, multiple: true, class: "hidden", accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.md,.gif", data: { action: "change->dm-message-form#handleFileSelect" } %>
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      </label>
-
-      <div class="flex-1 relative">
-        <div data-dm-message-form-target="highlight" class="absolute inset-0 py-3 text-base sm:text-sm whitespace-pre-wrap break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
-        <%= f.text_area :content,
-            placeholder: "Message @#{@other_user&.display_name.presence || @other_user&.username || @conversation.display_name(current_user)}",
-            class: "w-full bg-transparent text-transparent caret-white placeholder-gray-400 py-3 resize-none outline-none text-base sm:text-sm max-h-48 relative z-10",
-            rows: 1,
-            data: { action: "keydown->dm-message-form#handleKeydown input->dm-message-form#autoResize input->dm-message-form#updateHighlight", dm_message_form_target: "input", unified_picker_target: "input" } %>
-      </div>
-
-      <!-- Unified Picker button -->
-      <div class="relative">
-        <button type="button" class="text-gray-400 hover:text-gray-200 mx-1 sm:mx-2 shrink-0 p-1" data-action="click->unified-picker#toggle">
-          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        </button>
-        <!-- Unified Picker panel -->
-        <div data-unified-picker-target="panel" class="hidden fixed bottom-0 left-0 right-0 sm:absolute sm:bottom-12 sm:left-auto sm:right-0 w-full sm:w-96 bg-gray-800 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 flex flex-col" style="max-height: min(420px, 60vh);">
-          <!-- Tabs -->
-          <div class="flex border-b border-gray-700 shrink-0">
-            <button type="button" data-unified-picker-target="tabGifs" data-tab="gifs" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-transparent text-gray-400 hover:text-white transition cursor-pointer">GIFs</button>
-            <button type="button" data-unified-picker-target="tabStickers" data-tab="stickers" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-transparent text-gray-400 hover:text-white transition cursor-pointer">Stickers</button>
-            <button type="button" data-unified-picker-target="tabEmoji" data-tab="emoji" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-red-500 text-white transition cursor-pointer">Emoji</button>
-          </div>
-          <!-- Search -->
-          <div class="px-3 py-2 shrink-0">
-            <input type="text" data-unified-picker-target="searchInput" data-action="input->unified-picker#onSearch" placeholder="Search..." class="w-full bg-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 outline-none placeholder-gray-500 focus:ring-1 focus:ring-red-500">
-          </div>
-          <!-- Content -->
-          <div data-unified-picker-target="content" class="flex-1 overflow-y-auto px-2 pb-2 min-h-0"></div>
-        </div>
-      </div>
-
-      <button type="submit" class="text-gray-400 hover:text-red-400 ml-1 shrink-0 p-1">
-        <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+    <!-- New messages bar -->
+    <div data-scroll-position-target="newMessageBar" class="hidden">
+      <button class="w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white text-sm py-1.5 px-4 flex items-center justify-center gap-2 cursor-pointer transition"
+              data-action="click->scroll-position#jumpToBottom">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+        <span data-count>New message</span>
       </button>
     </div>
-  <% end %>
-</div>
 
-<!-- Drag-and-drop overlay -->
-<div data-dm-message-form-target="dropzone" class="hidden fixed inset-0 bg-gray-900/80 z-50 flex items-center justify-center pointer-events-auto">
-  <div class="border-2 border-dashed border-red-500 rounded-2xl p-12 text-center">
-    <svg class="w-16 h-16 text-red-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-    <p class="text-xl text-white font-semibold">Drop files to upload</p>
+    <!-- Typing indicator -->
+    <div id="typing-indicator" class="px-4 h-6 text-xs text-gray-400"></div>
+
+    <!-- Message input -->
+    <div class="px-2 sm:px-4 pb-4 mt-auto shrink-0 relative">
+      <!-- Reply bar -->
+      <div data-dm-message-form-target="replyBar" class="hidden bg-gray-700 rounded-t-lg px-4 py-2 flex items-center text-sm border-b border-gray-600">
+        <span class="text-gray-400 mr-1">Replying to</span>
+        <span data-dm-message-form-target="replyAuthor" class="text-accent-light font-medium mr-2"></span>
+        <span data-dm-message-form-target="replyPreview" class="text-gray-400 truncate flex-1"></span>
+        <button type="button" class="text-gray-400 hover:text-gray-200 ml-2 shrink-0" data-action="click->dm-message-form#clearReply">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <!-- File preview area -->
+      <div data-dm-message-form-target="filePreview" class="hidden bg-gray-700 px-4 py-2 flex flex-wrap border-b border-gray-600"></div>
+
+      <%= form_with model: @message, url: conversation_dm_messages_path(@conversation), html: { multipart: true, class: "relative" }, data: { action: "turbo:submit-end->dm-message-form#handleSubmit" } do |f| %>
+        <%= f.hidden_field :parent_id, data: { dm_message_form_target: "parentId" } %>
+        <div class="flex items-center bg-gray-600 rounded-lg px-2 sm:px-4">
+          <!-- File upload -->
+          <label class="text-gray-400 hover:text-gray-200 mr-2 sm:mr-3 shrink-0 cursor-pointer p-1">
+            <%= f.file_field :files, multiple: true, class: "hidden", accept: "image/*,video/*,audio/*,.pdf,.txt,.zip,.md,.gif", data: { action: "change->dm-message-form#handleFileSelect" } %>
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          </label>
+
+          <div class="flex-1 relative">
+            <div data-dm-message-form-target="highlight" class="absolute inset-0 py-3 text-base sm:text-sm leading-6 whitespace-pre-wrap break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
+            <%= f.text_area :content,
+                placeholder: "Message @#{@other_user&.display_name.presence || @other_user&.username || @conversation.display_name(current_user)}",
+                class: "w-full bg-transparent text-transparent caret-white placeholder-gray-400 py-3 resize-none outline-none text-base sm:text-sm leading-6 max-h-48 relative z-10",
+                rows: 1,
+                data: { action: "keydown->dm-message-form#handleKeydown input->dm-message-form#autoResize input->dm-message-form#updateHighlight", dm_message_form_target: "input", unified_picker_target: "input" } %>
+          </div>
+
+          <!-- Unified Picker button -->
+          <div class="relative">
+            <button type="button" class="text-gray-400 hover:text-gray-200 mx-1 sm:mx-2 shrink-0 p-1" data-action="click->unified-picker#toggle">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            </button>
+            <!-- Unified Picker panel -->
+            <div data-unified-picker-target="panel" class="hidden fixed bottom-0 left-0 right-0 sm:absolute sm:bottom-12 sm:left-auto sm:right-0 w-full sm:w-96 bg-gray-800 border border-gray-700 rounded-t-lg sm:rounded-lg shadow-xl z-50 flex flex-col" style="max-height: min(420px, 60vh);">
+              <!-- Tabs -->
+              <div class="flex border-b border-gray-700 shrink-0">
+                <button type="button" data-unified-picker-target="tabGifs" data-tab="gifs" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-transparent text-gray-400 hover:text-white transition cursor-pointer">GIFs</button>
+                <button type="button" data-unified-picker-target="tabStickers" data-tab="stickers" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-transparent text-gray-400 hover:text-white transition cursor-pointer">Stickers</button>
+                <button type="button" data-unified-picker-target="tabEmoji" data-tab="emoji" data-action="click->unified-picker#switchTab" class="flex-1 py-2 text-xs font-semibold text-center border-b-2 border-accent text-white transition cursor-pointer">Emoji</button>
+              </div>
+              <!-- Search -->
+              <div class="px-3 py-2 shrink-0">
+                <input type="text" data-unified-picker-target="searchInput" data-action="input->unified-picker#onSearch" placeholder="Search..." class="w-full bg-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 outline-none placeholder-gray-500 focus:ring-1 focus:ring-accent">
+              </div>
+              <!-- Content -->
+              <div data-unified-picker-target="content" class="flex-1 overflow-y-auto px-2 pb-2 min-h-0"></div>
+            </div>
+          </div>
+
+          <button type="submit" class="text-gray-400 hover:text-accent ml-1 shrink-0 p-1">
+            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Drag-and-drop overlay -->
+    <div data-dm-message-form-target="dropzone" class="hidden fixed inset-0 bg-gray-900/80 z-50 flex items-center justify-center pointer-events-auto">
+      <div class="border-2 border-dashed border-accent rounded-2xl p-12 text-center">
+        <svg class="w-16 h-16 text-accent-light mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+        <p class="text-xl text-white font-semibold">Drop files to upload</p>
+      </div>
+    </div>
   </div>
+
+  <% if @other_user %>
+    <!-- DM Profile Panel (right sidebar) -->
+    <aside id="dm-profile-panel" class="hidden w-80 bg-gray-800 border-l border-gray-900 overflow-y-auto shrink-0">
+      <!-- Banner -->
+      <div class="h-[120px] relative">
+        <% if @other_user.banner.attached? %>
+          <%= image_tag @other_user.banner, class: "w-full h-full object-cover",
+              style: "object-position: center #{(@other_user.banner_offset_y || 0)}px;" %>
+        <% elsif @other_user.effective_banner_url.present? %>
+          <%= image_tag @other_user.effective_banner_url, class: "w-full h-full object-cover",
+              style: "object-position: center #{(@other_user.banner_offset_y || 0)}px;" %>
+        <% else %>
+          <div class="w-full h-full" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>"></div>
+        <% end %>
+      </div>
+
+      <!-- Profile info -->
+      <div class="relative px-4 pb-4">
+        <!-- Avatar -->
+        <div class="relative -mt-[40px] mb-3">
+          <div class="w-[80px] h-[80px] rounded-full p-[4px] inline-block" style="background-color: <%= @other_user.profile_color_2.presence || @other_user.profile_color || '#1e1c1b' %>">
+            <% if @other_user.avatar.attached? %>
+              <%= image_tag @other_user.avatar, class: "w-full h-full rounded-full object-cover" %>
+            <% elsif @other_user.effective_avatar_url.present? %>
+              <%= image_tag @other_user.effective_avatar_url, class: "w-full h-full rounded-full object-cover" %>
+            <% else %>
+              <div class="w-full h-full rounded-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
+                <%= @other_user.username[0].upcase %>
+              </div>
+            <% end %>
+          </div>
+          <% status_color = case @other_user.online_state
+                            when "online" then "bg-green-500"
+                            when "idle" then "bg-yellow-500"
+                            when "dnd" then "bg-red-500"
+                            else "bg-gray-500"
+                            end %>
+          <div data-dm-presence-dot class="absolute bottom-[2px] left-[56px] w-[20px] h-[20px] rounded-full border-[4px] <%= status_color %>" style="border-color: <%= @other_user.profile_color_2.presence || @other_user.profile_color || '#1e1c1b' %>"></div>
+        </div>
+
+        <!-- Card content -->
+        <div class="bg-black/30 rounded-lg p-3 space-y-3">
+          <div>
+            <h3 class="text-lg font-bold text-white leading-tight"><%= @other_user.display_name.presence || @other_user.username %></h3>
+            <p class="text-xs text-white/60"><%= @other_user.tag %></p>
+            <% if @other_user.remote? %>
+              <p class="text-[10px] text-accent-light flex items-center gap-1 mt-0.5">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <%= @other_user.home_instance_domain %>
+              </p>
+            <% end %>
+          </div>
+
+          <% if @other_user.status.present? %>
+            <p class="text-sm text-white/70"><%= @other_user.status_emoji %> <%= @other_user.status %></p>
+          <% end %>
+
+          <% if @other_user.bio.present? %>
+            <div class="border-t border-white/10 pt-2">
+              <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">About Me</h4>
+              <p class="text-sm text-white/80"><%= @other_user.bio %></p>
+            </div>
+          <% end %>
+
+          <div class="border-t border-white/10 pt-2">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
+            <p class="text-[11px] text-white/50"><%= @other_user.created_at.strftime("%b %d, %Y") %></p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  <% end %>
 </div>
 
 </div>

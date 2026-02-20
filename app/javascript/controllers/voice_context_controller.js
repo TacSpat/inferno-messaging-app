@@ -218,7 +218,7 @@ export default class extends Controller {
 
   showToast(msg, isError = false) {
     const toast = document.createElement("div")
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-danger" : "bg-success"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
     toast.textContent = msg
     document.body.appendChild(toast)
     setTimeout(() => {

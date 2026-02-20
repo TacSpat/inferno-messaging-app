@@ -3,14 +3,18 @@ import { Controller } from "@hotwired/stimulus"
 // This controller lives on the voice-controls-bar in the sidebar layout.
 // The "Join Voice" button inside the turbo frame communicates via window events.
 export default class extends Controller {
-  static targets = ["statusText", "channelName", "muteBtn", "deafenBtn", "muteIcon", "deafenIcon"]
+  static targets = ["statusText", "channelName", "muteBtn", "deafenBtn", "muteIcon", "deafenIcon", "screenShareBtn", "screenShareIcon"]
   static values = {
     serverId: String,
     connected: { type: Boolean, default: false },
     channelId: { type: String, default: "" },
     channelName: { type: String, default: "" },
     selfMute: { type: Boolean, default: false },
-    selfDeaf: { type: Boolean, default: false }
+    selfDeaf: { type: Boolean, default: false },
+    inputMode: { type: String, default: "voice_activity" },
+    inputSensitivity: { type: Number, default: 0.01 },
+    noiseSuppression: { type: Boolean, default: true },
+    pttKeyCode: { type: String, default: "Backquote" }
   }
 
   connect() {
@@ -52,6 +56,18 @@ export default class extends Controller {
 
     this.serverMuted = false
     this.serverDeafened = false
+    this._screenShareActive = false
+    this._pttActive = false
+    this._remoteScreenTracks = new Map()
+    this._watchingStreams = new Set()
+    this._rnnoiseProcessor = null
+    this._rnnoiseAudioCtx = null
+
+    // Push-to-talk key listeners
+    this._onPttKeyDown = (e) => this._handlePttKeyDown(e)
+    this._onPttKeyUp = (e) => this._handlePttKeyUp(e)
+    document.addEventListener("keydown", this._onPttKeyDown, true)
+    document.addEventListener("keyup", this._onPttKeyUp, true)
 
     // Restore LiveKit room preserved from a previous navigation
     if (window._voiceState?.room) {
@@ -65,6 +81,11 @@ export default class extends Controller {
       this._mutedBeforeDeafen = vs.mutedBeforeDeafen
       this.serverMuted = vs.serverMuted || false
       this.serverDeafened = vs.serverDeafened || false
+      this._screenShareActive = vs.screenShareActive || false
+      this._pttActive = vs.pttActive || false
+      this._watchingStreams = new Set(vs.watchingStreams || [])
+      this._rnnoiseProcessor = vs.rnnoiseProcessor || null
+      this._rnnoiseAudioCtx = vs.rnnoiseAudioCtx || null
 
       if (this.hasChannelNameTarget) {
         this.channelNameTarget.textContent = this.channelDisplayName
@@ -72,6 +93,29 @@ export default class extends Controller {
       this.showControlsBar()
       this._startAudioLevelMonitor()
       this.syncAllVoiceUI()
+      this._setupCardClickListener()
+      if (this._screenShareActive) {
+        requestAnimationFrame(() => this._showLocalScreenSharePreview())
+      }
+      // Repopulate remote screen tracks from room and re-open watched streams
+      requestAnimationFrame(() => {
+        if (!this.room) return
+        this.room.remoteParticipants.forEach((participant) => {
+          participant.videoTrackPublications.forEach((pub) => {
+            if (pub.track && pub.isSubscribed && pub.track.source === "screen_share") {
+              this._remoteScreenTracks.set(participant.identity, { track: pub.track, participant })
+              this._addLiveBadgeToCard(participant.identity)
+            }
+          })
+        })
+        const toReopen = new Set(this._watchingStreams)
+        this._watchingStreams.clear()
+        for (const identity of toReopen) {
+          if (this._remoteScreenTracks.has(identity)) {
+            this._openStreamPreview(identity)
+          }
+        }
+      })
       return
     }
 
@@ -106,6 +150,16 @@ export default class extends Controller {
     window.removeEventListener("voice:force-move", this._onForceMove)
     window.removeEventListener("voice:server-mute", this._onServerMute)
     window.removeEventListener("voice:server-deafen", this._onServerDeafen)
+    document.removeEventListener("keydown", this._onPttKeyDown, true)
+    document.removeEventListener("keyup", this._onPttKeyUp, true)
+    if (this._visibilityHandler) {
+      document.removeEventListener("visibilitychange", this._visibilityHandler)
+      this._visibilityHandler = null
+    }
+    if (this._cardClickHandler) {
+      document.removeEventListener("click", this._cardClickHandler)
+      this._cardClickHandler = null
+    }
     // Preserve the LiveKit room across page navigations instead of disconnecting.
     // The next connect() will pick it up from window._voiceState.
     if (this.room) {
@@ -117,7 +171,12 @@ export default class extends Controller {
         deafened: this.deafened,
         mutedBeforeDeafen: this._mutedBeforeDeafen,
         serverMuted: this.serverMuted,
-        serverDeafened: this.serverDeafened
+        serverDeafened: this.serverDeafened,
+        screenShareActive: this._screenShareActive,
+        pttActive: this._pttActive,
+        watchingStreams: Array.from(this._watchingStreams || []),
+        rnnoiseProcessor: this._rnnoiseProcessor,
+        rnnoiseAudioCtx: this._rnnoiseAudioCtx
       }
       this.room = null
     }
@@ -125,6 +184,9 @@ export default class extends Controller {
 
   async handleJoinRequest({ channelId, serverId }) {
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
+
+    // Set serverIdValue so _leaveServerVoiceState and other methods can use it
+    this.serverIdValue = serverId
 
     try {
       // Acquire mic permission NOW while we still have user gesture context.
@@ -225,7 +287,8 @@ export default class extends Controller {
         try { this.room.disconnect() } catch {}
         this.room = null
       }
-      document.querySelectorAll('[id^="voice-audio-"]').forEach(el => el.remove())
+      document.querySelectorAll('[id^="voice-audio-"], [id^="voice-screen-audio-"], [id^="voice-screen-share-"]').forEach(el => el.remove())
+      this._remoteScreenTracks.clear()
 
       const { Room, RoomEvent, Track } = await import("livekit-client")
 
@@ -233,13 +296,27 @@ export default class extends Controller {
         audioCaptureDefaults: {
           autoGainControl: true,
           echoCancellation: true,
-          noiseSuppression: true
+          noiseSuppression: false  // RNNoise handles this when enabled
         }
       })
 
-      // Attach remote audio tracks so we can hear other participants
+      // Attach remote audio + screen share tracks
       this.room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
-        console.log(`[Voice] Track subscribed: ${track.kind} from ${participant.identity}`)
+        console.log(`[Voice] Track subscribed: ${track.kind} (source: ${track.source}) from ${participant.identity}`)
+
+        if (track.source === Track.Source.ScreenShare) {
+          if (track.kind === Track.Kind.Video) {
+            this._showRemoteScreenShare(track, participant)
+          } else if (track.kind === Track.Kind.Audio) {
+            // Screen share audio — attach as hidden audio element
+            const el = track.attach()
+            el.id = `voice-screen-audio-${participant.identity}`
+            document.body.appendChild(el)
+            this.room.startAudio().then(() => el.play().catch(() => {}))
+          }
+          return
+        }
+
         if (track.kind === Track.Kind.Audio) {
           // Remove any stale element for this participant
           const stale = document.getElementById(`voice-audio-${participant.identity}`)
@@ -258,15 +335,36 @@ export default class extends Controller {
       })
 
       this.room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
-        console.log(`[Voice] Track unsubscribed: ${track.kind} from ${participant.identity}`)
+        console.log(`[Voice] Track unsubscribed: ${track.kind} (source: ${track.source}) from ${participant.identity}`)
         track.detach().forEach(el => el.remove())
+
+        if (track.source === Track.Source.ScreenShare) {
+          if (track.kind === Track.Kind.Video) {
+            this._removeRemoteScreenShare(participant.identity)
+          }
+          const screenAudio = document.getElementById(`voice-screen-audio-${participant.identity}`)
+          if (screenAudio) screenAudio.remove()
+          return
+        }
+
         const leftover = document.getElementById(`voice-audio-${participant.identity}`)
         if (leftover) leftover.remove()
       })
 
+      // Detect when local screen share is stopped via browser's native "Stop sharing" button
+      this.room.on(RoomEvent.LocalTrackUnpublished, (publication) => {
+        if (publication.source === Track.Source.ScreenShare && this._screenShareActive) {
+          console.log("[Voice] Local screen share ended (browser stop or track ended)")
+          this._screenShareActive = false
+          this._removeLocalScreenSharePreview()
+          this._updateScreenShareUI()
+          this._updateScreenShareState()
+        }
+      })
+
       this.room.on(RoomEvent.Disconnected, () => {
         console.log("[Voice] Disconnected from room")
-        document.querySelectorAll('[id^="voice-audio-"]').forEach(el => el.remove())
+        document.querySelectorAll('[id^="voice-audio-"], [id^="voice-screen-audio-"], [id^="voice-screen-share-"]').forEach(el => el.remove())
         this.handleDisconnected()
       })
 
@@ -301,26 +399,45 @@ export default class extends Controller {
       console.log(`[Voice] Connected! Room: ${this.room.name}, Participants: ${this.room.remoteParticipants.size}`)
 
       // Try to unlock audio immediately (works if called from user gesture)
+      let audioUnlocked = false
       try {
         await this.room.startAudio()
         console.log("[Voice] Audio started (autoplay unlocked)")
+        audioUnlocked = true
       } catch {
         console.log("[Voice] Audio autoplay blocked — will unlock on first interaction")
-        this._setupAudioUnlock()
       }
 
       // Enable microphone — non-fatal, user can still listen if mic is denied
+      let micEnabled = false
       if (!this.muted) {
         try {
           await this.room.localParticipant.setMicrophoneEnabled(true)
           console.log("[Voice] Microphone enabled")
+          micEnabled = true
         } catch (micErr) {
           console.warn("[Voice] Microphone access denied:", micErr.message)
-          this.muted = true
-          this.syncAllVoiceUI()
+          // Don't force muted — the audio unlock handler will retry on user gesture
         }
       } else {
         console.log("[Voice] Microphone stays muted")
+      }
+
+      // Enable RNNoise noise suppression if the user has it turned on
+      if (this.noiseSuppressionValue && micEnabled) {
+        await this._enableRnnoise()
+      }
+
+      // If push-to-talk mode, start with mic muted
+      if (this.inputModeValue === "push_to_talk" && micEnabled) {
+        this._setMicMuted(true)
+        this.muted = true
+      }
+
+      // Always set up audio unlock as safety net — handles cases where
+      // startAudio or setMicrophoneEnabled failed due to missing user gesture
+      if (!audioUnlocked || !micEnabled) {
+        this._setupAudioUnlock()
       }
 
       // Attach any already-subscribed remote audio tracks
@@ -328,6 +445,20 @@ export default class extends Controller {
 
       // Start polling audio levels for speaking indicators
       this._startAudioLevelMonitor()
+
+      // Set up click listener for LIVE badges on participant cards
+      this._setupCardClickListener()
+
+      // Re-open any previously watched streams (after _attachExistingTracks repopulated _remoteScreenTracks)
+      if (this._watchingStreams.size > 0) {
+        const toReopen = new Set(this._watchingStreams)
+        this._watchingStreams.clear()
+        for (const identity of toReopen) {
+          if (this._remoteScreenTracks.has(identity)) {
+            this._openStreamPreview(identity)
+          }
+        }
+      }
 
       return true
     } catch (err) {
@@ -352,11 +483,16 @@ export default class extends Controller {
   _cleanUpAfterFailedReconnect() {
     // Disconnect any lingering room connection
     this._stopAudioLevelMonitor()
+    this._removeLocalScreenSharePreview()
+    this._hideFloatingControls()
+    this._disableRnnoise()
     if (this.room) {
       try { this.room.disconnect() } catch {}
       this.room = null
     }
-    document.querySelectorAll('[id^="voice-audio-"]').forEach(el => el.remove())
+    document.querySelectorAll('[id^="voice-audio-"], [id^="voice-screen-audio-"], [id^="voice-screen-share-"]').forEach(el => el.remove())
+    this._remoteScreenTracks.clear()
+    this._watchingStreams.clear()
 
     // Leave the server-side voice state and reset UI
     this._leaveServerVoiceState()
@@ -370,12 +506,17 @@ export default class extends Controller {
     this.deafened = false
     this._mutedBeforeDeafen = false
     this._clearMuteMemory()
+    this._screenShareActive = false
+    this._pttActive = false
     this.channelId = null
   }
 
   _setupAudioUnlock() {
-    // On page refresh there's no user gesture, so audio is blocked.
-    // Wait for ANY click/keypress on the page, then unlock.
+    // On page refresh there's no user gesture, so audio + mic are blocked.
+    // Wait for ANY click/keypress on the page, then unlock both.
+    if (this._audioUnlockBound) return // prevent duplicate listeners
+    this._audioUnlockBound = true
+
     const unlock = async () => {
       if (!this.room) return
       try {
@@ -388,6 +529,25 @@ export default class extends Controller {
       } catch (e) {
         console.warn("[Voice] Audio unlock failed:", e)
       }
+
+      // Also enable mic if it should be on but isn't yet
+      if (!this.muted && !this.deafened && this.room?.localParticipant) {
+        try {
+          const micOn = this.room.localParticipant.isMicrophoneEnabled
+          if (!micOn) {
+            await this.room.localParticipant.setMicrophoneEnabled(true)
+            console.log("[Voice] Microphone enabled via user interaction")
+            this._setupLocalAnalyser()
+            if (this.noiseSuppressionValue && !this._rnnoiseProcessor) {
+              this._enableRnnoise()
+            }
+          }
+        } catch (e) {
+          console.warn("[Voice] Mic enable on unlock failed:", e)
+        }
+      }
+
+      this._audioUnlockBound = false
       document.removeEventListener("click", unlock, true)
       document.removeEventListener("keydown", unlock, true)
     }
@@ -410,12 +570,26 @@ export default class extends Controller {
           el.play().catch(() => {})
         }
       })
+      // Re-attach screen share video tracks
+      participant.videoTrackPublications.forEach((pub) => {
+        if (pub.track && pub.isSubscribed && pub.track.source === "screen_share") {
+          this._showRemoteScreenShare(pub.track, participant)
+        }
+      })
     })
   }
 
   async reconnectToLiveKit() {
     // Fetch a fresh token without creating a new voice state
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
+
+    // Show reconnecting status
+    if (this.hasStatusTextTarget) {
+      this.statusTextTarget.textContent = "Reconnecting..."
+      this.statusTextTarget.classList.remove("text-green-500")
+      this.statusTextTarget.classList.add("text-yellow-500")
+    }
+
     try {
       const res = await fetch(`/servers/${this.serverIdValue}/channels/${this.channelId}/refresh_voice_token`, {
         method: "POST",
@@ -433,6 +607,13 @@ export default class extends Controller {
       if (!connected) {
         console.warn("[Voice] LiveKit connection failed on reconnect, cleaning up")
         this._cleanUpAfterFailedReconnect()
+      } else {
+        // Restore "Voice Connected" status after successful reconnect
+        if (this.hasStatusTextTarget) {
+          this.statusTextTarget.textContent = "Voice Connected"
+          this.statusTextTarget.classList.remove("text-yellow-500")
+          this.statusTextTarget.classList.add("text-green-500")
+        }
       }
     } catch (err) {
       console.error("[Voice] Failed to reconnect:", err)
@@ -442,13 +623,20 @@ export default class extends Controller {
 
   async disconnectVoice() {
     this._stopAudioLevelMonitor()
+    this._removeLocalScreenSharePreview()
+    this._hideFloatingControls()
+    await this._disableRnnoise()
     delete window._voiceState // Clear any preserved state
     if (this.room) {
       this.room.disconnect()
       this.room = null
     }
-    // Clean up remote audio elements
-    document.querySelectorAll('[id^="voice-audio-"]').forEach(el => el.remove())
+    // Clean up remote audio + screen share elements
+    document.querySelectorAll('[id^="voice-audio-"], [id^="voice-screen-audio-"], [id^="voice-screen-share-"]').forEach(el => el.remove())
+    this._screenShareActive = false
+    this._pttActive = false
+    this._remoteScreenTracks.clear()
+    this._watchingStreams.clear()
 
     if (this.channelId) {
       const serverId = this.serverIdValue
@@ -494,18 +682,9 @@ export default class extends Controller {
       return
     }
 
-    try {
-      if (this.room?.localParticipant) {
-        await this.room.localParticipant.setMicrophoneEnabled(!this.muted)
-      }
-    } catch (err) {
-      console.warn("[Voice] setMicrophoneEnabled failed:", err.message)
-    }
-
-    // Re-setup local analyser when unmuting (track may be new)
-    if (!this.muted && !this._localAnalyser) {
-      this._setupLocalAnalyser()
-    }
+    // Use track-level mute/unmute (instant) instead of setMicrophoneEnabled
+    // which destroys and recreates the track (slow, calls getUserMedia again)
+    this._setMicMuted(this.muted)
 
     this.syncAllVoiceUI()
 
@@ -537,18 +716,8 @@ export default class extends Controller {
       this._clearMuteMemory()
     }
 
-    try {
-      if (this.room?.localParticipant) {
-        await this.room.localParticipant.setMicrophoneEnabled(!this.muted)
-      }
-    } catch (err) {
-      console.warn("[Voice] setMicrophoneEnabled failed:", err.message)
-    }
-
-    // Re-setup local analyser when undeafening with mic active
-    if (!this.deafened && !this.muted && !this._localAnalyser) {
-      this._setupLocalAnalyser()
-    }
+    // Use track-level mute (instant) instead of setMicrophoneEnabled (slow)
+    this._setMicMuted(this.muted)
 
     // Mute/unmute all remote audio tracks locally
     if (this.room) {
@@ -587,6 +756,35 @@ export default class extends Controller {
     this._saveVoicePrefs()
   }
 
+  // Instant mic mute/unmute using MediaStreamTrack.enabled toggle.
+  // Unlike setMicrophoneEnabled() which destroys and recreates the track
+  // (calling getUserMedia again — slow), this keeps the track alive and
+  // just silences it at the media level for instant response.
+  // Note: we intentionally do NOT call pub.mute()/unmute() because LiveKit's
+  // SDK stops the underlying track on mute, which kills the analyser source
+  // and requires getUserMedia on unmute — defeating the purpose.
+  _setMicMuted(muted) {
+    if (!this.room?.localParticipant) return
+
+    try {
+      const pubs = Array.from(this.room.localParticipant.audioTrackPublications.values())
+      for (const pub of pubs) {
+        if (pub.track?.mediaStreamTrack) {
+          pub.track.mediaStreamTrack.enabled = !muted
+        }
+      }
+    } catch (e) {
+      console.warn("[Voice] Track-level mute failed:", e)
+    }
+
+    // Manage speaking indicator analyser — teardown on mute, recreate on unmute
+    if (muted) {
+      this._teardownLocalAnalyser()
+    } else {
+      this._setupLocalAnalyser()
+    }
+  }
+
   _saveVoicePrefs() {
     try {
       localStorage.setItem("voice_pref_muted", String(this.muted))
@@ -604,7 +802,13 @@ export default class extends Controller {
 
   handleDisconnected() {
     this._stopAudioLevelMonitor()
+    this._removeLocalScreenSharePreview()
+    this._hideFloatingControls()
+    this._disableRnnoise()
     this.room = null
+    document.querySelectorAll('[id^="voice-screen-share-"], [id^="voice-screen-audio-"]').forEach(el => el.remove())
+    this._remoteScreenTracks.clear()
+    this._watchingStreams.clear()
     const currentUserId = document.body.dataset.currentUserId
     if (this.channelId && currentUserId) {
       this.removeSidebarParticipant(this.channelId, currentUserId)
@@ -615,6 +819,8 @@ export default class extends Controller {
     this.deafened = false
     this._mutedBeforeDeafen = false
     this._clearMuteMemory()
+    this._screenShareActive = false
+    this._pttActive = false
     this.channelId = null
   }
 
@@ -769,7 +975,9 @@ export default class extends Controller {
   syncAllVoiceUI() {
     this.updateMuteUI()
     this.updateDeafenUI()
+    this._updateScreenShareUI()
     this._updateSelfVoiceIndicators()
+    this._syncFloatingControlStates()
   }
 
   // Immediately sync sidebar participant + main view card icons for the current user
@@ -854,12 +1062,17 @@ export default class extends Controller {
 
   handleForceDisconnect() {
     this._stopAudioLevelMonitor()
+    this._removeLocalScreenSharePreview()
+    this._hideFloatingControls()
+    this._disableRnnoise()
     delete window._voiceState
     if (this.room) {
       this.room.disconnect()
       this.room = null
     }
-    document.querySelectorAll('[id^="voice-audio-"]').forEach(el => el.remove())
+    document.querySelectorAll('[id^="voice-audio-"], [id^="voice-screen-audio-"], [id^="voice-screen-share-"]').forEach(el => el.remove())
+    this._remoteScreenTracks.clear()
+    this._watchingStreams.clear()
     this.hideControlsBar()
     this.updateMainViewDisconnected()
     this.muted = false
@@ -868,6 +1081,8 @@ export default class extends Controller {
     this._clearMuteMemory()
     this.serverMuted = false
     this.serverDeafened = false
+    this._screenShareActive = false
+    this._pttActive = false
     this.channelId = null
     this.showToast("You were disconnected from voice")
   }
@@ -1056,7 +1271,7 @@ export default class extends Controller {
 
   _pollAudioLevels() {
     if (!this.room) return
-    const THRESHOLD = 0.01
+    const THRESHOLD = this.inputSensitivityValue
 
     // Local participant — use Web Audio analyser for instant feedback
     const localP = this.room.localParticipant
@@ -1094,9 +1309,603 @@ export default class extends Controller {
     }
   }
 
+  // ── Push-to-Talk ──
+
+  _handlePttKeyDown(e) {
+    if (e.repeat) return
+    if (this.inputModeValue !== "push_to_talk") return
+    if (e.code !== this.pttKeyCodeValue) return
+    if (!this.room?.localParticipant) return
+
+    // Don't fire PTT when typing in text fields
+    const tag = e.target.tagName
+    if (tag === "INPUT" || tag === "TEXTAREA" || e.target.isContentEditable) return
+
+    e.preventDefault()
+    this._pttActive = true
+    this._setMicMuted(false)
+    this.muted = false
+    this.syncAllVoiceUI()
+  }
+
+  _handlePttKeyUp(e) {
+    if (this.inputModeValue !== "push_to_talk") return
+    if (e.code !== this.pttKeyCodeValue) return
+    if (!this._pttActive) return
+
+    e.preventDefault()
+    this._pttActive = false
+    this._setMicMuted(true)
+    this.muted = true
+    this.syncAllVoiceUI()
+  }
+
+  // ── Screen Sharing ──
+
+  async toggleScreenShare() {
+    if (!this.room?.localParticipant) return
+
+    if (this._screenShareActive) {
+      await this.room.localParticipant.setScreenShareEnabled(false)
+      this._screenShareActive = false
+      this._removeLocalScreenSharePreview()
+      this._updateScreenShareUI()
+      this._updateScreenShareState()
+    } else {
+      this._showScreenSharePicker()
+    }
+  }
+
+  _showScreenSharePicker() {
+    const tpl = document.getElementById("tpl-screen-share-picker")
+    if (!tpl) return
+    const frag = tpl.content.cloneNode(true)
+    const overlay = frag.querySelector("[data-ss-picker-overlay]")
+
+    // Load saved preferences
+    const defaults = { resolution: "720", frameRate: "30", contentType: "smoothness", audio: true }
+    let prefs = defaults
+    try {
+      const saved = JSON.parse(localStorage.getItem("voice_screen_share_prefs"))
+      if (saved) prefs = { ...defaults, ...saved }
+    } catch {}
+
+    // Set active pills from preferences
+    overlay.querySelectorAll("[data-ss-group]").forEach(group => {
+      const key = group.dataset.ssGroup
+      const val = String(prefs[key])
+      group.querySelectorAll(".ss-pill").forEach(pill => {
+        pill.classList.toggle("ss-pill-active", pill.dataset.value === val)
+      })
+    })
+
+    // Audio toggle
+    const audioToggle = overlay.querySelector("[data-ss-audio-toggle]")
+    if (prefs.audio) audioToggle.classList.add("ss-audio-on")
+
+    // Pill click delegation
+    overlay.querySelectorAll("[data-ss-group]").forEach(group => {
+      group.addEventListener("click", (e) => {
+        const pill = e.target.closest(".ss-pill")
+        if (!pill) return
+        group.querySelectorAll(".ss-pill").forEach(p => p.classList.remove("ss-pill-active"))
+        pill.classList.add("ss-pill-active")
+      })
+    })
+
+    // Audio toggle click
+    audioToggle.addEventListener("click", () => {
+      audioToggle.classList.toggle("ss-audio-on")
+    })
+
+    // Close handlers
+    const close = () => overlay.remove()
+    overlay.querySelector("[data-ss-close]").addEventListener("click", close)
+    overlay.querySelector("[data-ss-cancel]").addEventListener("click", close)
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) close()
+    })
+    const onEsc = (e) => {
+      if (e.key === "Escape") { close(); document.removeEventListener("keydown", onEsc) }
+    }
+    document.addEventListener("keydown", onEsc)
+
+    // Go Live handler
+    overlay.querySelector("[data-ss-go-live]").addEventListener("click", () => {
+      const settings = {}
+      overlay.querySelectorAll("[data-ss-group]").forEach(group => {
+        const active = group.querySelector(".ss-pill-active")
+        if (active) settings[group.dataset.ssGroup] = active.dataset.value
+      })
+      settings.audio = audioToggle.classList.contains("ss-audio-on")
+
+      // Save preferences
+      try { localStorage.setItem("voice_screen_share_prefs", JSON.stringify(settings)) } catch {}
+
+      close()
+      document.removeEventListener("keydown", onEsc)
+      this._startScreenShareWithSettings(settings)
+    })
+
+    document.body.appendChild(overlay)
+  }
+
+  async _startScreenShareWithSettings(settings) {
+    const resMap = {
+      "480":  { width: 854,  height: 480  },
+      "720":  { width: 1280, height: 720  },
+      "1080": { width: 1920, height: 1080 },
+      "1440": { width: 2560, height: 1440 },
+      "2160": { width: 3840, height: 2160 }
+    }
+    const res = resMap[settings.resolution] || resMap["720"]
+    const frameRate = parseInt(settings.frameRate) || 30
+    const contentHint = settings.contentType === "clarity" ? "detail" : "motion"
+    const audio = settings.audio !== false
+
+    try {
+      await this.room.localParticipant.setScreenShareEnabled(true, {
+        resolution: { width: res.width, height: res.height, frameRate },
+        contentHint,
+        audio,
+        systemAudio: audio ? "include" : "exclude",
+        suppressLocalAudioPlayback: true
+      })
+      this._screenShareActive = true
+      this._showLocalScreenSharePreview()
+      this._updateScreenShareUI()
+      this._updateScreenShareState()
+    } catch (err) {
+      if (err.name !== "NotAllowedError") {
+        console.error("[Voice] Screen share error:", err)
+        this.showToast("Screen share failed", true)
+      }
+    }
+  }
+
+  _updateScreenShareUI() {
+    if (!this.hasScreenShareBtnTarget) return
+    if (this._screenShareActive) {
+      this.screenShareBtnTarget.classList.add("text-green-400")
+      this.screenShareBtnTarget.classList.remove("text-gray-300")
+    } else {
+      this.screenShareBtnTarget.classList.remove("text-green-400")
+      this.screenShareBtnTarget.classList.add("text-gray-300")
+    }
+  }
+
+  async _updateScreenShareState() {
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content
+    try {
+      await fetch("/voice_states/self_screen_share", {
+        method: "PATCH",
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json" }
+      })
+    } catch (err) {
+      console.error("[Voice] Failed to update screen share state:", err)
+    }
+  }
+
+  _showRemoteScreenShare(track, participant) {
+    // Store track for opt-in watching — no DOM rendering until user clicks LIVE badge
+    this._remoteScreenTracks.set(participant.identity, { track, participant })
+    this._addLiveBadgeToCard(participant.identity)
+  }
+
+  _removeRemoteScreenShare(identity) {
+    this._closeStreamPreview(identity)
+    this._remoteScreenTracks.delete(identity)
+    this._removeLiveBadgeFromCard(identity)
+  }
+
+  _toggleWatchStream(identity) {
+    if (this._watchingStreams.has(identity)) {
+      this._closeStreamPreview(identity)
+    } else {
+      this._openStreamPreview(identity)
+    }
+  }
+
+  _openStreamPreview(identity) {
+    const entry = this._remoteScreenTracks.get(identity)
+    if (!entry) return
+    if (document.getElementById(`voice-screen-share-${identity}`)) return
+
+    const { track, participant } = entry
+    const gridContainer = document.querySelector("[data-voice-participant-grid]")
+    if (!gridContainer) return
+
+    const container = document.createElement("div")
+    container.id = `voice-screen-share-${identity}`
+    container.className = "voice-screen-preview"
+    container.dataset.screenShareIdentity = identity
+
+    const badge = document.createElement("div")
+    badge.className = "voice-live-badge"
+    badge.textContent = "LIVE"
+
+    const video = track.attach()
+    video.className = "voice-screen-video"
+    video.disablePictureInPicture = true
+
+    const label = document.createElement("div")
+    label.className = "voice-screen-label"
+    label.textContent = `${participant.identity} is sharing their screen`
+
+    const expandBtn = this._buildExpandButton()
+
+    const closeBtn = document.createElement("button")
+    closeBtn.className = "voice-screen-close"
+    closeBtn.title = "Close"
+    closeBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"/></svg>'
+    closeBtn.addEventListener("click", (e) => {
+      e.stopPropagation()
+      this._closeStreamPreview(identity)
+    })
+
+    container.appendChild(badge)
+    container.appendChild(video)
+    container.appendChild(label)
+    container.appendChild(expandBtn)
+    container.appendChild(closeBtn)
+
+    container.addEventListener("click", () => this._toggleMaximizeStream(container))
+
+    gridContainer.insertAdjacentElement("beforebegin", container)
+    this._watchingStreams.add(identity)
+  }
+
+  _closeStreamPreview(identity) {
+    const el = document.getElementById(`voice-screen-share-${identity}`)
+    if (el) {
+      if (el.classList.contains("voice-stream-focused")) {
+        const voiceContent = document.querySelector("[data-voice-content]")
+        if (voiceContent) voiceContent.classList.remove("voice-stream-maximized")
+        this._hideFloatingControls()
+        this._streamMaximized = false
+      }
+      el.remove()
+    }
+    this._watchingStreams.delete(identity)
+  }
+
+  // ── Local Screen Share Preview ──
+
+  _showLocalScreenSharePreview() {
+    if (!this.room?.localParticipant) return
+
+    // Find local screen share video track
+    let screenTrack = null
+    for (const [, pub] of this.room.localParticipant.videoTrackPublications) {
+      if (pub.track?.source === "screen_share") {
+        screenTrack = pub.track
+        break
+      }
+    }
+
+    if (!screenTrack) {
+      // Track may not be published yet — listen for it
+      import("livekit-client").then(({ RoomEvent }) => {
+        const handler = (pub) => {
+          if (pub.track?.source === "screen_share" && pub.track?.kind === "video") {
+            this.room?.off(RoomEvent.LocalTrackPublished, handler)
+            this._showLocalScreenSharePreview()
+          }
+        }
+        this.room?.on(RoomEvent.LocalTrackPublished, handler)
+      })
+      return
+    }
+
+    // Remove existing preview if any
+    const existing = document.getElementById("voice-local-screen-preview")
+    if (existing) existing.remove()
+
+    const gridContainer = document.querySelector("[data-voice-participant-grid]")
+    if (!gridContainer) return
+
+    const container = document.createElement("div")
+    container.id = "voice-local-screen-preview"
+    container.className = "voice-screen-preview"
+    container.dataset.screenShareIdentity = this.room.localParticipant.identity
+
+    const badge = document.createElement("div")
+    badge.className = "voice-live-badge"
+    badge.textContent = "LIVE"
+
+    const video = screenTrack.attach()
+    video.muted = true
+    video.className = "voice-screen-video"
+    video.disablePictureInPicture = true
+
+    // Hidden message shown when tab is not visible
+    const hiddenMsg = document.createElement("div")
+    hiddenMsg.className = "voice-screen-hidden-msg"
+    hiddenMsg.style.display = "none"
+    hiddenMsg.innerHTML = `
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      <span class="hidden-msg-title">You are still streaming</span>
+      <span class="hidden-msg-sub">Preview hidden to save resources</span>
+    `
+
+    const label = document.createElement("div")
+    label.className = "voice-screen-label"
+    label.textContent = "You are sharing your screen"
+
+    const expandBtn = this._buildExpandButton()
+
+    container.appendChild(badge)
+    container.appendChild(video)
+    container.appendChild(hiddenMsg)
+    container.appendChild(label)
+    container.appendChild(expandBtn)
+
+    container.addEventListener("click", () => this._toggleMaximizeStream(container))
+
+    gridContainer.insertAdjacentElement("beforebegin", container)
+
+    // Visibility change handler
+    this._visibilityHandler = () => this._handleVisibilityChange()
+    document.addEventListener("visibilitychange", this._visibilityHandler)
+
+    this._addLiveBadgeToCard(this.room.localParticipant.identity)
+  }
+
+  _removeLocalScreenSharePreview() {
+    const el = document.getElementById("voice-local-screen-preview")
+    if (el) {
+      if (el.classList.contains("voice-stream-focused")) {
+        const voiceContent = document.querySelector("[data-voice-content]")
+        if (voiceContent) voiceContent.classList.remove("voice-stream-maximized")
+        this._hideFloatingControls()
+        this._streamMaximized = false
+      }
+      el.remove()
+    }
+    if (this._visibilityHandler) {
+      document.removeEventListener("visibilitychange", this._visibilityHandler)
+      this._visibilityHandler = null
+    }
+    if (this.room?.localParticipant) {
+      this._removeLiveBadgeFromCard(this.room.localParticipant.identity)
+    }
+  }
+
+  _handleVisibilityChange() {
+    const container = document.getElementById("voice-local-screen-preview")
+    if (!container) return
+    const video = container.querySelector(".voice-screen-video")
+    const hiddenMsg = container.querySelector(".voice-screen-hidden-msg")
+    if (!video || !hiddenMsg) return
+
+    if (document.hidden) {
+      video.style.display = "none"
+      hiddenMsg.style.display = "flex"
+    } else {
+      video.style.display = "block"
+      hiddenMsg.style.display = "none"
+    }
+  }
+
+  // ── Click-to-Maximize ──
+
+  _toggleMaximizeStream(containerEl) {
+    const voiceContent = document.querySelector("[data-voice-content]")
+    if (!voiceContent) return
+
+    if (voiceContent.classList.contains("voice-stream-maximized")) {
+      voiceContent.classList.remove("voice-stream-maximized")
+      containerEl.classList.remove("voice-stream-focused")
+      this._hideFloatingControls()
+      this._streamMaximized = false
+    } else {
+      // Un-focus any previously focused stream
+      document.querySelectorAll(".voice-stream-focused").forEach(el => el.classList.remove("voice-stream-focused"))
+      voiceContent.classList.add("voice-stream-maximized")
+      containerEl.classList.add("voice-stream-focused")
+      this._streamMaximized = true
+      this._showFloatingControls(voiceContent)
+    }
+  }
+
+  _buildExpandButton() {
+    const btn = document.createElement("button")
+    btn.className = "voice-screen-expand"
+    btn.title = "Expand"
+    btn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5"/></svg>'
+    return btn
+  }
+
+  // ── LIVE Badge on Participant Cards ──
+
+  _addLiveBadgeToCard(identity) {
+    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
+    if (!card) return
+    const inner = card.querySelector(".voice-card-inner")
+    if (!inner || inner.querySelector(".voice-live-indicator")) return
+    const badge = document.createElement("div")
+    badge.className = "voice-live-indicator"
+    badge.textContent = "LIVE"
+    inner.appendChild(badge)
+  }
+
+  _setupCardClickListener() {
+    if (this._cardClickHandler) return
+    this._cardClickHandler = (e) => {
+      const liveBadge = e.target.closest(".voice-live-indicator")
+      if (!liveBadge) return
+      const card = liveBadge.closest("[data-voice-participant-id]")
+      if (!card) return
+      const identity = card.dataset.voiceParticipantId
+      e.stopPropagation()
+      this._toggleWatchStream(identity)
+    }
+    document.addEventListener("click", this._cardClickHandler)
+  }
+
+  _removeLiveBadgeFromCard(identity) {
+    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
+    if (!card) return
+    const badge = card.querySelector(".voice-live-indicator")
+    if (badge) badge.remove()
+  }
+
+  // ── Floating Controls Overlay ──
+
+  _showFloatingControls(voiceContent) {
+    this._hideFloatingControls()
+
+    const bar = document.createElement("div")
+    bar.id = "voice-floating-controls"
+    bar.className = "voice-floating-controls voice-floating-visible"
+
+    bar.innerHTML = `
+      <button class="voice-float-btn" data-float-action="mute" title="Toggle Mute">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+        </svg>
+      </button>
+      <button class="voice-float-btn" data-float-action="deafen" title="Toggle Deafen">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M15.54 8.46a5 5 0 010 7.07"/>
+        </svg>
+      </button>
+      <button class="voice-float-btn" data-float-action="screenshare" title="Toggle Screen Share">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+      </button>
+      <div class="voice-float-separator"></div>
+      <button class="voice-float-btn voice-float-btn-disconnect" data-float-action="disconnect" title="Disconnect">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"/>
+        </svg>
+      </button>
+    `
+
+    // Delegated click handler for floating buttons
+    bar.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-float-action]")
+      if (!btn) return
+      e.stopPropagation()
+      const action = btn.dataset.floatAction
+      if (action === "mute") this.toggleMute()
+      else if (action === "deafen") this.toggleDeafen()
+      else if (action === "screenshare") this.toggleScreenShare()
+      else if (action === "disconnect") this.leave()
+    })
+
+    voiceContent.appendChild(bar)
+    this._syncFloatingControlStates()
+
+    // Auto-hide after 3 seconds
+    this._floatingFadeTimer = setTimeout(() => this._fadeFloatingControls(), 3000)
+
+    // Show on mouse move
+    this._floatingMouseHandler = () => {
+      const ctrl = document.getElementById("voice-floating-controls")
+      if (ctrl) {
+        ctrl.classList.remove("voice-floating-hidden")
+        ctrl.classList.add("voice-floating-visible")
+      }
+      clearTimeout(this._floatingFadeTimer)
+      this._floatingFadeTimer = setTimeout(() => this._fadeFloatingControls(), 3000)
+    }
+    voiceContent.addEventListener("mousemove", this._floatingMouseHandler)
+  }
+
+  _fadeFloatingControls() {
+    const ctrl = document.getElementById("voice-floating-controls")
+    if (ctrl) {
+      ctrl.classList.remove("voice-floating-visible")
+      ctrl.classList.add("voice-floating-hidden")
+    }
+  }
+
+  _hideFloatingControls() {
+    const ctrl = document.getElementById("voice-floating-controls")
+    if (ctrl) ctrl.remove()
+    if (this._floatingFadeTimer) {
+      clearTimeout(this._floatingFadeTimer)
+      this._floatingFadeTimer = null
+    }
+    if (this._floatingMouseHandler) {
+      const voiceContent = document.querySelector("[data-voice-content]")
+      if (voiceContent) voiceContent.removeEventListener("mousemove", this._floatingMouseHandler)
+      this._floatingMouseHandler = null
+    }
+  }
+
+  _syncFloatingControlStates() {
+    const bar = document.getElementById("voice-floating-controls")
+    if (!bar) return
+
+    const muteBtn = bar.querySelector('[data-float-action="mute"]')
+    const deafenBtn = bar.querySelector('[data-float-action="deafen"]')
+    const shareBtn = bar.querySelector('[data-float-action="screenshare"]')
+
+    const effectivelyMuted = this.muted || this.deafened
+    if (muteBtn) {
+      muteBtn.classList.toggle("voice-float-btn-active-red", effectivelyMuted)
+      if (effectivelyMuted) {
+        muteBtn.querySelector("svg").innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3l18 18"/>'
+      } else {
+        muteBtn.querySelector("svg").innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>'
+      }
+    }
+    if (deafenBtn) {
+      deafenBtn.classList.toggle("voice-float-btn-active-red", this.deafened)
+      if (this.deafened) {
+        deafenBtn.querySelector("svg").innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/>'
+      } else {
+        deafenBtn.querySelector("svg").innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M15.54 8.46a5 5 0 010 7.07"/>'
+      }
+    }
+    if (shareBtn) {
+      shareBtn.classList.toggle("voice-float-btn-active-green", this._screenShareActive)
+    }
+  }
+
+  // ── RNNoise Noise Suppression ──
+
+  async _enableRnnoise() {
+    try {
+      const pub = Array.from(this.room.localParticipant.audioTrackPublications.values())
+        .find(p => p.track)
+      if (!pub?.track) return
+
+      const audioCtx = new AudioContext()
+      pub.track.setAudioContext(audioCtx)
+      this._rnnoiseAudioCtx = audioCtx
+
+      const { RnnoiseProcessor } = await import('../lib/rnnoise_processor')
+      this._rnnoiseProcessor = new RnnoiseProcessor()
+      await pub.track.setProcessor(this._rnnoiseProcessor)
+      console.log('[Voice] RNNoise noise suppression enabled')
+    } catch (err) {
+      console.warn('[Voice] RNNoise failed, falling back to browser noise suppression:', err)
+    }
+  }
+
+  async _disableRnnoise() {
+    if (!this._rnnoiseProcessor) return
+    try {
+      const pub = Array.from(this.room.localParticipant.audioTrackPublications.values())
+        .find(p => p.track)
+      if (pub?.track) await pub.track.stopProcessor()
+    } catch (err) {
+      console.warn('[Voice] RNNoise cleanup error:', err)
+    }
+    this._rnnoiseProcessor = null
+    if (this._rnnoiseAudioCtx) {
+      try { this._rnnoiseAudioCtx.close() } catch {}
+      this._rnnoiseAudioCtx = null
+    }
+  }
+
   showToast(msg, isError = false) {
     const toast = document.createElement("div")
-    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-red-600" : "bg-green-600"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
+    toast.className = `fixed bottom-6 right-6 ${isError ? "bg-danger" : "bg-success"} text-white px-4 py-2 rounded-lg shadow-lg z-[200] text-sm font-medium context-pop`
     toast.textContent = msg
     document.body.appendChild(toast)
     setTimeout(() => {

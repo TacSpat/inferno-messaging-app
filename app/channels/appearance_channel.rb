@@ -37,12 +37,19 @@ class AppearanceChannel < ApplicationCable::Channel
   end
 
   def broadcast_presence(state)
+    payload = { type: "presence", user_id: current_user.public_id, state: state }
+
     current_user.servers.each do |server|
-      ServerChannel.broadcast_to(server, {
-        type: "presence",
-        user_id: current_user.public_id,
-        state: state
-      })
+      ServerChannel.broadcast_to(server, payload)
+    end
+
+    current_user.conversations.each do |conversation|
+      ConversationChannel.broadcast_to(conversation, payload)
+    end
+
+    # Push to friends' notification streams so DM sidebar dots update
+    current_user.friends.select(:id).each do |friend|
+      ActionCable.server.broadcast("user_notifications_#{friend.id}", payload)
     end
   end
 end

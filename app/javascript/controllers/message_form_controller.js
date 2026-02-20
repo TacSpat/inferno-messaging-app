@@ -1,13 +1,12 @@
 import { Controller } from "@hotwired/stimulus"
-import { createConsumer } from "@rails/actioncable"
+import consumer from "../lib/cable"
 
 export default class extends Controller {
   static targets = ["highlight", "input", "filePreview", "dropzone", "replyBar", "replyAuthor", "replyPreview", "parentId"]
   static values = { channelId: String }
 
   connect() {
-    this.consumer = createConsumer()
-    this.subscription = this.consumer.subscriptions.create(
+    this.subscription = consumer.subscriptions.create(
       { channel: "ChannelChatChannel", channel_id: this.channelIdValue },
       {
         received: (data) => this.handleReceived(data)
@@ -65,7 +64,6 @@ export default class extends Controller {
 
   disconnect() {
     this.subscription?.unsubscribe()
-    this.consumer?.disconnect()
     this.teardownDragAndDrop()
     this.teardownPaste()
     this.teardownFileIntercept()
@@ -293,7 +291,7 @@ export default class extends Controller {
 
       const btn = document.createElement("button")
       btn.type = "button"
-      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-600 hover:bg-red-500 rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
+      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger hover:bg-danger-light rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
       btn.innerHTML = "&times;"
       btn.dataset.index = i
       btn.dataset.action = "click->message-form#removeFile"
@@ -587,7 +585,7 @@ export default class extends Controller {
     // Escape HTML
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     // Highlight URLs
-    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-red-400">$1</span>')
+    html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-accent-light">$1</span>')
     // Highlight bold **text**
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     // Highlight italic *text*
@@ -595,18 +593,18 @@ export default class extends Controller {
     // Highlight ~~strikethrough~~
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
     // Highlight `inline code`
-    html = html.replace(/`([^`]+)`/g, '<span class="text-red-300 bg-gray-700/50 rounded px-0.5">`$1`</span>')
+    html = html.replace(/`([^`]+)`/g, '<span class="text-accent bg-gray-700/50 rounded px-0.5">`$1`</span>')
     // Highlight code blocks
-    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-red-300">$1</span>')
+    html = html.replace(/(```[\s\S]*?```)/g, '<span class="text-accent">$1</span>')
     // Highlight @mentions
-    html = html.replace(/(^|[\s])(@\w+)/g, '$1<span class="text-red-400 bg-red-400/15 rounded px-0.5">$2</span>')
+    html = html.replace(/(^|[\s])(@\w+)/g, '$1<span class="text-accent-light bg-accent-light/15 rounded px-0.5">$2</span>')
     // Replace emoji placeholders (em-space + PUA char) with inline images
     if (window._emojiReverse && window._emojiMap) {
       html = html.replace(/\u2003([\uE000-\uF8FF])/g, (_, ch) => {
         const name = window._emojiReverse[ch]
         if (name && window._emojiMap[name]) {
           const w = this._emojiCharWidth || 20
-          return `<img src="${window._emojiMap[name]}" style="display:inline;height:${w}px;width:${w}px;object-fit:contain;vertical-align:middle;pointer-events:none">`
+          return `<img src="${window._emojiMap[name]}" style="display:inline-block;height:${w}px;width:${w}px;object-fit:contain;vertical-align:text-bottom;pointer-events:none">`
         }
         return _
       })

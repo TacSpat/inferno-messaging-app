@@ -26,7 +26,7 @@
         <h1 class="text-xl font-bold text-white">Roles</h1>
         <% if can_manage %>
           <button type="button"
-                  class="text-xs bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-3 py-1.5 rounded transition"
+                  class="text-xs bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-3 py-1.5 rounded transition"
                   data-action="click->role-editor#createRole">
             Create Role
           </button>
@@ -70,7 +70,7 @@
             <h2 class="text-xl font-bold text-white" data-role-editor-target="editorTitle"></h2>
           </div>
           <button type="button"
-                  class="text-sm bg-gradient-to-r from-red-700 to-red-500 hover:from-red-600 hover:to-red-400 text-white font-semibold px-3 py-1.5 rounded transition"
+                  class="text-sm bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-3 py-1.5 rounded transition"
                   data-role-editor-target="deleteBtn"
                   data-action="click->role-editor#deleteRole">
             Delete Role
@@ -87,7 +87,7 @@
               <input type="text"
                      data-role-editor-target="nameInput"
                      data-action="input->role-editor#updateName"
-                     class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-red-500 text-sm"
+                     class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm"
                      maxlength="50">
             </div>
 

@@ -56,6 +56,22 @@ class User < ApplicationRecord
   # Voice
   has_many :voice_states, dependent: :destroy
 
+  # Themes
+  THEMES = %w[inferno frostfire boron brimstone plasma pulsar obsidian].freeze
+
+  VOICE_SETTINGS_DEFAULTS = {
+    "input_mode" => "voice_activity",
+    "input_sensitivity" => 0.01,
+    "noise_suppression" => true,
+    "auto_join_voice" => true,
+    "ptt_key" => "`",
+    "ptt_key_code" => "Backquote"
+  }.freeze
+
+  def voice_setting(key)
+    (voice_settings || {})[key.to_s] || VOICE_SETTINGS_DEFAULTS[key.to_s]
+  end
+
   # Notifications
   has_many :notifications, dependent: :destroy
 
@@ -70,6 +86,7 @@ class User < ApplicationRecord
   validates :display_name, length: { maximum: 32 }, allow_blank: true
   validates :bio, length: { maximum: 500 }, allow_blank: true
   validates :status, length: { maximum: 128 }, allow_blank: true
+  validates :theme, inclusion: { in: THEMES }
 
   # Scopes
   scope :local, -> { where(remote: false) }
