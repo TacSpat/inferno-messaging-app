@@ -146,14 +146,32 @@ class DmMessagesController < ApplicationController
     user = message.user
     counterparty_pubkey = conversation.counterparty_pubkey
 
-    # Build payload — include file URLs when files are attached
+    # Build payload — include file URLs and custom emoji URLs
     plaintext = message.content || ""
+    payload_needed = false
+    payload = { type: "message", content: plaintext }
+
+    # Include file attachment URLs
     if message.files.attached? && base_url.present?
-      file_urls = message.files.map do |file|
+      payload[:files] = message.files.map do |file|
         "#{base_url}#{Rails.application.routes.url_helpers.rails_blob_path(file, only_path: true)}"
       end
-      plaintext = { type: "message", content: plaintext, files: file_urls }.to_json
+      payload_needed = true
     end
+
+    # Include custom emoji image URLs so receiver can render them
+    if plaintext.match?(/:[a-z0-9_]+:/i) && base_url.present?
+      emoji_names = plaintext.scan(/:([a-z0-9_]+):/i).flatten.uniq
+      emojis = ServerEmoji.where(server_id: user.servers.select(:id), name: emoji_names)
+      if emojis.any?
+        payload[:emojis] = emojis.each_with_object({}) do |emoji, map|
+          map[emoji.name] = "#{base_url}#{Rails.application.routes.url_helpers.rails_blob_path(emoji.image, only_path: true)}"
+        end
+        payload_needed = true
+      end
+    end
+
+    plaintext = payload_needed ? payload.to_json : plaintext
 
     # Build NIP-44 encrypted Kind 14 event
     conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)

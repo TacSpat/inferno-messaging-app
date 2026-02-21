@@ -401,8 +401,9 @@ class RelaySubscriptionManager
     owner = User.owner
     return unless owner
 
-    # Extract content from structured payloads (type: "message" with files)
+    # Extract content from structured payloads (type: "message" with files/emojis)
     content = plaintext
+    emoji_urls = nil
     begin
       parsed = JSON.parse(plaintext)
       if parsed.is_a?(Hash)
@@ -413,6 +414,7 @@ class RelaySubscriptionManager
             content += "\n" unless content.empty?
             content += files.join("\n")
           end
+          emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
         elsif parsed.key?("type")
           # Unknown structured payload — log but don't display as a message
           Rails.logger.info("[RelaySubscriptionManager] Ignoring DM payload type=#{parsed["type"]}")
@@ -421,6 +423,14 @@ class RelaySubscriptionManager
       end
     rescue JSON::ParserError
       # Plain text — use as-is
+    end
+
+    # Replace custom emoji shortcodes with inline images from sender's URLs
+    if emoji_urls.present?
+      emoji_urls.each do |name, url|
+        img = %(<img src="#{ERB::Util.html_escape(url)}" alt=":#{ERB::Util.html_escape(name)}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
+        content = content.gsub(/:#{Regexp.escape(name)}:/i, img)
+      end
     end
 
     return if content.blank?
