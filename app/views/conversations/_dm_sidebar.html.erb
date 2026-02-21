@@ -26,6 +26,7 @@
     <!-- Conversation list -->
     <% @conversations&.each do |conversation| %>
       <% other = conversation.direct? ? conversation.other_user(current_user) : nil %>
+      <% contact = other ? nil : conversation.counterparty_contact %>
       <% cp = conversation.conversation_participants.find_by(user: current_user) %>
       <% unread = cp&.unread_count || 0 %>
       <%= link_to conversation_path(conversation), data: { conversation_id: conversation.public_id, turbo_frame: "main-content" }, class: "flex items-center px-2.5 py-1.5 rounded group #{defined?(@conversation) && @conversation == conversation ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" do %>
@@ -34,9 +35,11 @@
             <%= image_tag other.avatar, class: "w-8 h-8 rounded-full object-cover" %>
           <% elsif other&.effective_avatar_url.present? %>
             <%= image_tag other.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
+          <% elsif contact&.avatar_url.present? %>
+            <%= image_tag contact.avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
           <% else %>
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= other&.profile_color || '#1e1c1b' %>">
-              <%= other&.username&.first&.upcase || '?' %>
+              <%= other&.username&.first&.upcase || conversation.counterparty_display_name&.first&.upcase || '?' %>
             </div>
           <% end %>
           <% if other %>
@@ -47,6 +50,8 @@
                            else "bg-gray-500"
                            end %>
             <div data-user-presence="<%= other.public_id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= dm_status %>"></div>
+          <% elsif contact %>
+            <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
           <% end %>
         </div>
         <div class="ml-2.5 min-w-0 flex-1">

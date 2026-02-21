@@ -50,9 +50,18 @@ class Conversation < ApplicationRecord
     end
   end
 
+  # Look up the Contact record for the counterparty pubkey
+  def counterparty_contact
+    return nil if counterparty_pubkey.blank?
+    @counterparty_contact ||= Contact.find_by(pubkey: counterparty_pubkey)
+  end
+
   # Display name for pubkey-only contacts (no local user record)
   def counterparty_display_name
     return nil if counterparty_pubkey.blank?
+    # Try Contact record first
+    contact = counterparty_contact
+    return contact.effective_display_name if contact&.effective_display_name.present?
     # Truncated npub as fallback
     begin
       npub = Nostr::Bech32.encode_npub(counterparty_pubkey)

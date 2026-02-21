@@ -190,7 +190,8 @@
           <%= @tab == 'online' ? 'Online' : 'All Contacts' %> — <%= @contacts.count %>
         </h3>
         <% @contacts.each do |contact| %>
-          <div class="flex items-center px-2 py-2.5 rounded hover:bg-gray-600/30 group border-b border-gray-700/50 last:border-b-0">
+          <div class="flex items-center px-2 py-2.5 rounded hover:bg-gray-600/30 group border-b border-gray-700/50 last:border-b-0 cursor-pointer"
+               onclick="document.getElementById('dm-contact-<%= contact.id %>').requestSubmit()">
             <div class="relative shrink-0">
               <% if contact.avatar_url.present? %>
                 <%= image_tag contact.avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
@@ -205,11 +206,14 @@
               <p class="text-sm font-medium text-white truncate"><%= contact.effective_display_name %></p>
               <p class="text-xs text-gray-400 truncate"><%= contact.online? ? 'Online' : 'Offline' %></p>
             </div>
-            <div class="flex items-center gap-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+            <div class="flex items-center gap-2 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity" onclick="event.stopPropagation()">
               <%= button_to friendship_path(contact), method: :delete, data: { turbo_confirm: "Remove #{contact.effective_display_name} from your contacts?" }, class: "w-9 h-9 flex items-center justify-center rounded-full bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-danger-light cursor-pointer" do %>
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
               <% end %>
             </div>
+            <%= form_tag conversations_path, method: :post, id: "dm-contact-#{contact.id}", class: "hidden", data: { turbo_frame: "_top" } do %>
+              <%= hidden_field_tag :pubkey, contact.pubkey %>
+            <% end %>
           </div>
         <% end %>
       <% end %>

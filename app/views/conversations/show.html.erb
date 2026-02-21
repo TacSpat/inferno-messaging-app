@@ -19,6 +19,9 @@
                        else "bg-gray-500"
                        end %>
     <div data-dm-presence-dot class="ml-2 w-2.5 h-2.5 rounded-full shrink-0 <%= header_status %>"></div>
+  <% elsif @dm_contact %>
+    <h1 class="font-semibold text-white"><%= @dm_contact.effective_display_name %></h1>
+    <div data-dm-presence-dot class="ml-2 w-2.5 h-2.5 rounded-full shrink-0 <%= @dm_contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
   <% else %>
     <h1 class="font-semibold text-white"><%= @conversation.display_name(current_user) %></h1>
   <% end %>
@@ -51,6 +54,18 @@
             <h2 class="text-2xl font-bold text-white"><%= @other_user.display_name.presence || @other_user.username %></h2>
             <p class="text-gray-400 mt-1"><%= @other_user.tag %></p>
             <p class="text-gray-400 mt-2 text-sm">This is the beginning of your direct message history with <strong class="text-white"><%= @other_user.display_name.presence || @other_user.username %></strong>.</p>
+          <% elsif @dm_contact %>
+            <div class="w-20 h-20 rounded-full flex items-center justify-center text-3xl mb-4 overflow-hidden">
+              <% if @dm_contact.avatar_url.present? %>
+                <%= image_tag @dm_contact.avatar_url, class: "w-full h-full object-cover" %>
+              <% else %>
+                <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white bg-gray-600">
+                  <%= @dm_contact.effective_display_name[0].upcase %>
+                </div>
+              <% end %>
+            </div>
+            <h2 class="text-2xl font-bold text-white"><%= @dm_contact.effective_display_name %></h2>
+            <p class="text-gray-400 mt-2 text-sm">This is the beginning of your direct message history with <strong class="text-white"><%= @dm_contact.effective_display_name %></strong>.</p>
           <% else %>
             <h2 class="text-2xl font-bold text-white"><%= @conversation.display_name(current_user) %></h2>
             <p class="text-gray-400 mt-1">This is the beginning of this conversation.</p>

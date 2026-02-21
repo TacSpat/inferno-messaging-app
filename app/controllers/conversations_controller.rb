@@ -39,18 +39,27 @@ class ConversationsController < ApplicationController
                              .order(created_at: :asc).last(50)
     @message = Message.new
     @other_user = @conversation.other_user(current_user) if @conversation.direct?
+    @dm_contact = @conversation.counterparty_contact if @other_user.nil? && @conversation.counterparty_pubkey.present?
     # Mark conversation as read
     @conversation.conversation_participants.find_by(user: current_user)&.mark_read!
   end
 
   def create
-    target_user = User.find_by!(public_id: params[:user_id])
-    if current_user.blocked?(target_user) || target_user.blocked?(current_user)
-      redirect_to conversations_path, alert: "Cannot message this user"
-      return
+    if params[:pubkey].present?
+      # P2P DM with a contact identified by pubkey
+      conversation = Conversation.find_or_create_by_pubkey(current_user, params[:pubkey])
+      redirect_to conversation_path(conversation)
+    elsif params[:user_id].present?
+      target_user = User.find_by!(public_id: params[:user_id])
+      if current_user.blocked?(target_user) || target_user.blocked?(current_user)
+        redirect_to conversations_path, alert: "Cannot message this user"
+        return
+      end
+      conversation = Conversation.find_or_create_direct(current_user, target_user)
+      redirect_to conversation_path(conversation)
+    else
+      redirect_to conversations_path, alert: "No recipient specified"
     end
-    conversation = Conversation.find_or_create_direct(current_user, target_user)
-    redirect_to conversation_path(conversation)
   end
 
   def accept
