@@ -1,0 +1,101 @@
+<div class="flex items-center justify-center min-h-screen bg-gray-900 px-4">
+  <div class="w-full max-w-sm text-center" id="sync-container" data-nostr-gid="<%= @nostr_group_id %>">
+    <!-- Animated logo/spinner -->
+    <div class="mb-6">
+      <div class="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-accent-dark to-accent flex items-center justify-center animate-pulse">
+        <svg class="w-8 h-8 text-white animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      </div>
+    </div>
+
+    <h2 class="text-lg font-bold text-white mb-2">Syncing Server</h2>
+    <p class="text-sm text-gray-400 mb-6" id="sync-step">Connecting to Nostr relays...</p>
+
+    <!-- Progress bar -->
+    <div class="w-full bg-gray-800 rounded-full h-2 mb-4 overflow-hidden">
+      <div id="sync-progress-bar" class="h-full bg-gradient-to-r from-accent-dark to-accent rounded-full transition-all duration-500 ease-out" style="width: 0%"></div>
+    </div>
+
+    <p class="text-xs text-gray-500" id="sync-detail">This may take a few seconds...</p>
+
+    <!-- Error state (hidden by default) -->
+    <div id="sync-error" class="hidden mt-4">
+      <p class="text-sm text-danger-light mb-3" id="sync-error-msg">Something went wrong.</p>
+      <a href="/" class="inline-block bg-gray-700 hover:bg-gray-600 text-white font-semibold px-6 py-2 rounded transition text-sm">Go Home</a>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const container = document.getElementById('sync-container');
+  const gid = container.dataset.nostrGid;
+  const progressBar = document.getElementById('sync-progress-bar');
+  const stepEl = document.getElementById('sync-step');
+  const detailEl = document.getElementById('sync-detail');
+  const errorEl = document.getElementById('sync-error');
+  const errorMsg = document.getElementById('sync-error-msg');
+
+  const stepLabels = {
+    'starting': 'Connecting to Nostr relays...',
+    'metadata': 'Syncing server metadata...',
+    'structure': 'Syncing channels & categories...',
+    'roles': 'Syncing roles...',
+    'members': 'Syncing members...',
+    'emojis': 'Syncing emojis...',
+    'stickers': 'Syncing stickers...',
+    'bans': 'Syncing moderation data...',
+    'invites': 'Syncing invites...',
+    'joining': 'Creating your membership...',
+    'complete': 'Done! Redirecting...',
+    'failed': 'Sync failed'
+  };
+
+  let pollCount = 0;
+  const maxPolls = 60; // 60 seconds max
+
+  function poll() {
+    pollCount++;
+    if (pollCount > maxPolls) {
+      showError('Sync timed out. The server may not be available on Nostr relays.');
+      return;
+    }
+
+    fetch('/inferno/server/' + gid + '/sync_status', {
+      headers: { 'Accept': 'application/json' }
+    })
+    .then(r => r.json())
+    .then(data => {
+      const label = stepLabels[data.step] || data.step;
+      stepEl.textContent = label;
+      progressBar.style.width = data.progress + '%';
+
+      if (data.step === 'complete' && data.redirect_url) {
+        progressBar.style.width = '100%';
+        stepEl.textContent = 'Done! Redirecting...';
+        setTimeout(() => { window.location.href = data.redirect_url; }, 500);
+      } else if (data.step === 'failed') {
+        showError(data.error || 'Could not sync server from Nostr relays.');
+      } else {
+        setTimeout(poll, 1000);
+      }
+    })
+    .catch(() => {
+      setTimeout(poll, 2000);
+    });
+  }
+
+  function showError(msg) {
+    errorEl.classList.remove('hidden');
+    errorMsg.textContent = msg;
+    detailEl.textContent = '';
+    progressBar.classList.remove('bg-gradient-to-r', 'from-accent-dark', 'to-accent');
+    progressBar.classList.add('bg-danger');
+  }
+
+  // Start polling after a short delay to let the job start
+  setTimeout(poll, 500);
+})();
+</script>

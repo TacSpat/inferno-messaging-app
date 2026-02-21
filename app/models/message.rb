@@ -10,6 +10,7 @@ class Message < ApplicationRecord
   has_many :replies, class_name: "Message", foreign_key: :parent_id, dependent: :nullify
   has_many :reactions, dependent: :destroy
   has_many :notifications, dependent: :destroy
+  has_many :nostr_event_logs, dependent: :nullify
   has_many_attached :files
 
   validates :content, presence: true, unless: :has_files?

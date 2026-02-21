@@ -1,8 +1,8 @@
 <% content_for :head do %>
   <meta property="og:title" content="Join <%= @server_name %> on Inferno">
   <meta property="og:description" content="<%= @server_description.presence || "#{@member_count} members" %>">
-  <% if @server&.icon&.attached? %>
-    <meta property="og:image" content="<%= rails_blob_url(@server.icon) %>">
+  <% if @local_server&.icon&.attached? %>
+    <meta property="og:image" content="<%= rails_blob_url(@local_server.icon) %>">
   <% elsif @nostr_info && @nostr_info[:picture_url].present? %>
     <meta property="og:image" content="<%= @nostr_info[:picture_url] %>">
   <% end %>
@@ -18,8 +18,8 @@
     <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
       <!-- Banner -->
       <div class="relative h-32 bg-gradient-to-br from-accent-dark/60 to-gray-800">
-        <% if @server&.respond_to?(:banner) && @server&.banner&.attached? %>
-          <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
+        <% if @local_server&.respond_to?(:banner) && @local_server&.banner&.attached? %>
+          <%= image_tag @local_server.banner, class: "w-full h-full object-cover" %>
         <% elsif @nostr_info && @nostr_info[:banner_url].present? %>
           <img src="<%= @nostr_info[:banner_url] %>" class="w-full h-full object-cover" />
         <% end %>
@@ -29,8 +29,8 @@
       <div class="relative px-6 pb-6">
         <!-- Server icon overlapping banner -->
         <div class="-mt-10 mb-3">
-          <% if @server&.icon&.attached? %>
-            <%= image_tag @server.icon, class: "w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" %>
+          <% if @local_server&.icon&.attached? %>
+            <%= image_tag @local_server.icon, class: "w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" %>
           <% elsif @nostr_info && @nostr_info[:picture_url].present? %>
             <img src="<%= @nostr_info[:picture_url] %>" class="w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" />
           <% else %>
@@ -49,7 +49,7 @@
 
         <!-- Member counts -->
         <div class="flex items-center gap-4 mb-2 text-xs">
-          <% if @server %>
+          <% if @local_server %>
             <div class="flex items-center gap-1.5">
               <span class="w-2 h-2 rounded-full bg-green-500"></span>
               <span class="text-gray-300"><%= @online_count %> Online</span>
@@ -65,7 +65,7 @@
 
         <% if @already_member %>
           <%= link_to "Open #{@server_name}",
-                server_channel_path(@server, @server.channels.ordered.first),
+                server_channel_path(@local_server, @local_server.channels.ordered.first),
                 class: "block w-full text-center bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition text-sm" %>
         <% elsif user_signed_in? %>
           <%= button_to "Join Server",

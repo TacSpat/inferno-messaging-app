@@ -126,6 +126,7 @@ Rails.application.routes.draw do
   # Nostr-native server links (resolve via relay, no invite code needed)
   get "inferno/server/:nostr_group_id", to: "nostr_servers#show", as: :nostr_server
   post "inferno/server/:nostr_group_id/join", to: "nostr_servers#join", as: :join_nostr_server
+  get "inferno/server/:nostr_group_id/sync_status", to: "nostr_servers#sync_status", as: :nostr_server_sync_status
 
   # Conversations (DMs)
   resources :conversations, only: [:index, :show, :create, :destroy] do

@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html class="h-full bg-gray-900">
+  <head>
+    <title>Inferno</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <%= csrf_meta_tags %>
+    <%= csp_meta_tag %>
+    <%= stylesheet_link_tag "tailwind", "data-turbo-track": "reload" %>
+    <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
+    <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
+    <%= yield :head %>
+  </head>
+  <body class="h-full overflow-hidden text-gray-100 bg-gray-900">
+    <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
+    <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
+    <%= yield %>
+  </body>
+</html>
