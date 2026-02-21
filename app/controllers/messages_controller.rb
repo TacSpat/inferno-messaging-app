@@ -16,6 +16,13 @@ class MessagesController < ApplicationController
     if @message.save
       # Preload associations for rendering to avoid N+1
       ActiveRecord::Associations::Preloader.new(records: [ @message.user ], associations: { server_memberships: :roles }).call
+      # Publish as NIP-29 Kind 9 event to relays (in background)
+      if @channel.nostr_group_id.present? && current_user.nostr_public_key.present?
+        msg = @message
+        channel = @channel
+        Thread.new { publish_channel_message_to_nostr(msg, channel) }
+      end
+
       # Broadcast via ActionCable
       ChannelChatChannel.broadcast_to(
         @channel,
@@ -111,5 +118,37 @@ class MessagesController < ApplicationController
     permitted = params.require(:message).permit(:content, :parent_id, files: [])
     permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
     permitted
+  end
+
+  def publish_channel_message_to_nostr(message, channel)
+    user = message.user
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 9, # NIP-29 group chat message
+      pubkey: user.nostr_public_key,
+      content: message.content || "",
+      tags: [
+        ["h", channel.nostr_group_id]
+      ]
+    )
+    signed = signer.sign(event)
+    signed_json = signed.to_json
+
+    message.update_columns(nostr_event_id: signed[:id] || signed["id"])
+
+    NostrEventLog.create!(
+      event_id: signed[:id] || signed["id"],
+      kind: 9,
+      pubkey: user.nostr_public_key,
+      message: message,
+      channel: channel,
+      direction: "outbound",
+      event_created_at: Time.current
+    )
+
+    RelayService.publish_to_all(signed_json)
+  rescue => e
+    Rails.logger.error("Failed to publish channel message to Nostr: #{e.message}")
   end
 end

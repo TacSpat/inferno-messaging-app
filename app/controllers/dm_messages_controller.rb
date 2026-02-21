@@ -24,8 +24,12 @@ class DmMessagesController < ApplicationController
       @conversation.conversation_participants.update_all(accepted: true)
       participant.mark_read!
 
-      # Publish as NIP-44 encrypted Kind 14 event
-      publish_dm_to_nostr(@message) if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present?
+      # Publish as NIP-44 encrypted Kind 14 event (in background, don't block response)
+      if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present?
+        msg = @message
+        conv = @conversation
+        Thread.new { publish_dm_to_nostr(msg, conv) }
+      end
 
       ConversationChannel.broadcast_to(
         @conversation,
@@ -124,9 +128,9 @@ class DmMessagesController < ApplicationController
     permitted
   end
 
-  def publish_dm_to_nostr(message)
+  def publish_dm_to_nostr(message, conversation)
     user = message.user
-    counterparty_pubkey = @conversation.counterparty_pubkey
+    counterparty_pubkey = conversation.counterparty_pubkey
 
     # Build NIP-44 encrypted Kind 14 event
     conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)
