@@ -280,7 +280,7 @@ end
       end
     else
       # Async placeholder for NostrServerUnfurlJob
-      embeds << %(<div class="mt-2 nostr-server-placeholder" data-nostr-gid="#{nostr_group_id}" data-nostr-server-#{nostr_group_id}><a href="/inferno/server/#{ERB::Util.html_escape(nostr_group_id)}" data-turbo="false" class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg></div><span class="text-gray-400 text-sm">Loading server...</span></a></div>)
+      embeds << %(<div class="mt-2 nostr-server-placeholder" data-nostr-gid="#{nostr_group_id}" data-nostr-server-#{nostr_group_id}><a href="/inferno/server/#{ERB::Util.html_escape(nostr_group_id)}" data-turbo="false" data-turbo-frame="_top" class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M12 5l7 7-7 7"/></svg></div><span class="text-gray-400 text-sm">Loading server...</span></a></div>)
     end
   end
 
@@ -440,7 +440,7 @@ end
     first_channel = server.channels.ordered.first
     link_url = first_channel ? "/servers/#{server.public_id}/channels/#{first_channel.public_id}" : "/inferno/server/#{nostr_group_id}"
 
-    %(<a href="#{link_url}" data-turbo="false" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
   end
 
   def render_remote_nostr_server_embed_html(info, nostr_group_id)
@@ -456,7 +456,7 @@ end
     instance_domain = Rails.application.config.x.instance_domain
     link_url = "/inferno/server/#{ERB::Util.html_escape(nostr_group_id)}"
 
-    %(<a href="#{link_url}" data-turbo="false" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
   end
 
   def render_remote_invite_embed_html(data, invite_url)
@@ -475,7 +475,7 @@ end
     # Rewrite to local Nostr server link if nostr_group_id is available
     if data["nostr_group_id"].present?
       link_url = "/inferno/server/#{ERB::Util.html_escape(data["nostr_group_id"])}"
-      target_attr = ""
+      target_attr = ' data-turbo="false" data-turbo-frame="_top"'
       rel_attr = ""
     else
       link_url = ERB::Util.html_escape(invite_url)

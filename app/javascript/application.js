@@ -4,6 +4,13 @@ import { Application } from "@hotwired/stimulus"
 
 const application = Application.start()
 
+// When a turbo-frame navigates to a page without a matching frame,
+// perform a full-page visit instead of showing "Content missing"
+document.addEventListener("turbo:frame-missing", (event) => {
+  event.preventDefault()
+  event.detail.visit(event.detail.response)
+})
+
 // Custom styled confirmation dialog for Turbo
 Turbo.setConfirmMethod((message) => {
   return new Promise((resolve) => {

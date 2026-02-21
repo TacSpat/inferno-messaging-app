@@ -71,12 +71,14 @@
           <%= button_to "Join Server",
                 join_nostr_server_path(@nostr_group_id),
                 method: :post,
+                data: { turbo: false },
                 class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
         <% else %>
           <div class="space-y-3">
             <%= button_to "Join Server",
                   join_nostr_server_path(@nostr_group_id),
                   method: :post,
+                  data: { turbo: false },
                   class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
             <p class="text-xs text-gray-500 text-center">
               Already have an account?
