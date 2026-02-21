@@ -43,6 +43,9 @@ class NostrServerAuth
 
   # Check authorization for an inbound event, with special cases
   def self.authorized_for_event?(server, event)
+    # During initial sync/bootstrap, skip auth — relay events are trusted
+    return true if Thread.current[:nostr_skip_auth]
+
     signer_pubkey = event["pubkey"]
     kind = event["kind"]
 

@@ -83,6 +83,27 @@ class NostrServerSyncService
     event = latest_event(events)
     return unless event
 
+    # Bootstrap: create the server record if it doesn't exist locally.
+    # Use insert to skip after_create callbacks (create_defaults, assign_nostr_group_id)
+    # since the relay data provides the real channels, roles, etc.
+    unless Server.exists?(nostr_group_id: @gid)
+      tags = event["tags"] || []
+      name = tags.find { |t| t[0] == "name" }&.dig(1) || "Unknown Server"
+      owner_pubkey = tags.find { |t| t[0] == "owner" }&.dig(1)
+      owner = User.find_by(nostr_public_key: owner_pubkey) if owner_pubkey.present?
+      owner ||= @user || User.first
+
+      Server.insert({
+        public_id: SecureRandom.alphanumeric(12),
+        name: name,
+        nostr_group_id: @gid,
+        owner_id: owner.id,
+        created_at: Time.current,
+        updated_at: Time.current
+      })
+      Rails.logger.info("[NostrServerSyncService] Created server record for #{@gid} (#{name})")
+    end
+
     process_via_manager(:process_server_metadata, event)
     Rails.logger.info("[NostrServerSyncService] Synced metadata for #{@gid}")
   end
@@ -217,11 +238,15 @@ class NostrServerSyncService
     event
   end
 
-  # Delegate processing to RelaySubscriptionManager's existing handlers
+  # Delegate processing to RelaySubscriptionManager's existing handlers.
+  # Skip auth during bootstrap — we trust relay events for initial sync.
   def process_via_manager(method, event)
+    Thread.current[:nostr_skip_auth] = true
     manager = RelaySubscriptionManager.instance
     manager.send(method, event)
   rescue => e
     Rails.logger.warn("[NostrServerSyncService] Failed to process #{method}: #{e.message}")
+  ensure
+    Thread.current[:nostr_skip_auth] = false
   end
 end
