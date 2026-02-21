@@ -116,6 +116,11 @@ class FriendshipsController < ApplicationController
     # Publish updated Kind 3 contact list
     NostrPublishJob.perform_later(current_user.id, :contacts)
 
+    # Notify the other party via Nostr DM
+    pubkey = contact.pubkey
+    user = current_user
+    Thread.new { send_friend_response_dm_async(user, pubkey, "removed") }
+
     broadcast_friend_update
 
     tab = was_pending ? "pending" : "all"

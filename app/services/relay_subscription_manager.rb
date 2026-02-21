@@ -479,6 +479,11 @@ class RelaySubscriptionManager
     when "declined"
       contact.update!(friendship_status: :declined)
       Rails.logger.info("[RelaySubscriptionManager] Friend request declined by #{sender_pubkey.first(12)}...")
+    when "removed"
+      contact.update!(friendship_status: :not_friend)
+      # Update our Kind 3 contact list to reflect removal
+      NostrPublishJob.perform_later(owner.id, :contacts) if owner
+      Rails.logger.info("[RelaySubscriptionManager] Removed by #{sender_pubkey.first(12)}...")
     end
 
     # Notify UI to refresh contacts lists
