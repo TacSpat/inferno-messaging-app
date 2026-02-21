@@ -305,11 +305,23 @@ class RelaySubscriptionManager
 
     sender_pubkey = event["pubkey"]
 
+    # Skip our own events echoed back from relays — just log them
+    if sender_pubkey == owner.nostr_public_key
+      NostrEventLog.create!(
+        event_id: event["id"],
+        kind: event["kind"],
+        pubkey: sender_pubkey,
+        direction: "outbound_echo",
+        event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
+      )
+      return
+    end
+
     # Decrypt NIP-44 content
     conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, sender_pubkey)
     plaintext = Nip44Service.decrypt(event["content"], conversation_key)
 
-    # Try to parse as JSON (friend request/response) or treat as plain DM text
+    # Try to parse as JSON (structured payload) or treat as plain DM text
     parsed = JSON.parse(plaintext) rescue nil
 
     if parsed.is_a?(Hash) && parsed["type"] == "friend_request"
@@ -320,17 +332,8 @@ class RelaySubscriptionManager
       process_dm_edit(sender_pubkey, parsed, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
       process_dm_delete(sender_pubkey, parsed, event)
-    elsif parsed.is_a?(Hash) && parsed["type"] == "message"
-      # Structured message with possible file attachments
-      content = parsed["content"] || ""
-      files = parsed["files"]
-      if files.is_a?(Array) && files.any?
-        content += "\n" unless content.empty?
-        content += files.join("\n")
-      end
-      process_dm_message(sender_pubkey, content, event)
     else
-      # Regular DM message (plain text)
+      # Regular DM message — extract content from structured payloads
       process_dm_message(sender_pubkey, plaintext, event)
     end
 
@@ -394,12 +397,36 @@ class RelaySubscriptionManager
     owner = User.owner
     return unless owner
 
+    # Extract content from structured payloads (type: "message" with files)
+    content = plaintext
+    begin
+      parsed = JSON.parse(plaintext)
+      if parsed.is_a?(Hash)
+        if parsed["type"] == "message"
+          content = parsed["content"] || ""
+          files = parsed["files"]
+          if files.is_a?(Array) && files.any?
+            content += "\n" unless content.empty?
+            content += files.join("\n")
+          end
+        elsif parsed.key?("type")
+          # Unknown structured payload — log but don't display as a message
+          Rails.logger.info("[RelaySubscriptionManager] Ignoring DM payload type=#{parsed["type"]}")
+          return
+        end
+      end
+    rescue JSON::ParserError
+      # Plain text — use as-is
+    end
+
+    return if content.blank?
+
     # Find or create conversation by counterparty pubkey
     conversation = Conversation.find_or_create_by_pubkey(owner, sender_pubkey)
 
     # Create the message
     message = conversation.messages.create!(
-      content: plaintext,
+      content: content,
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
