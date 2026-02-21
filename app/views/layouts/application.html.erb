@@ -196,7 +196,7 @@
             <%
               online_members = @members.reject { |m| m.offline? || m.invisible? }
               offline_members = @members.select { |m| m.offline? || m.invisible? }
-              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("permissions @> ?", { owner: true }.to_json).ordered.to_a
+              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("json_extract(permissions, '$.owner') = ?", true).ordered.to_a
               everyone_role = @server.roles.find_by(name: "@everyone")
               everyone_position = everyone_role&.position || 0
               role_groups = {}

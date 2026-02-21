@@ -1,4 +1,4 @@
-<% fr_count = current_user.pending_friend_requests.count %>
+<% fr_count = Contact.where(friendship_status: :pending_incoming).count %>
 <% dm_user = local_assigns[:dm_user] %>
 <div class="flex items-center gap-1 shrink-0">
   <% if fr_count > 0 %>

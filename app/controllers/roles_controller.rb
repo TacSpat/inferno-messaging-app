@@ -6,7 +6,7 @@ class RolesController < ApplicationController
   before_action :set_role, only: [ :update, :destroy ]
 
   def create
-    max_position = @server.roles.where.not("permissions @> ?", { owner: true }.to_json).maximum(:position) || 0
+    max_position = @server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).maximum(:position) || 0
     role = @server.roles.new(
       name: "New Role",
       color: "#99aab5",

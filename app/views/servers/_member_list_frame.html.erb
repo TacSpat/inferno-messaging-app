@@ -5,7 +5,7 @@
     offline_members = members.select { |m| m.offline? || m.invisible? }
 
     # Hoisted roles for this server, highest position first (skip default-named roles)
-    hoisted_roles = server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("permissions @> ?", { owner: true }.to_json).ordered.to_a
+    hoisted_roles = server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("json_extract(permissions, '$.owner') = ?", true).ordered.to_a
 
     # @everyone's position determines where the "Online" group sits in the hierarchy
     everyone_role = server.roles.find_by(name: "@everyone")
