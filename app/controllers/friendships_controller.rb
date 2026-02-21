@@ -43,8 +43,9 @@ class FriendshipsController < ApplicationController
     contact.friendship_status = :pending_outgoing
     contact.save!
 
-    # Send friend request as NIP-44 encrypted DM
-    send_friend_request_dm(pubkey)
+    # Send friend request as NIP-44 encrypted DM (in background, don't block response)
+    user = current_user
+    Thread.new { send_friend_request_dm_async(user, pubkey) }
 
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{contact.effective_display_name}!" }
@@ -65,8 +66,10 @@ class FriendshipsController < ApplicationController
     # Publish updated Kind 3 contact list
     NostrPublishJob.perform_later(current_user.id, :contacts)
 
-    # Send acceptance DM
-    send_friend_response_dm(contact.pubkey, "accepted")
+    # Send acceptance DM in background thread (don't block the response)
+    pubkey = contact.pubkey
+    user = current_user
+    Thread.new { send_friend_response_dm_async(user, pubkey, "accepted") }
 
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "all"), notice: "Friend request accepted!" }
@@ -78,7 +81,9 @@ class FriendshipsController < ApplicationController
     contact = Contact.find(params[:id])
     contact.update!(friendship_status: :declined)
 
-    send_friend_response_dm(contact.pubkey, "declined")
+    pubkey = contact.pubkey
+    user = current_user
+    Thread.new { send_friend_response_dm_async(user, pubkey, "declined") }
 
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request declined." }
@@ -132,46 +137,36 @@ class FriendshipsController < ApplicationController
     nil
   end
 
-  def send_friend_request_dm(pubkey)
-    return unless current_user.nostr_private_key.present?
+  def send_friend_request_dm_async(user, pubkey)
+    return unless user.nostr_private_key.present?
 
-    conversation_key = Nip44Service.conversation_key(
-      current_user.nostr_private_key, pubkey
-    )
-
-    payload = { type: "friend_request", from: current_user.nostr_public_key }.to_json
+    conversation_key = Nip44Service.conversation_key(user.nostr_private_key, pubkey)
+    payload = { type: "friend_request", from: user.nostr_public_key }.to_json
     encrypted = Nip44Service.encrypt(payload, conversation_key)
 
     event = build_nostr_event(
-      kind: 14,
-      content: encrypted,
-      tags: [["p", pubkey]],
-      privkey: current_user.nostr_private_key,
-      pubkey: current_user.nostr_public_key
+      kind: 14, content: encrypted, tags: [["p", pubkey]],
+      privkey: user.nostr_private_key, pubkey: user.nostr_public_key
     )
-
-    publish_to_relays(event)
+    RelayService.publish_to_all(event)
+  rescue => e
+    Rails.logger.error("Failed to send friend request DM: #{e.message}")
   end
 
-  def send_friend_response_dm(pubkey, status)
-    return unless current_user.nostr_private_key.present?
+  def send_friend_response_dm_async(user, pubkey, status)
+    return unless user.nostr_private_key.present?
 
-    conversation_key = Nip44Service.conversation_key(
-      current_user.nostr_private_key, pubkey
-    )
-
-    payload = { type: "friend_response", status: status, from: current_user.nostr_public_key }.to_json
+    conversation_key = Nip44Service.conversation_key(user.nostr_private_key, pubkey)
+    payload = { type: "friend_response", status: status, from: user.nostr_public_key }.to_json
     encrypted = Nip44Service.encrypt(payload, conversation_key)
 
     event = build_nostr_event(
-      kind: 14,
-      content: encrypted,
-      tags: [["p", pubkey]],
-      privkey: current_user.nostr_private_key,
-      pubkey: current_user.nostr_public_key
+      kind: 14, content: encrypted, tags: [["p", pubkey]],
+      privkey: user.nostr_private_key, pubkey: user.nostr_public_key
     )
-
-    publish_to_relays(event)
+    RelayService.publish_to_all(event)
+  rescue => e
+    Rails.logger.error("Failed to send friend response DM: #{e.message}")
   end
 
   def build_nostr_event(kind:, content:, tags:, privkey:, pubkey:)
