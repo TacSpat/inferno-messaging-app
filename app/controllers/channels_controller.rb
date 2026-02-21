@@ -20,6 +20,10 @@ class ChannelsController < ApplicationController
       { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
       unique_by: [ :user_id, :channel_id ]
     )
+
+    # Fetch any missed messages from relays in background
+    channel = @channel
+    Thread.new { NostrHistoryFetcher.fetch_channel(channel) } if channel.nostr_group_id.present?
   end
 
   def older_messages

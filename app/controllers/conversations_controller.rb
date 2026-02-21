@@ -42,6 +42,10 @@ class ConversationsController < ApplicationController
     @dm_contact = @conversation.counterparty_contact if @other_user.nil? && @conversation.counterparty_pubkey.present?
     # Mark conversation as read
     @conversation.conversation_participants.find_by(user: current_user)&.mark_read!
+
+    # Fetch any missed messages from relays in background
+    conv = @conversation
+    Thread.new { NostrHistoryFetcher.fetch_conversation(conv) } if conv.counterparty_pubkey.present?
   end
 
   def create
