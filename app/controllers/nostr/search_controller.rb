@@ -4,6 +4,7 @@ module Nostr
 
     # GET /nostr/search?q=alice
     def show
+      response.headers["Cache-Control"] = "no-store"
       query = params[:q].to_s.strip
       if query.blank?
         render json: []

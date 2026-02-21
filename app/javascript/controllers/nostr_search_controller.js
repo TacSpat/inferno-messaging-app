@@ -4,6 +4,7 @@ export default class extends Controller {
   static targets = ["input", "dropdown", "spinner"]
 
   connect() {
+    console.log("[nostr-search] controller connected")
     this.debounceTimer = null
     this.selectedIndex = -1
     this.results = []

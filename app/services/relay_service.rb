@@ -140,9 +140,15 @@ class RelayService
 
   private_class_method def self.run_with_eventmachine(&block)
     if EventMachine.reactor_running?
-      # Already inside an EM reactor (e.g. nested call)
-      done = -> { }
-      block.call(done)
+      # EM already running (RelaySubscriptionManager) — schedule on the reactor
+      # and use a Queue to block the calling thread until done
+      queue = Queue.new
+      EventMachine.next_tick do
+        done = -> { queue.push(:done) rescue nil }
+        block.call(done)
+      end
+      # Wait for completion (with generous timeout to avoid hanging forever)
+      queue.pop(timeout: RESPONSE_TIMEOUT + 5)
     else
       EventMachine.run do
         done = -> { EventMachine.stop }
