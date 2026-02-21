@@ -861,8 +861,9 @@ class RelaySubscriptionManager
     deleted = tags.find { |t| t[0] == "deleted" }&.dig(1) == "true"
 
     if deleted
-      Rails.logger.info("[RelaySubscriptionManager] Server #{server.nostr_group_id} marked deleted via Nostr")
+      Rails.logger.info("[RelaySubscriptionManager] Server #{server.nostr_group_id} marked deleted via Nostr — destroying locally")
       log_server_event(event)
+      server.destroy
       return
     end
 

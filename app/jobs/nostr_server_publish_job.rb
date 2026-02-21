@@ -58,12 +58,12 @@ class NostrServerPublishJob < ApplicationJob
       kind: kind,
       pubkey: @user.nostr_public_key,
       direction: "outbound",
-      event_created_at: Time.at(signed[:created_at] || signed["created_at"] || Time.current.to_i)
+      event_created_at: Time.at(signed.created_at || Time.current.to_i)
     )
 
     Rails.logger.info("[NostrServerPublishJob] Published kind #{kind} (#{event_type}) for server #{@server.nostr_group_id}")
-  rescue ActiveRecord::RecordNotUnique
-    # Event already logged
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
+    # Event already logged — ignore duplicate
   end
 
   private

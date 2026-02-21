@@ -57,7 +57,7 @@ class NostrGroupPublishJob < ApplicationJob
       message: message,
       channel: channel,
       direction: "outbound",
-      event_created_at: Time.at(signed[:created_at] || signed["created_at"] || Time.current.to_i)
+      event_created_at: Time.at(signed.created_at || Time.current.to_i)
     )
   rescue ActiveRecord::RecordNotUnique
     # Event already logged
