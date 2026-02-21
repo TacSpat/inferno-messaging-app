@@ -123,6 +123,10 @@ Rails.application.routes.draw do
   get "invite/:code", to: redirect("/inferno/invite/%{code}")
   post "invite/:code/accept", to: "invites#accept"
 
+  # Nostr-native server links (resolve via relay, no invite code needed)
+  get "inferno/server/:nostr_group_id", to: "nostr_servers#show", as: :nostr_server
+  post "inferno/server/:nostr_group_id/join", to: "nostr_servers#join", as: :join_nostr_server
+
   # Conversations (DMs)
   resources :conversations, only: [:index, :show, :create, :destroy] do
     member do

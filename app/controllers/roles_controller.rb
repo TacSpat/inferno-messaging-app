@@ -15,6 +15,7 @@ class RolesController < ApplicationController
     )
 
     if role.save
+      publish_server_roles
       render json: role_json(role), status: :created
     else
       render json: { errors: role.errors.full_messages }, status: :unprocessable_entity
@@ -34,6 +35,7 @@ class RolesController < ApplicationController
 
     if @role.update(attrs)
       ServerChannel.broadcast_to(@server, { type: "roles_updated" })
+      publish_server_roles
       render json: role_json(@role)
     else
       render json: { errors: @role.errors.full_messages }, status: :unprocessable_entity
@@ -49,6 +51,7 @@ class RolesController < ApplicationController
     @role.destroy
 
     ServerChannel.broadcast_to(@server, { type: "roles_updated" })
+    publish_server_roles
     render json: { success: true }
   end
 
@@ -66,6 +69,7 @@ class RolesController < ApplicationController
 
     # Broadcast so all clients refresh their member lists
     ServerChannel.broadcast_to(@server, { type: "roles_updated" })
+    publish_server_roles
 
     render json: { success: true }
   end
@@ -102,5 +106,10 @@ class RolesController < ApplicationController
       is_owner: role.owner?,
       is_everyone: role.everyone?
     }
+  end
+
+  def publish_server_roles
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "roles")
   end
 end

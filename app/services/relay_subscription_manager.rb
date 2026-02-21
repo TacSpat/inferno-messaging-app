@@ -20,6 +20,22 @@ class RelaySubscriptionManager
   KIND_DM = 14
   KIND_USER_STATUS = 30315
 
+  # Server state event kinds
+  KIND_SERVER_METADATA  = 31750
+  KIND_SERVER_STRUCTURE = 31751
+  KIND_SERVER_ROLES     = 31752
+  KIND_SERVER_MEMBER    = 31753
+  KIND_SERVER_EMOJIS    = 31754
+  KIND_SERVER_STICKERS  = 31755
+  KIND_SERVER_BAN       = 31756
+  KIND_SERVER_INVITE    = 31757
+  KIND_TYPING           = 25050
+  KIND_REACTION         = 7
+
+  SERVER_STATE_KINDS = [KIND_SERVER_METADATA, KIND_SERVER_STRUCTURE, KIND_SERVER_ROLES,
+                        KIND_SERVER_EMOJIS, KIND_SERVER_STICKERS].freeze
+  SERVER_PER_ENTITY_KINDS = [KIND_SERVER_MEMBER, KIND_SERVER_BAN, KIND_SERVER_INVITE].freeze
+
   RECONNECT_DELAY = 5 # seconds
 
   attr_reader :connections, :running
@@ -191,6 +207,47 @@ class RelaySubscriptionManager
       ws.send(JSON.generate(["REQ", sub_id, filter]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :contacts }
     end
+
+    # Subscription 4: Server state events (metadata, structure, roles, emojis, stickers)
+    server_group_ids = Server.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
+    if server_group_ids.any?
+      d_tag_filters = server_group_ids.flat_map { |gid|
+        ["inferno-#{gid}", "inferno-struct-#{gid}", "inferno-roles-#{gid}",
+         "inferno-emojis-#{gid}", "inferno-stickers-#{gid}"]
+      }
+      sub_id = "server-state-#{SecureRandom.hex(4)}"
+      filter = { kinds: SERVER_STATE_KINDS, "#d" => d_tag_filters }
+      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :server_state }
+
+      # Subscription 5: Per-member/ban/invite events
+      member_d_prefixes = server_group_ids.flat_map { |gid|
+        ["inferno-mbr-#{gid}-", "inferno-ban-#{gid}-", "inferno-invite-#{gid}-"]
+      }
+      # Nostr relays don't support prefix matching on d tags, so we use a broad filter
+      # and filter in process_inbound_event. We subscribe to the kinds.
+      sub_id = "server-entities-#{SecureRandom.hex(4)}"
+      filter = { kinds: SERVER_PER_ENTITY_KINDS, since: 1.hour.ago.to_i }
+      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :server_entities }
+
+      # Subscription 6: Ephemeral typing for all channels
+      all_channel_group_ids = Channel.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
+      if all_channel_group_ids.any?
+        sub_id = "typing-#{SecureRandom.hex(4)}"
+        filter = { kinds: [KIND_TYPING], "#h" => all_channel_group_ids }
+        ws.send(JSON.generate(["REQ", sub_id, filter]))
+        @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :typing }
+      end
+
+      # Subscription 7: Reactions for channel messages
+      if all_channel_group_ids.any?
+        sub_id = "reactions-#{SecureRandom.hex(4)}"
+        filter = { kinds: [KIND_REACTION], "#h" => all_channel_group_ids, since: 1.hour.ago.to_i }
+        ws.send(JSON.generate(["REQ", sub_id, filter]))
+        @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :reactions }
+      end
+    end
   end
 
   def handle_message(relay_url, raw_data)
@@ -220,6 +277,8 @@ class RelaySubscriptionManager
     app/services/nostr_profile_resolver.rb
     app/services/remote_asset_cache.rb
     app/services/nostr_sync_service.rb
+    app/services/nostr_server_auth.rb
+    app/services/nostr_server_sync_service.rb
     app/models/contact.rb
     app/models/message.rb
     app/models/conversation.rb
@@ -266,6 +325,26 @@ class RelaySubscriptionManager
       process_profile_update(event)
     when KIND_USER_STATUS
       process_presence_event(event)
+    when KIND_SERVER_METADATA
+      process_server_metadata(event)
+    when KIND_SERVER_STRUCTURE
+      process_server_structure(event)
+    when KIND_SERVER_ROLES
+      process_server_roles(event)
+    when KIND_SERVER_MEMBER
+      process_server_member(event)
+    when KIND_SERVER_EMOJIS
+      process_server_emojis(event)
+    when KIND_SERVER_STICKERS
+      process_server_stickers(event)
+    when KIND_SERVER_BAN
+      process_server_ban(event)
+    when KIND_SERVER_INVITE
+      process_server_invite(event)
+    when KIND_TYPING
+      process_typing_event(event)
+    when KIND_REACTION
+      process_reaction_event(event)
     end
   rescue => e
     Rails.logger.error("[RelaySubscriptionManager] Error processing event #{event['id']}: #{e.message}")
@@ -278,6 +357,15 @@ class RelaySubscriptionManager
     group_id = group_tag[1]
     channel = Channel.find_by(nostr_group_id: group_id)
     return unless channel
+
+    # Verify sender has send_messages permission in this channel's server
+    if channel.server
+      sender_pk = event["pubkey"]
+      unless NostrServerAuth.authorized?(channel.server, sender_pk, "send_messages")
+        Rails.logger.info("[RelaySubscriptionManager] Rejected message from #{sender_pk&.first(12)} — no send_messages permission")
+        return
+      end
+    end
 
     # Check if this is an edit (has an "e" tag with "edit" marker)
     edit_tag = (event["tags"] || []).find { |t| t[0] == "e" && t[3] == "edit" }
@@ -729,6 +817,508 @@ class RelaySubscriptionManager
 
     Rails.logger.debug("[RelaySubscriptionManager] Presence: #{contact.effective_display_name} is #{state}")
   end
+
+  # ── Server State Event Handlers ──────────────────────────────────────
+
+  def find_server_from_event(event)
+    tags = event["tags"] || []
+    # Try "server" tag first
+    server_tag = tags.find { |t| t[0] == "server" }
+    gid = server_tag&.dig(1)
+
+    # Fallback: extract from "d" tag
+    unless gid
+      d_tag = tags.find { |t| t[0] == "d" }
+      d_val = d_tag&.dig(1) || ""
+      # "inferno-<gid>" or "inferno-struct-<gid>" etc.
+      gid = d_val.sub(/\Ainferno-(?:struct-|roles-|emojis-|stickers-|mbr-|ban-|invite-)?/, "")
+      # For member/ban/invite, strip the trailing -<pubkey16>
+      gid = gid.sub(/-[0-9a-f]{16,}\z/, "") if d_val.match?(/\Ainferno-(?:mbr|ban|invite)-/)
+    end
+
+    return nil if gid.blank?
+    Server.find_by(nostr_group_id: gid)
+  end
+
+  def log_server_event(event)
+    NostrEventLog.create!(
+      event_id: event["id"],
+      kind: event["kind"],
+      pubkey: event["pubkey"],
+      direction: "inbound",
+      event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
+    )
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  end
+
+  def process_server_metadata(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    deleted = tags.find { |t| t[0] == "deleted" }&.dig(1) == "true"
+
+    if deleted
+      Rails.logger.info("[RelaySubscriptionManager] Server #{server.nostr_group_id} marked deleted via Nostr")
+      log_server_event(event)
+      return
+    end
+
+    name_tag = tags.find { |t| t[0] == "name" }
+    about_tag = tags.find { |t| t[0] == "about" }
+    welcome_enabled_tag = tags.find { |t| t[0] == "welcome_enabled" }
+    welcome_message_tag = tags.find { |t| t[0] == "welcome_message" }
+
+    attrs = {}
+    attrs[:name] = name_tag[1] if name_tag&.dig(1).present?
+    attrs[:description] = about_tag[1] if about_tag
+    attrs[:welcome_message_enabled] = welcome_enabled_tag[1] == "true" if welcome_enabled_tag
+    attrs[:welcome_message_template] = welcome_message_tag[1] if welcome_message_tag
+
+    # Download icon/banner from Blossom URLs
+    picture_tag = tags.find { |t| t[0] == "picture" }
+    if picture_tag&.dig(1).present?
+      cached = RemoteAssetCache.cache(picture_tag[1])
+      # Icon is stored as Active Storage — just note the URL for now
+    end
+
+    server.update!(attrs) if attrs.any?
+    log_server_event(event)
+
+    ServerChannel.broadcast_to(server, { type: "server_updated" })
+    Rails.logger.info("[RelaySubscriptionManager] Updated server metadata for #{server.nostr_group_id}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server metadata: #{e.message}")
+  end
+
+  def process_server_structure(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    cat_tags = tags.select { |t| t[0] == "cat" }
+    ch_tags = tags.select { |t| t[0] == "ch" }
+
+    ActiveRecord::Base.transaction do
+      # Sync categories
+      remote_cat_ids = cat_tags.map { |t| t[1] }
+      cat_tags.each do |t|
+        # ["cat", public_id, name, position]
+        cat = server.categories.find_or_initialize_by(public_id: t[1])
+        cat.assign_attributes(name: t[2], position: t[3].to_i)
+        cat.save! if cat.changed?
+      end
+      # Remove categories not in the event
+      server.categories.where.not(public_id: remote_cat_ids).each do |cat|
+        cat.channels.update_all(category_id: nil)
+        cat.destroy
+      end
+
+      # Sync channels
+      remote_ch_ids = ch_tags.map { |t| t[1] }
+      ch_tags.each do |t|
+        # ["ch", public_id, name, type, position, cat_id, topic, nsfw, nostr_group_id, perm_overrides]
+        ch = server.channels.find_or_initialize_by(public_id: t[1])
+        cat = t[5].present? ? server.categories.find_by(public_id: t[5]) : nil
+        ch.assign_attributes(
+          name: t[2],
+          channel_type: t[3],
+          position: t[4].to_i,
+          category: cat,
+          topic: t[6],
+          nsfw: t[7] == "true"
+        )
+        ch.nostr_group_id = t[8] if t[8].present?
+        ch.save! if ch.changed? || ch.new_record?
+      end
+      # Remove channels not in the event
+      server.channels.where.not(public_id: remote_ch_ids).destroy_all if remote_ch_ids.any?
+    end
+
+    log_server_event(event)
+    ServerChannel.broadcast_to(server, { type: "sidebar_reorder" })
+    Rails.logger.info("[RelaySubscriptionManager] Synced server structure for #{server.nostr_group_id}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server structure: #{e.message}")
+  end
+
+  def process_server_roles(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    role_tags = tags.select { |t| t[0] == "role" }
+
+    ActiveRecord::Base.transaction do
+      remote_role_ids = role_tags.map { |t| t[1] }
+
+      role_tags.each do |t|
+        # ["role", public_id, name, color, position, hoist, mentionable, permissions_json]
+        role = server.roles.find_or_initialize_by(public_id: t[1])
+        perms = JSON.parse(t[7]) rescue {}
+        role.assign_attributes(
+          name: t[2],
+          color: t[3],
+          position: t[4].to_i,
+          hoist: t[5] == "true",
+          permissions: perms
+        )
+        role.save! if role.changed? || role.new_record?
+      end
+
+      # Remove roles not in the event (except system roles we might still need)
+      server.roles.where.not(public_id: remote_role_ids).each do |role|
+        role.membership_roles.destroy_all
+        role.destroy
+      end
+    end
+
+    log_server_event(event)
+    ServerChannel.broadcast_to(server, { type: "roles_updated" })
+    Rails.logger.info("[RelaySubscriptionManager] Synced server roles for #{server.nostr_group_id}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server roles: #{e.message}")
+  end
+
+  def process_server_member(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    p_tag = tags.find { |t| t[0] == "p" }
+    return unless p_tag
+
+    member_pubkey = p_tag[1]
+    removed = tags.find { |t| t[0] == "removed" }&.dig(1) == "true"
+
+    member_user = User.find_by(nostr_public_key: member_pubkey)
+
+    if removed
+      if member_user
+        membership = server.server_memberships.find_by(user: member_user)
+        membership&.destroy
+        ServerChannel.broadcast_to(server, {
+          type: "member_leave",
+          user_id: member_user.public_id,
+          member_count: server.members.count
+        })
+      end
+      log_server_event(event)
+      Rails.logger.info("[RelaySubscriptionManager] Member removed from #{server.nostr_group_id}: #{member_pubkey[0..15]}")
+      return
+    end
+
+    # Create membership if user exists locally
+    if member_user
+      membership = server.server_memberships.find_or_initialize_by(user: member_user)
+
+      # Update nickname
+      nickname_tag = tags.find { |t| t[0] == "nickname" }
+      membership.nickname = nickname_tag[1].presence if nickname_tag
+
+      # Update joined_at
+      joined_tag = tags.find { |t| t[0] == "joined_at" }
+      membership.joined_at = Time.at(joined_tag[1].to_i) if joined_tag&.dig(1).present? && joined_tag[1] != "0"
+
+      is_new = membership.new_record?
+      membership.save! if membership.changed? || is_new
+
+      # Sync roles
+      roles_tag = tags.find { |t| t[0] == "roles" }
+      if roles_tag
+        role_public_ids = roles_tag[1..]
+        roles = server.roles.where(public_id: role_public_ids)
+        membership.roles = roles
+      end
+
+      if is_new
+        ServerChannel.broadcast_to(server, {
+          type: "member_join",
+          html: ApplicationController.render(
+            partial: "servers/member_item",
+            locals: { member: member_user, server: server }
+          ),
+          user_id: member_user.public_id,
+          member_count: server.members.count
+        })
+      end
+    end
+
+    log_server_event(event)
+    Rails.logger.info("[RelaySubscriptionManager] Synced member for #{server.nostr_group_id}: #{member_pubkey[0..15]}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server member: #{e.message}")
+  end
+
+  def process_server_emojis(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    emoji_tags = tags.select { |t| t[0] == "emoji" }
+
+    remote_names = emoji_tags.map { |t| t[1] }
+
+    emoji_tags.each do |t|
+      # ["emoji", name, blossom_url, creator_pubkey]
+      name = t[1]
+      url = t[2]
+      creator_pubkey = t[3]
+
+      emoji = server.server_emojis.find_or_initialize_by(name: name)
+      next unless emoji.new_record? # Don't overwrite existing emojis with attached images
+
+      # Download the image from the Blossom URL
+      cached_path = RemoteAssetCache.cache(url)
+      if cached_path
+        full_path = Rails.root.join("public", cached_path.sub(/\A\//, ""))
+        if File.exist?(full_path)
+          creator = User.find_by(nostr_public_key: creator_pubkey) || server.owner
+          emoji.creator = creator
+          emoji.image.attach(
+            io: File.open(full_path),
+            filename: File.basename(full_path),
+            content_type: Marcel::MimeType.for(Pathname.new(full_path))
+          )
+          emoji.save
+        end
+      end
+    end
+
+    # Remove emojis not in the event
+    server.server_emojis.where.not(name: remote_names).destroy_all if remote_names.any?
+
+    log_server_event(event)
+    Rails.logger.info("[RelaySubscriptionManager] Synced server emojis for #{server.nostr_group_id}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server emojis: #{e.message}")
+  end
+
+  def process_server_stickers(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    sticker_tags = tags.select { |t| t[0] == "sticker" }
+
+    remote_names = sticker_tags.map { |t| t[1] }
+
+    sticker_tags.each do |t|
+      # ["sticker", name, description, blossom_url, creator_pubkey]
+      name = t[1]
+      description = t[2]
+      url = t[3]
+      creator_pubkey = t[4]
+
+      sticker = server.server_stickers.find_or_initialize_by(name: name)
+      next unless sticker.new_record?
+
+      cached_path = RemoteAssetCache.cache(url)
+      if cached_path
+        full_path = Rails.root.join("public", cached_path.sub(/\A\//, ""))
+        if File.exist?(full_path)
+          creator = User.find_by(nostr_public_key: creator_pubkey) || server.owner
+          sticker.creator = creator
+          sticker.description = description
+          sticker.image.attach(
+            io: File.open(full_path),
+            filename: File.basename(full_path),
+            content_type: Marcel::MimeType.for(Pathname.new(full_path))
+          )
+          sticker.save
+        end
+      end
+    end
+
+    server.server_stickers.where.not(name: remote_names).destroy_all if remote_names.any?
+
+    log_server_event(event)
+    Rails.logger.info("[RelaySubscriptionManager] Synced server stickers for #{server.nostr_group_id}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server stickers: #{e.message}")
+  end
+
+  def process_server_ban(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    p_tag = tags.find { |t| t[0] == "p" }
+    return unless p_tag
+
+    banned_pubkey = p_tag[1]
+    unbanned = tags.find { |t| t[0] == "unbanned" }&.dig(1) == "true"
+
+    banned_user = User.find_by(nostr_public_key: banned_pubkey)
+    return unless banned_user
+
+    if unbanned
+      server.bans.where(user: banned_user).destroy_all
+      Rails.logger.info("[RelaySubscriptionManager] Unbanned #{banned_pubkey[0..15]} from #{server.nostr_group_id}")
+    else
+      reason_tag = tags.find { |t| t[0] == "reason" }
+      banned_by_tag = tags.find { |t| t[0] == "banned_by" }
+      banned_by = User.find_by(nostr_public_key: banned_by_tag&.dig(1)) || server.owner
+
+      ban = server.bans.find_or_initialize_by(user: banned_user)
+      ban.banned_by = banned_by
+      ban.reason = reason_tag&.dig(1)
+      ban.save!
+      Rails.logger.info("[RelaySubscriptionManager] Banned #{banned_pubkey[0..15]} from #{server.nostr_group_id}")
+    end
+
+    log_server_event(event)
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server ban: #{e.message}")
+  end
+
+  def process_server_invite(event)
+    server = find_server_from_event(event)
+    return unless server
+    return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    tags = event["tags"] || []
+    code_tag = tags.find { |t| t[0] == "code" }
+    return unless code_tag
+
+    code = code_tag[1]
+    revoked = tags.find { |t| t[0] == "revoked" }&.dig(1) == "true"
+
+    if revoked
+      invite = server.invites.find_by(code: code)
+      invite&.update!(active: false)
+      Rails.logger.info("[RelaySubscriptionManager] Revoked invite #{code} for #{server.nostr_group_id}")
+    else
+      invite = server.invites.find_or_initialize_by(code: code)
+      if invite.new_record?
+        max_uses_tag = tags.find { |t| t[0] == "max_uses" }
+        expires_tag = tags.find { |t| t[0] == "expires_at" }
+        created_by_tag = tags.find { |t| t[0] == "created_by" }
+        uses_tag = tags.find { |t| t[0] == "uses" }
+
+        creator = User.find_by(nostr_public_key: created_by_tag&.dig(1)) || server.owner
+        invite.creator = creator
+        invite.max_uses = max_uses_tag&.dig(1)&.to_i
+        expires_val = expires_tag&.dig(1)&.to_i
+        invite.expires_at = expires_val && expires_val > 0 ? Time.at(expires_val) : nil
+        invite.uses_count = uses_tag&.dig(1)&.to_i || 0
+        invite.save!
+        Rails.logger.info("[RelaySubscriptionManager] Created invite #{code} for #{server.nostr_group_id}")
+      end
+    end
+
+    log_server_event(event)
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing server invite: #{e.message}")
+  end
+
+  def process_typing_event(event)
+    # Ephemeral — no dedup needed, no logging
+    owner = User.owner
+    return unless owner
+    return if event["pubkey"] == owner.nostr_public_key # Skip our own typing
+
+    tags = event["tags"] || []
+    h_tag = tags.find { |t| t[0] == "h" }
+    return unless h_tag
+
+    channel = Channel.find_by(nostr_group_id: h_tag[1])
+    return unless channel
+
+    parsed = JSON.parse(event["content"]) rescue {}
+    username = parsed["username"] || event["pubkey"][0..11] + "..."
+    avatar_info = {}
+    avatar_info[:avatar_url] = parsed["avatar_url"] if parsed["avatar_url"].present?
+    avatar_info[:avatar_initial] = parsed["avatar_initial"] if parsed["avatar_initial"].present?
+    avatar_info[:avatar_color] = parsed["avatar_color"] if parsed["avatar_color"].present?
+
+    ChannelChatChannel.broadcast_to(channel, {
+      type: "typing",
+      user_id: "nostr-#{event["pubkey"][0..15]}",
+      username: username
+    }.merge(avatar_info))
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Error processing typing event: #{e.message}")
+  end
+
+  def process_reaction_event(event)
+    owner = User.owner
+    return unless owner
+
+    tags = event["tags"] || []
+    e_tag = tags.find { |t| t[0] == "e" }
+    h_tag = tags.find { |t| t[0] == "h" }
+    return unless e_tag && h_tag
+
+    target_event_id = e_tag[1]
+    channel = Channel.find_by(nostr_group_id: h_tag[1])
+    return unless channel
+
+    message = Message.find_by(nostr_event_id: target_event_id, channel: channel)
+    return unless message
+
+    emoji = event["content"]
+    reactor_pubkey = event["pubkey"]
+
+    # Find or create a local user proxy for the reactor
+    reactor_user = User.find_by(nostr_public_key: reactor_pubkey)
+
+    if emoji == "-"
+      # Remove reaction
+      if reactor_user
+        message.reactions.where(user: reactor_user).destroy_all
+      end
+    else
+      return if emoji.blank?
+      if reactor_user
+        message.reactions.find_or_create_by!(user: reactor_user, emoji: emoji)
+      end
+    end
+
+    # Broadcast updated reactions
+    html = ApplicationController.render(
+      partial: "messages/reactions",
+      locals: { message: message.reload, reaction_controller: "message-form" }
+    )
+    ChannelChatChannel.broadcast_to(channel, {
+      type: "update_reactions",
+      message_id: message.public_id,
+      html: html
+    })
+
+    log_server_event(event)
+    Rails.logger.debug("[RelaySubscriptionManager] Processed reaction from #{reactor_pubkey[0..15]} on #{target_event_id[0..15]}")
+  rescue ActiveRecord::RecordNotUnique
+    nil
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Error processing reaction event: #{e.message}")
+  end
+
+  # ── Connection Management ──────────────────────────────────────────
 
   def schedule_reconnect(url)
     return unless @running

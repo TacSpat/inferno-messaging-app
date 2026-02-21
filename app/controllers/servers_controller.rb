@@ -20,6 +20,10 @@ class ServersController < ApplicationController
     @server = Server.new(server_params)
     @server.owner = current_user
     if @server.save
+      publish_server_state(:metadata)
+      publish_server_state(:structure)
+      publish_server_state(:roles)
+      publish_server_state(:member, pubkey: current_user.nostr_public_key)
       redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
     else
       render :new, status: :unprocessable_entity
@@ -31,6 +35,7 @@ class ServersController < ApplicationController
 
   def update
     if @server.update(server_params)
+      publish_server_state(:metadata)
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else
       render :edit, status: :unprocessable_entity
@@ -38,6 +43,7 @@ class ServersController < ApplicationController
   end
 
   def destroy
+    publish_server_state(:metadata, deleted: true)
     @server.destroy
     redirect_to root_path, notice: "Server deleted.", status: :see_other
   end
@@ -45,6 +51,7 @@ class ServersController < ApplicationController
   def join
     unless current_user.servers.include?(@server)
       @server.server_memberships.create!(user: current_user)
+      publish_server_state(:member, pubkey: current_user.nostr_public_key)
     end
     redirect_to server_channel_path(@server, @server.channels.ordered.first)
   end
@@ -53,6 +60,7 @@ class ServersController < ApplicationController
     membership = @server.server_memberships.find_by(user: current_user)
     if membership && @server.owner != current_user
       membership.destroy
+      publish_server_state(:member, pubkey: current_user.nostr_public_key, removed: true)
       redirect_to root_path, notice: "Left server.", status: :see_other
     else
       redirect_back fallback_location: root_path, alert: "Can't leave a server you own."
@@ -102,5 +110,10 @@ class ServersController < ApplicationController
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
+  end
+
+  def publish_server_state(event_type, **options)
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, event_type.to_s, **options)
   end
 end

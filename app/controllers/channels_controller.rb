@@ -108,6 +108,7 @@ class ChannelsController < ApplicationController
         name: @channel.name,
         category_id: @channel.category&.public_id
       })
+      publish_server_structure
       redirect_to server_channel_path(@server, @channel)
     else
       render :new, status: :unprocessable_entity
@@ -128,6 +129,7 @@ class ChannelsController < ApplicationController
         name: @channel.name,
         category_id: @channel.category&.public_id
       })
+      publish_server_structure
       redirect_to server_channel_path(@server, @channel)
     else
       render :edit, status: :unprocessable_entity
@@ -141,6 +143,7 @@ class ChannelsController < ApplicationController
       type: "channel_deleted",
       channel_id: channel_public_id
     })
+    publish_server_structure
     redirect_to server_channel_path(@server, @server.channels.ordered.first)
   end
 
@@ -162,5 +165,10 @@ class ChannelsController < ApplicationController
 
   def channel_params
     params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id)
+  end
+
+  def publish_server_structure
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "structure")
   end
 end

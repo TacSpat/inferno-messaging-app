@@ -13,6 +13,7 @@ class ServerSettingsController < ApplicationController
 
   def update_overview
     if @server.update(server_params)
+      publish_server_state(:metadata)
       redirect_to server_settings_overview_path(@server), notice: "Server updated."
     else
       render :overview, status: :unprocessable_entity
@@ -44,6 +45,7 @@ class ServerSettingsController < ApplicationController
       nickname = params[:nickname].presence
       membership.update!(nickname: nickname)
       broadcast_member_update(membership)
+      publish_server_state(:member, pubkey: membership.user.nostr_public_key)
       return respond_to do |format|
         format.json { render json: { success: true, nickname: membership.nickname, display_name: membership.user.display_name_for(@server) } }
         format.html { redirect_to server_settings_members_path(@server), notice: "Nickname updated." }
@@ -67,6 +69,7 @@ class ServerSettingsController < ApplicationController
 
     membership.roles = roles
     broadcast_member_update(membership)
+    publish_server_state(:member, pubkey: membership.user.nostr_public_key)
 
     respond_to do |format|
       format.json do
@@ -85,7 +88,9 @@ class ServerSettingsController < ApplicationController
     membership = @server.server_memberships.find_by!(public_id: params[:id])
     return redirect_to server_settings_members_path(@server), alert: "Can't kick the owner." if membership.owner?
     username = membership.user.username
+    kicked_pubkey = membership.user.nostr_public_key
     membership.destroy
+    publish_server_state(:member, pubkey: kicked_pubkey, removed: true) if kicked_pubkey.present?
     redirect_to server_settings_members_path(@server), notice: "#{username} has been kicked."
   end
 
@@ -110,6 +115,7 @@ class ServerSettingsController < ApplicationController
     max_uses = params[:max_uses].presence&.to_i
 
     invite = @server.invites.create!(creator: current_user, expires_at: expires_at, max_uses: max_uses)
+    publish_server_state(:invite, invite_code: invite.code)
 
     respond_to do |format|
       format.html { redirect_to server_settings_invites_path(@server), notice: "Invite created." }
@@ -123,6 +129,7 @@ class ServerSettingsController < ApplicationController
       return redirect_to server_settings_invites_path(@server), alert: "You can only revoke your own invites."
     end
     invite.update!(active: false)
+    publish_server_state(:invite, invite_code: invite.code, revoked: true)
     redirect_to server_settings_invites_path(@server), notice: "Invite revoked."
   end
 
@@ -158,6 +165,7 @@ class ServerSettingsController < ApplicationController
     user = User.find_by!(public_id: params[:user_id])
     ban = @server.bans.new(user: user, banned_by: current_user, reason: params[:reason])
     if ban.save
+      publish_server_state(:ban, pubkey: user.nostr_public_key) if user.nostr_public_key.present?
       redirect_to server_settings_bans_path(@server), notice: "#{user.username} has been banned."
     else
       redirect_to server_settings_members_path(@server), alert: ban.errors.full_messages.join(", ")
@@ -166,7 +174,9 @@ class ServerSettingsController < ApplicationController
 
   def destroy_ban
     ban = @server.bans.find_by!(id: params[:ban_id])
+    banned_pubkey = ban.user&.nostr_public_key
     ban.destroy
+    publish_server_state(:ban, pubkey: banned_pubkey, unbanned: true) if banned_pubkey.present?
     redirect_to server_settings_bans_path(@server), notice: "Ban removed."
   end
 
@@ -225,5 +235,10 @@ class ServerSettingsController < ApplicationController
 
   def server_params
     params.require(:server).permit(:name, :description, :icon, :banner, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
+  end
+
+  def publish_server_state(event_type, **options)
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, event_type.to_s, **options)
   end
 end

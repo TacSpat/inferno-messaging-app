@@ -5,6 +5,7 @@ class InvitesController < ApplicationController
     @server = @invite.server
     @member_count = @server.members.count
     @online_count = @server.members.where(online_state: :online).count
+    @instance_domain = Rails.application.config.x.instance_domain
 
     respond_to do |format|
       format.html do
@@ -17,7 +18,9 @@ class InvitesController < ApplicationController
           icon_url: @server.icon.attached? ? rails_blob_url(@server.icon) : nil,
           member_count: @member_count,
           online_count: @online_count,
-          invite_code: @invite.code
+          invite_code: @invite.code,
+          nostr_group_id: @server.nostr_group_id,
+          instance_domain: @instance_domain
         }
       end
     end
@@ -35,8 +38,19 @@ class InvitesController < ApplicationController
     if current_user.servers.include?(@server)
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else
+      # Bootstrap server state from Nostr relays if this server has a nostr_group_id
+      if @server.nostr_group_id.present?
+        NostrServerSyncService.new(@server.nostr_group_id, joining_user: current_user).sync_all
+      end
+
       @invite.increment_uses!
       @server.server_memberships.create!(user: current_user)
+
+      # Publish self-join member event to Nostr
+      if current_user.nostr_public_key.present?
+        NostrServerPublishJob.perform_later(current_user.id, @server.id, "member", pubkey: current_user.nostr_public_key)
+      end
+
       redirect_to server_channel_path(@server, @server.channels.ordered.first), notice: "Welcome to #{@server.name}!"
     end
   end

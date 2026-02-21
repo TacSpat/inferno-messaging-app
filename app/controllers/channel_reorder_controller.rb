@@ -33,6 +33,7 @@ class ChannelReorderController < ApplicationController
       categories: categories_data.as_json
     })
 
+    publish_server_structure
     head :ok
   end
 
@@ -46,6 +47,7 @@ class ChannelReorderController < ApplicationController
     channel_public_id = channel.public_id
     channel.destroy
     ServerChannel.broadcast_to(@server, { type: "channel_deleted", channel_id: channel_public_id })
+    publish_server_structure
     head :ok
   end
 
@@ -56,6 +58,7 @@ class ChannelReorderController < ApplicationController
     category.channels.update_all(category_id: nil)
     category.destroy
     ServerChannel.broadcast_to(@server, { type: "category_deleted", category_id: category_public_id })
+    publish_server_structure
     head :ok
   end
 
@@ -70,5 +73,10 @@ class ChannelReorderController < ApplicationController
     unless membership&.has_permission?("manage_channels")
       head :forbidden
     end
+  end
+
+  def publish_server_structure
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "structure")
   end
 end

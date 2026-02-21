@@ -18,6 +18,7 @@ class CategoriesController < ApplicationController
         category_id: @category.public_id,
         name: @category.name
       })
+      publish_server_structure
       redirect_to server_channel_path(@server, @server.channels.first), notice: "Category created."
     else
       render :new, status: :unprocessable_entity
@@ -33,6 +34,7 @@ class CategoriesController < ApplicationController
         category_id: @category.public_id,
         name: @category.name
       })
+      publish_server_structure
       redirect_to server_channel_path(@server, @server.channels.first), notice: "Category updated."
     else
       render :edit, status: :unprocessable_entity
@@ -47,6 +49,7 @@ class CategoriesController < ApplicationController
       type: "category_deleted",
       category_id: category_public_id
     })
+    publish_server_structure
     redirect_to server_channel_path(@server, @server.channels.first), notice: "Category deleted."
   end
 
@@ -69,5 +72,10 @@ class CategoriesController < ApplicationController
     unless membership&.has_permission?("manage_channels")
       redirect_to server_channel_path(@server, @server.channels.first), alert: "Not authorized."
     end
+  end
+
+  def publish_server_structure
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "structure")
   end
 end

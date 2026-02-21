@@ -26,6 +26,7 @@ class ServerEmojisController < ApplicationController
     emoji.creator = current_user
 
     if emoji.save
+      publish_server_emojis
       respond_to do |format|
         format.json { render json: { id: emoji.public_id, name: emoji.name, image_url: emoji.image_url }, status: :created }
         format.html { redirect_to server_settings_emojis_path(@server), notice: "Emoji :#{emoji.name}: uploaded!" }
@@ -42,6 +43,7 @@ class ServerEmojisController < ApplicationController
     emoji = @server.server_emojis.find_by!(public_id: params[:id])
     name = emoji.name
     emoji.destroy
+    publish_server_emojis
 
     respond_to do |format|
       format.json { head :ok }
@@ -79,5 +81,10 @@ class ServerEmojisController < ApplicationController
 
   def emoji_params
     params.require(:server_emoji).permit(:name, :image)
+  end
+
+  def publish_server_emojis
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "emojis")
   end
 end

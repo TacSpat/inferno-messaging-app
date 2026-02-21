@@ -27,6 +27,7 @@ class ServerStickersController < ApplicationController
     sticker.creator = current_user
 
     if sticker.save
+      publish_server_stickers
       respond_to do |format|
         format.json { render json: { id: sticker.public_id, name: sticker.name, image_url: sticker.image_url }, status: :created }
         format.html { redirect_to server_settings_stickers_path(@server), notice: "Sticker '#{sticker.name}' uploaded!" }
@@ -43,6 +44,7 @@ class ServerStickersController < ApplicationController
     sticker = @server.server_stickers.find_by!(public_id: params[:id])
     name = sticker.name
     sticker.destroy
+    publish_server_stickers
 
     respond_to do |format|
       format.json { head :ok }
@@ -80,5 +82,10 @@ class ServerStickersController < ApplicationController
 
   def sticker_params
     params.require(:server_sticker).permit(:name, :description, :image)
+  end
+
+  def publish_server_stickers
+    return unless current_user.nostr_public_key.present?
+    NostrServerPublishJob.perform_later(current_user.id, @server.id, "stickers")
   end
 end
