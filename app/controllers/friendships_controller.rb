@@ -175,21 +175,15 @@ class FriendshipsController < ApplicationController
   end
 
   def build_nostr_event(kind:, content:, tags:, privkey:, pubkey:)
-    event_data = {
-      pubkey: pubkey,
-      created_at: Time.now.to_i,
+    signer = Nostr::Signer.new(private_key: privkey)
+    event = Nostr::Event.new(
       kind: kind,
-      tags: tags,
-      content: content
-    }
-
-    serialized = [0, event_data[:pubkey], event_data[:created_at], event_data[:kind], event_data[:tags], event_data[:content]]
-    event_data[:id] = Digest::SHA256.hexdigest(JSON.generate(serialized))
-
-    schnorr_key = Nostr::Key.new(privkey)
-    event_data[:sig] = schnorr_key.sign(event_data[:id])
-
-    event_data
+      pubkey: pubkey,
+      content: content,
+      tags: tags
+    )
+    signed = signer.sign(event)
+    signed.to_json
   end
 
   def publish_to_relays(event)
