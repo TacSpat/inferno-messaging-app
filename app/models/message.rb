@@ -13,6 +13,12 @@ class Message < ApplicationRecord
   has_many_attached :files
 
   validates :content, presence: true, unless: :has_files?
+
+  # For remote Nostr messages (no local user), resolve author from Contact by pubkey
+  def nostr_author
+    return nil if nostr_author_pubkey.blank?
+    @nostr_author ||= Contact.find_by(pubkey: nostr_author_pubkey)
+  end
   validates :content, length: { maximum: 4000 }, allow_blank: true
 
   after_create_commit :create_mention_notifications

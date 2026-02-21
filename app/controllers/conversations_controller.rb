@@ -21,6 +21,8 @@ class ConversationsController < ApplicationController
       @outgoing = Contact.pending_outgoing
     when "blocked"
       @blocked = current_user.blocked_users.includes(avatar_attachment: :blob)
+    when "search"
+      # Search results are loaded via Stimulus controller (GET /nostr/search?q=)
     end
   end
 

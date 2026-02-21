@@ -89,6 +89,7 @@ import ServerProfilePreviewController from "./controllers/server_profile_preview
 import SettingsOverlayController from "./controllers/settings_overlay_controller"
 import ThemePickerController from "./controllers/theme_picker_controller"
 import ClipboardController from "./controllers/clipboard_controller"
+import NostrSearchController from "./controllers/nostr_search_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -124,4 +125,5 @@ application.register("server-profile-preview", ServerProfilePreviewController)
 application.register("settings-overlay", SettingsOverlayController)
 application.register("theme-picker", ThemePickerController)
 application.register("clipboard", ClipboardController)
+application.register("nostr-search", NostrSearchController)
 // rebuild trigger

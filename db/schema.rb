@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_20_233151) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_21_015127) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -317,6 +317,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_233151) do
     t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.datetime "edited_at"
+    t.string "nostr_author_pubkey"
     t.string "nostr_event_id"
     t.text "nostr_event_json"
     t.bigint "parent_id"

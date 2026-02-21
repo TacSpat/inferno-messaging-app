@@ -1,16 +1,21 @@
 <% author = message.user %>
+<% dm_contact = author ? nil : (message.conversation&.counterparty_pubkey.present? ? Contact.find_by(pubkey: message.conversation.counterparty_pubkey) : nil) %>
+<% dm_remote_name = dm_contact&.effective_display_name || message.conversation&.counterparty_display_name || "Unknown User" %>
+<% dm_remote_avatar = dm_contact&.avatar_url %>
 <div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>">
   <!-- Mobile: avatar + name inline row -->
   <div class="flex items-center mb-0.5 sm:hidden">
     <% if author&.avatar&.attached? %>
       <%= image_tag author.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
+    <% elsif dm_remote_avatar.present? %>
+      <%= image_tag dm_remote_avatar, class: "w-7 h-7 rounded-full object-cover shrink-0" %>
     <% else %>
       <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-        <%= author ? author.username[0].upcase : "?" %>
+        <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
       </div>
     <% end %>
     <span class="ml-2 font-medium text-sm text-white truncate"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-      <%= author ? (author.display_name.presence || author.username) : "Deleted User" %>
+      <%= author ? (author.display_name.presence || author.username) : dm_remote_name %>
     </span>
     <span class="ml-2 text-xs text-gray-500 shrink-0">
       <%= message.created_at.strftime("%l:%M %p").strip %>
@@ -24,9 +29,11 @@
   <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
     <% if author&.avatar&.attached? %>
       <%= image_tag author.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
+    <% elsif dm_remote_avatar.present? %>
+      <%= image_tag dm_remote_avatar, class: "w-10 h-10 rounded-full object-cover" %>
     <% else %>
       <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-        <%= author ? author.username[0].upcase : "?" %>
+        <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
       </div>
     <% end %>
   </div>
@@ -45,7 +52,7 @@
     <!-- Desktop name/timestamp -->
     <div class="hidden sm:flex items-baseline">
       <span class="font-medium hover:underline cursor-pointer text-sm text-white"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-        <%= author ? (author.display_name.presence || author.username) : "Deleted User" %>
+        <%= author ? (author.display_name.presence || author.username) : dm_remote_name %>
       </span>
       <span class="ml-2 text-xs text-gray-500">
         <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>

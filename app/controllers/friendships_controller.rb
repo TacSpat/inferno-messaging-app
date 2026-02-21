@@ -12,20 +12,29 @@ class FriendshipsController < ApplicationController
     # Parse npub or hex pubkey
     pubkey = parse_pubkey(input)
     if pubkey.nil?
-      redirect_to conversations_path(tab: "add_friend"), alert: "Enter a valid npub or hex public key."
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "search"), alert: "Enter a valid npub or hex public key." }
+        format.json { render json: { error: "Invalid pubkey" }, status: :unprocessable_entity }
+      end
       return
     end
 
     # Can't add yourself
     if pubkey == current_user.nostr_public_key
-      redirect_to conversations_path(tab: "add_friend"), alert: "You can't add yourself."
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "search"), alert: "You can't add yourself." }
+        format.json { render json: { error: "Can't add yourself" }, status: :unprocessable_entity }
+      end
       return
     end
 
     # Check existing contact
     existing = Contact.find_by(pubkey: pubkey)
     if existing && !existing.not_friend?
-      redirect_to conversations_path(tab: "add_friend"), alert: "You already have a #{existing.friendship_status} contact for this pubkey."
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "search"), alert: "You already have a #{existing.friendship_status} contact for this pubkey." }
+        format.json { render json: { error: "Already a contact", status: existing.friendship_status }, status: :unprocessable_entity }
+      end
       return
     end
 
@@ -37,10 +46,16 @@ class FriendshipsController < ApplicationController
     # Send friend request as NIP-44 encrypted DM
     send_friend_request_dm(pubkey)
 
-    redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{contact.effective_display_name}!"
+    respond_to do |format|
+      format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request sent to #{contact.effective_display_name}!" }
+      format.json { render json: { status: "sent", name: contact.effective_display_name } }
+    end
   rescue => e
     Rails.logger.error("FriendshipsController#create error: #{e.message}")
-    redirect_to conversations_path(tab: "add_friend"), alert: "Failed to send friend request: #{e.message}"
+    respond_to do |format|
+      format.html { redirect_to conversations_path(tab: "search"), alert: "Failed to send friend request: #{e.message}" }
+      format.json { render json: { error: e.message }, status: :internal_server_error }
+    end
   end
 
   def accept

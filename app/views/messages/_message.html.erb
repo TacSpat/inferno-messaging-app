@@ -1,5 +1,8 @@
 <% grouped = local_assigns[:grouped] %>
 <% author = message.user %>
+<% nostr_contact = author ? nil : message.nostr_author %>
+<% remote_author_name = nostr_contact&.effective_display_name || (message.nostr_author_pubkey.present? ? message.nostr_author_pubkey.first(12) + "..." : nil) %>
+<% remote_avatar_url = nostr_contact&.avatar_url %>
 <% if message.system_message? %>
   <!-- System message (welcome, join, etc.) -->
   <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-2 sm:px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>" data-system-message="true">
@@ -25,13 +28,15 @@
           <%= image_tag author.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
         <% elsif author&.effective_avatar_url.present? %>
           <%= image_tag author.effective_avatar_url, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
+        <% elsif remote_avatar_url.present? %>
+          <%= image_tag remote_avatar_url, class: "w-7 h-7 rounded-full object-cover shrink-0" %>
         <% else %>
           <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-            <%= author ? author.username[0].upcase : "?" %>
+            <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
           </div>
         <% end %>
         <span class="ml-2 font-medium text-sm truncate" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-          <%= author ? author.display_name_for(server) : "Deleted User" %>
+          <%= author ? author.display_name_for(server) : (remote_author_name || "Unknown User") %>
         </span>
         <span class="ml-2 text-xs text-gray-500 shrink-0">
           <%= message.created_at.strftime("%l:%M %p").strip %>
@@ -47,9 +52,11 @@
           <%= image_tag author.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
         <% elsif author&.effective_avatar_url.present? %>
           <%= image_tag author.effective_avatar_url, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
+        <% elsif remote_avatar_url.present? %>
+          <%= image_tag remote_avatar_url, class: "w-10 h-10 rounded-full object-cover" %>
         <% else %>
           <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-            <%= author ? author.username[0].upcase : "?" %>
+            <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
           </div>
         <% end %>
       </div>
@@ -70,7 +77,7 @@
         <!-- Desktop name/timestamp -->
         <div class="hidden sm:flex items-baseline">
           <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
-            <%= author ? author.display_name_for(server) : "Deleted User" %>
+            <%= author ? author.display_name_for(server) : (remote_author_name || "Unknown User") %>
           </span>
           <span class="ml-2 text-xs text-gray-500">
             <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>

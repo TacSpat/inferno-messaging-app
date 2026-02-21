@@ -209,15 +209,26 @@ class RelaySubscriptionManager
     channel = Channel.find_by(nostr_group_id: group_id)
     return unless channel
 
+    # Resolve the sender — ensure we have a Contact record with profile info
+    sender_pubkey = event["pubkey"]
+    contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
+    if contact.new_record? || contact.profile_stale?
+      NostrProfileResolver.resolve(sender_pubkey)
+      contact.reload if contact.persisted?
+    end
+
     message = channel.messages.create!(
       content: event["content"],
-      public_id: SecureRandom.alphanumeric(12)
+      public_id: SecureRandom.alphanumeric(12),
+      nostr_event_id: event["id"],
+      nostr_author_pubkey: sender_pubkey,
+      created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
     NostrEventLog.create!(
       event_id: event["id"],
       kind: event["kind"],
-      pubkey: event["pubkey"],
+      pubkey: sender_pubkey,
       message: message,
       channel: channel,
       direction: "inbound",
@@ -234,15 +245,116 @@ class RelaySubscriptionManager
   end
 
   def process_dm_event(event)
+    owner = User.owner
+    return unless owner&.nostr_private_key.present?
+
+    sender_pubkey = event["pubkey"]
+
+    # Decrypt NIP-44 content
+    conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, sender_pubkey)
+    plaintext = Nip44Service.decrypt(event["content"], conversation_key)
+
+    # Try to parse as JSON (friend request/response) or treat as plain DM text
+    parsed = JSON.parse(plaintext) rescue nil
+
+    if parsed.is_a?(Hash) && parsed["type"] == "friend_request"
+      process_friend_request(sender_pubkey, event)
+    elsif parsed.is_a?(Hash) && parsed["type"] == "friend_response"
+      process_friend_response(sender_pubkey, parsed["status"], event)
+    else
+      # Regular DM message
+      process_dm_message(sender_pubkey, plaintext, event)
+    end
+
     NostrEventLog.create!(
       event_id: event["id"],
       kind: event["kind"],
-      pubkey: event["pubkey"],
+      pubkey: sender_pubkey,
       direction: "inbound",
       event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
+  rescue Nip44Service::DecryptionError => e
+    Rails.logger.warn("[RelaySubscriptionManager] Failed to decrypt DM from #{event["pubkey"]&.first(12)}: #{e.message}")
   rescue ActiveRecord::RecordNotUnique
     nil
+  end
+
+  def process_friend_request(sender_pubkey, event)
+    contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
+
+    # Don't overwrite an existing accepted friendship
+    return if contact.accepted?
+
+    # Resolve their profile from the event or relays
+    contact.friendship_status = :pending_incoming
+    contact.save!
+
+    # Fetch their profile in background
+    NostrProfileResolver.resolve(sender_pubkey)
+
+    # Notify the owner via ActionCable
+    owner = User.owner
+    if owner
+      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+        type: "friend_request",
+        from_pubkey: sender_pubkey,
+        from_name: contact.effective_display_name
+      })
+    end
+
+    Rails.logger.info("[RelaySubscriptionManager] Incoming friend request from #{sender_pubkey.first(12)}...")
+  end
+
+  def process_friend_response(sender_pubkey, status, event)
+    contact = Contact.find_by(pubkey: sender_pubkey)
+    return unless contact
+
+    case status
+    when "accepted"
+      contact.update!(friendship_status: :accepted)
+      # Publish updated Kind 3 contact list
+      owner = User.owner
+      NostrPublishJob.perform_later(owner.id, :contacts) if owner
+      Rails.logger.info("[RelaySubscriptionManager] Friend request accepted by #{sender_pubkey.first(12)}...")
+    when "declined"
+      contact.update!(friendship_status: :declined)
+      Rails.logger.info("[RelaySubscriptionManager] Friend request declined by #{sender_pubkey.first(12)}...")
+    end
+  end
+
+  def process_dm_message(sender_pubkey, plaintext, event)
+    owner = User.owner
+    return unless owner
+
+    # Find or create conversation by counterparty pubkey
+    conversation = Conversation.find_or_create_by_pubkey(owner, sender_pubkey)
+
+    # Create the message
+    message = conversation.messages.create!(
+      content: plaintext,
+      public_id: SecureRandom.alphanumeric(12),
+      nostr_event_id: event["id"],
+      created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
+    )
+
+    # Broadcast via ActionCable for real-time display
+    html = ApplicationController.render(
+      partial: "messages/dm_message",
+      locals: { message: message }
+    )
+    ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
+
+    # Notify the owner
+    contact = Contact.find_by(pubkey: sender_pubkey)
+    sender_name = contact&.effective_display_name || sender_pubkey.first(12) + "..."
+    ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+      type: "dm_message",
+      conversation_id: conversation.public_id,
+      sender_name: sender_name,
+      sender_id: nil
+    })
+
+    Rails.logger.info("[RelaySubscriptionManager] Received DM from #{sender_pubkey.first(12)}...")
   end
 
   def process_profile_update(event)
@@ -265,9 +377,26 @@ class RelaySubscriptionManager
 
     status_tag = (event["tags"] || []).find { |t| t[0] == "status" }
     state = status_tag&.dig(1) || event["content"]
+    return if state.blank?
 
-    contact.update_columns(last_seen_at: Time.current) if state.present? && state != "offline"
-    Rails.logger.debug("[RelaySubscriptionManager] Presence update for #{pubkey[0..15]}...: #{state}")
+    if state == "offline"
+      contact.update_columns(last_seen_at: nil)
+    else
+      contact.update_columns(last_seen_at: Time.current)
+    end
+
+    # Broadcast presence change to owner's UI
+    owner = User.owner
+    if owner
+      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+        type: "presence_update",
+        pubkey: pubkey,
+        name: contact.effective_display_name,
+        state: state == "offline" ? "offline" : "online"
+      })
+    end
+
+    Rails.logger.debug("[RelaySubscriptionManager] Presence: #{contact.effective_display_name} is #{state}")
   end
 
   def schedule_reconnect(url)

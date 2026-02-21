@@ -11,6 +11,9 @@ Rails.application.routes.draw do
   # NIP-05 Nostr identity verification
   get "/.well-known/nostr.json", to: "nostr/well_known#show", as: :nostr_well_known
 
+  # Nostr relay search (NIP-50 + NIP-05 resolution)
+  get "nostr/search", to: "nostr/search#show", as: :nostr_search
+
   # Blossom server (content-addressable file storage)
   get "blossom/list", to: "blossom#list", as: :blossom_list
   get "blossom/:sha256", to: "blossom#show", as: :blossom_show
