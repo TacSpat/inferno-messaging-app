@@ -10,6 +10,9 @@ class Users::SessionsController < Devise::SessionsController
   protected
 
   def after_sign_in_path_for(resource)
+    # Sync messages from relays (catches up from other devices)
+    NostrSyncJob.perform_later(resource.id) if resource.nostr_public_key.present?
+
     if session[:pending_invite_code].present?
       invite = Invite.find_by(code: session.delete(:pending_invite_code))
       if invite&.usable?

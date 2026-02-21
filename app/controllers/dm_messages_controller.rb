@@ -196,6 +196,16 @@ class DmMessagesController < ApplicationController
 
     # Publish to all active relays
     RelayService.publish_to_all(signed_hash)
+
+    # Log outbound event for multi-device dedup
+    NostrEventLog.create!(
+      event_id: signed.id,
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      direction: "outbound",
+      message: message,
+      event_created_at: Time.current
+    )
   rescue => e
     Rails.logger.error("Failed to publish DM as Nostr event: #{e.message}")
   end
@@ -216,7 +226,18 @@ class DmMessagesController < ApplicationController
       tags: [["p", counterparty_pubkey]]
     )
     signed = signer.sign(event)
-    RelayService.publish_to_all(signed.to_json)
+    signed_hash = signed.to_json
+    RelayService.publish_to_all(signed_hash)
+
+    # Log outbound event for multi-device dedup
+    NostrEventLog.create!(
+      event_id: signed.id,
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      direction: "outbound",
+      message: message,
+      event_created_at: Time.current
+    )
   rescue => e
     Rails.logger.error("Failed to publish DM #{action_type} to Nostr: #{e.message}")
   end
@@ -236,7 +257,17 @@ class DmMessagesController < ApplicationController
       tags: [["p", counterparty_pubkey]]
     )
     signed = signer.sign(event)
-    RelayService.publish_to_all(signed.to_json)
+    signed_hash = signed.to_json
+    RelayService.publish_to_all(signed_hash)
+
+    # Log outbound event for multi-device dedup
+    NostrEventLog.create!(
+      event_id: signed.id,
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      direction: "outbound",
+      event_created_at: Time.current
+    )
   rescue => e
     Rails.logger.error("Failed to publish DM delete to Nostr: #{e.message}")
   end

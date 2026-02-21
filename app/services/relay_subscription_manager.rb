@@ -79,6 +79,27 @@ class RelaySubscriptionManager
     end
   end
 
+  # Re-subscribe on all connections (e.g. when contacts/friends list changes)
+  def refresh_subscriptions
+    return unless @running && EventMachine.reactor_running?
+
+    EventMachine.next_tick do
+      @mutex.synchronize do
+        @connections.each do |url, conn|
+          next unless conn[:ws]
+          # Close existing subscriptions
+          conn[:subscriptions].each_key do |sub_id|
+            conn[:ws].send(JSON.generate(["CLOSE", sub_id])) rescue nil
+          end
+          conn[:subscriptions].clear
+          # Re-subscribe with updated data
+          subscribe_all(url, conn[:ws])
+        end
+      end
+      Rails.logger.info("[RelaySubscriptionManager] Refreshed subscriptions on all relays")
+    end
+  end
+
   private
 
   def connect_to_all_relays
@@ -132,9 +153,9 @@ class RelaySubscriptionManager
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :groups }
     end
 
-    # Subscription 2: DMs for our pubkey
+    # Subscription 2: DMs addressed to us (inbound)
     if owner.nostr_public_key.present?
-      sub_id = "dms-#{SecureRandom.hex(4)}"
+      sub_id = "dms-in-#{SecureRandom.hex(4)}"
       filter = {
         kinds: [KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM],
         "#p" => [owner.nostr_public_key],
@@ -142,15 +163,30 @@ class RelaySubscriptionManager
       }
       ws.send(JSON.generate(["REQ", sub_id, filter]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms }
+
+      # Subscription 2b: DMs authored by us (from other devices)
+      sub_id = "dms-out-#{SecureRandom.hex(4)}"
+      filter = {
+        kinds: [KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM],
+        authors: [owner.nostr_public_key],
+        since: 1.hour.ago.to_i
+      }
+      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms_own }
     end
 
-    # Subscription 3: Profile + presence updates from contacts
-    contact_pubkeys = Contact.friends.pluck(:pubkey)
-    if contact_pubkeys.any?
+    # Subscription 3: Profile + presence updates from all known contacts
+    # and DM counterparties (not just accepted friends)
+    contact_pubkeys = Contact.pluck(:pubkey)
+    conversation_pubkeys = Conversation.where.not(counterparty_pubkey: nil).pluck(:counterparty_pubkey)
+    all_pubkeys = (contact_pubkeys + conversation_pubkeys).uniq.compact_blank
+    all_pubkeys -= [owner.nostr_public_key] # Don't subscribe to our own profile/presence
+
+    if all_pubkeys.any?
       sub_id = "contacts-#{SecureRandom.hex(4)}"
       filter = {
         kinds: [KIND_METADATA, KIND_USER_STATUS],
-        authors: contact_pubkeys
+        authors: all_pubkeys
       }
       ws.send(JSON.generate(["REQ", sub_id, filter]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :contacts }
@@ -183,6 +219,7 @@ class RelaySubscriptionManager
     app/services/nip44_service.rb
     app/services/nostr_profile_resolver.rb
     app/services/remote_asset_cache.rb
+    app/services/nostr_sync_service.rb
     app/models/contact.rb
     app/models/message.rb
     app/models/conversation.rb
@@ -207,15 +244,16 @@ class RelaySubscriptionManager
     event_id = event["id"]
     return if event_id.blank?
 
-    # Deduplicate
+    # Deduplicate — skip events we already have locally
     return if NostrEventLog.already_processed?(event_id)
 
     kind = event["kind"]
     pubkey = event["pubkey"]
 
-    # Skip our own events
-    owner = User.owner
-    return if owner&.nostr_public_key == pubkey
+    # For our own events: if already_processed returned false, this is from
+    # another device running the same identity — process it normally.
+    # (Our own echoes are caught above because outbound logging creates the
+    # NostrEventLog entry before the relay echoes the event back.)
 
     case kind
     when NIP29_GROUP_CHAT_MESSAGE
@@ -248,16 +286,22 @@ class RelaySubscriptionManager
       return
     end
 
-    # Resolve the sender — ensure we have a Contact record with profile info
+    # Resolve the sender
     sender_pubkey = event["pubkey"]
-    contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
-    if contact.new_record? || contact.profile_stale?
-      NostrProfileResolver.resolve(sender_pubkey)
-      contact.reload if contact.persisted?
+    owner = User.owner
+    own_event = owner&.nostr_public_key == sender_pubkey
+
+    unless own_event
+      contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
+      if contact.new_record? || contact.profile_stale?
+        NostrProfileResolver.resolve(sender_pubkey)
+        contact.reload if contact.persisted?
+      end
     end
 
     message = channel.messages.create!(
       content: event["content"],
+      user: (owner if own_event),
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
       nostr_author_pubkey: sender_pubkey,
@@ -333,44 +377,47 @@ class RelaySubscriptionManager
     return unless owner&.nostr_private_key.present?
 
     sender_pubkey = event["pubkey"]
+    own_event = (sender_pubkey == owner.nostr_public_key)
 
-    # Skip our own events echoed back from relays — just log them
-    if sender_pubkey == owner.nostr_public_key
-      NostrEventLog.create!(
-        event_id: event["id"],
-        kind: event["kind"],
-        pubkey: sender_pubkey,
-        direction: "outbound_echo",
-        event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
-      )
-      return
+    # Determine counterparty for decryption key derivation
+    if own_event
+      # Our event from another device — counterparty is in the "p" tag
+      p_tag = (event["tags"] || []).find { |t| t[0] == "p" }
+      return unless p_tag
+      counterparty_pubkey = p_tag[1]
+    else
+      counterparty_pubkey = sender_pubkey
     end
 
     # Decrypt NIP-44 content
-    conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, sender_pubkey)
+    conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, counterparty_pubkey)
     plaintext = Nip44Service.decrypt(event["content"], conversation_key)
 
     # Try to parse as JSON (structured payload) or treat as plain DM text
     parsed = JSON.parse(plaintext) rescue nil
 
     if parsed.is_a?(Hash) && parsed["type"] == "friend_request"
-      process_friend_request(sender_pubkey, event)
+      process_friend_request(sender_pubkey, event) unless own_event
     elsif parsed.is_a?(Hash) && parsed["type"] == "friend_response"
-      process_friend_response(sender_pubkey, parsed["status"], event)
+      process_friend_response(sender_pubkey, parsed["status"], event) unless own_event
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_edit"
       process_dm_edit(sender_pubkey, parsed, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
       process_dm_delete(sender_pubkey, parsed, event)
     else
-      # Regular DM message — extract content from structured payloads
-      process_dm_message(sender_pubkey, plaintext, event)
+      # Regular DM message
+      if own_event
+        process_own_dm_message(counterparty_pubkey, plaintext, event)
+      else
+        process_dm_message(sender_pubkey, plaintext, event)
+      end
     end
 
     NostrEventLog.create!(
       event_id: event["id"],
       kind: event["kind"],
       pubkey: sender_pubkey,
-      direction: "inbound",
+      direction: own_event ? "outbound" : "inbound",
       event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
   rescue Nip44Service::DecryptionError => e
@@ -404,7 +451,15 @@ class RelaySubscriptionManager
         avatar_url: contact.avatar_url.presence || "",
         profile_color: "#b45309"
       })
+      # Also notify for pending count update
+      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+        type: "friend_update",
+        pending_count: Contact.pending_incoming.count
+      })
     end
+
+    # Refresh subscriptions to include the new contact's presence
+    RelaySubscriptionManager.instance.refresh_subscriptions
 
     Rails.logger.info("[RelaySubscriptionManager] Incoming friend request from #{sender_pubkey.first(12)}...")
   end
@@ -413,17 +468,29 @@ class RelaySubscriptionManager
     contact = Contact.find_by(pubkey: sender_pubkey)
     return unless contact
 
+    owner = User.owner
+
     case status
     when "accepted"
       contact.update!(friendship_status: :accepted)
       # Publish updated Kind 3 contact list
-      owner = User.owner
       NostrPublishJob.perform_later(owner.id, :contacts) if owner
       Rails.logger.info("[RelaySubscriptionManager] Friend request accepted by #{sender_pubkey.first(12)}...")
     when "declined"
       contact.update!(friendship_status: :declined)
       Rails.logger.info("[RelaySubscriptionManager] Friend request declined by #{sender_pubkey.first(12)}...")
     end
+
+    # Notify UI to refresh contacts lists
+    if owner
+      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+        type: "friend_update",
+        pending_count: Contact.pending_incoming.count
+      })
+    end
+
+    # Refresh subscriptions to include the updated contact's presence
+    RelaySubscriptionManager.instance.refresh_subscriptions
   end
 
   def process_dm_message(sender_pubkey, plaintext, event)
@@ -502,6 +569,70 @@ class RelaySubscriptionManager
     })
 
     Rails.logger.info("[RelaySubscriptionManager] Received DM from #{sender_pubkey.first(12)}...")
+  end
+
+  # Handle a DM we sent from another device running the same Nostr identity
+  def process_own_dm_message(counterparty_pubkey, plaintext, event)
+    owner = User.owner
+    return unless owner
+
+    # Parse structured payload (same logic as process_dm_message)
+    content = plaintext
+    emoji_urls = nil
+    files = nil
+    begin
+      parsed = JSON.parse(plaintext)
+      if parsed.is_a?(Hash)
+        if parsed["type"] == "message"
+          content = parsed["content"] || ""
+          files = parsed["files"]
+          if files.is_a?(Array) && files.any?
+            content += "\n" unless content.empty?
+            content += files.join("\n")
+          end
+          emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
+        elsif parsed.key?("type")
+          return
+        end
+      end
+    rescue JSON::ParserError
+      # Plain text
+    end
+
+    # Cache remote files
+    if files.is_a?(Array) && files.any?
+      cached = RemoteAssetCache.cache_all(files)
+      cached.each { |remote, local| content = content.gsub(remote, local) }
+    end
+
+    # Replace custom emojis
+    if emoji_urls.present?
+      emoji_urls.each do |name, url|
+        cached_url = RemoteAssetCache.cache(url) || url
+        img = %(<img src="#{ERB::Util.html_escape(cached_url)}" alt=":#{ERB::Util.html_escape(name)}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
+        content = content.gsub(/:#{Regexp.escape(name)}:/i, img)
+      end
+    end
+
+    return if content.blank?
+
+    conversation = Conversation.find_or_create_by_pubkey(owner, counterparty_pubkey)
+
+    message = conversation.messages.create!(
+      content: content,
+      user: owner,
+      public_id: SecureRandom.alphanumeric(12),
+      nostr_event_id: event["id"],
+      created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
+    )
+
+    html = ApplicationController.render(
+      partial: "messages/dm_message",
+      locals: { message: message }
+    )
+    ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
+
+    Rails.logger.info("[RelaySubscriptionManager] Synced own DM to #{counterparty_pubkey.first(12)}... from another device")
   end
 
   def process_dm_edit(sender_pubkey, parsed, event)

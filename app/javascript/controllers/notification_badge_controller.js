@@ -137,6 +137,8 @@ export default class extends Controller {
     } else if (data.type === "friend_request") {
       this.showHomeBadge()
       this._showFriendRequestBar(data)
+    } else if (data.type === "friend_update") {
+      this._handleFriendUpdate(data)
     } else if (data.type === "channel_message") {
       const selfId = document.body.dataset.currentUserId
       if (data.user_id && String(data.user_id) === String(selfId)) return
@@ -631,6 +633,8 @@ export default class extends Controller {
       if (res.ok) {
         this._frRemoveCurrentItem()
         this._frDecrementHomeBadge()
+        // Refresh the contacts page to update tabs and counts
+        this._scheduleContactsRefresh()
       }
       actions.forEach(b => b.disabled = false)
     }).catch(() => {
@@ -1561,6 +1565,63 @@ export default class extends Controller {
     document.querySelectorAll(`[data-user-presence-text="${data.user_id}"]`).forEach(el => {
       const state = data.state
       el.textContent = state && state !== "offline" ? state.charAt(0).toUpperCase() + state.slice(1) : "Offline"
+    })
+
+    // If on the Online friends tab, refresh to add/remove the user from the list
+    if (this._isOnContactsTab("online")) {
+      this._scheduleContactsRefresh()
+    }
+  }
+
+  // Handle friend_update notifications (friendship status changed)
+  _handleFriendUpdate(data) {
+    // Update the pending count badge on the tab
+    if (data.pending_count !== undefined) {
+      this._updatePendingBadge(data.pending_count)
+    }
+    // Refresh the contacts page content
+    this._scheduleContactsRefresh()
+  }
+
+  // Check if we're on a specific contacts tab
+  _isOnContactsTab(tabName) {
+    const url = new URL(window.location.href)
+    const tab = url.searchParams.get("tab")
+    // The contacts page is conversations#index with a tab param
+    const onContactsPage = document.getElementById("main-content") && url.pathname === "/conversations"
+    if (!tabName) return onContactsPage
+    return onContactsPage && tab === tabName
+  }
+
+  // Debounced contacts page refresh
+  _scheduleContactsRefresh() {
+    if (!document.getElementById("main-content")) return
+    if (this._contactsRefreshTimer) clearTimeout(this._contactsRefreshTimer)
+    this._contactsRefreshTimer = setTimeout(() => {
+      this._contactsRefreshTimer = null
+      const frame = document.getElementById("main-content")
+      if (frame) {
+        frame.src = window.location.href
+      }
+    }, 300)
+  }
+
+  // Update the pending count badge in the tab bar
+  _updatePendingBadge(count) {
+    // Find the Pending tab link and update its badge
+    const pendingLinks = document.querySelectorAll('a[href*="tab=pending"]')
+    pendingLinks.forEach(link => {
+      let badge = link.querySelector("span")
+      if (count > 0) {
+        if (!badge) {
+          badge = document.createElement("span")
+          badge.className = "ml-1 bg-accent text-white text-xs rounded-full px-1.5 min-w-[18px] inline-flex items-center justify-center"
+          link.appendChild(badge)
+        }
+        badge.textContent = count
+      } else if (badge) {
+        badge.remove()
+      }
     })
   }
 

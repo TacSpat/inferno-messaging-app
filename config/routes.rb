@@ -20,6 +20,9 @@ Rails.application.routes.draw do
   match "blossom/:sha256", to: "blossom#check", via: :head
   put "blossom/upload", to: "blossom#upload", as: :blossom_upload
 
+  # Multi-device sync
+  post "sync/refresh", to: "sync#refresh"
+
   get "up" => "rails/health#show", as: :rails_health_check
 
   authenticated :user do

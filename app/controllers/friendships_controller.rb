@@ -71,6 +71,8 @@ class FriendshipsController < ApplicationController
     user = current_user
     Thread.new { send_friend_response_dm_async(user, pubkey, "accepted") }
 
+    broadcast_friend_update
+
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "all"), notice: "Friend request accepted!" }
       format.json { render json: { status: "accepted" } }
@@ -85,6 +87,8 @@ class FriendshipsController < ApplicationController
     user = current_user
     Thread.new { send_friend_response_dm_async(user, pubkey, "declined") }
 
+    broadcast_friend_update
+
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request declined." }
       format.json { render json: { status: "declined" } }
@@ -94,6 +98,8 @@ class FriendshipsController < ApplicationController
   def ignore
     contact = Contact.find(params[:id])
     contact.update!(friendship_status: :not_friend)
+
+    broadcast_friend_update
 
     respond_to do |format|
       format.html { redirect_to conversations_path(tab: "pending"), notice: "Friend request ignored." }
@@ -110,14 +116,27 @@ class FriendshipsController < ApplicationController
     # Publish updated Kind 3 contact list
     NostrPublishJob.perform_later(current_user.id, :contacts)
 
-    if was_pending
-      redirect_to conversations_path(tab: "pending"), notice: "Friend request to #{name} cancelled."
-    else
-      redirect_to conversations_path(tab: "all"), notice: "Removed #{name} from contacts."
+    broadcast_friend_update
+
+    tab = was_pending ? "pending" : "all"
+    notice = was_pending ? "Friend request to #{name} cancelled." : "Removed #{name} from contacts."
+
+    respond_to do |format|
+      format.html { redirect_to conversations_path(tab: tab), notice: notice }
+      format.json { render json: { status: "removed" } }
     end
   end
 
   private
+
+  def broadcast_friend_update
+    ActionCable.server.broadcast("user_notifications_#{current_user.id}", {
+      type: "friend_update",
+      pending_count: Contact.pending_incoming.count
+    })
+    # Refresh relay subscriptions to include/exclude the contact's presence
+    RelaySubscriptionManager.instance.refresh_subscriptions
+  end
 
   def parse_pubkey(input)
     return nil if input.blank?
