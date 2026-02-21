@@ -27,7 +27,7 @@ class NostrGroupPublishJob < ApplicationJob
 
     # Store the signed event on the message
     message.update_columns(
-      nostr_event_id: signed[:id] || signed["id"],
+      nostr_event_id: signed.id,
       nostr_event_json: signed_json
     )
 
@@ -36,7 +36,7 @@ class NostrGroupPublishJob < ApplicationJob
 
     # Log the outbound event
     NostrEventLog.create!(
-      event_id: signed[:id] || signed["id"],
+      event_id: signed.id,
       kind: NIP29_GROUP_CHAT_MESSAGE,
       pubkey: user.nostr_public_key,
       message: message,

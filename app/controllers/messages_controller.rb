@@ -160,10 +160,10 @@ class MessagesController < ApplicationController
     signed = signer.sign(event)
     signed_json = signed.to_json
 
-    message.update_columns(nostr_event_id: signed[:id] || signed["id"])
+    message.update_columns(nostr_event_id: signed.id)
 
     NostrEventLog.create!(
-      event_id: signed[:id] || signed["id"],
+      event_id: signed.id,
       kind: 9,
       pubkey: user.nostr_public_key,
       message: message,

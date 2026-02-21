@@ -162,7 +162,7 @@ class DmMessagesController < ApplicationController
     signed_json = signed.to_json
 
     message.update_columns(
-      nostr_event_id: signed[:id] || signed["id"],
+      nostr_event_id: signed.id,
       nostr_event_json: signed_json
     )
 
