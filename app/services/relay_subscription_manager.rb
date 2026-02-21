@@ -852,6 +852,47 @@ class RelaySubscriptionManager
     nil
   end
 
+  # Download an asset URL and attach it to a server's ActiveStorage field.
+  # Handles both full URLs (https://host/cached_assets/...) and relative paths.
+  def attach_cached_asset(server, field, asset_url)
+    return if asset_url.blank?
+
+    # Try local filesystem first (for relative paths or same-instance URLs)
+    local_path = if asset_url.start_with?("/cached_assets/")
+      Rails.root.join("public", asset_url.delete_prefix("/"))
+    elsif asset_url.include?("/cached_assets/")
+      filename = asset_url.split("/cached_assets/").last
+      Rails.root.join("public", "cached_assets", filename)
+    end
+
+    if local_path && File.exist?(local_path)
+      attach_from_file(server, field, local_path)
+      return
+    end
+
+    # Download from remote URL
+    if asset_url.start_with?("http")
+      cached_path = RemoteAssetCache.cache(asset_url)
+      if cached_path
+        full_path = Rails.root.join("public", cached_path.delete_prefix("/"))
+        attach_from_file(server, field, full_path) if File.exist?(full_path)
+      end
+    end
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Failed to attach #{field}: #{e.message}")
+  end
+
+  def attach_from_file(server, field, path)
+    ext = File.extname(path)
+    content_type = Rack::Mime.mime_type(ext, "application/octet-stream")
+    server.send(field).attach(
+      io: File.open(path),
+      filename: File.basename(path),
+      content_type: content_type
+    )
+    Rails.logger.info("[RelaySubscriptionManager] Attached #{field} from #{path}")
+  end
+
   def process_server_metadata(event)
     server = find_server_from_event(event)
     return unless server
@@ -878,11 +919,15 @@ class RelaySubscriptionManager
     attrs[:welcome_message_enabled] = welcome_enabled_tag[1] == "true" if welcome_enabled_tag
     attrs[:welcome_message_template] = welcome_message_tag[1] if welcome_message_tag
 
-    # Download icon/banner from Blossom URLs
+    # Download icon/banner and attach via ActiveStorage
     picture_tag = tags.find { |t| t[0] == "picture" }
     if picture_tag&.dig(1).present?
-      cached = RemoteAssetCache.cache(picture_tag[1])
-      # Icon is stored as Active Storage — just note the URL for now
+      attach_cached_asset(server, :icon, picture_tag[1])
+    end
+
+    banner_tag = tags.find { |t| t[0] == "banner" }
+    if banner_tag&.dig(1).present?
+      attach_cached_asset(server, :banner, banner_tag[1])
     end
 
     server.update!(attrs) if attrs.any?

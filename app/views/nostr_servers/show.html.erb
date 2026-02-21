@@ -18,7 +18,7 @@
     <div class="bg-gray-800 rounded-lg shadow-xl overflow-hidden">
       <!-- Banner -->
       <div class="relative h-32 bg-gradient-to-br from-accent-dark/60 to-gray-800">
-        <% if @local_server&.respond_to?(:banner) && @local_server&.banner&.attached? %>
+        <% if @local_server&.respond_to?(:banner) && @local_server&.banner&.attached? && @local_server.banner.blob&.persisted? %>
           <%= image_tag @local_server.banner, class: "w-full h-full object-cover" %>
         <% elsif @nostr_info && @nostr_info[:banner_url].present? %>
           <img src="<%= @nostr_info[:banner_url] %>" class="w-full h-full object-cover" />
@@ -29,7 +29,7 @@
       <div class="relative px-6 pb-6">
         <!-- Server icon overlapping banner -->
         <div class="-mt-10 mb-3">
-          <% if @local_server&.icon&.attached? %>
+          <% if @local_server&.icon&.attached? && @local_server.icon.blob&.persisted? %>
             <%= image_tag @local_server.icon, class: "w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" %>
           <% elsif @nostr_info && @nostr_info[:picture_url].present? %>
             <img src="<%= @nostr_info[:picture_url] %>" class="w-20 h-20 rounded-2xl object-cover border-4 border-gray-800 bg-gray-700" />

@@ -326,9 +326,14 @@ class NostrServerPublishJob < ApplicationJob
     full_path = cache_dir.join(filename)
     File.binwrite(full_path, tempfile) unless File.exist?(full_path)
 
-    "/cached_assets/#{filename}"
+    # Return absolute URL so other instances can download this asset
+    instance_domain = Rails.application.config.x.instance_domain
+    scheme = instance_domain&.include?("localhost") || instance_domain&.match?(/:\d+$/) ? "http" : "https"
+    "#{scheme}://#{instance_domain}/cached_assets/#{filename}"
   rescue => e
     Rails.logger.warn("[NostrServerPublishJob] Blossom upload failed: #{e.message}")
-    Rails.application.routes.url_helpers.rails_blob_path(attachment, only_path: true)
+    instance_domain = Rails.application.config.x.instance_domain
+    scheme = instance_domain&.include?("localhost") || instance_domain&.match?(/:\d+$/) ? "http" : "https"
+    "#{scheme}://#{instance_domain}#{Rails.application.routes.url_helpers.rails_blob_path(attachment, only_path: true)}"
   end
 end
