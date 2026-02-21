@@ -193,11 +193,6 @@ class FriendshipsController < ApplicationController
   end
 
   def publish_to_relays(event)
-    urls = RelayConnection.active.pluck(:url)
-    urls.each do |url|
-      RelayService.publish_to_relay(url, event)
-    rescue => e
-      Rails.logger.warn("Failed to publish friend request to #{url}: #{e.message}")
-    end
+    RelayService.publish_to_all(event)
   end
 end

@@ -35,6 +35,9 @@ class SetupController < ApplicationController
 
     if @user.save
       seed_default_relays
+      # Publish profile (Kind 0) and relay list (Kind 10002) to Nostr relays
+      NostrPublishJob.perform_later(@user.id, :profile)
+      NostrPublishJob.perform_later(@user.id, :relay_list)
       sign_in(@user)
       redirect_to authenticated_root_path, notice: "Welcome to Inferno!"
     else
