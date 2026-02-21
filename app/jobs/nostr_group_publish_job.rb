@@ -23,16 +23,16 @@ class NostrGroupPublishJob < ApplicationJob
       ]
     )
     signed = signer.sign(event)
-    signed_json = signed.to_json
+    signed_hash = signed.to_json  # Returns a Hash (gem override)
 
     # Store the signed event on the message
     message.update_columns(
       nostr_event_id: signed.id,
-      nostr_event_json: signed_json
+      nostr_event_json: JSON.generate(signed_hash)
     )
 
     # Publish to all active relays
-    RelayService.publish_to_all(signed_json)
+    RelayService.publish_to_all(signed_hash)
 
     # Log the outbound event
     NostrEventLog.create!(

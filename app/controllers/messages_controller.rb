@@ -158,7 +158,7 @@ class MessagesController < ApplicationController
       ]
     )
     signed = signer.sign(event)
-    signed_json = signed.to_json
+    signed_hash = signed.to_json  # Returns a Hash (gem override)
 
     message.update_columns(nostr_event_id: signed.id)
 
@@ -172,7 +172,7 @@ class MessagesController < ApplicationController
       event_created_at: Time.current
     )
 
-    RelayService.publish_to_all(signed_json)
+    RelayService.publish_to_all(signed_hash)
   rescue => e
     Rails.logger.error("Failed to publish channel message to Nostr: #{e.message}")
   end
