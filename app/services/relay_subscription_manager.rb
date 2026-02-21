@@ -182,6 +182,7 @@ class RelaySubscriptionManager
     app/services/relay_subscription_manager.rb
     app/services/nip44_service.rb
     app/services/nostr_profile_resolver.rb
+    app/services/remote_asset_cache.rb
     app/models/contact.rb
     app/models/message.rb
     app/models/conversation.rb
@@ -453,10 +454,19 @@ class RelaySubscriptionManager
       # Plain text — use as-is
     end
 
-    # Replace custom emoji shortcodes with inline images from sender's URLs
+    # Cache remote file URLs locally so they survive sender going offline
+    if files.is_a?(Array) && files.any?
+      cached = RemoteAssetCache.cache_all(files)
+      cached.each do |remote, local|
+        content = content.gsub(remote, local)
+      end
+    end
+
+    # Replace custom emoji shortcodes with locally-cached inline images
     if emoji_urls.present?
       emoji_urls.each do |name, url|
-        img = %(<img src="#{ERB::Util.html_escape(url)}" alt=":#{ERB::Util.html_escape(name)}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
+        cached_url = RemoteAssetCache.cache(url) || url
+        img = %(<img src="#{ERB::Util.html_escape(cached_url)}" alt=":#{ERB::Util.html_escape(name)}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
         content = content.gsub(/:#{Regexp.escape(name)}:/i, img)
       end
     end
