@@ -158,6 +158,8 @@ class RelaySubscriptionManager
   end
 
   def handle_message(relay_url, raw_data)
+    dev_reload! if Rails.env.development?
+
     data = JSON.parse(raw_data) rescue nil
     return unless data.is_a?(Array)
 
@@ -172,6 +174,32 @@ class RelaySubscriptionManager
     when "NOTICE"
       Rails.logger.warn("[RelaySubscriptionManager] NOTICE from #{relay_url}: #{data[1]}")
     end
+  end
+
+  # Hot-reload changed service/model files in development so the persistent
+  # SubscriptionManager picks up code changes without a full server restart.
+  DEV_WATCH_FILES = %w[
+    app/services/relay_subscription_manager.rb
+    app/services/nip44_service.rb
+    app/services/nostr_profile_resolver.rb
+    app/models/contact.rb
+    app/models/message.rb
+    app/models/conversation.rb
+  ].freeze
+
+  def dev_reload!
+    @dev_mtimes ||= {}
+    DEV_WATCH_FILES.each do |relative|
+      path = Rails.root.join(relative)
+      next unless File.exist?(path)
+      mtime = File.mtime(path)
+      next if @dev_mtimes[relative] == mtime
+      @dev_mtimes[relative] = mtime
+      load path
+      Rails.logger.info("[RelaySubscriptionManager] Hot-reloaded #{relative}")
+    end
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Hot-reload error: #{e.message}")
   end
 
   def process_inbound_event(event)
