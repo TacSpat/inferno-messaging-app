@@ -366,10 +366,14 @@ class RelaySubscriptionManager
     # Notify the owner via ActionCable
     owner = User.owner
     if owner
+      display_name = contact.effective_display_name
       ActionCable.server.broadcast("user_notifications_#{owner.id}", {
         type: "friend_request",
-        from_pubkey: sender_pubkey,
-        from_name: contact.effective_display_name
+        friendship_id: contact.id,
+        from_user: display_name,
+        from_user_initial: display_name[0]&.upcase || "?",
+        avatar_url: contact.avatar_url.presence || "",
+        profile_color: "#b45309"
       })
     end
 
