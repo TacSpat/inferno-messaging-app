@@ -418,6 +418,13 @@ export default class extends Controller {
         const existing = document.getElementById(`message_${data.message_id}`)
         if (existing) existing.outerHTML = data.html
         break
+      case "update_message_content":
+        const contentTarget = document.getElementById(`message_${data.message_id}`)
+        if (contentTarget) {
+          const contentDiv = contentTarget.querySelector(".message-content")
+          if (contentDiv) contentDiv.innerHTML = data.html
+        }
+        break
       case "delete_message":
         const toDelete = document.getElementById(`message_${data.message_id}`)
         if (toDelete) toDelete.remove()

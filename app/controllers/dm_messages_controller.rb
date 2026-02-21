@@ -28,7 +28,8 @@ class DmMessagesController < ApplicationController
       if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present?
         msg = @message
         conv = @conversation
-        Thread.new { publish_dm_to_nostr(msg, conv) }
+        host = request.base_url
+        Thread.new { publish_dm_to_nostr(msg, conv, host) }
       end
 
       ConversationChannel.broadcast_to(
@@ -141,13 +142,22 @@ class DmMessagesController < ApplicationController
     permitted
   end
 
-  def publish_dm_to_nostr(message, conversation)
+  def publish_dm_to_nostr(message, conversation, base_url = nil)
     user = message.user
     counterparty_pubkey = conversation.counterparty_pubkey
 
+    # Build payload — include file URLs when files are attached
+    plaintext = message.content || ""
+    if message.files.attached? && base_url.present?
+      file_urls = message.files.map do |file|
+        "#{base_url}#{Rails.application.routes.url_helpers.rails_blob_path(file, only_path: true)}"
+      end
+      plaintext = { type: "message", content: plaintext, files: file_urls }.to_json
+    end
+
     # Build NIP-44 encrypted Kind 14 event
     conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)
-    encrypted_content = Nip44Service.encrypt(message.content || "", conversation_key)
+    encrypted_content = Nip44Service.encrypt(plaintext, conversation_key)
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(

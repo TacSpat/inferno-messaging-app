@@ -43,6 +43,15 @@ class TenorUnfurlJob < ApplicationJob
           html: html
         }
       )
+    elsif message.conversation
+      ConversationChannel.broadcast_to(
+        message.conversation,
+        {
+          type: "update_message_content",
+          message_id: message.public_id,
+          html: html
+        }
+      )
     end
   end
 

@@ -29,7 +29,7 @@ class Message < ApplicationRecord
   scope :ordered, -> { order(created_at: :asc) }
   scope :recent, -> { order(created_at: :desc) }
 
-  IMAGE_URL_REGEX = /(?:https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?|(?:\/rails\/active_storage\/\S+))/i
+  IMAGE_URL_REGEX = /(?:https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?|(?:https?:\/\/\S+)?\/rails\/active_storage\/\S+)/i
   YOUTUBE_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})(?:[&?][\S]*)*/i
   INSTAGRAM_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|kkinstagram\.com)\/(reel|p)\/([\w-]+)/i
   VIDEO_URL_REGEX = /https?:\/\/\S+\.(?:mp4|webm|mov|ogv)(?:\?\S*)?/i

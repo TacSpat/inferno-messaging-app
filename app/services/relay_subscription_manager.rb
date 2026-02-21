@@ -320,8 +320,17 @@ class RelaySubscriptionManager
       process_dm_edit(sender_pubkey, parsed, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
       process_dm_delete(sender_pubkey, parsed, event)
+    elsif parsed.is_a?(Hash) && parsed["type"] == "message"
+      # Structured message with possible file attachments
+      content = parsed["content"] || ""
+      files = parsed["files"]
+      if files.is_a?(Array) && files.any?
+        content += "\n" unless content.empty?
+        content += files.join("\n")
+      end
+      process_dm_message(sender_pubkey, content, event)
     else
-      # Regular DM message
+      # Regular DM message (plain text)
       process_dm_message(sender_pubkey, plaintext, event)
     end
 
