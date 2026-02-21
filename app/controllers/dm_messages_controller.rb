@@ -80,6 +80,12 @@ class DmMessagesController < ApplicationController
           html: render_to_string(partial: "messages/dm_message", locals: { message: @message })
         }
       )
+      # Publish edit to Nostr
+      if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present? && @message.nostr_event_id.present?
+        msg = @message
+        conv = @conversation
+        Thread.new { publish_dm_action_to_nostr(msg, conv, "message_edit") }
+      end
       respond_to do |format|
         format.turbo_stream { head :ok }
         format.html { redirect_to conversation_path(@conversation) }
@@ -98,6 +104,13 @@ class DmMessagesController < ApplicationController
       return
     end
     message_public_id = @message.public_id
+    nostr_event_id = @message.nostr_event_id
+    # Publish delete to Nostr before destroying locally
+    if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present? && nostr_event_id.present?
+      conv = @conversation
+      user = current_user
+      Thread.new { publish_dm_delete_to_nostr(user, conv, nostr_event_id) }
+    end
     @message.destroy
     ConversationChannel.broadcast_to(
       @conversation,
@@ -157,5 +170,46 @@ class DmMessagesController < ApplicationController
     RelayService.publish_to_all(signed_json)
   rescue => e
     Rails.logger.error("Failed to publish DM as Nostr event: #{e.message}")
+  end
+
+  def publish_dm_action_to_nostr(message, conversation, action_type)
+    user = message.user
+    counterparty_pubkey = conversation.counterparty_pubkey
+
+    payload = { type: action_type, event_id: message.nostr_event_id, content: message.content }.to_json
+    conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)
+    encrypted_content = Nip44Service.encrypt(payload, conversation_key)
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      content: encrypted_content,
+      tags: [["p", counterparty_pubkey]]
+    )
+    signed = signer.sign(event)
+    RelayService.publish_to_all(signed.to_json)
+  rescue => e
+    Rails.logger.error("Failed to publish DM #{action_type} to Nostr: #{e.message}")
+  end
+
+  def publish_dm_delete_to_nostr(user, conversation, nostr_event_id)
+    counterparty_pubkey = conversation.counterparty_pubkey
+
+    payload = { type: "message_delete", event_id: nostr_event_id }.to_json
+    conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)
+    encrypted_content = Nip44Service.encrypt(payload, conversation_key)
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      content: encrypted_content,
+      tags: [["p", counterparty_pubkey]]
+    )
+    signed = signer.sign(event)
+    RelayService.publish_to_all(signed.to_json)
+  rescue => e
+    Rails.logger.error("Failed to publish DM delete to Nostr: #{e.message}")
   end
 end

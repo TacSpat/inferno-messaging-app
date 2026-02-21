@@ -39,16 +39,8 @@ class NostrGroupModerationJob < ApplicationJob
     )
     signed = signer.sign(event)
 
-    relay = RelayConnection.find_by(url: channel.nostr_relay_url) ||
-            RelayConnection.new(url: channel.nostr_relay_url, status: "active")
-
-    result = RelayService.publish_to_relay(relay, signed.to_json)
-
-    if result[:success]
-      Rails.logger.info("Published delete event for #{target_event_id} in group #{channel.nostr_group_id}")
-    else
-      Rails.logger.warn("Failed to publish delete event: #{result[:message]}")
-    end
+    RelayService.publish_to_all(signed.to_json)
+    Rails.logger.info("Published delete event for #{target_event_id} in group #{channel.nostr_group_id}")
   end
 
   # Kind 9001: Remove a user from the group
@@ -67,15 +59,7 @@ class NostrGroupModerationJob < ApplicationJob
     )
     signed = signer.sign(event)
 
-    relay = RelayConnection.find_by(url: channel.nostr_relay_url) ||
-            RelayConnection.new(url: channel.nostr_relay_url, status: "active")
-
-    result = RelayService.publish_to_relay(relay, signed.to_json)
-
-    if result[:success]
-      Rails.logger.info("Published remove-user for #{target_pubkey[0..15]}... from group #{channel.nostr_group_id}")
-    else
-      Rails.logger.warn("Failed to publish remove-user event: #{result[:message]}")
-    end
+    RelayService.publish_to_all(signed.to_json)
+    Rails.logger.info("Published remove-user for #{target_pubkey[0..15]}... from group #{channel.nostr_group_id}")
   end
 end

@@ -13,6 +13,7 @@ class RelaySubscriptionManager
   include Singleton
 
   NIP29_GROUP_CHAT_MESSAGE = 9
+  NIP29_DELETE_EVENT = 9005
   KIND_METADATA = 0
   KIND_ENCRYPTED_DM = 4
   KIND_GIFT_WRAP = 1059
@@ -123,7 +124,7 @@ class RelaySubscriptionManager
     if group_ids.any?
       sub_id = "groups-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [NIP29_GROUP_CHAT_MESSAGE],
+        kinds: [NIP29_GROUP_CHAT_MESSAGE, NIP29_DELETE_EVENT],
         "#h" => group_ids,
         since: 1.hour.ago.to_i
       }
@@ -190,6 +191,8 @@ class RelaySubscriptionManager
     case kind
     when NIP29_GROUP_CHAT_MESSAGE
       process_group_message(event)
+    when NIP29_DELETE_EVENT
+      process_group_delete(event)
     when KIND_DM, KIND_GIFT_WRAP, KIND_ENCRYPTED_DM
       process_dm_event(event)
     when KIND_METADATA
@@ -208,6 +211,13 @@ class RelaySubscriptionManager
     group_id = group_tag[1]
     channel = Channel.find_by(nostr_group_id: group_id)
     return unless channel
+
+    # Check if this is an edit (has an "e" tag with "edit" marker)
+    edit_tag = (event["tags"] || []).find { |t| t[0] == "e" && t[3] == "edit" }
+    if edit_tag
+      process_group_edit(channel, event, edit_tag[1])
+      return
+    end
 
     # Resolve the sender — ensure we have a Contact record with profile info
     sender_pubkey = event["pubkey"]
@@ -244,6 +254,51 @@ class RelaySubscriptionManager
     # Already processed by another connection
   end
 
+  def process_group_edit(channel, event, original_event_id)
+    message = Message.find_by(nostr_event_id: original_event_id, channel: channel)
+    return unless message
+
+    message.update!(content: event["content"], edited_at: Time.current)
+
+    html = ApplicationController.render(
+      partial: "messages/message",
+      locals: { message: message, server: channel.server }
+    )
+    ChannelChatChannel.broadcast_to(channel, {
+      type: "update_message",
+      message_id: message.public_id,
+      html: html
+    })
+
+    Rails.logger.info("[RelaySubscriptionManager] Edited channel message #{original_event_id}")
+  end
+
+  def process_group_delete(event)
+    group_tag = (event["tags"] || []).find { |t| t[0] == "h" }
+    return unless group_tag
+
+    channel = Channel.find_by(nostr_group_id: group_tag[1])
+    return unless channel
+
+    # Find the event being deleted
+    event_tag = (event["tags"] || []).find { |t| t[0] == "e" }
+    return unless event_tag
+
+    target_event_id = event_tag[1]
+    message = Message.find_by(nostr_event_id: target_event_id, channel: channel)
+    return unless message
+
+    message_public_id = message.public_id
+    message.destroy
+
+    ChannelChatChannel.broadcast_to(channel, {
+      type: "delete_message",
+      message_id: message_public_id
+    })
+
+    Rails.logger.info("[RelaySubscriptionManager] Deleted channel message #{target_event_id}")
+  end
+
   def process_dm_event(event)
     owner = User.owner
     return unless owner&.nostr_private_key.present?
@@ -261,6 +316,10 @@ class RelaySubscriptionManager
       process_friend_request(sender_pubkey, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "friend_response"
       process_friend_response(sender_pubkey, parsed["status"], event)
+    elsif parsed.is_a?(Hash) && parsed["type"] == "message_edit"
+      process_dm_edit(sender_pubkey, parsed, event)
+    elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
+      process_dm_delete(sender_pubkey, parsed, event)
     else
       # Regular DM message
       process_dm_message(sender_pubkey, plaintext, event)
@@ -357,6 +416,53 @@ class RelaySubscriptionManager
     Rails.logger.info("[RelaySubscriptionManager] Received DM from #{sender_pubkey.first(12)}...")
   end
 
+  def process_dm_edit(sender_pubkey, parsed, event)
+    original_event_id = parsed["event_id"]
+    new_content = parsed["content"]
+    return if original_event_id.blank? || new_content.blank?
+
+    message = Message.find_by(nostr_event_id: original_event_id)
+    return unless message
+
+    message.update!(content: new_content, edited_at: Time.current)
+
+    conversation = message.conversation
+    return unless conversation
+
+    html = ApplicationController.render(
+      partial: "messages/dm_message",
+      locals: { message: message }
+    )
+    ConversationChannel.broadcast_to(conversation, {
+      type: "update_message",
+      message_id: message.public_id,
+      html: html
+    })
+
+    Rails.logger.info("[RelaySubscriptionManager] Edited DM #{original_event_id} from #{sender_pubkey.first(12)}...")
+  end
+
+  def process_dm_delete(sender_pubkey, parsed, event)
+    original_event_id = parsed["event_id"]
+    return if original_event_id.blank?
+
+    message = Message.find_by(nostr_event_id: original_event_id)
+    return unless message
+
+    conversation = message.conversation
+    message_public_id = message.public_id
+    message.destroy
+
+    if conversation
+      ConversationChannel.broadcast_to(conversation, {
+        type: "delete_message",
+        message_id: message_public_id
+      })
+    end
+
+    Rails.logger.info("[RelaySubscriptionManager] Deleted DM #{original_event_id} from #{sender_pubkey.first(12)}...")
+  end
+
   def process_profile_update(event)
     pubkey = event["pubkey"]
     contact = Contact.find_by(pubkey: pubkey)
@@ -389,7 +495,8 @@ class RelaySubscriptionManager
     owner = User.owner
     if owner
       ActionCable.server.broadcast("user_notifications_#{owner.id}", {
-        type: "presence_update",
+        type: "presence",
+        user_id: "contact-#{contact.id}",
         pubkey: pubkey,
         name: contact.effective_display_name,
         state: state == "offline" ? "offline" : "online"

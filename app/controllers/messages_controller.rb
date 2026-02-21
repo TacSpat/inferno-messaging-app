@@ -76,6 +76,12 @@ class MessagesController < ApplicationController
           html: render_to_string(partial: "messages/message", locals: { message: @message, server: @channel.server })
         }
       )
+      # Publish edit to Nostr as new Kind 9 event with edit tag
+      if @channel.nostr_group_id.present? && current_user.nostr_public_key.present? && @message.nostr_event_id.present?
+        msg = @message
+        channel = @channel
+        Thread.new { publish_channel_edit_to_nostr(msg, channel) }
+      end
       head :ok
     else
       render :edit, status: :unprocessable_entity
@@ -118,6 +124,25 @@ class MessagesController < ApplicationController
     permitted = params.require(:message).permit(:content, :parent_id, files: [])
     permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
     permitted
+  end
+
+  def publish_channel_edit_to_nostr(message, channel)
+    user = message.user
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 9,
+      pubkey: user.nostr_public_key,
+      content: message.content || "",
+      tags: [
+        ["h", channel.nostr_group_id],
+        ["e", message.nostr_event_id, "", "edit"]
+      ]
+    )
+    signed = signer.sign(event)
+    RelayService.publish_to_all(signed.to_json)
+  rescue => e
+    Rails.logger.error("Failed to publish channel edit to Nostr: #{e.message}")
   end
 
   def publish_channel_message_to_nostr(message, channel)

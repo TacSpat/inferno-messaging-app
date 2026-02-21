@@ -9,67 +9,93 @@ class RelayService
   class PublishError < StandardError; end
   class TimeoutError < StandardError; end
 
-  # Publish a signed event to all active relays
-  # Returns hash of { relay_url => { success: bool, message: str } }
+  # Publish a signed event to all active relays.
+  # Uses the SubscriptionManager's existing WebSocket connections when available
+  # (non-blocking fire-and-forget). Falls back to opening new connections in parallel.
   def self.publish_to_all(signed_event)
-    relays = RelayConnection.active
-    return {} if relays.empty?
+    urls = RelayConnection.active.pluck(:url)
+    return {} if urls.empty?
 
-    results = {}
-    relays.find_each do |relay|
-      results[relay.url] = publish_to_relay(relay, signed_event)
-    end
-    results
-  end
+    event_message = JSON.generate(["EVENT", signed_event])
 
-  # Publish a signed event to a specific relay
-  def self.publish_to_relay(relay, signed_event)
-    event_message = JSON.generate([ "EVENT", signed_event ])
-    result = { success: false, message: "Not attempted" }
-
-    run_with_eventmachine do |done|
-      ws = Faye::WebSocket::Client.new(relay.url)
-
-      timer = EventMachine.add_timer(RESPONSE_TIMEOUT) do
-        result = { success: false, message: "Timeout waiting for relay response" }
-        ws.close
-        done.call
-      end
-
-      ws.on :open do |_event|
-        relay.mark_connected!
-        ws.send(event_message)
-      end
-
-      ws.on :message do |event|
-        data = JSON.parse(event.data) rescue nil
-        if data.is_a?(Array) && data[0] == "OK"
-          EventMachine.cancel_timer(timer)
-          result = { success: data[2], message: data[3] || "OK" }
-          ws.close
-          done.call
+    # Try to use existing SubscriptionManager connections (non-blocking)
+    manager = RelaySubscriptionManager.instance
+    if manager.running && EventMachine.reactor_running?
+      results = {}
+      EventMachine.next_tick do
+        urls.each do |url|
+          conn = manager.connections[url]
+          if conn && conn[:ws]
+            begin
+              conn[:ws].send(event_message)
+              Rails.logger.debug("[RelayService] Published via SubscriptionManager to #{url}")
+            rescue => e
+              Rails.logger.warn("[RelayService] Failed to publish to #{url}: #{e.message}")
+            end
+          end
         end
       end
+      urls.each { |url| results[url] = { success: true, message: "Sent via persistent connection" } }
+      return results
+    end
 
-      ws.on :error do |event|
-        EventMachine.cancel_timer(timer)
-        error_msg = "WebSocket error: #{event.message rescue 'unknown'}"
-        relay.mark_error!(error_msg)
-        result = { success: false, message: error_msg }
-        done.call
+    # Fallback: open new connections in parallel (all relays in one EM tick)
+    publish_via_new_connections(urls, event_message)
+  end
+
+  # Publish via new WebSocket connections — all relays in parallel within one EM session
+  def self.publish_via_new_connections(urls, event_message)
+    results = {}
+    mutex = Mutex.new
+
+    run_with_eventmachine do |done|
+      pending = urls.size
+
+      finish_one = lambda do
+        count = mutex.synchronize { pending -= 1; pending }
+        done.call if count <= 0
       end
 
-      ws.on :close do |_event|
-        EventMachine.cancel_timer(timer) rescue nil
-        done.call
+      urls.each do |url|
+        ws = Faye::WebSocket::Client.new(url)
+
+        timer = EventMachine.add_timer(RESPONSE_TIMEOUT) do
+          mutex.synchronize { results[url] = { success: false, message: "Timeout" } }
+          ws.close rescue nil
+          finish_one.call
+        end
+
+        ws.on :open do |_event|
+          ws.send(event_message)
+        end
+
+        ws.on :message do |event|
+          data = JSON.parse(event.data) rescue nil
+          if data.is_a?(Array) && data[0] == "OK"
+            EventMachine.cancel_timer(timer)
+            mutex.synchronize { results[url] = { success: data[2], message: data[3] || "OK" } }
+            ws.close rescue nil
+            finish_one.call
+          end
+        end
+
+        ws.on :error do |event|
+          EventMachine.cancel_timer(timer)
+          mutex.synchronize { results[url] = { success: false, message: "Error: #{event.message rescue 'unknown'}" } }
+          finish_one.call
+        end
+
+        ws.on :close do |_event|
+          EventMachine.cancel_timer(timer) rescue nil
+          mutex.synchronize { results[url] ||= { success: false, message: "Closed" } }
+          finish_one.call
+        end
       end
     end
 
-    result
-  rescue StandardError => e
-    relay.mark_error!(e.message) if relay.respond_to?(:mark_error!)
-    { success: false, message: e.message }
+    results
   end
+  private_class_method :publish_via_new_connections
 
   # Fetch events matching a filter from a specific relay
   # Returns an array of event hashes
@@ -122,19 +148,68 @@ class RelayService
     events
   end
 
-  # Fetch events from all active relays, deduplicating by event id
+  # Fetch events from all active relays in parallel, deduplicating by event id
   def self.fetch_from_all(filter, timeout: RESPONSE_TIMEOUT)
-    relays = RelayConnection.active
-    return [] if relays.empty?
+    urls = RelayConnection.active.pluck(:url)
+    return [] if urls.empty?
 
     all_events = {}
-    relays.find_each do |relay|
-      events = fetch_from_relay(relay.url, filter, timeout: timeout)
-      events.each do |event|
-        # Keep the most recent version (dedup by event id)
-        all_events[event["id"]] = event
+    mutex = Mutex.new
+
+    run_with_eventmachine do |done|
+      pending = urls.size
+
+      finish_one = lambda do
+        count = mutex.synchronize { pending -= 1; pending }
+        done.call if count <= 0
+      end
+
+      urls.each do |url|
+        sub_id = SecureRandom.hex(8)
+        req_message = JSON.generate(["REQ", sub_id, filter])
+        close_message = JSON.generate(["CLOSE", sub_id])
+
+        ws = Faye::WebSocket::Client.new(url)
+
+        timer = EventMachine.add_timer(timeout) do
+          ws.send(close_message) rescue nil
+          ws.close rescue nil
+          finish_one.call
+        end
+
+        ws.on :open do |_event|
+          ws.send(req_message)
+        end
+
+        ws.on :message do |event|
+          data = JSON.parse(event.data) rescue nil
+          next unless data.is_a?(Array)
+
+          case data[0]
+          when "EVENT"
+            if data[2].is_a?(Hash)
+              mutex.synchronize { all_events[data[2]["id"]] = data[2] }
+            end
+          when "EOSE"
+            EventMachine.cancel_timer(timer)
+            ws.send(close_message) rescue nil
+            ws.close rescue nil
+            finish_one.call
+          end
+        end
+
+        ws.on :error do |_event|
+          EventMachine.cancel_timer(timer)
+          finish_one.call
+        end
+
+        ws.on :close do |_event|
+          EventMachine.cancel_timer(timer) rescue nil
+          finish_one.call
+        end
       end
     end
+
     all_events.values
   end
 

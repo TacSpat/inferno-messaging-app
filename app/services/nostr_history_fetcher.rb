@@ -43,26 +43,7 @@ class NostrHistoryFetcher
   private
 
   def self.fetch_events(filter)
-    urls = RelayConnection.active.pluck(:url)
-    all_events = {}
-    mutex = Mutex.new
-
-    threads = urls.map do |url|
-      Thread.new do
-        events = RelayService.fetch_from_relay(url, filter, timeout: 8)
-        mutex.synchronize do
-          events.each { |e| all_events[e["id"]] ||= e }
-        end
-      rescue => e
-        Rails.logger.warn("[NostrHistoryFetcher] Relay #{url} failed: #{e.message}")
-      end
-    end
-
-    # Wait up to 10s for all relays
-    threads.each { |t| t.join(10) }
-    threads.each { |t| t.kill if t.alive? }
-
-    all_events.values
+    RelayService.fetch_from_all(filter, timeout: 8)
   end
 
   def self.import_channel_events(channel, events)
@@ -97,16 +78,19 @@ class NostrHistoryFetcher
         event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
       )
 
+      # Broadcast each message for real-time UI update
+      html = ApplicationController.render(
+        partial: "messages/message",
+        locals: { message: message, server: channel.server }
+      )
+      ChannelChatChannel.broadcast_to(channel, { type: "new_message", html: html })
+
       imported += 1
     rescue ActiveRecord::RecordNotUnique
       next
     end
 
-    if imported > 0
-      Rails.logger.info("[NostrHistoryFetcher] Imported #{imported} channel messages for #{channel.name}")
-      # Broadcast to refresh the channel
-      ChannelChatChannel.broadcast_to(channel, { type: "history_sync", count: imported })
-    end
+    Rails.logger.info("[NostrHistoryFetcher] Imported #{imported} channel messages for #{channel.name}") if imported > 0
   end
 
   def self.import_dm_events(conversation, owner, events)
@@ -144,14 +128,18 @@ class NostrHistoryFetcher
         event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
       )
 
+      # Broadcast each message for real-time UI update
+      html = ApplicationController.render(
+        partial: "messages/dm_message",
+        locals: { message: message }
+      )
+      ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
+
       imported += 1
     rescue ActiveRecord::RecordNotUnique
       next
     end
 
-    if imported > 0
-      Rails.logger.info("[NostrHistoryFetcher] Imported #{imported} DMs for conversation #{conversation.id}")
-      ConversationChannel.broadcast_to(conversation, { type: "history_sync", count: imported })
-    end
+    Rails.logger.info("[NostrHistoryFetcher] Imported #{imported} DMs for conversation #{conversation.id}") if imported > 0
   end
 end

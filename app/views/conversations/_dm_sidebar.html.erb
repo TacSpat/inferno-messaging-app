@@ -51,7 +51,7 @@
                            end %>
             <div data-user-presence="<%= other.public_id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= dm_status %>"></div>
           <% elsif contact %>
-            <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
+            <div data-user-presence="contact-<%= contact.id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
           <% end %>
         </div>
         <div class="ml-2.5 min-w-0 flex-1">

@@ -31,19 +31,8 @@ class NostrGroupPublishJob < ApplicationJob
       nostr_event_json: signed_json
     )
 
-    # Publish to all relay URLs for this channel
-    relay_urls = channel.effective_relay_urls
-    relay_urls.each do |url|
-      relay = RelayConnection.find_or_create_for_relay(url) ||
-              RelayConnection.new(url: url, status: "active")
-      result = RelayService.publish_to_relay(relay, signed_json)
-
-      if result[:success]
-        Rails.logger.info("Published message #{message.id} to #{url}")
-      else
-        Rails.logger.warn("Failed to publish message #{message.id} to #{url}: #{result[:message]}")
-      end
-    end
+    # Publish to all active relays
+    RelayService.publish_to_all(signed_json)
 
     # Log the outbound event
     NostrEventLog.create!(
