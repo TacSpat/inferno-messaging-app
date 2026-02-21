@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# AppImage entry point for Inferno.
+# Launches the Tebako-packaged Rails server and opens the browser.
+
+export INFERNO_DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/inferno"
+export RAILS_ENV=production
+export SOLID_QUEUE_IN_PUMA=1
+export PORT=3131
+
+mkdir -p "$INFERNO_DATA_DIR"/{storage,tmp,log}
+
+# Persistent secret key — generate on first run
+SECRET_FILE="$INFERNO_DATA_DIR/.secret"
+if [ -f "$SECRET_FILE" ]; then
+  export SECRET_KEY_BASE
+  SECRET_KEY_BASE=$(cat "$SECRET_FILE")
+else
+  export SECRET_KEY_BASE
+  SECRET_KEY_BASE=$(openssl rand -hex 64)
+  echo "$SECRET_KEY_BASE" > "$SECRET_FILE"
+  chmod 600 "$SECRET_FILE"
+fi
+
+BINARY="$APPDIR/usr/bin/inferno"
+
+# First-run: prepare database (create + migrate)
+echo "[Inferno] Preparing database..."
+"$BINARY" db:prepare 2>/dev/null || true
+
+# Start Puma (with embedded Solid Queue)
+echo "[Inferno] Starting server on http://127.0.0.1:3131 ..."
+"$BINARY" server -b 127.0.0.1 -p 3131 &
+SERVER_PID=$!
+
+# Wait for server to be ready, then open browser
+(
+  for i in $(seq 1 30); do
+    if curl -sf http://127.0.0.1:3131/ > /dev/null 2>&1; then
+      xdg-open http://127.0.0.1:3131 2>/dev/null || true
+      break
+    fi
+    sleep 1
+  done
+) &
+
+# Graceful shutdown
+cleanup() {
+  echo "[Inferno] Shutting down..."
+  kill "$SERVER_PID" 2>/dev/null
+  wait "$SERVER_PID" 2>/dev/null
+}
+trap cleanup EXIT INT TERM
+
+wait "$SERVER_PID"

@@ -5,10 +5,9 @@ class NostrGroupPublishJob < ApplicationJob
 
   def perform(message_id)
     message = Message.find_by(id: message_id)
-    return unless message
-    return unless message.channel&.shared?
-    return if message.user&.remote?
+    return unless message&.channel
     return if message.user&.nostr_public_key.blank?
+    return if message.nostr_event_id.present? # Already published
 
     channel = message.channel
     user = message.user
@@ -20,33 +19,43 @@ class NostrGroupPublishJob < ApplicationJob
       pubkey: user.nostr_public_key,
       content: message.content || "",
       tags: [
-        [ "h", channel.nostr_group_id ]
+        ["h", channel.nostr_group_id]
       ]
     )
     signed = signer.sign(event)
-    signed_event = signed.to_json
+    signed_json = signed.to_json
 
-    # Publish to the channel's specific relay
-    relay = RelayConnection.find_by(url: channel.nostr_relay_url) ||
-            RelayConnection.new(url: channel.nostr_relay_url, status: "active")
+    # Store the signed event on the message
+    message.update_columns(
+      nostr_event_id: signed[:id] || signed["id"],
+      nostr_event_json: signed_json
+    )
 
-    result = RelayService.publish_to_relay(relay, signed_event)
+    # Publish to all relay URLs for this channel
+    relay_urls = channel.effective_relay_urls
+    relay_urls.each do |url|
+      relay = RelayConnection.find_or_create_for_relay(url) ||
+              RelayConnection.new(url: url, status: "active")
+      result = RelayService.publish_to_relay(relay, signed_json)
+
+      if result[:success]
+        Rails.logger.info("Published message #{message.id} to #{url}")
+      else
+        Rails.logger.warn("Failed to publish message #{message.id} to #{url}: #{result[:message]}")
+      end
+    end
 
     # Log the outbound event
     NostrEventLog.create!(
-      event_id: signed_event[:id],
+      event_id: signed[:id] || signed["id"],
       kind: NIP29_GROUP_CHAT_MESSAGE,
       pubkey: user.nostr_public_key,
       message: message,
       channel: channel,
       direction: "outbound",
-      event_created_at: Time.at(signed_event[:created_at])
+      event_created_at: Time.at(signed[:created_at] || signed["created_at"] || Time.current.to_i)
     )
-
-    if result[:success]
-      Rails.logger.info("Published message #{message.id} to NIP-29 group #{channel.nostr_group_id}")
-    else
-      Rails.logger.warn("Failed to publish message #{message.id} to relay: #{result[:message]}")
-    end
+  rescue ActiveRecord::RecordNotUnique
+    # Event already logged
   end
 end

@@ -4,6 +4,6 @@ module InstanceLimits
   private
 
   def instance_config
-    InstanceConfig.current
+    LocalConfig.current
   end
 end

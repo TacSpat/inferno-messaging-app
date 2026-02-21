@@ -6,9 +6,9 @@ class AddHoistToRoles < ActiveRecord::Migration[8.0]
     reversible do |dir|
       dir.up do
         execute <<~SQL
-          UPDATE roles SET hoist = true
-          WHERE permissions @> '{"owner": true}'::jsonb
-             OR permissions @> '{"administrator": true}'::jsonb
+          UPDATE roles SET hoist = 1
+          WHERE json_extract(permissions, '$.owner') = 1
+             OR json_extract(permissions, '$.administrator') = 1
         SQL
       end
     end

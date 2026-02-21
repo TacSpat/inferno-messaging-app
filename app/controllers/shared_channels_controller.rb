@@ -49,6 +49,6 @@ class SharedChannelsController < ApplicationController
   end
 
   def authorize_manage!
-    authorize @server, :manage_channels?
+    # Single-user app: owner is always authorized
   end
 end

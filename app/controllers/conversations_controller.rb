@@ -7,20 +7,18 @@ class ConversationsController < ApplicationController
     @tab = params[:tab] || "online"
     @conversations = current_user.conversations
       .includes(participants: { avatar_attachment: :blob }, messages: :user)
-      .order("messages.created_at DESC NULLS LAST")
+      .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
-    @pending_count = current_user.pending_friend_requests.count
+    @pending_count = Contact.pending_incoming.count
 
     case @tab
     when "online"
-      @friends = current_user.friends.includes(avatar_attachment: :blob).where.not(online_state: :offline).order(:display_name)
-      @remote_friends = current_user.remote_friend_references.prefer_https.online.ordered if current_user.remote?
+      @contacts = Contact.friends.select(&:online?)
     when "all"
-      @friends = current_user.friends.includes(avatar_attachment: :blob).order(:display_name)
-      @remote_friends = current_user.remote_friend_references.prefer_https.ordered if current_user.remote?
+      @contacts = Contact.friends.order(:display_name)
     when "pending"
-      @incoming = current_user.incoming_friend_requests.includes(user: { avatar_attachment: :blob })
-      @outgoing = current_user.sent_friend_requests.includes(friend: { avatar_attachment: :blob })
+      @incoming = Contact.pending_incoming
+      @outgoing = Contact.pending_outgoing
     when "blocked"
       @blocked = current_user.blocked_users.includes(avatar_attachment: :blob)
     end
@@ -33,7 +31,7 @@ class ConversationsController < ApplicationController
     end
     @conversations = current_user.conversations
       .includes(participants: { avatar_attachment: :blob }, messages: :user)
-      .order("messages.created_at DESC NULLS LAST")
+      .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
     @messages = @conversation.messages.includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)
                              .order(created_at: :asc).last(50)
@@ -69,7 +67,6 @@ class ConversationsController < ApplicationController
 
   def set_dm_layout
     @dm_layout = true
-    @remote_conversations = current_user.remote_conversation_references.prefer_https.ordered
   end
 
   def set_conversation

@@ -1,8 +1,6 @@
 class ServerMembership < ApplicationRecord
   include HasPublicId
-  include InstanceLimits
   belongs_to :user
-  has_paper_trail
   belongs_to :server
   belongs_to :server_folder, optional: true
   has_many :membership_roles, dependent: :destroy
@@ -11,8 +9,6 @@ class ServerMembership < ApplicationRecord
   scope :ordered, -> { order(position: :asc, joined_at: :asc) }
 
   validates :user_id, uniqueness: { scope: :server_id }
-  validate :within_member_limit, on: :create
-
   before_create :set_joined_at
   after_create :send_welcome_message
   after_create_commit :broadcast_member_join
@@ -73,9 +69,4 @@ class ServerMembership < ApplicationRecord
     })
   end
 
-  def within_member_limit
-    if server && instance_config.member_limit_reached_for?(server)
-      errors.add(:base, "This server has reached its member limit (#{instance_config.max_members_per_server})")
-    end
-  end
 end

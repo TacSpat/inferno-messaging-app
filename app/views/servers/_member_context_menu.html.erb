@@ -27,28 +27,27 @@
       Message
     <% end %>
 
-    <% if current_user.friends_with?(member) %>
-      <% friendship = current_user.friendships.find_by(friend: member) %>
-      <%= button_to friendship_path(friendship), method: :delete,
+    <% contact = Contact.find_by(pubkey: member.nostr_public_key) if member.nostr_public_key.present? %>
+    <% if contact&.accepted? %>
+      <%= button_to friendship_path(contact), method: :delete,
             class: "flex items-center w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded cursor-pointer text-left",
-            data: { turbo_confirm: "Remove #{member.display_name.presence || member.username} from your friends?" } do %>
-        Remove Friend
+            data: { turbo_confirm: "Remove #{member.display_name.presence || member.username} from your contacts?" } do %>
+        Remove Contact
       <% end %>
-    <% elsif current_user.sent_friend_requests.find_by(friend: member) %>
+    <% elsif contact&.pending_outgoing? %>
       <button class="flex items-center w-full px-2.5 py-1.5 text-gray-500 rounded cursor-default" disabled>
-        Friend Request Sent
+        Request Sent
       </button>
-    <% elsif current_user.incoming_friend_requests.find_by(user: member) %>
-      <% request = current_user.incoming_friend_requests.find_by(user: member) %>
-      <%= button_to accept_friendship_path(request), method: :post,
+    <% elsif contact&.pending_incoming? %>
+      <%= button_to accept_friendship_path(contact), method: :post,
             class: "flex items-center w-full px-2.5 py-1.5 text-green-400 hover:bg-green-600/20 rounded cursor-pointer text-left" do %>
-        Accept Friend Request
+        Accept Request
       <% end %>
-    <% else %>
-      <%= button_to friendships_path(user_id: member.public_id, source: "context"), method: :post,
+    <% elsif member.nostr_public_key.present? %>
+      <%= button_to friendships_path(tag: member.npub, source: "context"), method: :post,
             class: "flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer text-left",
             data: { turbo_confirm: "Send a friend request to #{member.display_name.presence || member.username}?" } do %>
-        Add Friend
+        Add Contact
       <% end %>
     <% end %>
   <% end %>
@@ -100,12 +99,6 @@
   <% end %>
 
   <div class="border-t border-gray-700 my-1"></div>
-  <% if member.remote? %>
-    <div class="flex items-center w-full px-2.5 py-1.5 text-accent-light text-xs">
-      <svg class="w-3.5 h-3.5 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-      <%= member.home_instance_domain %>
-    </div>
-  <% end %>
   <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
           onclick="navigator.clipboard.writeText('<%= member.public_id %>')">
     Copy User ID

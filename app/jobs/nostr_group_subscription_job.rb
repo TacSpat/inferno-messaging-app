@@ -3,13 +3,12 @@ class NostrGroupSubscriptionJob < ApplicationJob
 
   NIP29_GROUP_CHAT_MESSAGE = 9
 
-  # Subscribe to all shared channels and process inbound events
+  # Subscribe to all channels and process inbound events from relays
   def perform
-    shared_channels = Channel.shared_channels.where.not(nostr_relay_url: nil, nostr_group_id: nil)
-    return if shared_channels.empty?
+    channels = Channel.where.not(nostr_group_id: [nil, ""])
+    return if channels.empty?
 
-    # Group channels by relay URL to minimize connections
-    channels_by_relay = shared_channels.group_by(&:nostr_relay_url)
+    channels_by_relay = channels.group_by(&:nostr_relay_url).reject { |url, _| url.blank? }
 
     channels_by_relay.each do |relay_url, channels|
       process_relay(relay_url, channels)
@@ -22,8 +21,6 @@ class NostrGroupSubscriptionJob < ApplicationJob
     group_ids = channels.map(&:nostr_group_id)
     channel_map = channels.index_by(&:nostr_group_id)
 
-    # Fetch recent Kind 9 events for these groups
-    # Use a since timestamp to avoid re-fetching old messages
     oldest_log = NostrEventLog.inbound
       .where(channel: channels)
       .order(event_created_at: :desc)
@@ -32,7 +29,7 @@ class NostrGroupSubscriptionJob < ApplicationJob
     since = oldest_log ? oldest_log.event_created_at.to_i : 1.hour.ago.to_i
 
     filter = {
-      kinds: [ NIP29_GROUP_CHAT_MESSAGE ],
+      kinds: [NIP29_GROUP_CHAT_MESSAGE],
       "#h" => group_ids,
       since: since
     }
@@ -65,9 +62,9 @@ class NostrGroupSubscriptionJob < ApplicationJob
     pubkey = event_data["pubkey"]
     content = event_data["content"]
 
-    # Skip events from local users (we already have these)
-    local_user = User.local.find_by(nostr_public_key: pubkey)
-    return if local_user
+    # Skip events from our own user
+    owner = User.owner
+    return if owner&.nostr_public_key == pubkey
 
     # Verify the event signature
     begin
@@ -81,23 +78,8 @@ class NostrGroupSubscriptionJob < ApplicationJob
       return
     end
 
-    # Find or create remote user
-    remote_user = RemoteUser.find_by(nostr_public_key: pubkey)
-    unless remote_user
-      remote_user = RemoteUser.find_or_create_from_auth(
-        public_key: pubkey,
-        home_instance: "unknown",
-        username: "nostr_#{pubkey[0..7]}"
-      )
-    end
-    remote_user.reload
-    shadow_user = remote_user.shadow_user
-
-    return unless shadow_user
-
-    # Create the local message
+    # Create the local message (attributed to owner for now — will be improved with Contact model)
     message = channel.messages.create!(
-      user: shadow_user,
       content: content,
       public_id: SecureRandom.alphanumeric(12)
     )
@@ -113,10 +95,8 @@ class NostrGroupSubscriptionJob < ApplicationJob
       event_created_at: event_data["created_at"] ? Time.at(event_data["created_at"]) : Time.current
     )
 
-    # Broadcast via ActionCable so local users see it in real time
     broadcast_message(message, channel)
   rescue ActiveRecord::RecordNotUnique
-    # Race condition: another process already inserted this event
     nil
   rescue StandardError => e
     Rails.logger.error("Error processing inbound event #{event_data['id']}: #{e.message}")
@@ -132,15 +112,5 @@ class NostrGroupSubscriptionJob < ApplicationJob
       type: "new_message",
       html: html
     })
-
-    # Broadcast unread indicator
-    channel.server.members.where.not(id: message.user_id).find_each do |member|
-      ActionCable.server.broadcast("user_notifications_#{member.id}", {
-        type: "channel_message",
-        server_id: channel.server.public_id,
-        channel_id: channel.public_id,
-        user_id: message.user.public_id
-      })
-    end
   end
 end

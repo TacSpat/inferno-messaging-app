@@ -8,6 +8,18 @@ class Conversation < ApplicationRecord
 
   validates :name, length: { maximum: 100 }
 
+  # Find or create a direct conversation with a counterparty identified by pubkey
+  def self.find_or_create_by_pubkey(owner, counterparty_pubkey)
+    conv = where(kind: :direct, counterparty_pubkey: counterparty_pubkey).first
+    return conv if conv
+
+    transaction do
+      conv = create!(kind: :direct, counterparty_pubkey: counterparty_pubkey)
+      conv.conversation_participants.create!(user: owner, accepted: true)
+      conv
+    end
+  end
+
   def self.find_or_create_direct(user1, user2)
     conv = joins(:conversation_participants)
       .where(kind: :direct)
@@ -32,9 +44,21 @@ class Conversation < ApplicationRecord
   def display_name(current_user)
     if direct?
       other = other_user(current_user)
-      other&.display_name.presence || other&.username || "Unknown"
+      other&.display_name.presence || other&.username || counterparty_display_name || "Unknown"
     else
       name.presence || participants.where.not(id: current_user.id).map { |u| u.display_name.presence || u.username }.join(", ")
+    end
+  end
+
+  # Display name for pubkey-only contacts (no local user record)
+  def counterparty_display_name
+    return nil if counterparty_pubkey.blank?
+    # Truncated npub as fallback
+    begin
+      npub = Nostr::Bech32.encode_npub(counterparty_pubkey)
+      "#{npub[0..12]}..."
+    rescue
+      "#{counterparty_pubkey[0..8]}..."
     end
   end
 

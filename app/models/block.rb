@@ -5,8 +5,8 @@ class Block < ApplicationRecord
   validates :blocked_id, uniqueness: { scope: :blocker_id }
   validate :not_self
 
-  # Blocking removes any existing friendship
-  after_create :remove_friendships
+  # Blocking removes any existing contact relationship
+  after_create :remove_contact
 
   private
 
@@ -14,8 +14,8 @@ class Block < ApplicationRecord
     errors.add(:blocked, "can't block yourself") if blocker_id == blocked_id
   end
 
-  def remove_friendships
-    Friendship.where(user_id: blocker_id, friend_id: blocked_id).destroy_all
-    Friendship.where(user_id: blocked_id, friend_id: blocker_id).destroy_all
+  def remove_contact
+    pubkey = blocked.nostr_public_key
+    Contact.where(pubkey: pubkey).destroy_all if pubkey.present?
   end
 end

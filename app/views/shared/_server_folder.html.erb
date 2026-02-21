@@ -121,13 +121,9 @@
              class="flex flex-col items-center space-y-2 py-2 px-2.5 mt-1 rounded-2xl"
              style="background-color: <%= folder.color %>30">
           <% folder_items.each do |fi| %>
-            <% if fi[:type] == :server %>
-              <div data-server-id="<%= fi[:server].public_id %>">
-                <%= render partial: "servers/server_icon", locals: { server: fi[:server], active: local_assigns[:active_server] == fi[:server] } %>
-              </div>
-            <% else %>
-              <%= render partial: "shared/remote_server_icon", locals: { ref: fi[:remote_ref], in_folder: true } %>
-            <% end %>
+            <div data-server-id="<%= fi[:server].public_id %>">
+              <%= render partial: "servers/server_icon", locals: { server: fi[:server], active: local_assigns[:active_server] == fi[:server] } %>
+            </div>
           <% end %>
         </div>
       </div>

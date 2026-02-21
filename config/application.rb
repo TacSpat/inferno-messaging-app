@@ -16,8 +16,8 @@ module MessagingApp
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
 
-    # Use Sidekiq for background jobs
-    config.active_job.queue_adapter = :sidekiq
+    # Use Solid Queue for background jobs
+    config.active_job.queue_adapter = :solid_queue
 
     # Instance domain used for NIP-05 identifiers and cross-instance auth.
     # Load from ENV (set by foreman via .env), or fall back to reading .env directly.

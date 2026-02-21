@@ -1,14 +1,13 @@
-<% pending = current_user.pending_friend_requests.includes(user: { avatar_attachment: :blob }) %>
+<% pending = Contact.pending_incoming %>
 <div id="friend-request-bar" class="hidden fr-bar" data-fr-index="0">
   <%# Hidden data store for all pending requests — JS filters dismissed via localStorage %>
   <div data-fr-items class="hidden">
-    <% pending.each do |fr| %>
-      <% sender = fr.user %>
-      <div data-friendship-id="<%= fr.id %>"
-           data-fr-name="<%= sender.display_name.presence || sender.username %>"
-           data-fr-color="<%= sender.profile_color || '#b45309' %>"
-           data-fr-initial="<%= sender.username[0].upcase %>"
-           data-fr-avatar="<%= sender.avatar.attached? ? url_for(sender.avatar) : (sender.respond_to?(:effective_avatar_url) && sender.effective_avatar_url.presence || '') %>">
+    <% pending.each do |contact| %>
+      <div data-friendship-id="<%= contact.id %>"
+           data-fr-name="<%= contact.effective_display_name %>"
+           data-fr-color="#b45309"
+           data-fr-initial="<%= contact.effective_display_name[0].upcase %>"
+           data-fr-avatar="<%= contact.avatar_url.presence || '' %>">
       </div>
     <% end %>
   </div>

@@ -40,8 +40,6 @@ class UserCardsController < ApplicationController
           status: @member.status,
           status_emoji: @member.status_emoji,
           online_state: @member.online_state,
-          remote: @member.remote?,
-          home_instance_domain: @member.remote? ? @member.home_instance_domain : nil,
           profile_color: @member.profile_color || "#1e1c1b",
           profile_color_2: @member.profile_color_2.presence || @member.profile_color || "#1e1c1b",
           avatar_url: avatar_url,

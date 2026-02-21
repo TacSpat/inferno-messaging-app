@@ -10,10 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
-  # These are extensions that must be enabled in order to support this database
-  enable_extension "pg_catalog.plpgsql"
-
+ActiveRecord::Schema[8.1].define(version: 2026_02_20_233151) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -94,8 +91,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.string "name"
     t.string "nostr_group_id"
     t.string "nostr_relay_url"
+    t.json "nostr_relay_urls"
     t.boolean "nsfw"
-    t.jsonb "permissions_overrides"
+    t.json "permissions_overrides"
     t.integer "position"
     t.string "public_id", limit: 12, null: false
     t.bigint "server_id", null: false
@@ -109,6 +107,23 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.index ["nostr_group_id"], name: "index_channels_on_nostr_group_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
     t.index ["server_id"], name: "index_channels_on_server_id"
+  end
+
+  create_table "contacts", force: :cascade do |t|
+    t.string "avatar_url"
+    t.text "bio"
+    t.datetime "created_at", null: false
+    t.string "display_name"
+    t.integer "friendship_status", default: 0, null: false
+    t.datetime "last_seen_at"
+    t.string "nip05"
+    t.string "petname"
+    t.datetime "profile_fetched_at"
+    t.string "pubkey", null: false
+    t.string "relay_url"
+    t.datetime "updated_at", null: false
+    t.index ["friendship_status"], name: "index_contacts_on_friendship_status"
+    t.index ["pubkey"], name: "index_contacts_on_pubkey", unique: true
   end
 
   create_table "conversation_participants", force: :cascade do |t|
@@ -125,6 +140,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
   end
 
   create_table "conversations", force: :cascade do |t|
+    t.string "counterparty_pubkey"
     t.datetime "created_at", null: false
     t.integer "kind", default: 0, null: false
     t.string "name"
@@ -150,7 +166,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
   create_table "domain_block_snapshots", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.bigint "instance_blocklist_id", null: false
-    t.jsonb "snapshot_data", default: {}, null: false
+    t.json "snapshot_data", default: {}, null: false
     t.datetime "updated_at", null: false
     t.index ["instance_blocklist_id"], name: "index_domain_block_snapshots_on_instance_blocklist_id", unique: true
   end
@@ -160,8 +176,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.string "actor_type"
     t.datetime "created_at", null: false
     t.string "event_type", null: false
-    t.inet "ip_address"
-    t.jsonb "metadata", default: {}
+    t.string "ip_address"
+    t.json "metadata", default: {}
     t.string "remote_domain"
     t.bigint "target_id"
     t.string "target_type"
@@ -227,6 +243,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
 
   create_table "instance_configs", force: :cascade do |t|
     t.integer "attachment_retention_days", default: 0
+    t.json "blossom_server_urls"
     t.datetime "created_at", null: false
     t.string "federation_mode", default: "open", null: false
     t.text "instance_description"
@@ -300,6 +317,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.datetime "edited_at"
+    t.string "nostr_event_id"
+    t.text "nostr_event_json"
     t.bigint "parent_id"
     t.boolean "pinned"
     t.string "public_id", limit: 12, null: false
@@ -310,6 +329,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.index ["channel_id", "created_at"], name: "index_messages_on_channel_id_and_created_at"
     t.index ["channel_id"], name: "index_messages_on_channel_id"
     t.index ["conversation_id"], name: "index_messages_on_conversation_id"
+    t.index ["nostr_event_id"], name: "index_messages_on_nostr_event_id", unique: true
     t.index ["parent_id"], name: "index_messages_on_parent_id"
     t.index ["public_id"], name: "index_messages_on_public_id", unique: true
     t.index ["user_id"], name: "index_messages_on_user_id"
@@ -366,6 +386,22 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.index ["channel_id"], name: "index_nostr_event_logs_on_channel_id"
     t.index ["event_id"], name: "index_nostr_event_logs_on_event_id", unique: true
     t.index ["message_id"], name: "index_nostr_event_logs_on_message_id"
+  end
+
+  create_table "nostr_events", force: :cascade do |t|
+    t.text "content"
+    t.datetime "created_at", null: false
+    t.datetime "event_created_at", null: false
+    t.string "event_id", null: false
+    t.integer "kind", null: false
+    t.string "pubkey", null: false
+    t.string "sig", null: false
+    t.json "tags"
+    t.datetime "updated_at", null: false
+    t.index ["event_id"], name: "index_nostr_events_on_event_id", unique: true
+    t.index ["kind", "pubkey"], name: "index_nostr_events_on_kind_and_pubkey"
+    t.index ["kind"], name: "index_nostr_events_on_kind"
+    t.index ["pubkey"], name: "index_nostr_events_on_pubkey"
   end
 
   create_table "notifications", force: :cascade do |t|
@@ -488,7 +524,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.boolean "hoist", default: false, null: false
     t.boolean "mentionable"
     t.string "name"
-    t.jsonb "permissions"
+    t.json "permissions"
     t.integer "position"
     t.string "public_id", limit: 12, null: false
     t.bigint "server_id", null: false
@@ -560,8 +596,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.text "description"
     t.string "invite_code"
     t.string "name"
+    t.string "nostr_group_id"
     t.bigint "owner_id", null: false
     t.string "public_id", limit: 12, null: false
+    t.json "relay_urls"
     t.datetime "updated_at", null: false
     t.bigint "welcome_channel_id"
     t.boolean "welcome_message_enabled", default: true
@@ -632,7 +670,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
     t.string "unconfirmed_email"
     t.datetime "updated_at", null: false
     t.string "username", null: false
-    t.jsonb "voice_settings", default: {}, null: false
+    t.json "voice_settings", default: {}, null: false
     t.index ["confirmation_token"], name: "index_users_on_confirmation_token", unique: true
     t.index ["email"], name: "index_users_on_email", unique: true
     t.index ["nostr_public_key"], name: "index_users_on_nostr_public_key", unique: true
@@ -645,10 +683,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_20_210000) do
   create_table "versions", force: :cascade do |t|
     t.datetime "created_at"
     t.string "event", null: false
-    t.inet "ip_address"
+    t.string "ip_address"
     t.bigint "item_id", null: false
     t.string "item_type", null: false
-    t.jsonb "metadata"
+    t.json "metadata"
     t.text "object"
     t.string "remote_domain"
     t.string "whodunnit"

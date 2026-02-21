@@ -1,9 +1,7 @@
 class Server < ApplicationRecord
   include HasPublicId
-  include InstanceLimits
   belongs_to :owner, class_name: "User"
   belongs_to :welcome_channel, class_name: "Channel", optional: true
-  has_paper_trail
   has_many :channels, dependent: :destroy
   has_many :categories, dependent: :destroy
   has_many :server_memberships, dependent: :destroy
@@ -13,15 +11,20 @@ class Server < ApplicationRecord
   has_many :bans, dependent: :destroy
   has_many :server_emojis, dependent: :destroy
   has_many :server_stickers, dependent: :destroy
-  has_many :voice_states, dependent: :destroy
   has_one_attached :icon
   has_one_attached :banner
 
   validates :name, presence: true, length: { maximum: 100 }
-  validate :within_instance_server_limit, on: :create
-  validate :within_user_server_limit, on: :create
 
   after_create :create_defaults
+  after_create :assign_nostr_group_id
+
+  # Effective relay URLs: server-specific + global relays
+  def effective_relay_urls
+    urls = (relay_urls || [])
+    global = RelayConnection.active.pluck(:url)
+    (urls + global).uniq
+  end
 
   def send_welcome_message(user)
     return unless welcome_message_enabled?
@@ -39,7 +42,6 @@ class Server < ApplicationRecord
       system_message: true
     )
 
-    # Broadcast so it appears in real-time
     ChannelChatChannel.broadcast_to(
       channel,
       {
@@ -54,16 +56,8 @@ class Server < ApplicationRecord
 
   private
 
-  def within_instance_server_limit
-    if instance_config.server_limit_reached?
-      errors.add(:base, "This instance has reached its server limit")
-    end
-  end
-
-  def within_user_server_limit
-    if owner && instance_config.server_limit_reached_for?(owner)
-      errors.add(:base, "You have reached the maximum number of servers you can create (#{instance_config.max_servers_per_user})")
-    end
+  def assign_nostr_group_id
+    update_column(:nostr_group_id, "inferno-#{public_id}") if nostr_group_id.blank?
   end
 
   def create_defaults
@@ -74,7 +68,6 @@ class Server < ApplicationRecord
     text_category = categories.create!(name: "Text Channels", position: 0)
     general = channels.create!(name: "general", channel_type: :text, position: 0, category: text_category)
 
-    # Set welcome channel to #general
     update_column(:welcome_channel_id, general.id)
 
     membership = server_memberships.create!(user: owner, joined_at: Time.current)

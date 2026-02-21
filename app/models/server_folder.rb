@@ -3,7 +3,6 @@ class ServerFolder < ApplicationRecord
 
   belongs_to :user
   has_many :server_memberships, dependent: :nullify
-  has_many :remote_server_references, dependent: :nullify
 
   scope :ordered, -> { order(position: :asc) }
 

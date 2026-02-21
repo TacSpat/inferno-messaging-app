@@ -17,19 +17,19 @@ class ServersController < ApplicationController
   end
 
   def create
-    if params[:instance_url].present? && params[:instance_url] != "local"
-      create_remote_server
+    @server = Server.new(server_params)
+    @server.owner = current_user
+    if @server.save
+      redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
     else
-      create_local_server
+      render :new, status: :unprocessable_entity
     end
   end
 
   def edit
-    authorize @server
   end
 
   def update
-    authorize @server
     if @server.update(server_params)
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else
@@ -38,7 +38,6 @@ class ServersController < ApplicationController
   end
 
   def destroy
-    authorize @server
     @server.destroy
     redirect_to root_path, notice: "Server deleted.", status: :see_other
   end
@@ -64,7 +63,6 @@ class ServersController < ApplicationController
     items = params.require(:items)
     memberships = current_user.server_memberships.includes(:server).index_by { |m| m.server.public_id }
     folders = current_user.server_folders.index_by(&:public_id)
-    remote_refs = current_user.remote_server_references.index_by { |r| r.id.to_s }
 
     ActiveRecord::Base.transaction do
       items.each do |entry|
@@ -74,22 +72,11 @@ class ServersController < ApplicationController
           next unless folder
           folder.update_column(:position, pos)
 
-          # Update servers inside this folder (local + remote)
           (entry[:servers] || []).each do |server_entry|
-            if server_entry[:remote].present?
-              ref = remote_refs[server_entry[:id].to_s]
-              next unless ref
-              ref.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
-            else
-              membership = memberships[server_entry[:id]]
-              next unless membership
-              membership.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
-            end
+            membership = memberships[server_entry[:id]]
+            next unless membership
+            membership.update_columns(position: server_entry[:position].to_i, server_folder_id: folder.id)
           end
-        elsif entry[:type] == "remote_server"
-          ref = remote_refs[entry[:id].to_s]
-          next unless ref
-          ref.update_columns(position: pos, server_folder_id: nil)
         else
           membership = memberships[entry[:id]]
           next unless membership
@@ -102,30 +89,6 @@ class ServersController < ApplicationController
   end
 
   private
-
-  def create_local_server
-    @server = Server.new(server_params)
-    @server.owner = current_user
-    if @server.save
-      redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
-    else
-      render :new, status: :unprocessable_entity
-    end
-  end
-
-  def create_remote_server
-    ref = FederationService.create_remote_server(
-      user: current_user,
-      instance_url: params[:instance_url],
-      name: params[:server][:name],
-      description: params[:server][:description]
-    )
-    redirect_to root_path, notice: "Server \"#{ref.name}\" created on #{ref.instance_domain}!"
-  rescue FederationService::FederationError => e
-    @server = Server.new(server_params)
-    flash.now[:alert] = "Failed to create remote server: #{e.message}"
-    render :new, status: :unprocessable_entity
-  end
 
   def set_server
     @server = Server.find_by!(public_id: params[:id])

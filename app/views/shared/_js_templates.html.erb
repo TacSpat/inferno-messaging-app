@@ -140,67 +140,12 @@
   </div>
 </template>
 
-<%# Voice empty state (channel_sidebar_controller, voice_channel_controller) %>
-<template id="tpl-voice-empty-state">
-  <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
-    <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-      <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-    </div>
-    <h2 class="text-xl font-bold text-white mb-1" data-slot="channel-name"></h2>
-    <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
-  </div>
-</template>
-
-<%# Voice participant card (channel_sidebar_controller, voice_channel_controller) %>
-<template id="tpl-voice-card">
-  <div class="voice-card group">
-    <div class="voice-card-inner">
-      <div class="voice-avatar-wrapper" data-slot="avatar"></div>
-      <div class="voice-username-pill">
-        <span class="truncate" data-slot="username"></span>
-      </div>
-    </div>
-  </div>
-</template>
-
 <%# Role badge (member_roles_controller) %>
 <template id="tpl-role-badge">
   <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full">
     <span class="w-2 h-2 rounded-full mr-1" data-slot="color-dot"></span>
     <span data-slot="name"></span>
   </span>
-</template>
-
-<%# Sync overlay (instance_sync_controller) %>
-<template id="tpl-sync-overlay">
-  <div class="modal-overlay fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center backdrop-blur-sm">
-    <div class="bg-gray-800 rounded-xl border border-gray-700 p-6 max-w-sm w-full mx-4 shadow-2xl text-center">
-      <div class="flex justify-center mb-4">
-        <svg class="w-8 h-8 text-accent-light animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-      </div>
-      <h3 class="text-lg font-semibold text-white mb-1">Syncing instance data</h3>
-      <p class="text-sm text-gray-400" data-sync-status>Fetching latest profile, servers, and collections...</p>
-    </div>
-  </div>
-</template>
-
-<%# Move-to dropdown shell (voice_context_controller) %>
-<template id="tpl-move-dropdown">
-  <div class="absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop">
-    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Move to</p>
-    <div data-slot="channels"></div>
-  </div>
-</template>
-
-<%# Move-to channel item (voice_context_controller) %>
-<template id="tpl-move-channel-item">
-  <button class="flex items-center w-full px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded-sm">
-    <svg class="w-4 h-4 text-gray-500 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
-    <span class="truncate" data-slot="name"></span>
-  </button>
 </template>
 
 <%# Folder context menu (server_rail_controller) %>

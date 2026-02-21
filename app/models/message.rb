@@ -17,7 +17,7 @@ class Message < ApplicationRecord
 
   after_create_commit :create_mention_notifications
   after_create_commit :render_and_cache!
-  after_create_commit :publish_to_nostr_group, if: :in_shared_channel?
+  after_create_commit :publish_to_nostr_group, if: :in_channel?
   after_update_commit :render_and_cache!, if: :saved_change_to_content?
 
   scope :ordered, -> { order(created_at: :asc) }
@@ -309,8 +309,8 @@ end
     files.attached? || files.any?
   end
 
-  def in_shared_channel?
-    channel&.shared? && !system_message? && !user&.remote?
+  def in_channel?
+    channel.present? && !system_message? && user&.nostr_public_key.present?
   end
 
   def publish_to_nostr_group

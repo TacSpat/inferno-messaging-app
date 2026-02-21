@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Inferno
+Comment=Local-first P2P messaging
+Icon=inferno
+Exec=AppRun
+Categories=Network;InstantMessaging;
+Terminal=false

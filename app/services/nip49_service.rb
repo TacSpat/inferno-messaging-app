@@ -6,7 +6,13 @@ require "securerandom"
 # NIP-49: Encrypted private key export/import using scrypt + XChaCha20-Poly1305.
 # Produces bech32-encoded "ncryptsec" strings that users can back up safely.
 class Nip49Service
-  LIB = Fiddle.dlopen("libsodium.so.23")
+  LIB = Fiddle.dlopen(
+    case RbConfig::CONFIG["host_os"]
+    when /darwin/      then "libsodium.dylib"
+    when /mingw|mswin/ then "libsodium.dll"
+    else "libsodium.so.23"
+    end
+  )
 
   # int sodium_init(void)
   SODIUM_INIT = Fiddle::Function.new(

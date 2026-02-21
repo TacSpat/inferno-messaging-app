@@ -2,7 +2,7 @@ module HasNostrIdentity
   extend ActiveSupport::Concern
 
   included do
-    after_create :generate_nostr_keypair, unless: -> { nostr_public_key? || (respond_to?(:remote?) && remote?) }
+    after_create :generate_nostr_keypair, unless: -> { nostr_public_key? }
   end
 
   # Decrypted private key (hex)

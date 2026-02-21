@@ -5,7 +5,7 @@ class CreateRoles < ActiveRecord::Migration[8.0]
       t.string :color
       t.integer :position
       t.boolean :mentionable
-      t.jsonb :permissions
+      t.json :permissions
       t.references :server, null: false, foreign_key: true
 
       t.timestamps

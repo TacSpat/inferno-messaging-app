@@ -7,8 +7,8 @@ class CreateFederationAuditLogs < ActiveRecord::Migration[8.0]
       t.string :target_type
       t.bigint :target_id
       t.string :remote_domain
-      t.inet :ip_address
-      t.jsonb :metadata, default: {}
+      t.string :ip_address
+      t.json :metadata, default: {}
       t.datetime :created_at, null: false
     end
 

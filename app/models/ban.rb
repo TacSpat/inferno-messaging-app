@@ -1,6 +1,5 @@
 class Ban < ApplicationRecord
   belongs_to :server
-  has_paper_trail
   belongs_to :user
   belongs_to :banned_by, class_name: "User"
 

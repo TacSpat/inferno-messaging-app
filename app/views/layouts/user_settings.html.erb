@@ -38,11 +38,9 @@
             <%= link_to "Appearance", user_settings_appearance_path,
                 data: { turbo_frame: "settings-frame" },
                 class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[appearance update_appearance]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <% unless current_user.remote? %>
-              <%= link_to "Password", user_settings_password_path,
-                  data: { turbo_frame: "settings-frame" },
-                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'change_password' || action_name == 'update_password' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <% end %>
+            <%= link_to "Password", user_settings_password_path,
+                data: { turbo_frame: "settings-frame" },
+                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'change_password' || action_name == 'update_password' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
 
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">App Settings</h3>
@@ -50,9 +48,6 @@
             <%= link_to "Notifications", user_settings_notifications_path,
                 data: { turbo_frame: "settings-frame" },
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'notifications' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <%= link_to "Voice & Video", user_settings_voice_path,
-                data: { turbo_frame: "settings-frame" },
-                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'voice' || action_name == 'update_voice' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
             <%= link_to "Keybinds", user_settings_keybinds_path,
                 data: { turbo_frame: "settings-frame" },
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'keybinds' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>

@@ -47,11 +47,9 @@ class MessagesController < ApplicationController
   end
 
   def edit
-    authorize @message
   end
 
   def update
-    authorize @message
     @message.edited_at = Time.current
     # Remove specific file attachments if requested
     if params[:message][:remove_file_ids].present?
@@ -78,20 +76,17 @@ class MessagesController < ApplicationController
   end
 
   def destroy
-    authorize @message
     message_public_id = @message.public_id
 
-    # If shared channel, publish NIP-29 delete event
-    if @channel.shared?
-      event_log = NostrEventLog.find_by(message: @message)
-      if event_log
-        NostrGroupModerationJob.perform_later(
-          :delete_event,
-          channel_id: @channel.id,
-          moderator_id: current_user.id,
-          target_event_id: event_log.event_id
-        )
-      end
+    # Publish NIP-29 delete event to relays
+    event_log = NostrEventLog.find_by(message: @message)
+    if event_log
+      NostrGroupModerationJob.perform_later(
+        :delete_event,
+        channel_id: @channel.id,
+        moderator_id: current_user.id,
+        target_event_id: event_log.event_id
+      )
     end
 
     @message.destroy

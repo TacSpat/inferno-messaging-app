@@ -4,7 +4,7 @@ class NostrPublishJob < ApplicationJob
   # event_type: :profile, :contacts, or :relay_list
   def perform(user_id, event_type)
     user = User.find(user_id)
-    return if user.remote? || user.nostr_public_key.blank?
+    return if user.nostr_public_key.blank?
 
     signed_event = case event_type.to_sym
     when :profile
@@ -69,9 +69,9 @@ class NostrPublishJob < ApplicationJob
 
   # Kind 3: Contacts list
   def build_contacts_event(user)
-    tags = user.friends.where.not(nostr_public_key: nil).map do |friend|
-      relay_url = InstanceConfig.current.instance_relay_url.presence || ""
-      [ "p", friend.nostr_public_key, relay_url, friend.display_name.presence || friend.username ]
+    tags = Contact.friends.map do |contact|
+      relay_url = contact.relay_url.presence || LocalConfig.current.instance_relay_url.presence || ""
+      [ "p", contact.pubkey, relay_url, contact.petname.presence || contact.effective_display_name ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
@@ -92,7 +92,7 @@ class NostrPublishJob < ApplicationJob
     end
 
     # Also include the instance relay if configured
-    instance_relay = InstanceConfig.current.instance_relay_url
+    instance_relay = LocalConfig.current.instance_relay_url
     if instance_relay.present? && tags.none? { |t| t[1] == instance_relay }
       tags << [ "r", instance_relay, "read" ]
       tags << [ "r", instance_relay, "write" ]

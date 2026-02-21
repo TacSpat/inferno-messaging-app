@@ -13,9 +13,14 @@ module Nostr
                   .first
 
       if user
+        # Include relay URLs for discovery (NIP-05 + NIP-46)
+        relay_urls = RelayConnection.active.pluck(:url)
+        relay_map = {}
+        relay_map[user.nostr_public_key] = relay_urls if relay_urls.any?
+
         response = {
           names: { name => user.nostr_public_key },
-          relays: {}
+          relays: relay_map
         }
       else
         response = { names: {}, relays: {} }

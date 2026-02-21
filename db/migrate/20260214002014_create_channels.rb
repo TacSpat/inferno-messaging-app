@@ -6,7 +6,7 @@ class CreateChannels < ActiveRecord::Migration[8.0]
       t.integer :position
       t.integer :channel_type
       t.boolean :nsfw
-      t.jsonb :permissions_overrides
+      t.json :permissions_overrides
       t.references :server, null: false, foreign_key: true
 
       t.timestamps

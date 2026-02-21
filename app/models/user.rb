@@ -1,13 +1,7 @@
 class User < ApplicationRecord
   include HasPublicId
   include HasNostrIdentity
-  devise :database_authenticatable, :registerable,
-         :recoverable, :rememberable, :validatable,
-         :confirmable
-  include Suspendable
-
-  # Remote user detail (for shadow users)
-  belongs_to :remote_user_detail, class_name: "RemoteUser", optional: true
+  devise :database_authenticatable, :rememberable
 
   # Profile
   has_one_attached :avatar
@@ -25,13 +19,26 @@ class User < ApplicationRecord
   # Messages
   has_many :messages, dependent: :nullify
 
-  # Friends
-  has_many :friendships, dependent: :destroy
-  has_many :accepted_friendships, -> { accepted }, class_name: "Friendship"
-  has_many :friends, through: :accepted_friendships, source: :friend
-  has_many :pending_friend_requests, -> { pending }, class_name: "Friendship", foreign_key: :friend_id
-  has_many :incoming_friend_requests, -> { where(status: [:pending, :ignored]) }, class_name: "Friendship", foreign_key: :friend_id
-  has_many :sent_friend_requests, -> { pending }, class_name: "Friendship"
+  # Contacts (replaces Friendship model — all friends are external Nostr contacts)
+  def contacts
+    Contact.all
+  end
+
+  def friend_contacts
+    Contact.friends
+  end
+
+  def pending_incoming_contacts
+    Contact.pending_incoming
+  end
+
+  def pending_outgoing_contacts
+    Contact.pending_outgoing
+  end
+
+  def pending_contact_count
+    Contact.pending_incoming.count
+  end
 
   # Blocks
   has_many :blocks, foreign_key: :blocker_id, dependent: :destroy
@@ -45,32 +52,8 @@ class User < ApplicationRecord
   has_many :gif_collections, dependent: :destroy
   has_many :gif_favorites, dependent: :destroy
 
-  # Remote server references (servers on other instances)
-  has_many :remote_server_references, dependent: :destroy
-  has_many :remote_conversation_references, dependent: :destroy
-  has_many :remote_friend_references, dependent: :destroy
-
-  # Suspensions
-  has_many :user_suspensions, dependent: :destroy
-
-  # Voice
-  has_many :voice_states, dependent: :destroy
-
   # Themes
   THEMES = %w[inferno frostfire boron brimstone plasma pulsar obsidian].freeze
-
-  VOICE_SETTINGS_DEFAULTS = {
-    "input_mode" => "voice_activity",
-    "input_sensitivity" => 0.01,
-    "noise_suppression" => true,
-    "auto_join_voice" => true,
-    "ptt_key" => "`",
-    "ptt_key_code" => "Backquote"
-  }.freeze
-
-  def voice_setting(key)
-    (voice_settings || {})[key.to_s] || VOICE_SETTINGS_DEFAULTS[key.to_s]
-  end
 
   # Notifications
   has_many :notifications, dependent: :destroy
@@ -88,10 +71,6 @@ class User < ApplicationRecord
   validates :status, length: { maximum: 128 }, allow_blank: true
   validates :theme, inclusion: { in: THEMES }
 
-  # Scopes
-  scope :local, -> { where(remote: false) }
-  scope :remote_users, -> { where(remote: true) }
-
   # Online state
   enum :online_state, { offline: 0, online: 1, idle: 2, dnd: 3, invisible: 4 }
 
@@ -100,6 +79,11 @@ class User < ApplicationRecord
   before_validation :default_display_name, on: :create
   after_update_commit :broadcast_profile_update, if: :profile_changed?
   after_update_commit :publish_nostr_profile, if: :nostr_profile_changed?
+
+  # The single owner of this local instance
+  def self.owner
+    first
+  end
 
   # Full tag like "Tac#0420"
   def tag
@@ -119,51 +103,22 @@ class User < ApplicationRecord
     display_name.presence || username
   end
 
-  # Override NIP-05 for remote users: delegate to home instance identifier
-  def nip05_identifier
-    if remote? && remote_user_detail.present?
-      remote_user_detail.nip05_identifier
-    else
-      super
-    end
-  end
-
-  # For remote users, the public key lives on the RemoteUser record
-  def npub
-    if remote? && remote_user_detail&.nostr_public_key.present?
-      Nostr::Bech32.encode_npub(remote_user_detail.nostr_public_key)
-    else
-      super
-    end
-  end
-
-  def home_instance_domain
-    return nil unless remote?
-    remote_user_detail&.home_instance
-  end
-
-  # Returns remote avatar URL for remote users without a local attachment
-  def effective_avatar_url
-    return nil if avatar.attached?
-    return nil unless remote?
-    remote_user_detail&.avatar_url
-  end
-
-  # Returns remote banner URL for remote users without a local attachment
-  def effective_banner_url
-    return nil if banner.attached?
-    return nil unless remote?
-    remote_user_detail&.banner_url
-  end
-
   def blocked?(user)
     blocks.exists?(blocked_id: user.id)
   end
 
-  def friends_with?(user)
-    friendships.accepted.exists?(friend_id: user.id)
+  # Stub methods — previously delegated to RemoteUserDetail
+  def effective_avatar_url = nil
+  def effective_banner_url = nil
+
+  def friends_with_pubkey?(pubkey)
+    Contact.friends.exists?(pubkey: pubkey)
   end
 
+  def friends_with?(other_user)
+    return false unless other_user&.nostr_public_key.present?
+    friends_with_pubkey?(other_user.nostr_public_key)
+  end
 
   def role_color_for(server)
     return "#ffffff" unless server
@@ -179,22 +134,15 @@ class User < ApplicationRecord
   def ordered_rail_items
     memberships = server_memberships.includes(:server, :server_folder).ordered
     folders = server_folders.ordered.includes(server_memberships: :server)
-    remote_refs = remote_server_references.prefer_https.includes(:server_folder).ordered
 
     items = []
 
-    # Add folders with their mixed local + remote servers
+    # Add folders with their servers
     folders.each do |folder|
       folder_items = []
-
       memberships.select { |m| m.server_folder_id == folder.id }.each do |m|
         folder_items << { type: :server, server: m.server, position: m.position }
       end
-
-      remote_refs.select { |r| r.server_folder_id == folder.id }.each do |r|
-        folder_items << { type: :remote_server, remote_ref: r, position: r.position }
-      end
-
       folder_items.sort_by! { |i| i[:position] }
       items << { type: :folder, folder: folder, items: folder_items, position: folder.position }
     end
@@ -202,11 +150,6 @@ class User < ApplicationRecord
     # Add top-level servers (not in any folder)
     memberships.select { |m| m.server_folder_id.nil? }.each do |m|
       items << { type: :server, server: m.server, position: m.position }
-    end
-
-    # Add top-level remote servers (not in any folder)
-    remote_refs.select { |r| r.server_folder_id.nil? }.each do |r|
-      items << { type: :remote_server, remote_ref: r, position: r.position }
     end
 
     items.sort_by { |item| item[:position] }
@@ -219,7 +162,7 @@ class User < ApplicationRecord
   end
 
   def nostr_profile_changed?
-    !remote? && nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
+    nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
   end
 
   def publish_nostr_profile

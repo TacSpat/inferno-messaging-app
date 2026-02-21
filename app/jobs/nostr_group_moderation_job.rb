@@ -8,7 +8,7 @@ class NostrGroupModerationJob < ApplicationJob
   # action: :delete_event or :remove_user
   def perform(action, channel_id:, moderator_id:, target_event_id: nil, target_pubkey: nil, reason: nil)
     channel = Channel.find_by(id: channel_id)
-    return unless channel&.shared?
+    return unless channel
 
     moderator = User.find_by(id: moderator_id)
     return if moderator.nil? || moderator.nostr_public_key.blank?

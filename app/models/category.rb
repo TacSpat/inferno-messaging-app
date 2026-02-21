@@ -1,7 +1,6 @@
 class Category < ApplicationRecord
   include HasPublicId
   include InstanceLimits
-  has_paper_trail
   belongs_to :server
   has_many :channels, dependent: :nullify
 

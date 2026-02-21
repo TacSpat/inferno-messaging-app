@@ -3,8 +3,8 @@ class DmMessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_conversation
-  before_action :set_message, only: [ :update, :destroy ]
-  before_action :validate_file_types, only: [ :create, :update ]
+  before_action :set_message, only: [:update, :destroy]
+  before_action :validate_file_types, only: [:create, :update]
 
   def create
     participant = @conversation.conversation_participants.find_by(user: current_user)
@@ -22,8 +22,11 @@ class DmMessagesController < ApplicationController
 
     if @message.save
       @conversation.conversation_participants.update_all(accepted: true)
-      # Update sender's last_read_at
       participant.mark_read!
+
+      # Publish as NIP-44 encrypted Kind 14 event
+      publish_dm_to_nostr(@message) if current_user.nostr_public_key.present? && @conversation.counterparty_pubkey.present?
+
       ConversationChannel.broadcast_to(
         @conversation,
         {
@@ -119,5 +122,36 @@ class DmMessagesController < ApplicationController
     permitted = params.require(:message).permit(:content, :parent_id, files: [])
     permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
     permitted
+  end
+
+  def publish_dm_to_nostr(message)
+    user = message.user
+    counterparty_pubkey = @conversation.counterparty_pubkey
+
+    # Build NIP-44 encrypted Kind 14 event
+    conversation_key = Nip44Service.conversation_key(user.nostr_private_key, counterparty_pubkey)
+    encrypted_content = Nip44Service.encrypt(message.content || "", conversation_key)
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 14,
+      pubkey: user.nostr_public_key,
+      content: encrypted_content,
+      tags: [
+        ["p", counterparty_pubkey]
+      ]
+    )
+    signed = signer.sign(event)
+    signed_json = signed.to_json
+
+    message.update_columns(
+      nostr_event_id: signed[:id] || signed["id"],
+      nostr_event_json: signed_json
+    )
+
+    # Publish to all active relays
+    RelayService.publish_to_all(signed_json)
+  rescue => e
+    Rails.logger.error("Failed to publish DM as Nostr event: #{e.message}")
   end
 end

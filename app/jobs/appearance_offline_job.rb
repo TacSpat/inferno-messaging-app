@@ -21,8 +21,7 @@ class AppearanceOfflineJob < ApplicationJob
       ConversationChannel.broadcast_to(conversation, payload)
     end
 
-    user.friends.select(:id).each do |friend|
-      ActionCable.server.broadcast("user_notifications_#{friend.id}", payload)
-    end
+    # Publish offline status to Nostr relays
+    NostrPresencePublishJob.perform_later(user_id, "offline")
   end
 end

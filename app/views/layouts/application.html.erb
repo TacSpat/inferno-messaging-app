@@ -146,9 +146,9 @@
 
 
           <!-- Channels list -->
-          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder voice-context" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-auto-join-voice-value="<%= current_user.voice_setting('auto_join_voice') %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>" data-voice-context-server-id-value="<%= @server.public_id %>">
-            <%# Uncategorized channels first (text + voice) %>
-            <% @server.channels.uncategorized.where(channel_type: [:text, :voice]).ordered.each do |channel| %>
+          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>">
+            <%# Uncategorized channels first %>
+            <% @server.channels.uncategorized.where(channel_type: [:text, :announcement]).ordered.each do |channel| %>
               <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel) } %>
             <% end %>
 
@@ -157,8 +157,6 @@
               <%= render partial: "categories/category", locals: { category: category, server: @server } %>
             <% end %>
           </div>
-
-          <%= render "shared/voice_controls_bar" %>
 
           <!-- User panel (bottom) -->
           <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: #0a0a09;">

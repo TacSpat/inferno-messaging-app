@@ -25,7 +25,7 @@ class ServerSettingsController < ApplicationController
 
   def members
     @memberships = @server.server_memberships.includes(:membership_roles, :roles, user: { avatar_attachment: :blob }).order(joined_at: :desc)
-    @all_roles = @server.roles.where.not("permissions @> ?", { owner: true }.to_json).ordered
+    @all_roles = @server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).ordered
   end
 
   def update_member
@@ -98,14 +98,6 @@ class ServerSettingsController < ApplicationController
   end
 
   def create_invite
-    if InstanceConfig.current.invite_creation_blocked?
-      respond_to do |format|
-        format.html { redirect_to server_settings_invites_path(@server), alert: "Invite creation is currently disabled." }
-        format.json { render json: { error: "Invite creation disabled" }, status: :forbidden }
-      end
-      return
-    end
-
     expires_at = case params[:expires_in]
     when "30m" then 30.minutes.from_now
     when "1h"  then 1.hour.from_now

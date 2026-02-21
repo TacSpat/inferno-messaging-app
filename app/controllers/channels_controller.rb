@@ -11,21 +11,15 @@ class ChannelsController < ApplicationController
     @current_membership = current_user.server_memberships.find_by(server: @server)
     @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
 
-    if @channel.voice?
-      @voice_states = @channel.voice_states.includes(user: { avatar_attachment: :blob })
-      @current_voice_state = current_user.voice_states.find_by(server: @server)
-      render :show_voice
-    else
-      @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
-                          .ordered.last(50)
-      @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
-      @message = Message.new
-      current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
-      ChannelRead.upsert(
-        { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
-        unique_by: [ :user_id, :channel_id ]
-      )
-    end
+    @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
+                        .ordered.last(50)
+    @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
+    @message = Message.new
+    current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
+    ChannelRead.upsert(
+      { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
+      unique_by: [ :user_id, :channel_id ]
+    )
   end
 
   def older_messages
@@ -94,13 +88,11 @@ class ChannelsController < ApplicationController
   end
 
   def new
-    authorize @server, :manage_channels?
     category = params[:category_id].present? ? @server.categories.find_by(public_id: params[:category_id]) : nil
     @channel = @server.channels.new(category: category)
   end
 
   def create
-    authorize @server, :manage_channels?
     @channel = @server.channels.new(channel_params)
     if params[:channel] && params[:channel][:category_id].present?
       @channel.category = @server.categories.find_by(public_id: params[:channel].delete(:category_id))
@@ -119,11 +111,9 @@ class ChannelsController < ApplicationController
   end
 
   def edit
-    authorize @server, :manage_channels?
   end
 
   def update
-    authorize @server, :manage_channels?
     if params[:channel] && params[:channel][:category_id].present?
       @channel.category = @server.categories.find_by(public_id: params[:channel].delete(:category_id))
     end
@@ -141,7 +131,6 @@ class ChannelsController < ApplicationController
   end
 
   def destroy
-    authorize @server, :manage_channels?
     channel_public_id = @channel.public_id
     @channel.destroy
     ServerChannel.broadcast_to(@server, {

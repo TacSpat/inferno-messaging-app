@@ -1,8 +1,6 @@
 class Invite < ApplicationRecord
   belongs_to :server
   belongs_to :creator, class_name: "User"
-  has_paper_trail
-
   validates :code, presence: true, uniqueness: true
 
   before_validation :generate_code, on: :create

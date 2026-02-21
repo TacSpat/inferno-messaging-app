@@ -1,14 +1,11 @@
 class AppearanceChannel < ApplicationCable::Channel
   def subscribed
-    # Small delay so other subscriptions establish first
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current)
-    # Broadcast after a tick so ServerChannel subscriptions are ready
     broadcast_presence_later("online")
+    publish_nostr_status("online")
   end
 
   def unsubscribed
-    # Wait long enough for a client ping cycle (30s) to distinguish
-    # a brief WebSocket drop from actually leaving the page
     AppearanceOfflineJob.set(wait: 45.seconds).perform_later(current_user.id)
   end
 
@@ -20,11 +17,13 @@ class AppearanceChannel < ApplicationCable::Channel
   def away
     current_user.update_columns(online_state: User.online_states[:idle], online_at: Time.current)
     broadcast_presence("idle")
+    publish_nostr_status("idle")
   end
 
   def back
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current)
     broadcast_presence("online")
+    publish_nostr_status("online")
   end
 
   private
@@ -46,10 +45,11 @@ class AppearanceChannel < ApplicationCable::Channel
     current_user.conversations.each do |conversation|
       ConversationChannel.broadcast_to(conversation, payload)
     end
+  end
 
-    # Push to friends' notification streams so DM sidebar dots update
-    current_user.friends.select(:id).each do |friend|
-      ActionCable.server.broadcast("user_notifications_#{friend.id}", payload)
-    end
+  # Publish NIP-38 Kind 30315 user status event to relays
+  def publish_nostr_status(state)
+    return unless current_user.nostr_public_key.present?
+    NostrPresencePublishJob.perform_later(current_user.id, state)
   end
 end

@@ -33,9 +33,6 @@
         <span class="ml-2 font-medium text-sm truncate" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
           <%= author ? author.display_name_for(server) : "Deleted User" %>
         </span>
-        <% if author&.remote? %>
-          <span class="ml-1 text-[10px] text-accent-light/70 bg-accent/10 px-1 rounded"><%= author.home_instance_domain %></span>
-        <% end %>
         <span class="ml-2 text-xs text-gray-500 shrink-0">
           <%= message.created_at.strftime("%l:%M %p").strip %>
         </span>
@@ -75,9 +72,6 @@
           <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
             <%= author ? author.display_name_for(server) : "Deleted User" %>
           </span>
-          <% if author&.remote? %>
-            <span class="ml-1 text-[10px] text-accent-light/70 bg-accent/10 px-1 rounded"><%= author.home_instance_domain %></span>
-          <% end %>
           <span class="ml-2 text-xs text-gray-500">
             <%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %>
           </span>

@@ -1,0 +1,173 @@
+name: Package Desktop Apps
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  RUBY_VERSION: '3.4.2'
+  RAILS_ENV: production
+
+jobs:
+  # ─── Linux AppImage ──────────────────────────────────────────
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev libsodium23 libfuse2
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          bundle-without: development:test
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Tebako
+        run: gem install tebako
+
+      - name: Precompile assets
+        run: |
+          bun install --frozen-lockfile
+          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+
+      - name: Build Tebako binary
+        run: |
+          rm -rf node_modules .git tmp/cache log
+          tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Build AppImage
+        run: packaging/linux/build_appimage.sh ./inferno
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inferno-Linux-AppImage
+          path: Inferno-x86_64.AppImage
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Inferno-x86_64.AppImage
+
+  # ─── macOS .app bundle ──────────────────────────────────────
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: brew install libsodium
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          bundle-without: development:test
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Tebako
+        run: gem install tebako
+
+      - name: Precompile assets
+        run: |
+          bun install --frozen-lockfile
+          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+
+      - name: Build Tebako binary
+        run: |
+          rm -rf node_modules .git tmp/cache log
+          tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Build macOS .app bundle
+        run: packaging/macos/build_macos.sh ./inferno
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inferno-macOS
+          path: Inferno-macos.zip
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Inferno-macos.zip
+
+  # ─── Windows installer ──────────────────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install libsodium
+        shell: pwsh
+        run: |
+          $url = "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable-msvc.zip"
+          Invoke-WebRequest -Uri $url -OutFile libsodium.zip
+          Expand-Archive libsodium.zip -DestinationPath libsodium
+          Copy-Item "libsodium\x64\Release\v143\dynamic\libsodium.dll" -Destination "packaging\windows\libsodium.dll"
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          bundle-without: development:test
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install Tebako
+        run: gem install tebako
+
+      - name: Precompile assets
+        shell: bash
+        run: |
+          bun install --frozen-lockfile
+          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+
+      - name: Build Tebako binary
+        shell: bash
+        run: |
+          rm -rf node_modules .git tmp/cache log
+          tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Prepare installer files
+        shell: bash
+        run: |
+          cp inferno.exe packaging/windows/inferno.exe
+
+      - name: Build Windows installer
+        shell: cmd
+        run: |
+          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" packaging\windows\inferno.iss
+        # Inno Setup is pre-installed on windows-latest runners
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inferno-Windows-Setup
+          path: packaging/windows/Inferno-Setup.exe
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: packaging/windows/Inferno-Setup.exe

@@ -4,8 +4,8 @@ source "https://rubygems.org"
 gem "rails", "~> 8.1.2"
 # The modern asset pipeline for Rails [https://github.com/rails/propshaft]
 gem "propshaft"
-# Use postgresql as the database for Active Record
-gem "pg", "~> 1.1"
+# Use SQLite as the database for Active Record
+gem "sqlite3", ">= 2.1"
 # Use the Puma web server [https://github.com/puma/puma]
 gem "puma", ">= 5.0"
 # Bundle and transpile JavaScript [https://github.com/rails/jsbundling-rails]
@@ -31,7 +31,8 @@ gem "solid_queue"
 gem "solid_cable"
 
 # Reduces boot times through caching; required in config/boot.rb
-gem "bootsnap", require: false
+# Moved to dev/test — incompatible with Tebako's read-only filesystem in production
+# gem "bootsnap", require: false
 
 # Deploy this application anywhere as a Docker container [https://kamal-deploy.org]
 gem "kamal", require: false
@@ -43,6 +44,8 @@ gem "thruster", require: false
 # gem "image_processing", "~> 1.2"
 
 group :development, :test do
+  # Reduces boot times through caching; incompatible with Tebako in production
+  gem "bootsnap", require: false
   # Load .env files into ENV
   gem "dotenv-rails"
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
@@ -75,22 +78,15 @@ group :test do
 end
 
 gem "devise", "~> 5.0"
-gem "sidekiq", "~> 8.1"
-gem "pundit", "~> 2.5"
 gem "redcarpet", "~> 3.6"
 gem "rouge", "~> 4.7"
-gem "pg_search", "~> 2.3"
 gem "image_processing", "~> 1.14"
-gem "redis", "~> 5.4"
 
 group :development do
   gem "letter_opener", "~> 1.10"
   gem "letter_opener_web", "~> 3.0"
 end
 
-gem "paper_trail", "~> 17.0"
-
 gem "nostr_ruby", "~> 0.2"
 gem "rack-attack", "~> 6.7"
 gem "fiddle"
-gem "livekit-server-sdk", "~> 0.8"

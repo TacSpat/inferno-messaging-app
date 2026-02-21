@@ -1,55 +1,33 @@
+<% if User.none? %>
+  <% redirect_to setup_path and return %>
+<% end %>
+
 <div class="flex items-center justify-center min-h-screen bg-gray-900">
   <div class="w-full max-w-md bg-gray-800 rounded-lg shadow-xl p-8">
-    <% federation_context = params[:challenge].present? || params[:requesting_domain].present? || session[:post_auth_redirect].present? %>
-
     <div class="text-center mb-6">
       <h1 class="text-3xl font-bold text-white">Inferno</h1>
-      <% if federation_context %>
-        <p class="text-gray-400 mt-1">Sign in to continue to the remote instance</p>
-      <% else %>
-        <p class="text-gray-400 mt-1">Welcome back!</p>
-      <% end %>
+      <p class="text-gray-400 mt-1">Welcome back, <%= User.owner&.display_name || "owner" %>!</p>
     </div>
 
-    <% if federation_context %>
-      <div class="bg-gray-900 rounded-lg p-3 mb-5 flex items-center gap-3">
-        <div class="w-8 h-8 bg-gray-700 rounded-lg flex items-center justify-center shrink-0">
-          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>
-        </div>
-        <p class="text-sm text-gray-300">
-          Sign into your <strong class="text-white">home instance</strong> to verify your identity and continue.
-        </p>
-      </div>
-    <% end %>
-
     <%= form_for(resource, as: resource_name, url: session_path(resource_name), html: { class: "space-y-4" }) do |f| %>
-      <div>
-        <%= f.label :email, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.email_field :email, autofocus: true, autocomplete: "email", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
-      </div>
+      <!-- Hidden email field since we only have one user -->
+      <%= f.hidden_field :email, value: User.owner&.email %>
 
       <div>
-        <%= f.label :password, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.password_field :password, autocomplete: "current-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
+        <%= f.label :password, "Passphrase", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+        <%= f.password_field :password, autofocus: true, autocomplete: "current-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
       </div>
 
-      <div class="flex items-center justify-between">
+      <div class="flex items-center">
         <label class="flex items-center">
           <%= f.check_box :remember_me, class: "rounded bg-gray-900 border-gray-700 text-accent focus:ring-accent" %>
           <span class="ml-2 text-sm text-gray-400">Remember me</span>
         </label>
-        <%= link_to "Forgot password?", new_password_path(resource_name), class: "text-sm text-accent-light hover:underline" %>
       </div>
 
       <div>
-        <%= f.submit "Log In", class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+        <%= f.submit "Unlock", class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
       </div>
-    <% end %>
-
-    <% unless federation_context %>
-      <p class="text-center text-sm text-gray-400 mt-4">
-        Need an account? <%= link_to "Register", new_registration_path(resource_name), class: "text-accent-light hover:underline" %>
-      </p>
     <% end %>
   </div>
 </div>

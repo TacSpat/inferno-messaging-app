@@ -3,7 +3,7 @@
   <% home_active = !local_assigns[:active_server] %>
   <%
     home_badge_count = 0
-    home_badge_count += current_user.pending_friend_requests.count
+    home_badge_count += Contact.pending_incoming.count
     current_user.conversation_participants.includes(:conversation).each do |cp|
       home_badge_count += cp.unread_count
     end
@@ -27,8 +27,6 @@
     <% current_user.ordered_rail_items.each do |item| %>
       <% if item[:type] == :folder %>
         <%= render partial: "shared/server_folder", locals: { item: item, active_server: local_assigns[:active_server] } %>
-      <% elsif item[:type] == :remote_server %>
-        <%= render partial: "shared/remote_server_icon", locals: { ref: item[:remote_ref], in_folder: false } %>
       <% else %>
         <div data-server-id="<%= item[:server].public_id %>" data-rail-item="server">
           <%= render partial: "servers/server_icon", locals: { server: item[:server], active: local_assigns[:active_server] == item[:server] } %>

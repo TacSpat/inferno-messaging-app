@@ -2,7 +2,6 @@ class Role < ApplicationRecord
   include HasPublicId
   include InstanceLimits
   belongs_to :server
-  has_paper_trail
   has_many :membership_roles, dependent: :destroy
   has_many :server_memberships, through: :membership_roles
 
