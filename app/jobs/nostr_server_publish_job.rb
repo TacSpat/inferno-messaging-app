@@ -195,7 +195,7 @@ class NostrServerPublishJob < ApplicationJob
       return tags
     end
 
-    # Find the membership for this pubkey
+    # Find the membership for this pubkey (local user first, then remote member)
     member_user = User.find_by(nostr_public_key: target_pubkey)
     if member_user
       membership = @server.server_memberships.find_by(user: member_user)
@@ -204,6 +204,14 @@ class NostrServerPublishJob < ApplicationJob
         tags << (["roles"] + role_ids)
         tags << ["nickname", membership.nickname || ""]
         tags << ["joined_at", (membership.joined_at || membership.created_at).to_i.to_s]
+      end
+    else
+      remote = @server.remote_members.find_by(pubkey: target_pubkey)
+      if remote
+        role_ids = remote.roles.pluck(:public_id)
+        tags << (["roles"] + role_ids)
+        tags << ["nickname", remote.nickname || ""]
+        tags << ["joined_at", (remote.joined_at || remote.created_at).to_i.to_s]
       end
     end
 

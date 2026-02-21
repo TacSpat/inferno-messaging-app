@@ -48,8 +48,13 @@
           <p class="text-xs text-white/80"><%= member.bio %></p>
         </div>
       <% end %>
-      <% membership = server.server_memberships.find_by(user: member) %>
-      <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+      <% if member.remote? %>
+        <% membership = member %>
+        <% visible_roles = member.roles.where.not(name: "@everyone").ordered %>
+      <% else %>
+        <% membership = server.server_memberships.find_by(user: member) %>
+        <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+      <% end %>
       <% if visible_roles.any? %>
         <div class="border-t border-white/10 pt-2">
           <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>

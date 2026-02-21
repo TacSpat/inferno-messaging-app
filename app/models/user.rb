@@ -111,6 +111,10 @@ class User < ApplicationRecord
   def effective_avatar_url = nil
   def effective_banner_url = nil
 
+  def remote?
+    false
+  end
+
   def friends_with_pubkey?(pubkey)
     Contact.friends.exists?(pubkey: pubkey)
   end

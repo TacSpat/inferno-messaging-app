@@ -1221,13 +1221,25 @@ export default class extends Controller {
     } else if (conversationId) {
       url = `/conversations/${conversationId}/dm_messages/${messageId}`
     } else {
+      console.error("[deleteMessage] No channelId or conversationId found")
       return
     }
 
-    await fetch(url, {
-      method: "DELETE",
-      headers: { "X-CSRF-Token": csrf }
-    })
+    try {
+      const res = await fetch(url, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": csrf }
+      })
+      if (res.ok) {
+        // Also remove from DOM immediately as a fallback
+        const el = document.getElementById(`message_${messageId}`)
+        if (el) el.remove()
+      } else {
+        console.error(`[deleteMessage] Failed: ${res.status} ${res.statusText}`)
+      }
+    } catch (err) {
+      console.error("[deleteMessage] Error:", err)
+    }
   }
 
     renderContextMenu(x, y, items) {
@@ -1258,9 +1270,13 @@ export default class extends Controller {
       btn.innerHTML = `${item.icon}${item.label}${item.disabled ? '<span class="ml-auto text-xs text-gray-600">Soon</span>' : ''}`
 
       if (!item.disabled && item.action) {
-        btn.addEventListener("click", () => {
-          item.action()
+        btn.addEventListener("click", async () => {
           this.closeMenu()
+          try {
+            await item.action()
+          } catch (err) {
+            console.error("[contextMenu] Action error:", err)
+          }
         })
       }
       menu.appendChild(btn)

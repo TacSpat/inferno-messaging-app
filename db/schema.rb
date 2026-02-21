@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_015127) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_21_101008) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -478,6 +478,42 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_015127) do
     t.index ["user_id"], name: "index_remote_friend_references_on_user_id"
   end
 
+  create_table "remote_members", force: :cascade do |t|
+    t.string "avatar_url"
+    t.string "banner_url"
+    t.text "bio"
+    t.datetime "created_at", null: false
+    t.string "display_name"
+    t.datetime "joined_at"
+    t.datetime "last_seen_at"
+    t.string "nickname"
+    t.string "nip05"
+    t.integer "online_state", default: 0, null: false
+    t.string "profile_color"
+    t.string "profile_color_2"
+    t.datetime "profile_fetched_at"
+    t.string "pubkey", null: false
+    t.string "public_id"
+    t.integer "server_id", null: false
+    t.string "status"
+    t.string "status_emoji"
+    t.datetime "updated_at", null: false
+    t.string "username"
+    t.index ["public_id"], name: "index_remote_members_on_public_id", unique: true
+    t.index ["server_id", "pubkey"], name: "index_remote_members_on_server_id_and_pubkey", unique: true
+    t.index ["server_id"], name: "index_remote_members_on_server_id"
+  end
+
+  create_table "remote_membership_roles", force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.integer "remote_member_id", null: false
+    t.integer "role_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["remote_member_id", "role_id"], name: "index_remote_membership_roles_on_remote_member_id_and_role_id", unique: true
+    t.index ["remote_member_id"], name: "index_remote_membership_roles_on_remote_member_id"
+    t.index ["role_id"], name: "index_remote_membership_roles_on_role_id"
+  end
+
   create_table "remote_server_references", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "icon_url"
@@ -762,6 +798,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_015127) do
   add_foreign_key "reactions", "users"
   add_foreign_key "remote_conversation_references", "users"
   add_foreign_key "remote_friend_references", "users"
+  add_foreign_key "remote_members", "servers"
+  add_foreign_key "remote_membership_roles", "remote_members"
+  add_foreign_key "remote_membership_roles", "roles"
   add_foreign_key "remote_server_references", "server_folders"
   add_foreign_key "remote_server_references", "users"
   add_foreign_key "roles", "servers"

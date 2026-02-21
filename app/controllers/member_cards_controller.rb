@@ -18,6 +18,7 @@ class MemberCardsController < ApplicationController
   end
 
   def set_member
-    @member = @server.members.includes(avatar_attachment: :blob, banner_attachment: :blob).find_by!(public_id: params[:id])
+    @member = @server.members.includes(avatar_attachment: :blob, banner_attachment: :blob).find_by(public_id: params[:id])
+    @member ||= @server.remote_members.find_by!(public_id: params[:id])
   end
 end

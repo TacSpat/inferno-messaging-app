@@ -11,6 +11,7 @@ class Server < ApplicationRecord
   has_many :bans, dependent: :destroy
   has_many :server_emojis, dependent: :destroy
   has_many :server_stickers, dependent: :destroy
+  has_many :remote_members, dependent: :destroy
   has_one_attached :icon
   has_one_attached :banner
 
@@ -18,6 +19,19 @@ class Server < ApplicationRecord
 
   after_create :create_defaults
   after_create :assign_nostr_group_id
+
+  # All members: local users + remote members (excluding remotes whose pubkey matches a local user)
+  def all_members
+    local = members.includes(server_memberships: :roles, avatar_attachment: :blob)
+    local_pubkeys = local.filter_map(&:nostr_public_key)
+    remote = remote_members.includes(:roles)
+    remote = remote.where.not(pubkey: local_pubkeys) if local_pubkeys.any?
+    local.to_a + remote.to_a
+  end
+
+  def total_member_count
+    members.count + remote_members.where.not(pubkey: User.where.not(nostr_public_key: nil).select(:nostr_public_key)).count
+  end
 
   # Effective relay URLs: server-specific + global relays
   def effective_relay_urls

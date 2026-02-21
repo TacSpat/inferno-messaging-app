@@ -76,6 +76,11 @@ class NostrServerSyncService
     sync_roles
   end
 
+  # Public: re-sync just members (idempotent, safe to call anytime)
+  def resync_members
+    sync_members
+  end
+
   private
 
   def sync_metadata
@@ -147,7 +152,9 @@ class NostrServerSyncService
     count = 0
     grouped.each_value do |evts|
       event = evts.max_by { |e| e["created_at"].to_i }
-      next if NostrEventLog.already_processed?(event["id"])
+      # Skip already_processed? check — member processing is idempotent
+      # (uses find_or_initialize_by) and we need to backfill RemoteMembers
+      # for events logged before the RemoteMember feature existed.
       process_via_manager(:process_server_member, event)
       count += 1
     end

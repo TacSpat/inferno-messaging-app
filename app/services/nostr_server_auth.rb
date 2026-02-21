@@ -12,10 +12,11 @@ class NostrServerAuth
     # Owner is always authorized
     return true if server.owner&.nostr_public_key == signer_pubkey
 
-    # Find the member by pubkey
+    # Find the member by pubkey (local first, then remote)
     membership = server.server_memberships
                        .joins(:user)
                        .find_by(users: { nostr_public_key: signer_pubkey })
+    membership ||= server.remote_members.find_by(pubkey: signer_pubkey)
     return false unless membership
 
     # Admin has almost all permissions

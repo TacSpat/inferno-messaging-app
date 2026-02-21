@@ -89,6 +89,15 @@ class MessagesController < ApplicationController
   end
 
   def destroy
+    # Authorize: author can delete own messages, admins/manage_messages can delete any
+    unless @message.user == current_user
+      membership = current_user.server_memberships.find_by(server: @channel.server)
+      unless membership&.has_permission?("manage_messages")
+        head :forbidden
+        return
+      end
+    end
+
     message_public_id = @message.public_id
 
     # Publish NIP-29 delete event to relays
@@ -99,6 +108,22 @@ class MessagesController < ApplicationController
         channel_id: @channel.id,
         moderator_id: current_user.id,
         target_event_id: event_log.event_id
+      )
+    end
+
+    # Ensure the Nostr event is logged so the history fetcher doesn't re-import it.
+    # Message#destroy nullifies the log's message_id but keeps the event_id entry,
+    # which makes NostrEventLog.already_processed? return true. If no log exists
+    # (e.g. Thread.new publish failed silently), create one now.
+    if @message.nostr_event_id.present? && !NostrEventLog.exists?(event_id: @message.nostr_event_id)
+      NostrEventLog.create(
+        event_id: @message.nostr_event_id,
+        kind: 9,
+        pubkey: @message.nostr_author_pubkey || @message.user&.nostr_public_key || "unknown",
+        channel: @channel,
+        message: @message,
+        direction: "inbound",
+        event_created_at: @message.created_at
       )
     end
 

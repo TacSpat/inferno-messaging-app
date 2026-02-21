@@ -53,6 +53,8 @@ class NostrHistoryFetcher
     events.each do |event|
       next if NostrEventLog.already_processed?(event["id"])
       next if event["pubkey"] == owner_pubkey # Skip our own
+      # Skip if a message with this event already exists (duplicate guard)
+      next if channel.messages.exists?(nostr_event_id: event["id"])
 
       sender_pubkey = event["pubkey"]
       contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)

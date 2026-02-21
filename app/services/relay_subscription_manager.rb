@@ -195,7 +195,8 @@ class RelaySubscriptionManager
     # and DM counterparties (not just accepted friends)
     contact_pubkeys = Contact.pluck(:pubkey)
     conversation_pubkeys = Conversation.where.not(counterparty_pubkey: nil).pluck(:counterparty_pubkey)
-    all_pubkeys = (contact_pubkeys + conversation_pubkeys).uniq.compact_blank
+    remote_member_pubkeys = RemoteMember.distinct.pluck(:pubkey)
+    all_pubkeys = (contact_pubkeys + conversation_pubkeys + remote_member_pubkeys).uniq.compact_blank
     all_pubkeys -= [owner.nostr_public_key] # Don't subscribe to our own profile/presence
 
     if all_pubkeys.any?
@@ -777,13 +778,29 @@ class RelaySubscriptionManager
 
   def process_profile_update(event)
     pubkey = event["pubkey"]
-    contact = Contact.find_by(pubkey: pubkey)
-    return unless contact
-
     metadata = JSON.parse(event["content"]) rescue nil
     return unless metadata
 
-    contact.update_from_metadata(metadata)
+    contact = Contact.find_by(pubkey: pubkey)
+    contact&.update_from_metadata(metadata)
+
+    # Also update any remote members with this pubkey and broadcast changes
+    RemoteMember.where(pubkey: pubkey).includes(:server).find_each do |rm|
+      rm.update_from_metadata(metadata)
+      ServerChannel.broadcast_to(rm.server, {
+        type: "member_update",
+        user_id: rm.public_id,
+        html: ApplicationController.render(
+          partial: "servers/member_item",
+          locals: { member: rm, server: rm.server }
+        ),
+        display_name: rm.display_name_for,
+        username: rm.username,
+        tag: rm.tag,
+        role_color: rm.role_color_for
+      })
+    end
+
     Rails.logger.debug("[RelaySubscriptionManager] Profile update for #{pubkey[0..15]}...")
   end
 
@@ -791,31 +808,54 @@ class RelaySubscriptionManager
   def process_presence_event(event)
     pubkey = event["pubkey"]
     contact = Contact.find_by(pubkey: pubkey)
-    return unless contact
 
     status_tag = (event["tags"] || []).find { |t| t[0] == "status" }
     state = status_tag&.dig(1) || event["content"]
     return if state.blank?
 
-    if state == "offline"
-      contact.update_columns(last_seen_at: nil)
-    else
-      contact.update_columns(last_seen_at: Time.current)
+    if contact
+      if state == "offline"
+        contact.update_columns(last_seen_at: nil)
+      else
+        contact.update_columns(last_seen_at: Time.current)
+      end
+
+      # Broadcast presence change to owner's UI
+      owner = User.owner
+      if owner
+        ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+          type: "presence",
+          user_id: "contact-#{contact.id}",
+          pubkey: pubkey,
+          name: contact.effective_display_name,
+          state: state == "offline" ? "offline" : "online"
+        })
+      end
+
+      Rails.logger.debug("[RelaySubscriptionManager] Presence: #{contact.effective_display_name} is #{state}")
     end
 
-    # Broadcast presence change to owner's UI
-    owner = User.owner
-    if owner
-      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
-        type: "presence",
-        user_id: "contact-#{contact.id}",
-        pubkey: pubkey,
-        name: contact.effective_display_name,
-        state: state == "offline" ? "offline" : "online"
+    # Update remote members with this pubkey across all servers
+    online_state = state == "offline" ? :offline : :online
+    remote_members = RemoteMember.where(pubkey: pubkey)
+    remote_members.find_each do |rm|
+      rm.update_columns(
+        online_state: RemoteMember.online_states[online_state],
+        last_seen_at: state == "offline" ? nil : Time.current
+      )
+      ServerChannel.broadcast_to(rm.server, {
+        type: "member_update",
+        user_id: rm.public_id,
+        html: ApplicationController.render(
+          partial: "servers/member_item",
+          locals: { member: rm.reload, server: rm.server }
+        ),
+        display_name: rm.display_name_for,
+        username: rm.username,
+        tag: rm.tag,
+        role_color: rm.role_color_for
       })
     end
-
-    Rails.logger.debug("[RelaySubscriptionManager] Presence: #{contact.effective_display_name} is #{state}")
   end
 
   # ── Server State Event Handlers ──────────────────────────────────────
@@ -1059,6 +1099,17 @@ class RelaySubscriptionManager
           user_id: member_user.public_id,
           member_count: server.members.count
         })
+      else
+        remote = server.remote_members.find_by(pubkey: member_pubkey)
+        if remote
+          remote_public_id = remote.public_id
+          remote.destroy
+          ServerChannel.broadcast_to(server, {
+            type: "member_leave",
+            user_id: remote_public_id,
+            member_count: server.total_member_count
+          })
+        end
       end
       log_server_event(event)
       Rails.logger.info("[RelaySubscriptionManager] Member removed from #{server.nostr_group_id}: #{member_pubkey[0..15]}")
@@ -1097,6 +1148,75 @@ class RelaySubscriptionManager
           ),
           user_id: member_user.public_id,
           member_count: server.members.count
+        })
+      end
+    else
+      # Remote member — no local User record
+      remote = server.remote_members.find_or_initialize_by(pubkey: member_pubkey)
+
+      # Update nickname
+      nickname_tag = tags.find { |t| t[0] == "nickname" }
+      remote.nickname = nickname_tag[1].presence if nickname_tag
+
+      # Update joined_at
+      joined_tag = tags.find { |t| t[0] == "joined_at" }
+      remote.joined_at = Time.at(joined_tag[1].to_i) if joined_tag&.dig(1).present? && joined_tag[1] != "0"
+
+      is_new = remote.new_record?
+      remote.save! if remote.changed? || is_new
+
+      # Sync roles
+      roles_tag = tags.find { |t| t[0] == "roles" }
+      if roles_tag
+        role_public_ids = roles_tag[1..]
+        roles = server.roles.where(public_id: role_public_ids)
+        remote.roles = roles
+      end
+
+      # Fetch Kind 0 profile if stale
+      if remote.profile_stale?
+        fetch_server = server
+        Thread.new do
+          begin
+            contact = NostrProfileResolver.resolve(member_pubkey)
+            if contact&.persisted?
+              remote.update_from_metadata({
+                "display_name" => contact.display_name,
+                "name" => contact.display_name,
+                "picture" => contact.avatar_url,
+                "banner" => contact.respond_to?(:banner_url) ? contact.banner_url : nil,
+                "about" => contact.bio,
+                "nip05" => contact.nip05
+              })
+              # Broadcast updated profile to sidebar
+              ServerChannel.broadcast_to(fetch_server, {
+                type: "member_update",
+                user_id: remote.public_id,
+                html: ApplicationController.render(
+                  partial: "servers/member_item",
+                  locals: { member: remote.reload, server: fetch_server }
+                ),
+                display_name: remote.display_name_for,
+                username: remote.username,
+                tag: remote.tag,
+                role_color: remote.role_color_for
+              })
+            end
+          rescue => e
+            Rails.logger.error("[RelaySubscriptionManager] Profile fetch failed for remote member #{member_pubkey[0..15]}: #{e.message}")
+          end
+        end
+      end
+
+      if is_new
+        ServerChannel.broadcast_to(server, {
+          type: "member_join",
+          html: ApplicationController.render(
+            partial: "servers/member_item",
+            locals: { member: remote, server: server }
+          ),
+          user_id: remote.public_id,
+          member_count: server.total_member_count
         })
       end
     end

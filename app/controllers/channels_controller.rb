@@ -9,7 +9,7 @@ class ChannelsController < ApplicationController
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current) if current_user.offline?
 
     @current_membership = current_user.server_memberships.find_by(server: @server)
-    @members = @server.members.includes(server_memberships: :roles, avatar_attachment: :blob)
+    @members = @server.all_members
 
     @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
                         .ordered.last(50)
@@ -24,6 +24,12 @@ class ChannelsController < ApplicationController
     # Fetch any missed messages from relays in background
     channel = @channel
     Thread.new { NostrHistoryFetcher.fetch_channel(channel) } if channel.nostr_group_id.present?
+
+    # Sync remote members from relays in background
+    server = @server
+    if server.nostr_group_id.present?
+      Thread.new { NostrServerSyncService.new(server.nostr_group_id).resync_members }
+    end
   end
 
   def older_messages
