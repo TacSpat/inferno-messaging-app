@@ -1,3 +1,5 @@
+<% visible_channels = category.channels.ordered.select { |ch| ch.visible_to?(current_user) } %>
+<% return if visible_channels.empty? %>
 <div data-controller="category-collapse" data-category-collapse-id-value="<%= category.public_id %>" data-category-id="<%= category.public_id %>" class="mb-1">
   <div class="flex items-center justify-between px-2 pt-4 pb-1 cursor-pointer group"
        data-action="click->category-collapse#toggle">
@@ -15,8 +17,9 @@
     <% end %>
   </div>
   <div data-category-collapse-target="channels" class="space-y-0.5">
-    <% category.channels.ordered.each do |channel| %>
-      <%= render partial: "channels/channel_item", locals: { channel: channel, server: server, active: (defined?(@channel) && channel == @channel) } %>
+    <% visible_channels.each do |channel| %>
+      <% channel_access = channel.visible_to?(current_user) %>
+      <%= render partial: "channels/channel_item", locals: { channel: channel, server: server, active: (defined?(@channel) && channel == @channel), read_only: channel_access == :read_only } %>
     <% end %>
   </div>
 </div>

@@ -26,10 +26,12 @@
           </button>
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2"><%= @server.name %></h3>
 
+          <% if @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
           <div class="space-y-0.5 mb-4">
             <%= link_to "Overview", server_settings_overview_path(@server),
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'overview' || action_name == 'update_overview' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
+          <% end %>
 
           <% show_emoji_link = @current_membership&.has_permission?("create_emojis") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
           <% show_sticker_link = @current_membership&.has_permission?("create_stickers") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
@@ -47,25 +49,42 @@
           </div>
           <% end %>
 
+          <% show_members = @current_membership&.has_permission?("manage_server") || @current_membership&.has_permission?("manage_roles") || @current_membership&.admin? %>
+          <% show_roles = @current_membership&.has_permission?("manage_server") || @current_membership&.has_permission?("manage_roles") || @current_membership&.admin? %>
+          <% show_invites = @current_membership&.has_permission?("create_invite") || @current_membership&.has_permission?("manage_invites") %>
+          <% if show_members || show_roles || show_invites %>
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">People</h3>
           <div class="space-y-0.5 mb-4">
-            <%= link_to "Members", server_settings_members_path(@server),
-                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'members' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <%= link_to "Roles", server_settings_roles_path(@server),
-                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'roles' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <% if @current_membership&.has_permission?("create_invite") || @current_membership&.has_permission?("manage_invites") %>
+            <% if show_members %>
+              <%= link_to "Members", server_settings_members_path(@server),
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'members' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
+            <% if show_roles %>
+              <%= link_to "Roles", server_settings_roles_path(@server),
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'roles' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
+            <% if show_invites %>
               <%= link_to "Invites", server_settings_invites_path(@server),
                   class: "block px-2 py-1.5 rounded text-sm #{action_name == 'invites' || action_name == 'create_invite' || action_name == 'destroy_invite' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
             <% end %>
           </div>
+          <% end %>
 
+          <% show_audit_log = @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
+          <% show_bans = @current_membership&.has_permission?("manage_server") || @current_membership&.has_permission?("ban_members") || @current_membership&.admin? %>
+          <% if show_audit_log || show_bans %>
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Moderation</h3>
           <div class="space-y-0.5 mb-4">
-            <%= link_to "Audit Log", server_settings_audit_log_path(@server),
-                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'audit_log' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
-            <%= link_to "Bans", server_settings_bans_path(@server),
-                class: "block px-2 py-1.5 rounded text-sm #{action_name == 'bans' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% if show_audit_log %>
+              <%= link_to "Audit Log", server_settings_audit_log_path(@server),
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'audit_log' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
+            <% if show_bans %>
+              <%= link_to "Bans", server_settings_bans_path(@server),
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'bans' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
           </div>
+          <% end %>
 
           <div class="border-t border-gray-700 mt-4 pt-4">
             <% if @server.owner == current_user %>

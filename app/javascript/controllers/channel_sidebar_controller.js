@@ -172,6 +172,12 @@ export default class extends Controller {
       case "sidebar_reorder":
         this.reorderSidebar(data)
         break
+      case "sidebar_refresh":
+        this.refreshPage()
+        break
+      case "server_deleted":
+        this.handleServerDeleted()
+        break
       case "voice_state_join":
         this.handleVoiceJoin(data)
         break
@@ -232,6 +238,16 @@ export default class extends Controller {
   removeChannel(data) {
     const el = this.element.querySelector(`[data-channel-id="${data.channel_id}"]`)
     if (el) el.remove()
+
+    // If the user is currently viewing the deleted channel, navigate to the first available channel
+    if (this._activeChannelId === data.channel_id) {
+      const firstChannel = this.element.querySelector("a[data-channel-id]")
+      if (firstChannel) {
+        window.Turbo?.visit(firstChannel.getAttribute("href"), { action: "replace" })
+      } else {
+        window.Turbo?.visit("/", { action: "replace" })
+      }
+    }
   }
 
   buildCategoryEl(data) {
@@ -319,6 +335,15 @@ export default class extends Controller {
         })
       })
     }
+  }
+
+  refreshPage() {
+    // Full page refresh to re-run server-side visibility checks
+    window.Turbo?.visit(window.location.href, { action: "replace" })
+  }
+
+  handleServerDeleted() {
+    window.Turbo?.visit("/", { action: "replace" })
   }
 
   handleVoiceJoin(data) {

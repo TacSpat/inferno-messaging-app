@@ -13,7 +13,11 @@
     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
   </button>
 
-  <span class="text-gray-400 text-xl mr-2">#</span>
+  <% if @channel.encrypted? %>
+    <svg class="w-5 h-5 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+  <% else %>
+    <span class="text-gray-400 text-xl mr-2">#</span>
+  <% end %>
   <h1 class="font-semibold text-white"><%= render_name_with_emojis(@channel.name, @server) %></h1>
   <% if @channel.topic.present? %>
     <div class="mx-4 w-px h-6 bg-gray-600 hidden sm:block"></div>
@@ -29,6 +33,13 @@
     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
   </button>
 </div>
+
+<% if @read_only_channel %>
+  <div class="bg-yellow-900/50 border-b border-yellow-700/50 px-4 py-2.5 flex items-center gap-2 shrink-0">
+    <svg class="w-4 h-4 text-yellow-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+    <span class="text-sm text-yellow-200">You no longer have access to this channel. You are viewing cached messages.</span>
+  </div>
+<% end %>
 
 <!-- Messages area -->
 <div id="messages"
@@ -62,6 +73,7 @@
   <% end %>
 </div>
 
+<% unless @read_only_channel %>
 <!-- New messages bar -->
 <div data-scroll-position-target="newMessageBar" class="hidden">
   <button class="w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white text-sm py-1.5 px-4 flex items-center justify-center gap-2 cursor-pointer transition">
@@ -145,6 +157,7 @@
     <p class="text-xl text-white font-semibold">Drop files to upload</p>
   </div>
 </div>
+<% end %>
 
 </div>
 <% end %>

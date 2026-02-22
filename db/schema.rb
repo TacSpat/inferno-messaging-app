@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_21_101008) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_010000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -86,8 +86,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_21_101008) do
 
   create_table "channels", force: :cascade do |t|
     t.bigint "category_id"
+    t.string "channel_public_key"
     t.integer "channel_type"
     t.datetime "created_at", null: false
+    t.boolean "encrypted", default: false
+    t.text "encrypted_channel_private_key"
     t.string "name"
     t.string "nostr_group_id"
     t.string "nostr_relay_url"

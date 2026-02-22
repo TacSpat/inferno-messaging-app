@@ -3,6 +3,8 @@ class ChannelsController < ApplicationController
   before_action :set_server
   before_action :set_channel, only: [ :show, :edit, :update, :destroy, :older_messages, :newer_messages, :around_messages ]
   before_action :ensure_member!
+  before_action :ensure_channel_access!, only: [ :show, :older_messages, :newer_messages, :around_messages ]
+  before_action :ensure_manage_channels!, only: [ :new, :create, :edit, :update, :destroy ]
 
   def show
     # Ensure current user appears online (WebSocket reconnects after page render)
@@ -128,13 +130,21 @@ class ChannelsController < ApplicationController
     if params[:channel] && params[:channel][:category_id].present?
       @channel.category = @server.categories.find_by(public_id: params[:channel].delete(:category_id))
     end
-    if @channel.update(channel_params)
-      ServerChannel.broadcast_to(@server, {
-        type: "channel_updated",
-        channel_id: @channel.public_id,
-        name: @channel.name,
-        category_id: @channel.category&.public_id
-      })
+    @channel.assign_attributes(channel_params)
+    encryption_changed = @channel.encrypted_changed?
+    if @channel.save
+      if encryption_changed
+        # Encryption state changed — force full sidebar refresh for all members
+        # so visibility checks re-run and icons update
+        ServerChannel.broadcast_to(@server, { type: "sidebar_refresh" })
+      else
+        ServerChannel.broadcast_to(@server, {
+          type: "channel_updated",
+          channel_id: @channel.public_id,
+          name: @channel.name,
+          category_id: @channel.category&.public_id
+        })
+      end
       publish_server_structure
       redirect_to server_channel_path(@server, @channel)
     else
@@ -169,8 +179,33 @@ class ChannelsController < ApplicationController
     end
   end
 
+  def ensure_channel_access!
+    access = @channel.visible_to?(current_user)
+    if access == false
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have access to this channel."
+    elsif access == :read_only
+      @read_only_channel = true
+    end
+  end
+
+  def ensure_manage_channels!
+    membership = current_user.server_memberships.find_by(server: @server)
+    unless membership&.has_permission?("manage_channels")
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission to manage channels."
+    end
+  end
+
   def channel_params
-    params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id)
+    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, allowed_role_ids: [])
+    if permitted[:encrypted] == "1" || permitted[:encrypted] == true
+      role_ids = (permitted.delete(:allowed_role_ids) || []).reject(&:blank?)
+      permitted[:permissions_overrides] = { "allowed_role_ids" => role_ids }
+    else
+      permitted.delete(:allowed_role_ids)
+      # Turning off encryption — clear role restrictions
+      permitted[:permissions_overrides] = nil if permitted.key?(:encrypted)
+    end
+    permitted
   end
 
   def publish_server_structure

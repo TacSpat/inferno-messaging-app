@@ -7,6 +7,12 @@ class MessagesController < ApplicationController
   before_action :validate_file_types, only: [ :create, :update ]
 
   def create
+    # Block message creation in encrypted channels where user only has read_only access
+    if @channel.encrypted? && @channel.visible_to?(current_user) != :full
+      head :forbidden
+      return
+    end
+
     @message = @channel.messages.new(message_params.except(:parent_id))
     @message.user = current_user
     if params[:message][:parent_id].present?
@@ -153,16 +159,25 @@ class MessagesController < ApplicationController
 
   def publish_channel_edit_to_nostr(message, channel)
     user = message.user
+    event_content = message.content || ""
+    tags = [
+      ["h", channel.nostr_group_id],
+      ["e", message.nostr_event_id, "", "edit"]
+    ]
+
+    if channel.encrypted? && channel.channel_public_key.present?
+      conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
+      event_content = Nip44Service.encrypt(event_content, conversation_key)
+      tags << ["encrypted", "nip44"]
+      tags << ["channel_pubkey", channel.channel_public_key]
+    end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(
       kind: 9,
       pubkey: user.nostr_public_key,
-      content: message.content || "",
-      tags: [
-        ["h", channel.nostr_group_id],
-        ["e", message.nostr_event_id, "", "edit"]
-      ]
+      content: event_content,
+      tags: tags
     )
     signed = signer.sign(event)
     RelayService.publish_to_all(signed.to_json)
@@ -172,15 +187,22 @@ class MessagesController < ApplicationController
 
   def publish_channel_message_to_nostr(message, channel)
     user = message.user
+    event_content = message.content || ""
+    tags = [["h", channel.nostr_group_id]]
+
+    if channel.encrypted? && channel.channel_public_key.present?
+      conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
+      event_content = Nip44Service.encrypt(event_content, conversation_key)
+      tags << ["encrypted", "nip44"]
+      tags << ["channel_pubkey", channel.channel_public_key]
+    end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(
       kind: 9, # NIP-29 group chat message
       pubkey: user.nostr_public_key,
-      content: message.content || "",
-      tags: [
-        ["h", channel.nostr_group_id]
-      ]
+      content: event_content,
+      tags: tags
     )
     signed = signer.sign(event)
     signed_hash = signed.to_json  # Returns a Hash (gem override)

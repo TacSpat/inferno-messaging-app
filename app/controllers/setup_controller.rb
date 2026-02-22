@@ -59,7 +59,6 @@ class SetupController < ApplicationController
     default_relays = %w[
       wss://relay.damus.io
       wss://nos.lol
-      wss://relay.nostr.band
       wss://relay.snort.social
     ]
     default_relays.each do |url|

@@ -12,6 +12,9 @@ class ProfilesController < ApplicationController
   def update
     @user = current_user
     if @user.update(profile_params)
+      if profile_params[:avatar].present? || profile_params[:banner].present?
+        @user.broadcast_profile_update
+      end
       redirect_to profile_path, notice: "Profile updated."
     else
       render :edit, status: :unprocessable_entity

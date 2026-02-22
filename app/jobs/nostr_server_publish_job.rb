@@ -136,7 +136,7 @@ class NostrServerPublishJob < ApplicationJob
     end
 
     @server.channels.ordered.includes(:category).each do |ch|
-      perm_overrides = ch.respond_to?(:permission_overrides) ? (ch.permission_overrides || {}).to_json : "{}"
+      perm_overrides = (ch.permissions_overrides || {}).to_json
       tags << [
         "ch",
         ch.public_id,
@@ -147,7 +147,9 @@ class NostrServerPublishJob < ApplicationJob
         ch.topic || "",
         ch.nsfw?.to_s,
         ch.nostr_group_id || "",
-        perm_overrides
+        perm_overrides,
+        ch.encrypted?.to_s,
+        ch.channel_public_key || ""
       ]
     end
 

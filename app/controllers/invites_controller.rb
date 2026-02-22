@@ -10,6 +10,7 @@ class InvitesController < ApplicationController
     respond_to do |format|
       format.html do
         @already_member = user_signed_in? && current_user.servers.include?(@server)
+        @ban = user_signed_in? && @server.bans.find_by(user: current_user)
       end
       format.json do
         render json: {
@@ -32,6 +33,12 @@ class InvitesController < ApplicationController
     unless user_signed_in?
       session[:pending_invite_code] = @invite.code
       redirect_to new_user_session_path, notice: "Sign in to join #{@server.name}!"
+      return
+    end
+
+    ban = @server.bans.find_by(user: current_user)
+    if ban
+      redirect_to invite_path(@invite.code), alert: "You are banned from this server."
       return
     end
 

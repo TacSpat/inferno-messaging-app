@@ -56,7 +56,7 @@
     <div class="border-t border-gray-700 my-1"></div>
 
     <% if can_manage %>
-      <% non_system_roles = server.roles.where.not("permissions @> ?", { owner: true }.to_json).where.not(name: "@everyone").ordered %>
+      <% non_system_roles = server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).where.not(name: "@everyone").ordered %>
       <div class="relative context-roles-wrapper">
         <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
                 data-context-action="showRoles"
@@ -82,14 +82,23 @@
   <% if !is_self && !is_owner %>
     <% if can_kick %>
       <div class="border-t border-gray-700 my-1"></div>
-      <%= button_to "Kick #{member.username}",
-            server_settings_kick_member_path(server, membership),
-            method: :delete,
-            class: "flex items-center w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded cursor-pointer text-left",
-            data: { turbo_confirm: "Kick #{member.username} from #{server.name}?" } %>
+      <% if membership %>
+        <%= button_to "Kick #{member.username}",
+              server_settings_kick_member_path(server, membership),
+              method: :delete,
+              class: "flex items-center w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded cursor-pointer text-left",
+              data: { turbo_confirm: "Kick #{member.username} from #{server.name}?" } %>
+      <% elsif member.is_a?(RemoteMember) %>
+        <%= button_to "Kick #{member.username}",
+              server_settings_kick_remote_member_path(server, member),
+              method: :delete,
+              class: "flex items-center w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded cursor-pointer text-left",
+              data: { turbo_confirm: "Kick #{member.username} from #{server.name}?" } %>
+      <% end %>
     <% end %>
 
     <% if can_ban %>
+      <div class="border-t border-gray-700 my-1"></div>
       <%= button_to "Ban #{member.username}",
             server_settings_create_ban_path(server, user_id: member.public_id),
             method: :post,

@@ -159,20 +159,6 @@ class User < ApplicationRecord
     items.sort_by { |item| item[:position] }
   end
 
-  private
-
-  def profile_changed?
-    saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio? || saved_change_to_status? || saved_change_to_status_emoji?
-  end
-
-  def nostr_profile_changed?
-    nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
-  end
-
-  def publish_nostr_profile
-    NostrPublishJob.perform_later(id, :profile)
-  end
-
   def broadcast_profile_update
     servers.each do |server|
       html = ApplicationController.render(
@@ -188,7 +174,24 @@ class User < ApplicationRecord
         tag: tag,
         role_color: role_color_for(server)
       })
-    end
+  end
+
+  private
+
+  def profile_changed?
+    saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio? ||
+      saved_change_to_status? || saved_change_to_status_emoji? ||
+      saved_change_to_profile_color? || saved_change_to_profile_color_2? ||
+      saved_change_to_banner_offset_y? || saved_change_to_discriminator?
+  end
+
+  def nostr_profile_changed?
+    nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
+  end
+
+  def publish_nostr_profile
+    NostrPublishJob.perform_later(id, :profile)
+  end
   end
 
   def assign_discriminator

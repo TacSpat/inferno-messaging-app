@@ -94,6 +94,15 @@ class ServerSettingsController < ApplicationController
     redirect_to server_settings_members_path(@server), notice: "#{username} has been kicked."
   end
 
+  def kick_remote_member
+    remote_member = @server.remote_members.find_by!(public_id: params[:id])
+    username = remote_member.username
+    kicked_pubkey = remote_member.pubkey
+    remote_member.destroy
+    publish_server_state(:member, pubkey: kicked_pubkey, removed: true) if kicked_pubkey.present?
+    redirect_to server_settings_members_path(@server), notice: "#{username} has been kicked."
+  end
+
   def invites
     if @current_membership.has_permission?("manage_invites")
       @invites = @server.invites.active_invites.includes(:creator).order(created_at: :desc)
@@ -162,13 +171,26 @@ class ServerSettingsController < ApplicationController
   end
 
   def create_ban
-    user = User.find_by!(public_id: params[:user_id])
-    ban = @server.bans.new(user: user, banned_by: current_user, reason: params[:reason])
-    if ban.save
-      publish_server_state(:ban, pubkey: user.nostr_public_key) if user.nostr_public_key.present?
-      redirect_to server_settings_bans_path(@server), notice: "#{user.username} has been banned."
+    user = User.find_by(public_id: params[:user_id])
+    remote_member = @server.remote_members.find_by(public_id: params[:user_id]) unless user
+
+    if user
+      ban = @server.bans.new(user: user, banned_by: current_user, reason: params[:reason])
+      if ban.save
+        publish_server_state(:ban, pubkey: user.nostr_public_key) if user.nostr_public_key.present?
+        redirect_to server_settings_bans_path(@server), notice: "#{user.username} has been banned."
+      else
+        redirect_to server_settings_members_path(@server), alert: ban.errors.full_messages.join(", ")
+      end
+    elsif remote_member
+      # Remote members have no local User record — remove and publish ban
+      username = remote_member.username
+      pubkey = remote_member.pubkey
+      remote_member.destroy
+      publish_server_state(:ban, pubkey: pubkey) if pubkey.present?
+      redirect_to server_settings_members_path(@server), notice: "#{username} has been banned."
     else
-      redirect_to server_settings_members_path(@server), alert: ban.errors.full_messages.join(", ")
+      redirect_to server_settings_members_path(@server), alert: "User not found."
     end
   end
 

@@ -30,11 +30,21 @@ class NostrGroupPublishJob < ApplicationJob
       end
     end
 
+    event_content = message.content || ""
+
+    # NIP-44 encrypt content for encrypted channels
+    if channel.encrypted? && channel.channel_public_key.present?
+      conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
+      event_content = Nip44Service.encrypt(event_content, conversation_key)
+      tags << ["encrypted", "nip44"]
+      tags << ["channel_pubkey", channel.channel_public_key]
+    end
+
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(
       kind: NIP29_GROUP_CHAT_MESSAGE,
       pubkey: user.nostr_public_key,
-      content: message.content || "",
+      content: event_content,
       tags: tags
     )
     signed = signer.sign(event)

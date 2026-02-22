@@ -92,6 +92,7 @@ Rails.application.routes.draw do
     get "members", to: "server_settings#members", as: :members
     patch "members/:id", to: "server_settings#update_member", as: :update_member
     delete "members/:id", to: "server_settings#kick_member", as: :kick_member
+    delete "remote_members/:id", to: "server_settings#kick_remote_member", as: :kick_remote_member
     get "roles", to: "server_settings#roles", as: :roles
     get "invites", to: "server_settings#invites", as: :invites
     post "invites", to: "server_settings#create_invite", as: :create_invite

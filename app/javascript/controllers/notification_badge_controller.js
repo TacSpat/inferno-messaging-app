@@ -110,6 +110,11 @@ export default class extends Controller {
     return el?.dataset?.channelReorderCanManageValue === "true"
   }
 
+  get canManageMessages() {
+    const el = document.querySelector("[data-can-manage-messages]")
+    return el?.dataset?.canManageMessages === "true"
+  }
+
   get currentServerId() {
     return document.querySelector("[data-current-server-id]")?.dataset?.currentServerId
   }
@@ -1052,7 +1057,7 @@ export default class extends Controller {
         danger: true,
         action: () => this.deleteMessage(messageId, true)
       })
-    } else if (this.canManage) {
+    } else if (this.canManageMessages) {
       items.push({ separator: true })
       items.push({
         icon: this.icons.trash,

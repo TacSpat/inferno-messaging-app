@@ -359,11 +359,14 @@ class RelaySubscriptionManager
     channel = Channel.find_by(nostr_group_id: group_id)
     return unless channel
 
-    # Verify sender has send_messages permission in this channel's server
-    if channel.server
-      sender_pk = event["pubkey"]
-      unless NostrServerAuth.authorized?(channel.server, sender_pk, "send_messages")
-        Rails.logger.info("[RelaySubscriptionManager] Rejected message from #{sender_pk&.first(12)} — no send_messages permission")
+    # Decrypt NIP-44 encrypted content for encrypted channels
+    encrypted_tag = (event["tags"] || []).find { |t| t[0] == "encrypted" && t[1] == "nip44" }
+    if encrypted_tag && channel.encrypted? && channel.channel_private_key.present?
+      begin
+        conversation_key = Nip44Service.conversation_key(channel.channel_private_key, event["pubkey"])
+        event["content"] = Nip44Service.decrypt(event["content"], conversation_key)
+      rescue Nip44Service::DecryptionError => e
+        Rails.logger.warn("[RelaySubscriptionManager] Failed to decrypt encrypted channel message: #{e.message}")
         return
       end
     end
@@ -385,6 +388,12 @@ class RelaySubscriptionManager
       if contact.new_record? || contact.profile_stale?
         NostrProfileResolver.resolve(sender_pubkey)
         contact.reload if contact.persisted?
+      end
+
+      # Auto-create RemoteMember if sender is unknown to this server
+      # (the NIP-29 relay has already authorized them as a group member)
+      if channel.server
+        ensure_remote_member(channel.server, sender_pubkey, contact)
       end
     end
 
@@ -448,17 +457,42 @@ class RelaySubscriptionManager
 
     target_event_id = event_tag[1]
     message = Message.find_by(nostr_event_id: target_event_id, channel: channel)
-    return unless message
 
-    message_public_id = message.public_id
-    message.destroy
+    if message
+      message_public_id = message.public_id
 
-    ChannelChatChannel.broadcast_to(channel, {
-      type: "delete_message",
-      message_id: message_public_id
-    })
+      # Ensure the original message's event is logged so the history fetcher
+      # won't re-import it after deletion
+      unless NostrEventLog.exists?(event_id: target_event_id)
+        NostrEventLog.create(
+          event_id: target_event_id,
+          kind: 9,
+          pubkey: message.nostr_author_pubkey || message.user&.nostr_public_key || event["pubkey"],
+          channel: channel,
+          message: message,
+          direction: "inbound",
+          event_created_at: message.created_at
+        )
+      end
 
-    Rails.logger.info("[RelaySubscriptionManager] Deleted channel message #{target_event_id}")
+      message.destroy
+
+      ChannelChatChannel.broadcast_to(channel, {
+        type: "delete_message",
+        message_id: message_public_id
+      })
+
+      Rails.logger.info("[RelaySubscriptionManager] Deleted channel message #{target_event_id}")
+    end
+
+    # Log the delete event itself to prevent reprocessing
+    NostrEventLog.find_or_create_by(event_id: event["id"]) do |log|
+      log.kind = event["kind"]
+      log.pubkey = event["pubkey"]
+      log.channel = channel
+      log.direction = "inbound"
+      log.event_created_at = event["created_at"] ? Time.at(event["created_at"]) : Time.current
+    end
   end
 
   def process_dm_event(event)
@@ -880,6 +914,40 @@ class RelaySubscriptionManager
     Server.find_by(nostr_group_id: gid)
   end
 
+  # Auto-create a RemoteMember when a group message arrives from an unknown
+  # sender.  The NIP-29 relay has already authorized them as a group member,
+  # so we trust that and create the record to make them visible in the sidebar.
+  def ensure_remote_member(server, pubkey, contact = nil)
+    return if User.exists?(nostr_public_key: pubkey) # Local user — skip
+    return if server.remote_members.exists?(pubkey: pubkey) # Already known
+
+    remote = server.remote_members.create!(pubkey: pubkey)
+
+    # Populate from Contact if available
+    if contact&.persisted?
+      remote.update_from_metadata({
+        "display_name" => contact.display_name,
+        "name" => contact.display_name,
+        "picture" => contact.avatar_url,
+        "about" => contact.bio,
+        "nip05" => contact.nip05
+      })
+    end
+
+    # Broadcast new member to sidebar
+    ServerChannel.broadcast_to(server, {
+      type: "member_join",
+      html: ApplicationController.render(
+        partial: "servers/member_item",
+        locals: { member: remote.reload, server: server }
+      ),
+      user_id: remote.public_id,
+      member_count: server.total_member_count
+    })
+  rescue ActiveRecord::RecordNotUnique
+    # Another thread already created it
+  end
+
   def log_server_event(event)
     NostrEventLog.create!(
       event_id: event["id"],
@@ -943,6 +1011,7 @@ class RelaySubscriptionManager
 
     if deleted
       Rails.logger.info("[RelaySubscriptionManager] Server #{server.nostr_group_id} marked deleted via Nostr — destroying locally")
+      ServerChannel.broadcast_to(server, { type: "server_deleted" })
       log_server_event(event)
       server.destroy
       return
@@ -1008,7 +1077,7 @@ class RelaySubscriptionManager
       # Sync channels
       remote_ch_ids = ch_tags.map { |t| t[1] }
       ch_tags.each do |t|
-        # ["ch", public_id, name, type, position, cat_id, topic, nsfw, nostr_group_id, perm_overrides]
+        # ["ch", public_id, name, type, position, cat_id, topic, nsfw, nostr_group_id, perm_overrides, encrypted, channel_public_key]
         ch = server.channels.find_or_initialize_by(public_id: t[1])
         cat = t[5].present? ? server.categories.find_by(public_id: t[5]) : nil
         ch.assign_attributes(
@@ -1020,6 +1089,15 @@ class RelaySubscriptionManager
           nsfw: t[7] == "true"
         )
         ch.nostr_group_id = t[8] if t[8].present?
+        # Sync permissions overrides
+        if t[9].present? && t[9] != "{}"
+          ch.permissions_overrides = JSON.parse(t[9]) rescue {}
+        end
+        # Sync encryption fields
+        if t[10].present?
+          ch.encrypted = t[10] == "true"
+          ch.channel_public_key = t[11] if t[11].present?
+        end
         ch.save! if ch.changed? || ch.new_record?
       end
       # Remove channels not in the event

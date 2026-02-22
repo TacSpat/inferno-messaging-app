@@ -13,6 +13,12 @@ class SettingsController < ApplicationController
   def update_profile
     @user = current_user
     if @user.update(profile_params)
+      # Model callback covers scalar field changes, but avatar/banner
+      # attachment changes don't trigger saved_change_to_*, so broadcast
+      # explicitly when attachments were included in the update.
+      if profile_params[:avatar].present? || profile_params[:banner].present?
+        @user.broadcast_profile_update
+      end
       redirect_to user_settings_profile_path, notice: "Profile updated!"
     else
       render :profile, status: :unprocessable_entity

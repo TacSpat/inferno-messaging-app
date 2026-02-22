@@ -24,6 +24,15 @@ class RemoteMember < ApplicationRecord
     roles.any? { |r| r.has_permission?(permission) }
   end
 
+  def nostr_public_key
+    pubkey
+  end
+
+  def npub
+    return nil if pubkey.blank?
+    Nostr::Bech32.encode_npub(pubkey)
+  end
+
   def owner?
     false
   end

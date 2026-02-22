@@ -1,16 +1,31 @@
 <% unread = channel.unread_for?(current_user) %>
 <% mention_count = current_user.notifications.unread.for_channel(channel.id).count %>
+<% is_read_only = local_assigns[:read_only] %>
 <a href="<%= server_channel_path(server, channel) %>"
    data-turbo-frame="main-content"
    data-channel-id="<%= channel.public_id %>"
    class="flex items-center px-2 py-1.5 rounded group relative
-          <%= active ? 'bg-gray-600 text-white' : (unread ? 'text-white hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200') %>">
-  <% if unread && !active %>
+          <%= if is_read_only
+                active ? 'bg-gray-600 text-gray-500' : 'text-gray-500 hover:bg-gray-700 hover:text-gray-400'
+              elsif active
+                'bg-gray-600 text-white'
+              elsif unread
+                'text-white hover:bg-gray-700'
+              else
+                'text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+              end %>">
+  <% if unread && !active && !is_read_only %>
     <div class="unread-pill absolute -left-2 top-1/2 -translate-y-1/2 w-1 h-2 bg-gray-300 rounded-r-full"></div>
   <% end %>
-  <span class="text-lg mr-1.5 opacity-60">#</span>
-  <span class="truncate text-sm flex-1 <%= unread ? 'font-bold' : 'font-medium' %>"><%= render_name_with_emojis(channel.name, server) %></span>
-  <% if mention_count > 0 %>
+  <% if is_read_only %>
+    <svg class="w-4 h-4 mr-1.5 opacity-50 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+  <% elsif channel.encrypted? %>
+    <svg class="w-4 h-4 mr-1.5 opacity-60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+  <% else %>
+    <span class="text-lg mr-1.5 opacity-60">#</span>
+  <% end %>
+  <span class="truncate text-sm flex-1 <%= unread && !is_read_only ? 'font-bold' : 'font-medium' %>"><%= render_name_with_emojis(channel.name, server) %></span>
+  <% if mention_count > 0 && !is_read_only %>
     <div class="mention-badge ml-auto min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0">
       <%= mention_count > 99 ? '99+' : mention_count %>
     </div>

@@ -146,10 +146,13 @@
 
 
           <!-- Channels list -->
-          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= current_user.server_memberships.find_by(server: @server)&.has_permission?('manage_channels') || false %>">
+          <% _membership = current_user.server_memberships.find_by(server: @server) %>
+          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
             <%# Uncategorized channels first %>
             <% @server.channels.uncategorized.where(channel_type: [:text, :announcement]).ordered.each do |channel| %>
-              <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel) } %>
+              <% channel_access = channel.visible_to?(current_user) %>
+              <% next unless channel_access %>
+              <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel), read_only: channel_access == :read_only } %>
             <% end %>
 
             <%# Categorized channels %>

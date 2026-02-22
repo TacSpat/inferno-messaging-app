@@ -27,6 +27,54 @@ class Channel < ApplicationRecord
 
   # All channels are Nostr-backed
   after_create :assign_nostr_group_id
+  after_create :generate_channel_keypair!, if: :encrypted?
+  after_save :generate_channel_keypair_on_encrypt!, if: -> { saved_change_to_encrypted? && encrypted? && channel_public_key.blank? }
+  after_save :purge_encrypted_history!, if: -> { saved_change_to_encrypted? && !encrypted? }
+
+  # Keypair management for encrypted channels (mirrors HasNostrIdentity)
+  def generate_channel_keypair!
+    private_key = Nostr::Key.generate_private_key
+    public_key = Nostr::Key.get_public_key(private_key)
+
+    update_columns(
+      channel_public_key: public_key,
+      encrypted_channel_private_key: channel_encryptor.encrypt_and_sign(private_key)
+    )
+  end
+
+  def channel_private_key
+    return nil if encrypted_channel_private_key.blank?
+    channel_encryptor.decrypt_and_verify(encrypted_channel_private_key)
+  end
+
+  # Returns :full, :read_only, or false
+  def visible_to?(user)
+    return :full unless encrypted?
+
+    membership = user.server_memberships.find_by(server: server)
+    return :full if membership&.owner? || membership&.admin?
+
+    allowed_ids = permissions_overrides&.dig("allowed_role_ids")
+    if allowed_ids.present? && membership
+      user_role_ids = membership.roles.pluck(:public_id)
+      return :full if (allowed_ids & user_role_ids).any?
+    end
+
+    # No access — check if user has any association with this channel
+    # channel_reads means the user visited this channel at some point
+    has_history = channel_reads.where(user: user).exists?
+    has_history ? :read_only : false
+  end
+
+  scope :accessible_to, ->(user) {
+    # Non-encrypted channels are always accessible
+    non_encrypted = where(encrypted: [false, nil])
+
+    # For encrypted channels, we need to check visibility
+    encrypted_ids = where(encrypted: true).select { |ch| ch.visible_to?(user) }.map(&:id)
+
+    where(id: non_encrypted.select(:id)).or(where(id: encrypted_ids))
+  }
 
   # Enable sharing on specific relays
   def enable_sharing!(relay_url:, group_id: nil)
@@ -72,6 +120,31 @@ class Channel < ApplicationRecord
   end
 
   private
+
+  def generate_channel_keypair_on_encrypt!
+    generate_channel_keypair!
+  end
+
+  # When encryption is removed, purge all messages from the encrypted era.
+  # They were only meant for users who had access at the time — letting
+  # them surface to new/unauthorized members would leak private content.
+  # The keypair is also destroyed so old relay ciphertext becomes unrecoverable.
+  def purge_encrypted_history!
+    messages.destroy_all
+    channel_reads.delete_all
+    nostr_event_logs.delete_all
+    update_columns(
+      channel_public_key: nil,
+      encrypted_channel_private_key: nil
+    )
+  end
+
+  def channel_encryptor
+    key = ActiveSupport::KeyGenerator.new(
+      Rails.application.secret_key_base
+    ).generate_key("channel keypair encryption", 32)
+    ActiveSupport::MessageEncryptor.new(key)
+  end
 
   def generate_group_id
     "#{server.public_id}-#{public_id}"

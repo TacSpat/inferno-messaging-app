@@ -44,6 +44,7 @@ class ServersController < ApplicationController
 
   def destroy
     publish_server_state(:metadata, deleted: true)
+    ServerChannel.broadcast_to(@server, { type: "server_deleted" })
     @server.destroy
     redirect_to root_path, notice: "Server deleted.", status: :see_other
   end
