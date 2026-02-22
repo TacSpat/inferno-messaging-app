@@ -177,6 +177,14 @@ class User < ApplicationRecord
     end
   end
 
+  def publish_member_events
+    return unless nostr_public_key.present?
+    servers.each do |server|
+      next unless server.nostr_group_id.present?
+      NostrServerPublishJob.perform_later(id, server.id, "member", pubkey: nostr_public_key)
+    end
+  end
+
   private
 
   def profile_changed?
@@ -192,6 +200,8 @@ class User < ApplicationRecord
 
   def publish_nostr_profile
     NostrPublishJob.perform_later(id, :profile)
+    # Also re-publish member events so remote instances get updated profile data
+    publish_member_events
   end
 
   def assign_discriminator

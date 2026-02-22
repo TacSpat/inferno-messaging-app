@@ -1263,6 +1263,22 @@ class RelaySubscriptionManager
       joined_tag = tags.find { |t| t[0] == "joined_at" }
       remote.joined_at = Time.at(joined_tag[1].to_i) if joined_tag&.dig(1).present? && joined_tag[1] != "0"
 
+      # Update profile from embedded tags (preferred over Kind 0 fetch)
+      profile_name = tags.find { |t| t[0] == "profile_name" }&.dig(1)
+      profile_display = tags.find { |t| t[0] == "profile_display_name" }&.dig(1)
+      profile_picture = tags.find { |t| t[0] == "profile_picture" }&.dig(1)
+      profile_banner = tags.find { |t| t[0] == "profile_banner" }&.dig(1)
+      profile_about = tags.find { |t| t[0] == "profile_about" }&.dig(1)
+
+      if profile_name.present? || profile_display.present?
+        remote.username = profile_name if profile_name.present?
+        remote.display_name = profile_display.presence || profile_name if profile_display.present? || profile_name.present?
+        remote.avatar_url = profile_picture if profile_picture.present?
+        remote.banner_url = profile_banner if profile_banner.present?
+        remote.bio = profile_about if profile_about.present?
+        remote.profile_fetched_at = Time.current
+      end
+
       is_new = remote.new_record?
       remote.save! if remote.changed? || is_new
 
@@ -1274,15 +1290,14 @@ class RelaySubscriptionManager
         remote.roles = roles
       end
 
-      # Fetch Kind 0 profile if stale
-      if remote.profile_stale?
+      # Fallback: fetch Kind 0 profile if no profile tags and stale
+      if profile_name.blank? && remote.profile_stale?
         fetch_server = server
         Thread.new do
           begin
             metadata = fetch_kind0_metadata(member_pubkey)
             if metadata
               remote.update_from_metadata(metadata)
-              # Broadcast updated profile to sidebar
               ServerChannel.broadcast_to(fetch_server, {
                 type: "member_update",
                 user_id: remote.public_id,

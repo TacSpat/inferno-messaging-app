@@ -207,6 +207,17 @@ class NostrServerPublishJob < ApplicationJob
         tags << ["nickname", membership.nickname || ""]
         tags << ["joined_at", (membership.joined_at || membership.created_at).to_i.to_s]
       end
+
+      # Embed profile data so remote instances don't need a separate Kind 0 fetch
+      tags << ["profile_name", member_user.username || ""]
+      tags << ["profile_display_name", member_user.display_name.presence || member_user.username || ""]
+      tags << ["profile_about", member_user.bio || ""]
+      if member_user.avatar.attached?
+        tags << ["profile_picture", blossom_url_for(member_user.avatar)]
+      end
+      if member_user.banner.attached?
+        tags << ["profile_banner", blossom_url_for(member_user.banner)]
+      end
     else
       remote = @server.remote_members.find_by(pubkey: target_pubkey)
       if remote
@@ -214,6 +225,13 @@ class NostrServerPublishJob < ApplicationJob
         tags << (["roles"] + role_ids)
         tags << ["nickname", remote.nickname || ""]
         tags << ["joined_at", (remote.joined_at || remote.created_at).to_i.to_s]
+
+        # Forward remote member's profile data
+        tags << ["profile_name", remote.username || ""]
+        tags << ["profile_display_name", remote.display_name || ""]
+        tags << ["profile_about", remote.bio || ""]
+        tags << ["profile_picture", remote.avatar_url || ""]
+        tags << ["profile_banner", remote.banner_url || ""]
       end
     end
 
