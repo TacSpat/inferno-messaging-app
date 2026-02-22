@@ -174,6 +174,7 @@ class User < ApplicationRecord
         tag: tag,
         role_color: role_color_for(server)
       })
+    end
   end
 
   private
@@ -191,7 +192,6 @@ class User < ApplicationRecord
 
   def publish_nostr_profile
     NostrPublishJob.perform_later(id, :profile)
-  end
   end
 
   def assign_discriminator

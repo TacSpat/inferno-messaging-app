@@ -56,6 +56,14 @@ class NostrPublishJob < ApplicationJob
       )
     end
 
+    # Include banner URL if attached
+    if user.banner.attached?
+      profile_data[:banner] = Rails.application.routes.url_helpers.rails_blob_url(
+        user.banner,
+        host: Rails.application.config.x.instance_domain
+      )
+    end
+
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(
       kind: 0, # METADATA
