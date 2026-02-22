@@ -214,6 +214,8 @@ class NostrServerPublishJob < ApplicationJob
       tags << ["profile_about", member_user.bio || ""]
       tags << ["profile_color", member_user.profile_color || ""]
       tags << ["profile_color_2", member_user.profile_color_2 || ""]
+      tags << ["profile_status", member_user.status || ""]
+      tags << ["profile_status_emoji", member_user.status_emoji || ""]
       begin
         tags << ["profile_picture", blossom_url_for(member_user.avatar)] if member_user.avatar.attached?
         tags << ["profile_banner", blossom_url_for(member_user.banner)] if member_user.banner.attached?
@@ -236,6 +238,8 @@ class NostrServerPublishJob < ApplicationJob
         tags << ["profile_banner", remote.banner_url || ""]
         tags << ["profile_color", remote.profile_color || ""]
         tags << ["profile_color_2", remote.profile_color_2 || ""]
+        tags << ["profile_status", remote.status || ""]
+        tags << ["profile_status_emoji", remote.status_emoji || ""]
       end
     end
 
@@ -343,20 +347,26 @@ class NostrServerPublishJob < ApplicationJob
     return "" unless attachment.attached?
 
     blob = attachment.blob
-    hash = blob.checksum # Base64-encoded MD5 — we need SHA256 for Blossom
     ext = File.extname(blob.filename.to_s).presence || ".bin"
 
-    # Try to use RemoteAssetCache-style local path
-    # Compute SHA256 from the blob's content
-    tempfile = blob.download
-    sha256 = Digest::SHA256.hexdigest(tempfile)
+    # Use cached SHA256 from blob metadata to avoid re-downloading
+    sha256 = blob.metadata&.dig("sha256")
+    unless sha256
+      tempfile = blob.download
+      sha256 = Digest::SHA256.hexdigest(tempfile)
+      blob.update!(metadata: (blob.metadata || {}).merge("sha256" => sha256))
+    end
+
     filename = "#{sha256}#{ext}"
 
-    # Write to public/cached_assets for serving
+    # Write to public/cached_assets for serving (only if not already cached)
     cache_dir = Rails.root.join("public", "cached_assets")
-    FileUtils.mkdir_p(cache_dir)
     full_path = cache_dir.join(filename)
-    File.binwrite(full_path, tempfile) unless File.exist?(full_path)
+    unless File.exist?(full_path)
+      tempfile ||= blob.download
+      FileUtils.mkdir_p(cache_dir)
+      File.binwrite(full_path, tempfile)
+    end
 
     # Return absolute URL so other instances can download this asset
     instance_domain = Rails.application.config.x.instance_domain

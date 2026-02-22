@@ -1264,22 +1264,22 @@ class RelaySubscriptionManager
       remote.joined_at = Time.at(joined_tag[1].to_i) if joined_tag&.dig(1).present? && joined_tag[1] != "0"
 
       # Update profile from embedded tags (preferred over Kind 0 fetch)
-      profile_name = tags.find { |t| t[0] == "profile_name" }&.dig(1)
-      profile_display = tags.find { |t| t[0] == "profile_display_name" }&.dig(1)
-      profile_picture = tags.find { |t| t[0] == "profile_picture" }&.dig(1)
-      profile_banner = tags.find { |t| t[0] == "profile_banner" }&.dig(1)
-      profile_about = tags.find { |t| t[0] == "profile_about" }&.dig(1)
-      profile_color = tags.find { |t| t[0] == "profile_color" }&.dig(1)
-      profile_color_2 = tags.find { |t| t[0] == "profile_color_2" }&.dig(1)
+      profile_tags = %w[profile_name profile_display_name profile_picture profile_banner
+                        profile_about profile_color profile_color_2 profile_status profile_status_emoji]
+      profile_data = profile_tags.each_with_object({}) do |key, h|
+        h[key] = tags.find { |t| t[0] == key }&.dig(1)
+      end
 
-      if profile_name.present? || profile_display.present?
-        remote.username = profile_name if profile_name.present?
-        remote.display_name = profile_display.presence || profile_name if profile_display.present? || profile_name.present?
-        remote.avatar_url = profile_picture if profile_picture.present?
-        remote.banner_url = profile_banner if profile_banner.present?
-        remote.bio = profile_about if profile_about.present?
-        remote.profile_color = profile_color if profile_color.present?
-        remote.profile_color_2 = profile_color_2 if profile_color_2.present?
+      if profile_data["profile_name"].present? || profile_data["profile_display_name"].present?
+        remote.username = profile_data["profile_name"] if profile_data["profile_name"].present?
+        remote.display_name = profile_data["profile_display_name"].presence || profile_data["profile_name"] if profile_data["profile_display_name"].present? || profile_data["profile_name"].present?
+        remote.avatar_url = profile_data["profile_picture"] if profile_data["profile_picture"].present?
+        remote.banner_url = profile_data["profile_banner"] if profile_data["profile_banner"].present?
+        remote.bio = profile_data["profile_about"] if profile_data["profile_about"].present?
+        remote.profile_color = profile_data["profile_color"] if profile_data["profile_color"].present?
+        remote.profile_color_2 = profile_data["profile_color_2"] if profile_data["profile_color_2"].present?
+        remote.status = profile_data["profile_status"] if profile_data["profile_status"].present?
+        remote.status_emoji = profile_data["profile_status_emoji"] if profile_data["profile_status_emoji"].present?
         remote.profile_fetched_at = Time.current
       end
 

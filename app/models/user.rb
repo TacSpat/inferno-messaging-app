@@ -195,7 +195,11 @@ class User < ApplicationRecord
   end
 
   def nostr_profile_changed?
-    nostr_public_key.present? && (saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio?)
+    nostr_public_key.present? && (
+      saved_change_to_username? || saved_change_to_display_name? || saved_change_to_bio? ||
+      saved_change_to_status? || saved_change_to_status_emoji? ||
+      saved_change_to_profile_color? || saved_change_to_profile_color_2?
+    )
   end
 
   def publish_nostr_profile
