@@ -31,6 +31,13 @@ class ChannelsController < ApplicationController
     server = @server
     if server.nostr_group_id.present?
       Thread.new { NostrServerSyncService.new(server.nostr_group_id).resync_members }
+
+      # Publish current user's member event with profile data (debounced to once per 10 min)
+      cache_key = "member_event_published:#{current_user.id}:#{server.id}"
+      unless Rails.cache.exist?(cache_key)
+        Rails.cache.write(cache_key, true, expires_in: 10.minutes)
+        NostrServerPublishJob.perform_later(current_user.id, server.id, "member", pubkey: current_user.nostr_public_key)
+      end
     end
   end
 

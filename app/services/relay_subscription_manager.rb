@@ -979,7 +979,7 @@ class RelaySubscriptionManager
       direction: "inbound",
       event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
-  rescue ActiveRecord::RecordNotUnique
+  rescue ActiveRecord::RecordNotUnique, ActiveRecord::RecordInvalid
     nil
   end
 
