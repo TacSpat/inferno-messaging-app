@@ -120,8 +120,8 @@ class BlossomClientService
     # BUD-01 auth: sign the upload with the owner's Nostr key
     owner = User.owner
     if owner&.nostr_private_key.present?
-      auth_event = build_auth_event(owner, sha256, "upload")
-      request["Authorization"] = "Nostr #{Base64.strict_encode64(auth_event.to_json)}"
+      auth_json = build_auth_event(owner, sha256, "upload")
+      request["Authorization"] = "Nostr #{Base64.strict_encode64(auth_json)}"
     end
 
     response = http.request(request)
@@ -161,24 +161,18 @@ class BlossomClientService
   end
 
   def self.build_auth_event(user, sha256, action)
-    event_data = {
-      pubkey: user.nostr_public_key,
-      created_at: Time.now.to_i,
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
       kind: 24242,
+      pubkey: user.nostr_public_key,
+      content: "Upload #{sha256}",
       tags: [
         ["t", action],
         ["x", sha256],
         ["expiration", (Time.now.to_i + 300).to_s]
-      ],
-      content: "Upload #{sha256}"
-    }
-
-    serialized = [0, event_data[:pubkey], event_data[:created_at], event_data[:kind], event_data[:tags], event_data[:content]]
-    event_data[:id] = Digest::SHA256.hexdigest(JSON.generate(serialized))
-
-    schnorr_key = Nostr::Key.new(user.nostr_private_key)
-    event_data[:sig] = schnorr_key.sign(event_data[:id])
-
-    event_data
+      ]
+    )
+    signed = signer.sign(event)
+    JSON.generate(signed.to_json)  # to_json returns Hash, wrap in JSON string
   end
 end
