@@ -1269,6 +1269,8 @@ class RelaySubscriptionManager
       profile_picture = tags.find { |t| t[0] == "profile_picture" }&.dig(1)
       profile_banner = tags.find { |t| t[0] == "profile_banner" }&.dig(1)
       profile_about = tags.find { |t| t[0] == "profile_about" }&.dig(1)
+      profile_color = tags.find { |t| t[0] == "profile_color" }&.dig(1)
+      profile_color_2 = tags.find { |t| t[0] == "profile_color_2" }&.dig(1)
 
       if profile_name.present? || profile_display.present?
         remote.username = profile_name if profile_name.present?
@@ -1276,6 +1278,8 @@ class RelaySubscriptionManager
         remote.avatar_url = profile_picture if profile_picture.present?
         remote.banner_url = profile_banner if profile_banner.present?
         remote.bio = profile_about if profile_about.present?
+        remote.profile_color = profile_color if profile_color.present?
+        remote.profile_color_2 = profile_color_2 if profile_color_2.present?
         remote.profile_fetched_at = Time.current
       end
 

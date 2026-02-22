@@ -212,11 +212,13 @@ class NostrServerPublishJob < ApplicationJob
       tags << ["profile_name", member_user.username || ""]
       tags << ["profile_display_name", member_user.display_name.presence || member_user.username || ""]
       tags << ["profile_about", member_user.bio || ""]
-      if member_user.avatar.attached?
-        tags << ["profile_picture", blossom_url_for(member_user.avatar)]
-      end
-      if member_user.banner.attached?
-        tags << ["profile_banner", blossom_url_for(member_user.banner)]
+      tags << ["profile_color", member_user.profile_color || ""]
+      tags << ["profile_color_2", member_user.profile_color_2 || ""]
+      begin
+        tags << ["profile_picture", blossom_url_for(member_user.avatar)] if member_user.avatar.attached?
+        tags << ["profile_banner", blossom_url_for(member_user.banner)] if member_user.banner.attached?
+      rescue => e
+        Rails.logger.warn("[NostrServerPublishJob] Failed to generate blob URL: #{e.message}")
       end
     else
       remote = @server.remote_members.find_by(pubkey: target_pubkey)
@@ -232,6 +234,8 @@ class NostrServerPublishJob < ApplicationJob
         tags << ["profile_about", remote.bio || ""]
         tags << ["profile_picture", remote.avatar_url || ""]
         tags << ["profile_banner", remote.banner_url || ""]
+        tags << ["profile_color", remote.profile_color || ""]
+        tags << ["profile_color_2", remote.profile_color_2 || ""]
       end
     end
 

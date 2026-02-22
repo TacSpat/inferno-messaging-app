@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_010000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -114,6 +114,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_010000) do
 
   create_table "contacts", force: :cascade do |t|
     t.string "avatar_url"
+    t.string "banner_url"
     t.text "bio"
     t.datetime "created_at", null: false
     t.string "display_name"
@@ -125,6 +126,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_010000) do
     t.string "pubkey", null: false
     t.string "relay_url"
     t.datetime "updated_at", null: false
+    t.string "username"
     t.index ["friendship_status"], name: "index_contacts_on_friendship_status"
     t.index ["pubkey"], name: "index_contacts_on_pubkey", unique: true
   end

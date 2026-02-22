@@ -40,6 +40,13 @@ class ConversationsController < ApplicationController
     @message = Message.new
     @other_user = @conversation.other_user(current_user) if @conversation.direct?
     @dm_contact = @conversation.counterparty_contact if @other_user.nil? && @conversation.counterparty_pubkey.present?
+
+    # Refresh remote contact profile in background
+    if @dm_contact&.profile_stale?
+      contact_pubkey = @dm_contact.pubkey
+      Thread.new { NostrProfileResolver.resolve(contact_pubkey) }
+    end
+
     # Mark conversation as read
     @conversation.conversation_participants.find_by(user: current_user)&.mark_read!
 
