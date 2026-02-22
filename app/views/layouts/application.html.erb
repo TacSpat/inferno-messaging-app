@@ -164,9 +164,7 @@
           <!-- User panel (bottom) -->
           <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: #0a0a09;">
             <div class="relative">
-              <% if current_user.avatar.attached? %>
-                <%= image_tag current_user.avatar, class: "w-8 h-8 rounded-full object-cover" %>
-              <% elsif current_user.effective_avatar_url.present? %>
+              <% if current_user.effective_avatar_url.present? %>
                 <%= image_tag current_user.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
               <% else %>
                 <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= current_user.profile_color || '#1e1c1b' %>">

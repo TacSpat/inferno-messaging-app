@@ -1,8 +1,11 @@
 <% grouped = local_assigns[:grouped] %>
 <% author = message.user %>
-<% nostr_contact = author ? nil : message.nostr_author %>
-<% remote_author_name = nostr_contact&.effective_display_name || (message.nostr_author_pubkey.present? ? message.nostr_author_pubkey.first(12) + "..." : nil) %>
-<% remote_avatar_url = nostr_contact&.avatar_url %>
+<% unless author %>
+  <% remote_member = message.channel&.server&.remote_members&.find_by(pubkey: message.nostr_author_pubkey) if message.nostr_author_pubkey.present? %>
+  <% nostr_contact = remote_member ? nil : message.nostr_author %>
+<% end %>
+<% remote_author_name = remote_member&.display_name_for || nostr_contact&.effective_display_name || (message.nostr_author_pubkey.present? ? message.nostr_author_pubkey.first(12) + "..." : nil) %>
+<% remote_avatar_url = remote_member&.effective_avatar_url || nostr_contact&.avatar_url %>
 <% if message.system_message? %>
   <!-- System message (welcome, join, etc.) -->
   <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-2 sm:px-4" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>" data-timestamp="<%= message.created_at.iso8601 %>" data-system-message="true">
@@ -23,19 +26,17 @@
       </div>
     <% else %>
       <!-- Mobile: avatar + name inline row -->
+      <% msg_avatar = author&.effective_avatar_url || remote_avatar_url %>
+      <% msg_member = author || remote_member %>
       <div class="flex items-center mb-0.5 sm:hidden">
-        <% if author&.avatar&.attached? %>
-          <%= image_tag author.avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
-        <% elsif author&.effective_avatar_url.present? %>
-          <%= image_tag author.effective_avatar_url, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
-        <% elsif remote_avatar_url.present? %>
-          <%= image_tag remote_avatar_url, class: "w-7 h-7 rounded-full object-cover shrink-0" %>
+        <% if msg_avatar.present? %>
+          <%= image_tag msg_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
         <% else %>
-          <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+          <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= msg_member&.try(:profile_color) || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{msg_member&.public_id}\"".html_safe if msg_member %>>
             <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
           </div>
         <% end %>
-        <span class="ml-2 font-medium text-sm truncate" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+        <span class="ml-2 font-medium text-sm truncate" style="color: <%= author ? author.role_color_for(server) : (remote_member&.role_color_for || '#6b7280') %>"<%= " data-msg-user-id=\"#{msg_member&.public_id}\"".html_safe if msg_member %>>
           <%= author ? author.display_name_for(server) : (remote_author_name || "Unknown User") %>
         </span>
         <span class="ml-2 text-xs text-gray-500 shrink-0">
@@ -48,14 +49,10 @@
 
       <!-- Desktop: avatar column -->
       <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
-        <% if author&.avatar&.attached? %>
-          <%= image_tag author.avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
-        <% elsif author&.effective_avatar_url.present? %>
-          <%= image_tag author.effective_avatar_url, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
-        <% elsif remote_avatar_url.present? %>
-          <%= image_tag remote_avatar_url, class: "w-10 h-10 rounded-full object-cover" %>
+        <% if msg_avatar.present? %>
+          <%= image_tag msg_avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
         <% else %>
-          <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+          <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= msg_member&.try(:profile_color) || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{msg_member&.public_id}\"".html_safe if msg_member %>>
             <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
           </div>
         <% end %>
@@ -76,7 +73,7 @@
       <% unless grouped %>
         <!-- Desktop name/timestamp -->
         <div class="hidden sm:flex items-baseline">
-          <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= author ? author.role_color_for(server) : '#6b7280' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+          <span class="font-medium hover:underline cursor-pointer text-sm" style="color: <%= author ? author.role_color_for(server) : (remote_member&.role_color_for || '#6b7280') %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
             <%= author ? author.display_name_for(server) : (remote_author_name || "Unknown User") %>
           </span>
           <span class="ml-2 text-xs text-gray-500">

@@ -1,9 +1,6 @@
 <div class="w-72 rounded-lg shadow-2xl border border-gray-700 overflow-hidden" data-user-card-id="<%= member.public_id %>">
   <div class="h-[80px] relative">
-    <% if member.banner.attached? %>
-      <%= image_tag member.banner, class: "w-full h-full object-cover",
-          style: "object-position: center #{(member.banner_offset_y || 0)}px;" %>
-    <% elsif member.effective_banner_url.present? %>
+    <% if member.effective_banner_url.present? %>
       <%= image_tag member.effective_banner_url, class: "w-full h-full object-cover",
           style: "object-position: center #{(member.banner_offset_y || 0)}px;" %>
     <% else %>
@@ -15,9 +12,7 @@
       <div class="w-[66px] h-[66px] rounded-full p-[5px] inline-block cursor-pointer"
            style="background: <%= member.profile_color_2.presence || member.profile_color || '#1e1c1b' %>"
            data-profile-overlay-trigger data-user-id="<%= member.public_id %>"<%= " data-server-id=\"#{server.public_id}\"".html_safe if server %>>
-        <% if member.avatar.attached? %>
-          <%= image_tag member.avatar, class: "w-full h-full rounded-full object-cover" %>
-        <% elsif member.effective_avatar_url.present? %>
+        <% if member.effective_avatar_url.present? %>
           <%= image_tag member.effective_avatar_url, class: "w-full h-full rounded-full object-cover" %>
         <% else %>
           <div class="w-full h-full rounded-full flex items-center justify-center text-xl font-bold text-white"
@@ -50,8 +45,13 @@
         </div>
       <% end %>
       <% if server %>
-        <% membership = server.server_memberships.find_by(user: member) %>
-        <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+        <% if member.remote? %>
+          <% visible_roles = member.roles.where.not(name: "@everyone").ordered %>
+          <% membership = member %>
+        <% else %>
+          <% membership = server.server_memberships.find_by(user: member) %>
+          <% visible_roles = membership&.roles&.where&.not(name: "@everyone")&.ordered || [] %>
+        <% end %>
         <% if visible_roles.any? %>
           <div class="border-t border-white/10 pt-2">
             <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">Roles</h4>

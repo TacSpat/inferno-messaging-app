@@ -31,12 +31,9 @@
       <% unread = cp&.unread_count || 0 %>
       <%= link_to conversation_path(conversation), data: { conversation_id: conversation.public_id, turbo_frame: "main-content" }, class: "flex items-center px-2.5 py-1.5 rounded group #{defined?(@conversation) && @conversation == conversation ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" do %>
         <div class="relative shrink-0">
-          <% if other&.avatar&.attached? %>
-            <%= image_tag other.avatar, class: "w-8 h-8 rounded-full object-cover" %>
-          <% elsif other&.effective_avatar_url.present? %>
-            <%= image_tag other.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
-          <% elsif contact&.avatar_url.present? %>
-            <%= image_tag contact.avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
+          <% sidebar_avatar = other&.effective_avatar_url || contact&.avatar_url %>
+          <% if sidebar_avatar.present? %>
+            <%= image_tag sidebar_avatar, class: "w-8 h-8 rounded-full object-cover" %>
           <% else %>
             <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= other&.profile_color || '#1e1c1b' %>">
               <%= other&.username&.first&.upcase || conversation.counterparty_display_name&.first&.upcase || '?' %>
@@ -113,9 +110,7 @@
   <!-- User panel (bottom) -->
   <div class="flex items-center px-2 py-2 border-t border-gray-900" style="background-color: #0a0a09;">
     <div class="relative">
-      <% if current_user.avatar.attached? %>
-        <%= image_tag current_user.avatar, class: "w-8 h-8 rounded-full object-cover" %>
-      <% elsif current_user.effective_avatar_url.present? %>
+      <% if current_user.effective_avatar_url.present? %>
         <%= image_tag current_user.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
       <% else %>
         <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= current_user.profile_color || '#1e1c1b' %>">

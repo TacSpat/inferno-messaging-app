@@ -2,8 +2,8 @@
   <div class="w-full max-w-2xl bg-gray-800 rounded-lg shadow-xl overflow-hidden">
     <!-- Banner -->
     <div class="h-32 " style="<%= profile_gradient_style(@user) %> relative">
-      <% if @user.banner.attached? %>
-        <%= image_tag @user.banner, class: "w-full h-full object-cover" %>
+      <% if @user.effective_banner_url.present? %>
+        <%= image_tag @user.effective_banner_url, class: "w-full h-full object-cover" %>
       <% end %>
     </div>
 
@@ -11,8 +11,8 @@
     <div class="px-6 pb-6">
       <div class="flex items-end -mt-12 mb-4">
         <div class="w-24 h-24 rounded-full border-4 border-gray-800 flex items-center justify-center text-3xl font-bold text-white" style="<%= profile_gradient_style(@user) %> shrink-0">
-          <% if @user.avatar.attached? %>
-            <%= image_tag @user.avatar, class: "w-full h-full rounded-full object-cover" %>
+          <% if @user.effective_avatar_url.present? %>
+            <%= image_tag @user.effective_avatar_url, class: "w-full h-full rounded-full object-cover" %>
           <% else %>
             <%= @user.username[0].upcase %>
           <% end %>

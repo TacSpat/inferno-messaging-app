@@ -43,8 +43,8 @@
         <div class="flex flex-col items-center justify-center h-full text-center">
           <% if @other_user %>
             <div class="w-20 h-20 rounded-full flex items-center justify-center text-3xl mb-4 overflow-hidden">
-              <% if @other_user.avatar.attached? %>
-                <%= image_tag @other_user.avatar, class: "w-full h-full object-cover" %>
+              <% if @other_user.effective_avatar_url.present? %>
+                <%= image_tag @other_user.effective_avatar_url, class: "w-full h-full object-cover" %>
               <% else %>
                 <div class="w-full h-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
                   <%= @other_user.username[0].upcase %>
@@ -161,19 +161,18 @@
     </div>
   </div>
 
-  <% if @other_user %>
+  <% dm_profile = @other_user || @dm_contact %>
+  <% if dm_profile %>
     <!-- DM Profile Panel (right sidebar) -->
     <aside id="dm-profile-panel" class="hidden w-80 bg-gray-800 border-l border-gray-900 overflow-y-auto shrink-0">
       <!-- Banner -->
       <div class="h-[120px] relative">
-        <% if @other_user.banner.attached? %>
-          <%= image_tag @other_user.banner, class: "w-full h-full object-cover",
-              style: "object-position: center #{(@other_user.banner_offset_y || 0)}px;" %>
-        <% elsif @other_user.effective_banner_url.present? %>
-          <%= image_tag @other_user.effective_banner_url, class: "w-full h-full object-cover",
-              style: "object-position: center #{(@other_user.banner_offset_y || 0)}px;" %>
+        <% dm_banner = dm_profile.try(:effective_banner_url) || dm_profile.try(:banner_url) %>
+        <% if dm_banner.present? %>
+          <%= image_tag dm_banner, class: "w-full h-full object-cover",
+              style: "object-position: center #{(dm_profile.try(:banner_offset_y) || 0)}px;" %>
         <% else %>
-          <div class="w-full h-full" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>"></div>
+          <div class="w-full h-full" style="background-color: <%= dm_profile.try(:profile_color) || '#1e1c1b' %>"></div>
         <% end %>
       </div>
 
@@ -181,48 +180,59 @@
       <div class="relative px-4 pb-4">
         <!-- Avatar -->
         <div class="relative -mt-[40px] mb-3">
-          <div class="w-[80px] h-[80px] rounded-full p-[4px] inline-block" style="background-color: <%= @other_user.profile_color_2.presence || @other_user.profile_color || '#1e1c1b' %>">
-            <% if @other_user.avatar.attached? %>
-              <%= image_tag @other_user.avatar, class: "w-full h-full rounded-full object-cover" %>
-            <% elsif @other_user.effective_avatar_url.present? %>
-              <%= image_tag @other_user.effective_avatar_url, class: "w-full h-full rounded-full object-cover" %>
+          <div class="w-[80px] h-[80px] rounded-full p-[4px] inline-block" style="background-color: <%= dm_profile.try(:profile_color_2).presence || dm_profile.try(:profile_color) || '#1e1c1b' %>">
+            <% dm_avatar_panel = dm_profile.try(:effective_avatar_url) || dm_profile.try(:avatar_url) %>
+            <% if dm_avatar_panel.present? %>
+              <%= image_tag dm_avatar_panel, class: "w-full h-full rounded-full object-cover" %>
             <% else %>
-              <div class="w-full h-full rounded-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= @other_user.profile_color || '#1e1c1b' %>">
-                <%= @other_user.username[0].upcase %>
+              <div class="w-full h-full rounded-full flex items-center justify-center text-2xl font-bold text-white" style="background-color: <%= dm_profile.try(:profile_color) || '#1e1c1b' %>">
+                <%= (dm_profile.try(:username) || dm_profile.try(:effective_display_name) || "?")[0].upcase %>
               </div>
             <% end %>
           </div>
-          <% status_color = case @other_user.online_state
-                            when "online" then "bg-green-500"
-                            when "idle" then "bg-yellow-500"
-                            when "dnd" then "bg-red-500"
-                            else "bg-gray-500"
-                            end %>
-          <div data-dm-presence-dot class="absolute bottom-[2px] left-[56px] w-[20px] h-[20px] rounded-full border-[4px] <%= status_color %>" style="border-color: <%= @other_user.profile_color_2.presence || @other_user.profile_color || '#1e1c1b' %>"></div>
+          <% if @other_user %>
+            <% status_color = case @other_user.online_state
+                              when "online" then "bg-green-500"
+                              when "idle" then "bg-yellow-500"
+                              when "dnd" then "bg-red-500"
+                              else "bg-gray-500"
+                              end %>
+          <% else %>
+            <% status_color = @dm_contact&.online? ? "bg-green-500" : "bg-gray-500" %>
+          <% end %>
+          <div data-dm-presence-dot class="absolute bottom-[2px] left-[56px] w-[20px] h-[20px] rounded-full border-[4px] <%= status_color %>" style="border-color: <%= dm_profile.try(:profile_color_2).presence || dm_profile.try(:profile_color) || '#1e1c1b' %>"></div>
         </div>
 
         <!-- Card content -->
         <div class="bg-black/30 rounded-lg p-3 space-y-3">
           <div>
-            <h3 class="text-lg font-bold text-white leading-tight"><%= @other_user.display_name.presence || @other_user.username %></h3>
-            <p class="text-xs text-white/60"><%= @other_user.tag %></p>
+            <h3 class="text-lg font-bold text-white leading-tight"><%= @other_user ? (@other_user.display_name.presence || @other_user.username) : @dm_contact.effective_display_name %></h3>
+            <% if @other_user %>
+              <p class="text-xs text-white/60"><%= @other_user.tag %></p>
+            <% elsif @dm_contact&.npub %>
+              <p class="text-xs text-white/60 truncate"><%= @dm_contact.npub %></p>
+            <% end %>
           </div>
 
-          <% if @other_user.status.present? %>
-            <p class="text-sm text-white/70"><%= @other_user.status_emoji %> <%= @other_user.status %></p>
+          <% profile_status = dm_profile.try(:status) %>
+          <% if profile_status.present? %>
+            <p class="text-sm text-white/70"><%= dm_profile.try(:status_emoji) %> <%= profile_status %></p>
           <% end %>
 
-          <% if @other_user.bio.present? %>
+          <% profile_bio = dm_profile.try(:bio) %>
+          <% if profile_bio.present? %>
             <div class="border-t border-white/10 pt-2">
               <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-1">About Me</h4>
-              <p class="text-sm text-white/80"><%= @other_user.bio %></p>
+              <p class="text-sm text-white/80"><%= profile_bio %></p>
             </div>
           <% end %>
 
-          <div class="border-t border-white/10 pt-2">
-            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
-            <p class="text-[11px] text-white/50"><%= @other_user.created_at.strftime("%b %d, %Y") %></p>
-          </div>
+          <% if @other_user %>
+            <div class="border-t border-white/10 pt-2">
+              <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
+              <p class="text-[11px] text-white/50"><%= @other_user.created_at.strftime("%b %d, %Y") %></p>
+            </div>
+          <% end %>
         </div>
       </div>
     </aside>

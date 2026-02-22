@@ -1,10 +1,7 @@
 <div class="rounded-lg shadow-xl border border-gray-600 overflow-hidden" data-banner-editor-target="previewCard">
   <!-- Banner -->
   <div class="h-[60px] relative">
-    <% if @user.banner.attached? %>
-      <%= image_tag @user.banner, class: "w-full h-full object-cover",
-          data: { banner_editor_target: "previewBanner" } %>
-    <% elsif @user.effective_banner_url.present? %>
+    <% if @user.effective_banner_url.present? %>
       <%= image_tag @user.effective_banner_url, class: "w-full h-full object-cover",
           data: { banner_editor_target: "previewBanner" } %>
     <% else %>
@@ -19,10 +16,7 @@
     <div class="relative -mt-[28px] mb-1">
       <div class="w-[52px] h-[52px] rounded-full p-[4px] inline-block" data-banner-editor-target="previewRing"
            style="background: <%= @user.profile_color_2.presence || @user.profile_color || '#1e1c1b' %>">
-        <% if @user.avatar.attached? %>
-          <%= image_tag @user.avatar, class: "w-full h-full rounded-full object-cover",
-              data: { banner_editor_target: "previewAvatar" } %>
-        <% elsif @user.effective_avatar_url.present? %>
+        <% if @user.effective_avatar_url.present? %>
           <%= image_tag @user.effective_avatar_url, class: "w-full h-full rounded-full object-cover",
               data: { banner_editor_target: "previewAvatar" } %>
         <% else %>

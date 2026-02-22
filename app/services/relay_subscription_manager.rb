@@ -668,6 +668,13 @@ class RelaySubscriptionManager
 
     return if content.blank?
 
+    # Ensure contact exists with up-to-date profile
+    contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
+    if contact.new_record? || contact.profile_stale?
+      NostrProfileResolver.resolve(sender_pubkey)
+      contact.reload if contact.persisted?
+    end
+
     # Find or create conversation by counterparty pubkey
     conversation = Conversation.find_or_create_by_pubkey(owner, sender_pubkey)
 
@@ -687,7 +694,6 @@ class RelaySubscriptionManager
     ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
 
     # Notify the owner
-    contact = Contact.find_by(pubkey: sender_pubkey)
     sender_name = contact&.effective_display_name || sender_pubkey.first(12) + "..."
     ActionCable.server.broadcast("user_notifications_#{owner.id}", {
       type: "dm_message",
@@ -815,8 +821,8 @@ class RelaySubscriptionManager
     metadata = JSON.parse(event["content"]) rescue nil
     return unless metadata
 
-    contact = Contact.find_by(pubkey: pubkey)
-    contact&.update_from_metadata(metadata)
+    contact = Contact.find_or_initialize_by(pubkey: pubkey)
+    contact.update_from_metadata(metadata)
 
     # Also update any remote members with this pubkey and broadcast changes
     RemoteMember.where(pubkey: pubkey).includes(:server).find_each do |rm|

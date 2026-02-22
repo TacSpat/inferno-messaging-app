@@ -153,8 +153,8 @@
         <% @blocked.each do |user| %>
           <div class="flex items-center px-2 py-2.5 rounded hover:bg-gray-600/30 group border-b border-gray-700/50 last:border-b-0">
             <div class="relative shrink-0">
-              <% if user.avatar.attached? %>
-                <%= image_tag user.avatar, class: "w-9 h-9 rounded-full object-cover" %>
+              <% if user.effective_avatar_url.present? %>
+                <%= image_tag user.effective_avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
               <% else %>
                 <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= user.profile_color || '#1e1c1b' %>">
                   <%= user.username[0].upcase %>

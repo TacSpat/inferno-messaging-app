@@ -107,9 +107,18 @@ class User < ApplicationRecord
     blocks.exists?(blocked_id: user.id)
   end
 
-  # Stub methods — previously delegated to RemoteUserDetail
-  def effective_avatar_url = nil
-  def effective_banner_url = nil
+  # Returns Blossom URL if uploaded, otherwise falls back to Active Storage path
+  def effective_avatar_url
+    return nil unless avatar.attached?
+    avatar.blob.metadata&.dig("blossom_url") ||
+      Rails.application.routes.url_helpers.rails_blob_path(avatar, only_path: true)
+  end
+
+  def effective_banner_url
+    return nil unless banner.attached?
+    banner.blob.metadata&.dig("blossom_url") ||
+      Rails.application.routes.url_helpers.rails_blob_path(banner, only_path: true)
+  end
 
   def remote?
     false
