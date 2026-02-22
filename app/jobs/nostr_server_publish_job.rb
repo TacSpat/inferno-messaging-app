@@ -340,42 +340,9 @@ class NostrServerPublishJob < ApplicationJob
     tags
   end
 
-  # Upload an Active Storage attachment to the local Blossom endpoint
-  # and return a content-addressable URL.
-  # Falls back to the Rails blob path if Blossom upload fails.
+  # Upload an Active Storage attachment to a Blossom server and return the URL.
+  # Uses BlossomClientService which handles caching, auth, and fallback servers.
   def blossom_url_for(attachment)
-    return "" unless attachment.attached?
-
-    blob = attachment.blob
-    ext = File.extname(blob.filename.to_s).presence || ".bin"
-
-    # Use cached SHA256 from blob metadata to avoid re-downloading
-    sha256 = blob.metadata&.dig("sha256")
-    unless sha256
-      tempfile = blob.download
-      sha256 = Digest::SHA256.hexdigest(tempfile)
-      blob.update!(metadata: (blob.metadata || {}).merge("sha256" => sha256))
-    end
-
-    filename = "#{sha256}#{ext}"
-
-    # Write to public/cached_assets for serving (only if not already cached)
-    cache_dir = Rails.root.join("public", "cached_assets")
-    full_path = cache_dir.join(filename)
-    unless File.exist?(full_path)
-      tempfile ||= blob.download
-      FileUtils.mkdir_p(cache_dir)
-      File.binwrite(full_path, tempfile)
-    end
-
-    # Return absolute URL so other instances can download this asset
-    instance_domain = Rails.application.config.x.instance_domain
-    scheme = instance_domain&.include?("localhost") || instance_domain&.match?(/:\d+$/) ? "http" : "https"
-    "#{scheme}://#{instance_domain}/cached_assets/#{filename}"
-  rescue => e
-    Rails.logger.warn("[NostrServerPublishJob] Blossom upload failed: #{e.message}")
-    instance_domain = Rails.application.config.x.instance_domain
-    scheme = instance_domain&.include?("localhost") || instance_domain&.match?(/:\d+$/) ? "http" : "https"
-    "#{scheme}://#{instance_domain}#{Rails.application.routes.url_helpers.rails_blob_path(attachment, only_path: true)}"
+    BlossomClientService.upload_attachment(attachment)
   end
 end

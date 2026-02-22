@@ -48,20 +48,15 @@ class NostrPublishJob < ApplicationJob
       nip05: user.nip05_identifier
     }
 
-    # Include avatar URL if attached
+    # Upload avatar/banner to Blossom and include URLs
     if user.avatar.attached?
-      profile_data[:picture] = Rails.application.routes.url_helpers.rails_blob_url(
-        user.avatar,
-        host: Rails.application.config.x.instance_domain
-      )
+      url = BlossomClientService.upload_attachment(user.avatar)
+      profile_data[:picture] = url if url.present?
     end
 
-    # Include banner URL if attached
     if user.banner.attached?
-      profile_data[:banner] = Rails.application.routes.url_helpers.rails_blob_url(
-        user.banner,
-        host: Rails.application.config.x.instance_domain
-      )
+      url = BlossomClientService.upload_attachment(user.banner)
+      profile_data[:banner] = url if url.present?
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)

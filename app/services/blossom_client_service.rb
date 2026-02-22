@@ -63,11 +63,39 @@ class BlossomClientService
     "#{base_url.chomp('/')}/#{sha256}"
   end
 
+  # Upload an Active Storage attachment to Blossom, caching the URL in blob metadata.
+  # Returns the Blossom URL, or "" if the attachment is missing or upload fails.
+  def self.upload_attachment(attachment)
+    return "" unless attachment.attached?
+
+    blob = attachment.blob
+
+    # Return cached URL if already uploaded
+    cached_url = blob.metadata&.dig("blossom_url")
+    return cached_url if cached_url.present?
+
+    # Download and upload
+    data = blob.download
+    content_type = blob.content_type || "application/octet-stream"
+    result = upload(StringIO.new(data), content_type: content_type, filename: blob.filename.to_s)
+
+    # Cache the URL and SHA256 in blob metadata
+    blob.update!(metadata: (blob.metadata || {}).merge(
+      "blossom_url" => result[:url],
+      "sha256" => result[:sha256]
+    ))
+
+    result[:url]
+  rescue => e
+    Rails.logger.warn("[BlossomClientService] upload_attachment failed: #{e.message}")
+    ""
+  end
+
   private
 
   DEFAULT_BLOSSOM_SERVERS = %w[
     https://blossom.primal.net
-    https://nostr.build
+    https://cdn.satellite.earth
   ].freeze
 
   def self.blossom_server_urls
