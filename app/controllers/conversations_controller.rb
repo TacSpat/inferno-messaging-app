@@ -9,6 +9,15 @@ class ConversationsController < ApplicationController
       .includes(participants: { avatar_attachment: :blob }, messages: :user)
       .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
+
+    # Ensure contacts exist for all DM counterparties (resolve missing profiles in background)
+    dm_pubkeys = @conversations.where.not(counterparty_pubkey: nil).pluck(:counterparty_pubkey)
+    if dm_pubkeys.any?
+      existing = Contact.where(pubkey: dm_pubkeys).pluck(:pubkey)
+      missing = dm_pubkeys - existing
+      missing.each { |pk| Thread.new { NostrProfileResolver.resolve(pk) } } if missing.any?
+    end
+
     @pending_count = Contact.pending_incoming.count
 
     case @tab
@@ -39,12 +48,17 @@ class ConversationsController < ApplicationController
                              .order(created_at: :asc).last(50)
     @message = Message.new
     @other_user = @conversation.other_user(current_user) if @conversation.direct?
-    @dm_contact = @conversation.counterparty_contact if @other_user.nil? && @conversation.counterparty_pubkey.present?
+    if @other_user.nil? && @conversation.counterparty_pubkey.present?
+      contact_pubkey = @conversation.counterparty_pubkey
+      @dm_contact = Contact.find_by(pubkey: contact_pubkey)
 
-    # Refresh remote contact profile in background
-    if @dm_contact&.profile_stale?
-      contact_pubkey = @dm_contact.pubkey
-      Thread.new { NostrProfileResolver.resolve(contact_pubkey) }
+      if @dm_contact.nil?
+        # First time viewing this DM — create contact and resolve profile
+        NostrProfileResolver.resolve(contact_pubkey)
+        @dm_contact = Contact.find_by(pubkey: contact_pubkey)
+      elsif @dm_contact.profile_stale?
+        Thread.new { NostrProfileResolver.resolve(contact_pubkey) }
+      end
     end
 
     # Mark conversation as read
