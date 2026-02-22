@@ -971,6 +971,23 @@ class RelaySubscriptionManager
     nil
   end
 
+  def broadcast_member_update(member, server)
+    ServerChannel.broadcast_to(server, {
+      type: "member_update",
+      user_id: member.public_id,
+      html: ApplicationController.render(
+        partial: "servers/member_item",
+        locals: { member: member.reload, server: server }
+      ),
+      display_name: member.display_name_for,
+      username: member.username,
+      tag: member.tag,
+      role_color: member.role_color_for
+    })
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] broadcast_member_update failed: #{e.message}")
+  end
+
   def log_server_event(event)
     NostrEventLog.create!(
       event_id: event["id"],
@@ -1284,7 +1301,8 @@ class RelaySubscriptionManager
       end
 
       is_new = remote.new_record?
-      remote.save! if remote.changed? || is_new
+      profile_updated = remote.changed?
+      remote.save! if profile_updated || is_new
 
       # Sync roles
       roles_tag = tags.find { |t| t[0] == "roles" }
@@ -1295,25 +1313,15 @@ class RelaySubscriptionManager
       end
 
       # Fallback: fetch Kind 0 profile if no profile tags and stale
-      if profile_name.blank? && remote.profile_stale?
+      has_profile_tags = profile_data["profile_name"].present? || profile_data["profile_display_name"].present?
+      if !has_profile_tags && remote.profile_stale?
         fetch_server = server
         Thread.new do
           begin
             metadata = fetch_kind0_metadata(member_pubkey)
             if metadata
               remote.update_from_metadata(metadata)
-              ServerChannel.broadcast_to(fetch_server, {
-                type: "member_update",
-                user_id: remote.public_id,
-                html: ApplicationController.render(
-                  partial: "servers/member_item",
-                  locals: { member: remote.reload, server: fetch_server }
-                ),
-                display_name: remote.display_name_for,
-                username: remote.username,
-                tag: remote.tag,
-                role_color: remote.role_color_for
-              })
+              broadcast_member_update(remote, fetch_server)
             end
           rescue => e
             Rails.logger.error("[RelaySubscriptionManager] Profile fetch failed for remote member #{member_pubkey[0..15]}: #{e.message}")
@@ -1331,6 +1339,8 @@ class RelaySubscriptionManager
           user_id: remote.public_id,
           member_count: server.total_member_count
         })
+      elsif profile_updated
+        broadcast_member_update(remote, server)
       end
     end
 
