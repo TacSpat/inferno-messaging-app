@@ -948,6 +948,29 @@ class RelaySubscriptionManager
     # Another thread already created it
   end
 
+  # Fetch Kind 0 profile metadata directly from relays, bypassing Contact model
+  def fetch_kind0_metadata(pubkey)
+    urls = RelayConnection.active.pluck(:url)
+    return nil if urls.empty?
+
+    filter = { kinds: [0], authors: [pubkey], limit: 1 }
+    urls.each do |url|
+      events = RelayService.fetch_from_relay(url, filter, timeout: 10)
+      if events.any?
+        event = events.max_by { |e| e["created_at"].to_i }
+        begin
+          return JSON.parse(event["content"])
+        rescue JSON::ParserError
+          next
+        end
+      end
+    end
+    nil
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Kind 0 fetch failed for #{pubkey[0..15]}: #{e.message}")
+    nil
+  end
+
   def log_server_event(event)
     NostrEventLog.create!(
       event_id: event["id"],
@@ -1256,16 +1279,9 @@ class RelaySubscriptionManager
         fetch_server = server
         Thread.new do
           begin
-            contact = NostrProfileResolver.resolve(member_pubkey)
-            if contact&.persisted?
-              remote.update_from_metadata({
-                "display_name" => contact.display_name,
-                "name" => contact.display_name,
-                "picture" => contact.avatar_url,
-                "banner" => contact.respond_to?(:banner_url) ? contact.banner_url : nil,
-                "about" => contact.bio,
-                "nip05" => contact.nip05
-              })
+            metadata = fetch_kind0_metadata(member_pubkey)
+            if metadata
+              remote.update_from_metadata(metadata)
               # Broadcast updated profile to sidebar
               ServerChannel.broadcast_to(fetch_server, {
                 type: "member_update",
