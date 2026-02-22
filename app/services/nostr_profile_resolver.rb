@@ -19,18 +19,22 @@ class NostrProfileResolver
       limit: 1
     }
 
-    # Try each relay until we get a result
-    metadata = nil
+    # Collect events from all relays and use the most recent one
+    all_events = []
     urls.each do |url|
       events = RelayService.fetch_from_relay(url, filter, timeout: 10)
-      if events.any?
-        event = events.max_by { |e| e["created_at"].to_i }
-        begin
-          metadata = JSON.parse(event["content"])
-          break
-        rescue JSON::ParserError
-          next
-        end
+      all_events.concat(events)
+    rescue => e
+      Rails.logger.debug("NostrProfileResolver relay #{url} error: #{e.message}")
+    end
+
+    metadata = nil
+    if all_events.any?
+      newest = all_events.max_by { |e| e["created_at"].to_i }
+      begin
+        metadata = JSON.parse(newest["content"])
+      rescue JSON::ParserError
+        # skip
       end
     end
 
