@@ -504,6 +504,8 @@ class RelaySubscriptionManager
     sender_pubkey = event["pubkey"]
     own_event = (sender_pubkey == owner.nostr_public_key)
 
+    Rails.logger.debug("[RelaySubscriptionManager] process_dm_event kind=#{event["kind"]} from=#{sender_pubkey[0..15]} own=#{own_event}")
+
     # Determine counterparty for decryption key derivation
     if own_event
       # Our event from another device — counterparty is in the "p" tag
@@ -517,6 +519,7 @@ class RelaySubscriptionManager
     # Decrypt NIP-44 content
     conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, counterparty_pubkey)
     plaintext = Nip44Service.decrypt(event["content"], conversation_key)
+    Rails.logger.debug("[RelaySubscriptionManager] Decrypted DM, parsed type=#{(JSON.parse(plaintext) rescue {})["type"]}")
 
     # Try to parse as JSON (structured payload) or treat as plain DM text
     parsed = JSON.parse(plaintext) rescue nil
