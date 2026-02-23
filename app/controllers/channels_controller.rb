@@ -13,6 +13,13 @@ class ChannelsController < ApplicationController
     @current_membership = current_user.server_memberships.find_by(server: @server)
     @members = @server.all_members
 
+    if @channel.voice?
+      @voice_states = @channel.voice_states.includes(:user)
+      @voice_configured = @server.voice_ready?
+      render "channels/show_voice"
+      return
+    end
+
     @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
                         .ordered.last(50)
     @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
@@ -123,7 +130,8 @@ class ChannelsController < ApplicationController
         type: "channel_created",
         channel_id: @channel.public_id,
         name: @channel.name,
-        category_id: @channel.category&.public_id
+        category_id: @channel.category&.public_id,
+        channel_type: @channel.channel_type
       })
       publish_server_structure
       redirect_to server_channel_path(@server, @channel)
@@ -151,7 +159,8 @@ class ChannelsController < ApplicationController
           type: "channel_updated",
           channel_id: @channel.public_id,
           name: @channel.name,
-          category_id: @channel.category&.public_id
+          category_id: @channel.category&.public_id,
+          channel_type: @channel.channel_type
         })
       end
       publish_server_structure
@@ -205,7 +214,7 @@ class ChannelsController < ApplicationController
   end
 
   def channel_params
-    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, allowed_role_ids: [])
+    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, :voice_bitrate, :voice_user_limit, :video_enabled, allowed_role_ids: [])
     if permitted[:encrypted] == "1" || permitted[:encrypted] == true
       role_ids = (permitted.delete(:allowed_role_ids) || []).reject(&:blank?)
       permitted[:permissions_overrides] = { "allowed_role_ids" => role_ids }

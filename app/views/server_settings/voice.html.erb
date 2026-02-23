@@ -1,0 +1,174 @@
+<% can_manage = @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
+
+<h1 class="text-xl font-bold text-white mb-1">Voice</h1>
+<p class="text-sm text-gray-400 mb-6">Voice settings for <%= @server.name %></p>
+
+<% if can_manage %>
+<!-- ═══ Voice Enable Toggle (admin only) ═══ -->
+<%= form_tag server_settings_update_voice_path(@server), method: :patch, class: "mb-6" do %>
+  <label class="flex items-center gap-3 cursor-pointer">
+    <input type="hidden" name="voice_enabled" value="0">
+    <input type="checkbox" name="voice_enabled" value="1"
+           <%= "checked" if @server.voice_enabled? %>
+           onchange="this.form.submit()"
+           class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+    <div>
+      <span class="text-sm font-medium text-white">Enable Voice Channels</span>
+      <p class="text-xs text-gray-400">Allow members to use voice channels on this server</p>
+    </div>
+  </label>
+<% end %>
+<% end %>
+
+<!-- ═══ Voice Providers ═══ -->
+<div class="mb-8">
+  <h2 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Voice Providers</h2>
+
+  <% unless @server.voice_ready? %>
+    <div class="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-4">
+      <div class="flex items-start gap-3">
+        <svg class="w-5 h-5 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        <div>
+          <p class="text-sm text-yellow-200 font-medium">Voice is not ready</p>
+          <p class="text-xs text-yellow-200/70 mt-1">
+            <% if !@server.voice_enabled? && can_manage %>
+              Enable voice channels above, then have a member volunteer as a voice provider.
+            <% elsif !@server.voice_enabled? %>
+              Voice channels are disabled on this server. An admin needs to enable them.
+            <% else %>
+              A server member needs to volunteer their LiveKit credentials as a voice provider.
+            <% end %>
+          </p>
+        </div>
+      </div>
+    </div>
+  <% end %>
+
+  <p class="text-xs text-gray-500 mb-4">
+    Members who share their LiveKit accounts power voice channels for this server.
+    Multiple providers enable load balancing and automatic failover.
+  </p>
+
+  <% if @providers.any? %>
+    <div class="space-y-2 mb-4">
+      <% @providers.each do |svp| %>
+        <div class="bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <% if svp.user.effective_avatar_url.present? %>
+              <img src="<%= svp.user.effective_avatar_url %>" class="w-8 h-8 rounded-full object-cover">
+            <% else %>
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold" style="background-color: <%= svp.user.profile_color || '#6b7280' %>">
+                <%= svp.user.username[0].upcase %>
+              </div>
+            <% end %>
+            <div>
+              <span class="text-sm font-medium text-white"><%= svp.user.display_name.presence || svp.user.username %></span>
+              <div class="flex items-center gap-2">
+                <% if svp.active? %>
+                  <span class="text-xs text-green-400">Active</span>
+                <% else %>
+                  <span class="text-xs text-gray-500">Inactive</span>
+                <% end %>
+                <% if svp.user.livekit_verified? %>
+                  <span class="text-xs text-green-400/60">Verified</span>
+                <% end %>
+                <% active_channels = Channel.where(current_voice_provider_id: svp.user_id).count %>
+                <% if active_channels > 0 %>
+                  <span class="text-xs text-accent-light"><%= active_channels %> active channel<%= active_channels == 1 ? '' : 's' %></span>
+                <% end %>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1 text-xs text-teal-300 bg-teal-500/10 px-2 py-0.5 rounded-full">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+              Voice Provider
+            </span>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
+
+  <!-- Volunteer / Opt-out buttons -->
+  <% if @is_provider %>
+    <%= button_to "Stop Providing Voice", server_settings_voice_opt_out_path(@server), method: :delete,
+        class: "px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white text-sm rounded font-medium cursor-pointer transition" %>
+  <% elsif @can_volunteer %>
+    <%= button_to "Volunteer as Voice Provider", server_settings_voice_opt_in_path(@server), method: :post,
+        class: "px-4 py-2 bg-accent hover:bg-accent-light text-white text-sm rounded font-medium cursor-pointer transition" %>
+  <% elsif !current_user.livekit_configured? %>
+    <div class="bg-gray-800 border border-gray-700 rounded-lg p-4">
+      <p class="text-sm text-gray-400">
+        To volunteer as a voice provider, first configure your LiveKit credentials in
+        <a href="<%= user_settings_voice_path %>" class="text-accent-light hover:underline">User Settings > Voice & Video</a>.
+      </p>
+    </div>
+  <% end %>
+</div>
+
+<% if can_manage %>
+<!-- ═══ Voice Channel Settings (admin only) ═══ -->
+<% if @voice_channels.any? %>
+  <h2 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Channel Settings</h2>
+  <%= form_tag server_settings_update_voice_path(@server), method: :patch, class: "space-y-6" do %>
+    <input type="hidden" name="voice_enabled" value="<%= @server.voice_enabled? ? '1' : '0' %>">
+    <% @voice_channels.each do |channel| %>
+      <div class="bg-gray-800 border border-gray-700 rounded-lg p-5">
+        <div class="flex items-center gap-2 mb-4">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+          <h3 class="text-sm font-semibold text-white"><%= channel.name %></h3>
+          <% if channel.voice_states.any? %>
+            <span class="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full"><%= channel.voice_states.count %> connected</span>
+          <% end %>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Bitrate</label>
+            <select name="channels[<%= channel.public_id %>][voice_bitrate]"
+                    class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+              <% [[32000, "32 kbps"], [64000, "64 kbps"], [96000, "96 kbps"], [128000, "128 kbps"], [256000, "256 kbps"]].each do |val, label| %>
+                <option value="<%= val %>" <%= "selected" if channel.voice_bitrate == val %>><%= label %></option>
+              <% end %>
+            </select>
+          </div>
+
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">User Limit</label>
+            <input type="number" name="channels[<%= channel.public_id %>][voice_user_limit]"
+                   value="<%= channel.voice_user_limit %>" min="0" max="99"
+                   class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+            <p class="text-xs text-gray-500 mt-1">0 = unlimited</p>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <input type="hidden" name="channels[<%= channel.public_id %>][video_enabled]" value="0">
+            <input type="checkbox" name="channels[<%= channel.public_id %>][video_enabled]" value="1"
+                   <%= "checked" if channel.video_enabled? %>
+                   class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+            <div>
+              <span class="text-sm font-medium text-white">Enable Video</span>
+              <p class="text-xs text-gray-400">Allow members to share their camera</p>
+            </div>
+          </label>
+        </div>
+      </div>
+    <% end %>
+
+    <button type="submit" class="bg-gradient-to-r from-confirm-dark to-confirm
+           hover:from-confirm hover:to-confirm-light text-white font-semibold
+           px-6 py-2.5 rounded transition cursor-pointer text-sm">
+      Save Changes
+    </button>
+  <% end %>
+<% else %>
+  <div class="bg-gray-800 border border-gray-700 rounded-lg p-8 text-center">
+    <svg class="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+    <p class="text-sm text-gray-400 mb-1">No voice channels yet</p>
+    <p class="text-xs text-gray-500">Create a voice channel to configure its settings here.</p>
+  </div>
+<% end %>
+<% end %>

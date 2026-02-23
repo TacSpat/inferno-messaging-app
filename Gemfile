@@ -88,5 +88,7 @@ group :development do
 end
 
 gem "nostr_ruby", "~> 0.2"
+gem "livekit-server-sdk", "~> 0.6"
+gem "jwt", "~> 2.9"
 gem "rack-attack", "~> 6.7"
 gem "fiddle"

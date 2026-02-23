@@ -1,0 +1,243 @@
+<h2 class="text-xl font-bold text-white mb-6">Voice & Video</h2>
+
+<% voice = @user.voice_settings || {} %>
+
+<div class="max-w-lg" data-controller="voice-settings voice-device-select">
+  <%= form_tag settings_update_voice_path, method: :patch, class: "space-y-8" do %>
+
+    <!-- ═══ Audio Input ═══ -->
+    <div>
+      <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Input Device</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Microphone</label>
+          <select data-voice-device-select-target="inputDevice"
+                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+            <option value="default">Default</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">Device selection is stored locally in your browser.</p>
+        </div>
+
+        <!-- Mic test -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Mic Test</label>
+          <div class="flex items-center gap-3">
+            <button type="button" class="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs rounded font-medium cursor-pointer transition"
+                    data-action="click->voice-device-select#toggleMicTest"
+                    data-voice-device-select-target="micTestBtn">
+              Test Mic
+            </button>
+            <div class="flex-1 h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div class="h-full bg-green-500 rounded-full transition-all duration-75" style="width: 0%"
+                   data-voice-device-select-target="micLevel"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Input sensitivity -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide">Input Sensitivity</label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-xs text-gray-400" data-voice-device-select-target="sensitivityModeLabel">Automatic</span>
+              <input type="checkbox" checked
+                     data-voice-device-select-target="sensitivityAuto"
+                     data-action="change->voice-device-select#toggleSensitivityMode"
+                     class="w-8 h-4 rounded-full bg-gray-700 appearance-none cursor-pointer relative
+                            before:content-[''] before:absolute before:top-0.5 before:left-0.5 before:w-3 before:h-3 before:rounded-full before:bg-gray-400 before:transition-all
+                            checked:bg-accent/60 checked:before:translate-x-4 checked:before:bg-white">
+            </label>
+          </div>
+          <div class="relative" data-voice-device-select-target="sensitivitySliderWrap">
+            <div class="flex items-center gap-3">
+              <span class="text-xs text-gray-500 w-7 shrink-0">-100</span>
+              <div class="relative flex-1 h-6 flex items-center">
+                <!-- Background bar with live level indicator -->
+                <div class="absolute inset-x-0 h-1.5 bg-gray-700 rounded-full">
+                  <div class="h-full bg-green-500/40 rounded-full transition-all duration-75" style="width: 0%"
+                       data-voice-device-select-target="sensitivityLevel"></div>
+                </div>
+                <!-- Threshold marker line -->
+                <div class="absolute h-4 w-0.5 bg-white/70 rounded-full pointer-events-none transition-all"
+                     data-voice-device-select-target="sensitivityMarker" style="left: 50%"></div>
+                <input type="range" min="-100" max="0" value="-50"
+                       data-voice-device-select-target="sensitivitySlider"
+                       data-action="input->voice-device-select#updateSensitivity"
+                       class="absolute inset-x-0 w-full h-6 opacity-0 cursor-pointer">
+              </div>
+              <span class="text-xs text-gray-500 w-5 shrink-0 text-right">0</span>
+            </div>
+            <p class="text-xs text-gray-500 mt-1">Sound below the threshold won't be transmitted.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Audio Output ═══ -->
+    <div class="border-t border-gray-700 pt-6">
+      <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Output Device</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Speaker / Headphones</label>
+          <select data-voice-device-select-target="outputDevice"
+                  class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+            <option value="default">Default</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Output Volume</label>
+          <div class="flex items-center gap-3">
+            <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+            <input type="range" min="0" max="200" value="100"
+                   data-voice-device-select-target="outputVolume"
+                   data-action="input->voice-device-select#updateOutputVolume"
+                   class="flex-1 h-1.5 bg-gray-700 rounded-full appearance-none cursor-pointer accent-accent [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:shadow-md">
+            <svg class="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+            <span data-voice-device-select-target="outputVolumeLabel" class="text-xs text-gray-400 w-10 text-right tabular-nums">100%</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-1">Applies immediately to voice channels. Above 100% amplifies audio.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Audio Processing ═══ -->
+    <div class="border-t border-gray-700 pt-6">
+      <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Audio Processing</h3>
+      <div class="space-y-3">
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="hidden" name="noise_suppression" value="0">
+          <input type="checkbox" name="noise_suppression" value="1"
+                 <%= "checked" if voice["noise_suppression"] %>
+                 class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+          <div>
+            <span class="text-sm font-medium text-white">Noise Suppression</span>
+            <p class="text-xs text-gray-400">Reduce background noise from your microphone</p>
+          </div>
+        </label>
+
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="hidden" name="echo_cancellation" value="0">
+          <input type="checkbox" name="echo_cancellation" value="1"
+                 <%= "checked" if voice["echo_cancellation"] != false %>
+                 class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+          <div>
+            <span class="text-sm font-medium text-white">Echo Cancellation</span>
+            <p class="text-xs text-gray-400">Prevent your speakers from being picked up by your mic</p>
+          </div>
+        </label>
+
+        <label class="flex items-center gap-3 cursor-pointer">
+          <input type="hidden" name="auto_gain_control" value="0">
+          <input type="checkbox" name="auto_gain_control" value="1"
+                 <%= "checked" if voice["auto_gain_control"] != false %>
+                 class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+          <div>
+            <span class="text-sm font-medium text-white">Automatic Gain Control</span>
+            <p class="text-xs text-gray-400">Automatically adjust microphone volume</p>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- ═══ Input Mode ═══ -->
+    <div class="border-t border-gray-700 pt-6">
+      <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Input Mode</h3>
+      <div class="flex gap-3">
+        <label class="flex-1 cursor-pointer">
+          <input type="radio" name="input_mode" value="voice_activity"
+                 <%= "checked" if voice["input_mode"] != "push_to_talk" %>
+                 class="sr-only peer">
+          <div class="border-2 border-gray-600 peer-checked:border-accent/60 rounded-lg p-3 transition peer-checked:ring-2 peer-checked:ring-accent/20 hover:border-gray-500">
+            <span class="text-sm font-medium text-white block mb-1">Voice Activity</span>
+            <span class="text-xs text-gray-400">Mic is always on when unmuted</span>
+          </div>
+        </label>
+        <label class="flex-1 cursor-pointer">
+          <input type="radio" name="input_mode" value="push_to_talk"
+                 <%= "checked" if voice["input_mode"] == "push_to_talk" %>
+                 class="sr-only peer">
+          <div class="border-2 border-gray-600 peer-checked:border-accent/60 rounded-lg p-3 transition peer-checked:ring-2 peer-checked:ring-accent/20 hover:border-gray-500">
+            <span class="text-sm font-medium text-white block mb-1">Push to Talk</span>
+            <span class="text-xs text-gray-400">Hold a key to transmit audio</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- ═══ LiveKit Configuration (all users) ═══ -->
+    <div class="border-t-2 border-gray-600 pt-8 mt-4">
+      <input type="hidden" name="livekit_section" value="1">
+      <h2 class="text-lg font-bold text-white mb-2">LiveKit Credentials</h2>
+      <p class="text-xs text-gray-500 mb-5">
+        Configure your LiveKit account to volunteer as a voice provider for servers you're a member of.
+        Get a free account at
+        <a href="https://livekit.io" target="_blank" rel="noopener" class="text-accent-light hover:underline">livekit.io</a>,
+        or self-host LiveKit Server.
+      </p>
+
+      <div class="space-y-4">
+        <!-- LiveKit URL -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">LiveKit Server URL</label>
+          <input type="text" name="livekit_url" value="<%= @user.livekit_url %>"
+                 placeholder="wss://your-project.livekit.cloud"
+                 class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+          <p class="text-xs text-gray-500 mt-1">Must use wss:// (secure WebSocket)</p>
+        </div>
+
+        <!-- API Key -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">API Key</label>
+          <input type="text" name="livekit_api_key" value="<%= @user.livekit_api_key %>"
+                 placeholder="APIxxxxxxxx"
+                 class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+        </div>
+
+        <!-- API Secret -->
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">API Secret</label>
+          <input type="password" name="livekit_api_secret"
+                 placeholder="<%= @user.livekit_api_secret_enc.present? ? '••••••••••••' : 'Enter API secret' %>"
+                 class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm">
+          <p class="text-xs text-gray-500 mt-1">Encrypted at rest. Leave blank to keep current secret.</p>
+        </div>
+      </div>
+
+      <!-- Verification status -->
+      <div class="flex items-center gap-3 mt-4">
+        <div data-voice-settings-target="verifyStatus">
+          <% if @user.livekit_verified? %>
+            <div class="flex items-center gap-1.5 text-green-400 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+              Verified
+              <% if @user.livekit_verified_at %>
+                <span class="text-gray-500 text-xs">(<%= time_ago_in_words(@user.livekit_verified_at) %> ago)</span>
+              <% end %>
+            </div>
+          <% elsif @user.livekit_configured? %>
+            <div class="flex items-center gap-1.5 text-yellow-400 text-sm">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+              Not verified
+            </div>
+          <% end %>
+        </div>
+        <% if @user.livekit_configured? %>
+          <button type="button"
+                  class="text-sm text-accent-light hover:text-accent font-medium cursor-pointer"
+                  data-action="click->voice-settings#verify"
+                  data-voice-settings-target="verifyBtn">
+            Verify Connection
+          </button>
+          <span data-voice-settings-target="verifyResult" class="text-sm hidden"></span>
+        <% end %>
+      </div>
+
+      <button type="submit" class="w-full mt-5 bg-gradient-to-r from-confirm-dark to-confirm
+             hover:from-confirm hover:to-confirm-light text-white font-semibold
+             py-2.5 rounded transition cursor-pointer text-sm">
+        Save Changes
+      </button>
+    </div>
+  <% end %>
+</div>

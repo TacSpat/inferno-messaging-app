@@ -12,6 +12,7 @@ class Server < ApplicationRecord
   has_many :server_emojis, dependent: :destroy
   has_many :server_stickers, dependent: :destroy
   has_many :remote_members, dependent: :destroy
+  has_many :server_voice_providers, dependent: :destroy
   has_one_attached :icon
   has_one_attached :banner
 
@@ -66,6 +67,25 @@ class Server < ApplicationRecord
         )
       }
     )
+  end
+
+  def voice_ready?
+    voice_enabled? && server_voice_providers.active.any?
+  end
+
+  # Pick the active provider with fewest current channel assignments (load balance).
+  # exclude_ids: provider user IDs to skip (e.g., a failed provider during failover).
+  def pick_voice_provider(exclude_ids: [])
+    providers = server_voice_providers.active.includes(:user)
+    providers = providers.where.not(user_id: exclude_ids) if exclude_ids.any?
+    return nil if providers.empty?
+
+    # Count how many channels each provider is currently serving
+    provider_load = providers.each_with_object({}) do |svp, hash|
+      hash[svp] = Channel.where(current_voice_provider_id: svp.user_id).count
+    end
+
+    provider_load.min_by { |_svp, count| count }.first&.user
   end
 
   private

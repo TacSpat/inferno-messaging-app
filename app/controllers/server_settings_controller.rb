@@ -2,7 +2,7 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers ]
+  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers, :voice, :opt_in_voice, :opt_out_voice ]
   before_action :ensure_invite_permission!, only: [ :invites, :create_invite, :destroy_invite ]
   before_action :ensure_emoji_permission!, only: [ :emojis ]
   before_action :ensure_sticker_permission!, only: [ :stickers ]
@@ -164,6 +164,57 @@ class ServerSettingsController < ApplicationController
       PaperTrail::Version.where(item_type: type, item_id: ids)
     end
     @versions = conditions.reduce(:or).order(created_at: :desc).limit(50)
+  end
+
+  def voice
+    @voice_channels = @server.channels.where(channel_type: :voice).ordered
+    @providers = @server.server_voice_providers.includes(:user).ordered
+    @is_provider = @server.server_voice_providers.exists?(user: current_user)
+    @can_volunteer = current_user.livekit_configured? && !@is_provider
+  end
+
+  def update_voice
+    # Update voice_enabled toggle
+    @server.update!(voice_enabled: params[:voice_enabled] == "1") if params.key?(:voice_enabled)
+
+    voice_channels = @server.channels.where(channel_type: :voice)
+
+    # Update each voice channel's settings from params
+    (params[:channels] || {}).each do |public_id, attrs|
+      channel = voice_channels.find_by(public_id: public_id)
+      next unless channel
+      channel.update(
+        voice_bitrate: attrs[:voice_bitrate],
+        voice_user_limit: attrs[:voice_user_limit],
+        video_enabled: attrs[:video_enabled] == "1"
+      )
+    end
+
+    redirect_to server_settings_voice_path(@server), notice: "Voice settings updated."
+  end
+
+  def opt_in_voice
+    unless current_user.livekit_configured?
+      redirect_to server_settings_voice_path(@server), alert: "Configure your LiveKit credentials in User Settings > Voice first."
+      return
+    end
+
+    svp = @server.server_voice_providers.new(user: current_user)
+    if svp.save
+      redirect_to server_settings_voice_path(@server), notice: "You're now a voice provider for this server!"
+    else
+      redirect_to server_settings_voice_path(@server), alert: svp.errors.full_messages.join(", ")
+    end
+  end
+
+  def opt_out_voice
+    svp = @server.server_voice_providers.find_by(user: current_user)
+    if svp
+      svp.destroy
+      redirect_to server_settings_voice_path(@server), notice: "You've opted out as a voice provider."
+    else
+      redirect_to server_settings_voice_path(@server), alert: "You're not a voice provider for this server."
+    end
   end
 
   def bans

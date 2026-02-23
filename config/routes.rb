@@ -82,7 +82,17 @@ Rails.application.routes.draw do
     resources :roles, except: [:show]
     resources :emojis, only: [:index, :create, :destroy], controller: "server_emojis"
     resources :stickers, only: [:index, :create, :destroy], controller: "server_stickers"
+
+    # Voice channels
+    post "voice/join/:channel_id", to: "voice_channels#join", as: :voice_join
+    post "voice/rejoin/:channel_id", to: "voice_channels#rejoin", as: :voice_rejoin
+    delete "voice/leave", to: "voice_channels#leave", as: :voice_leave
+    post "voice/leave", to: "voice_channels#leave"  # sendBeacon compatibility
   end
+
+  # Voice state updates (not scoped to server — user has one active state)
+  patch "voice_states/self_mute", to: "voice_states#self_mute"
+  patch "voice_states/self_deafen", to: "voice_states#self_deafen"
 
   # Server settings
   scope "servers/:server_id/settings", as: "server_settings" do
@@ -103,6 +113,10 @@ Rails.application.routes.draw do
     delete "bans", to: "server_settings#destroy_ban", as: :destroy_ban
     get "emojis", to: "server_settings#emojis", as: :emojis
     get "stickers", to: "server_settings#stickers", as: :stickers
+    get "voice", to: "server_settings#voice", as: :voice
+    patch "voice", to: "server_settings#update_voice", as: :update_voice
+    post "voice/opt_in", to: "server_settings#opt_in_voice", as: :voice_opt_in
+    delete "voice/opt_out", to: "server_settings#opt_out_voice", as: :voice_opt_out
   end
 
   # Mentions autocomplete
@@ -170,6 +184,9 @@ Rails.application.routes.draw do
   patch "settings/password", to: "settings#update_password", as: :settings_update_password
   post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
   post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
+  get "settings/voice", to: "settings#voice", as: :user_settings_voice
+  patch "settings/voice", to: "settings#update_voice", as: :settings_update_voice
+  post "settings/voice/verify", to: "settings#verify_voice", as: :settings_verify_voice
   resource :profile, only: [:show, :edit, :update]
 
   # User cards

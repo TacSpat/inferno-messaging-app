@@ -6,6 +6,8 @@ class Channel < ApplicationRecord
   has_many :messages, dependent: :destroy
   has_many :channel_reads, dependent: :destroy
   has_many :nostr_event_logs, dependent: :destroy
+  has_many :voice_states, dependent: :destroy
+  belongs_to :current_voice_provider, class_name: "User", optional: true
 
   def unread_for?(user)
     last_message_at = messages.maximum(:created_at)
@@ -15,7 +17,9 @@ class Channel < ApplicationRecord
     read.last_read_at < last_message_at
   end
 
-  enum :channel_type, { text: 0, announcement: 2 }
+  enum :channel_type, { text: 0, voice: 1, announcement: 2 }
+
+  before_validation { self.name = name.downcase if name.present? }
 
   validates :name, presence: true, length: { maximum: 100 },
             format: { with: /\A[a-z0-9 _\-:\u{00A0}-\u{10FFFF}]+\z/, message: "lowercase letters, numbers, spaces, hyphens, underscores, and emojis only" }

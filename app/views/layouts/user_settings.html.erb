@@ -11,10 +11,9 @@
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
   </head>
   <body class="h-full overflow-hidden text-gray-100" data-current-user-id="<%= current_user&.public_id %>">
+    <turbo-frame id="settings-frame" class="block h-full">
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
-
-    <turbo-frame id="settings-frame" class="block h-full">
     <div class="flex h-full" data-controller="settings-sidebar">
       <!-- Mobile sidebar backdrop -->
       <div data-settings-sidebar-target="backdrop" class="hidden fixed inset-0 bg-black/50 z-40 md:hidden" data-action="click->settings-sidebar#close"></div>
@@ -45,6 +44,9 @@
 
           <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">App Settings</h3>
           <div class="space-y-0.5 mb-4">
+            <%= link_to "Voice & Video", user_settings_voice_path,
+                data: { turbo_frame: "settings-frame" },
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[voice update_voice]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
             <%= link_to "Notifications", user_settings_notifications_path,
                 data: { turbo_frame: "settings-frame" },
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'notifications' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>

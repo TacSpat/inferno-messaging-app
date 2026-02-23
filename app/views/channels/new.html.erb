@@ -3,10 +3,20 @@
     <h1 class="text-xl font-bold text-white mb-1">Create Channel</h1>
     <p class="text-sm text-gray-400 mb-6">in <%= @server.name %></p>
 
-    <%= form_with model: [@server, @channel], class: "space-y-4", data: { controller: "encrypted-channel" } do |f| %>
+    <%= form_with model: [@server, @channel], class: "space-y-4", data: { controller: "encrypted-channel channel-type" } do |f| %>
+      <% if @channel.errors.any? %>
+        <div class="bg-danger/20 border border-danger/40 rounded-lg p-3">
+          <% @channel.errors.full_messages.each do |msg| %>
+            <p class="text-sm text-red-300"><%= msg %></p>
+          <% end %>
+        </div>
+      <% end %>
       <div>
         <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Channel Type</label>
-        <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {}, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
+        <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {},
+            class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm",
+            data: { action: "change->channel-type#toggle", channel_type_target: "select" } %>
+      </div>
       <div>
         <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Category</label>
         <%= f.collection_select :category_id, @server.categories.ordered, :id, :name, { include_blank: "No Category" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
@@ -29,6 +39,34 @@
       <div>
         <%= f.label :topic, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
         <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm", placeholder: "What's this channel about?" %>
+      </div>
+
+      <!-- Voice channel options (shown when channel_type is voice) -->
+      <div data-channel-type-target="voiceOptions" class="hidden border border-gray-700 rounded-lg p-4 space-y-4">
+        <h3 class="text-sm font-semibold text-white">Voice Channel Options</h3>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Bitrate</label>
+          <%= f.select :voice_bitrate,
+              [["32 kbps (Low)", 32000], ["64 kbps (Normal)", 64000], ["96 kbps (High)", 96000], ["128 kbps (Very High)", 128000], ["256 kbps (Best)", 256000]],
+              { selected: 64000 },
+              class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
+          <p class="text-xs text-gray-500 mt-1">Higher bitrate = better quality but uses more bandwidth</p>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">User Limit</label>
+          <%= f.number_field :voice_user_limit, value: 0, min: 0, max: 99, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
+          <p class="text-xs text-gray-500 mt-1">0 = unlimited</p>
+        </div>
+
+        <label class="flex items-center gap-3 cursor-pointer">
+          <%= f.check_box :video_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer" %>
+          <div>
+            <span class="text-sm font-medium text-white">Enable Video</span>
+            <p class="text-xs text-gray-400">Allow members to share their camera in this channel</p>
+          </div>
+        </label>
       </div>
 
       <!-- Encrypted channel toggle -->

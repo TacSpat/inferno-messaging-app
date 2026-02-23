@@ -98,6 +98,10 @@ import ThemePickerController from "./controllers/theme_picker_controller"
 import ClipboardController from "./controllers/clipboard_controller"
 import NostrSearchController from "./controllers/nostr_search_controller"
 import EncryptedChannelController from "./controllers/encrypted_channel_controller"
+import VoiceChannelController from "./controllers/voice_channel_controller"
+import VoiceSettingsController from "./controllers/voice_settings_controller"
+import VoiceDeviceSelectController from "./controllers/voice_device_select_controller"
+import ChannelTypeController from "./controllers/channel_type_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -135,4 +139,8 @@ application.register("theme-picker", ThemePickerController)
 application.register("clipboard", ClipboardController)
 application.register("nostr-search", NostrSearchController)
 application.register("encrypted-channel", EncryptedChannelController)
+application.register("voice-channel", VoiceChannelController)
+application.register("voice-settings", VoiceSettingsController)
+application.register("voice-device-select", VoiceDeviceSelectController)
+application.register("channel-type", ChannelTypeController)
 // rebuild trigger

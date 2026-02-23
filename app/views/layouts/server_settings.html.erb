@@ -33,6 +33,11 @@
           </div>
           <% end %>
 
+          <div class="space-y-0.5 mb-4">
+            <%= link_to "Voice", server_settings_voice_path(@server),
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[voice update_voice opt_in_voice opt_out_voice]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+          </div>
+
           <% show_emoji_link = @current_membership&.has_permission?("create_emojis") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
           <% show_sticker_link = @current_membership&.has_permission?("create_stickers") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
           <% if show_emoji_link || show_sticker_link %>

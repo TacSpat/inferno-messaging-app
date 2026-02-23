@@ -84,6 +84,45 @@ class SettingsController < ApplicationController
     end
   end
 
+  def voice
+    @user = current_user
+  end
+
+  def update_voice
+    @user = current_user
+
+    # User-level voice settings (stored in user.voice_settings JSON)
+    voice_settings = @user.voice_settings || {}
+    voice_settings["noise_suppression"] = params[:noise_suppression] == "1"
+    voice_settings["echo_cancellation"] = params[:echo_cancellation] != "0"
+    voice_settings["auto_gain_control"] = params[:auto_gain_control] != "0"
+    voice_settings["input_mode"] = params[:input_mode].presence || "voice_activity"
+
+    # LiveKit credentials (available to all users)
+    if params[:livekit_section].present?
+      @user.livekit_url = params[:livekit_url].presence
+      @user.livekit_api_key = params[:livekit_api_key].presence
+      @user.livekit_api_secret = params[:livekit_api_secret] if params[:livekit_api_secret].present?
+
+      if @user.livekit_url_changed? || @user.livekit_api_key_changed? || @user.livekit_api_secret_enc_changed?
+        @user.livekit_verified = false
+        @user.livekit_verified_at = nil
+      end
+    end
+
+    @user.update!(voice_settings: voice_settings)
+
+    redirect_to user_settings_voice_path, notice: "Voice settings saved!"
+  rescue => e
+    flash.now[:alert] = e.message
+    render :voice, status: :unprocessable_entity
+  end
+
+  def verify_voice
+    result = LivekitVerifier.verify!(user: current_user)
+    render json: { success: result.success, message: result.message }
+  end
+
   def reveal_nostr_key
     if current_user.valid_password?(params[:password])
       render json: { nsec: current_user.nsec }, layout: false

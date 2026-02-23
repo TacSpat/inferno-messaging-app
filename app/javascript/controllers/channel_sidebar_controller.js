@@ -201,6 +201,8 @@ export default class extends Controller {
     const link = tpl.querySelector("a")
     link.href = `/servers/${this.serverIdValue}/channels/${data.channel_id}`
     link.dataset.channelId = data.channel_id
+    if (data.channel_type === "voice") link.dataset.voiceChannel = "true"
+    this._setChannelIcon(link.querySelector('[data-slot="icon"]'), data.channel_type)
     this._setNameWithEmojis(link.querySelector('[data-slot="name"]'), data.name)
     return link
   }
@@ -233,6 +235,33 @@ export default class extends Controller {
     if (!existing) return
     const nameSpan = existing.querySelector(".truncate")
     if (nameSpan && data.name) this._setNameWithEmojis(nameSpan, data.name)
+
+    // Update icon if channel_type changed
+    if (data.channel_type) {
+      const iconSlot = existing.querySelector('[data-slot="icon"]')
+      if (iconSlot) this._setChannelIcon(iconSlot, data.channel_type)
+      if (data.channel_type === "voice") existing.dataset.voiceChannel = "true"
+      else delete existing.dataset.voiceChannel
+    }
+
+    // Move to new category if category_id changed
+    if (data.category_id !== undefined) {
+      const currentParent = existing.closest("[data-category-id]")
+      const currentCatId = currentParent?.dataset.categoryId || null
+
+      if (data.category_id !== currentCatId) {
+        if (data.category_id) {
+          const targetCat = this.element.querySelector(`[data-category-id="${data.category_id}"]`)
+          const channelsDiv = targetCat?.querySelector("[data-category-collapse-target='channels']")
+          if (channelsDiv) channelsDiv.appendChild(existing)
+        } else {
+          // Moved to uncategorized — place before first category
+          const firstCategory = this.element.querySelector("[data-category-id]")
+          if (firstCategory) firstCategory.before(existing)
+          else this.element.appendChild(existing)
+        }
+      }
+    }
   }
 
   removeChannel(data) {
@@ -634,6 +663,17 @@ export default class extends Controller {
     const tpl = document.getElementById("tpl-voice-empty-state").content.cloneNode(true)
     tpl.querySelector('[data-slot="channel-name"]').textContent = channelName
     return tpl.firstElementChild
+  }
+
+  _setChannelIcon(slot, channelType) {
+    if (channelType === "voice") {
+      slot.className = "mr-1.5 opacity-60 shrink-0"
+      slot.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>'
+    } else {
+      slot.className = "text-lg mr-1.5 opacity-60"
+      slot.innerHTML = ""
+      slot.textContent = "#"
+    }
   }
 
   _setNameWithEmojis(el, name) {

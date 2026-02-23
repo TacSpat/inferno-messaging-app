@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_130000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -89,6 +89,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.string "channel_public_key"
     t.integer "channel_type"
     t.datetime "created_at", null: false
+    t.integer "current_voice_provider_id"
     t.boolean "encrypted", default: false
     t.text "encrypted_channel_private_key"
     t.string "name"
@@ -107,6 +108,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.integer "voice_bitrate", default: 64000
     t.integer "voice_user_limit", default: 0
     t.index ["category_id"], name: "index_channels_on_category_id"
+    t.index ["current_voice_provider_id"], name: "index_channels_on_current_voice_provider_id"
     t.index ["nostr_group_id"], name: "index_channels_on_nostr_group_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
     t.index ["server_id"], name: "index_channels_on_server_id"
@@ -255,6 +257,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.string "instance_name", default: "Inferno Chat"
     t.string "instance_relay_url"
     t.boolean "keep_pinned_messages", default: true
+    t.string "livekit_api_key"
+    t.text "livekit_api_secret_enc"
+    t.string "livekit_url"
+    t.boolean "livekit_verified", default: false
+    t.datetime "livekit_verified_at"
     t.boolean "lockdown_enabled", default: false, null: false
     t.boolean "lockdown_invite_creation", default: false, null: false
     t.boolean "lockdown_local_signups", default: false, null: false
@@ -633,6 +640,18 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.index ["server_id"], name: "index_server_stickers_on_server_id"
   end
 
+  create_table "server_voice_providers", force: :cascade do |t|
+    t.boolean "active", default: true, null: false
+    t.datetime "created_at", null: false
+    t.integer "position", default: 0, null: false
+    t.integer "server_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["server_id", "user_id"], name: "index_server_voice_providers_on_server_id_and_user_id", unique: true
+    t.index ["server_id"], name: "index_server_voice_providers_on_server_id"
+    t.index ["user_id"], name: "index_server_voice_providers_on_user_id"
+  end
+
   create_table "servers", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.text "description"
@@ -643,6 +662,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.string "public_id", limit: 12, null: false
     t.json "relay_urls"
     t.datetime "updated_at", null: false
+    t.boolean "voice_enabled", default: false
     t.bigint "welcome_channel_id"
     t.boolean "welcome_message_enabled", default: true
     t.text "welcome_message_template", default: "Welcome to the server, {user}! 🎉"
@@ -691,6 +711,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
     t.string "email", default: "", null: false
     t.string "encrypted_password", default: "", null: false
     t.boolean "instance_admin", default: false, null: false
+    t.string "livekit_api_key"
+    t.text "livekit_api_secret_enc"
+    t.string "livekit_url"
+    t.boolean "livekit_verified", default: false
+    t.datetime "livekit_verified_at"
     t.datetime "nostr_contacts_published_at"
     t.text "nostr_encrypted_private_key"
     t.datetime "nostr_profile_published_at"
@@ -771,6 +796,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
   add_foreign_key "channel_reads", "users"
   add_foreign_key "channels", "categories"
   add_foreign_key "channels", "servers"
+  add_foreign_key "channels", "users", column: "current_voice_provider_id"
   add_foreign_key "conversation_participants", "conversations"
   add_foreign_key "conversation_participants", "users"
   add_foreign_key "data_exports", "users"
@@ -817,6 +843,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_040000) do
   add_foreign_key "server_memberships", "users"
   add_foreign_key "server_stickers", "servers"
   add_foreign_key "server_stickers", "users", column: "creator_id"
+  add_foreign_key "server_voice_providers", "servers"
+  add_foreign_key "server_voice_providers", "users"
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
   add_foreign_key "user_suspensions", "users"

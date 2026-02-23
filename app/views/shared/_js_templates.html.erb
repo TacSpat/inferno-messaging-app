@@ -115,11 +115,50 @@
   </div>
 </template>
 
+<%# Voice empty state (channel_sidebar_controller, voice_channel_controller) %>
+<template id="tpl-voice-empty-state">
+  <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
+    <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
+      <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
+    </div>
+    <h2 class="text-xl font-bold text-white mb-1" data-slot="channel-name"></h2>
+    <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
+  </div>
+</template>
+
+<%# Voice participant card (channel_sidebar_controller, voice_channel_controller) %>
+<template id="tpl-voice-card">
+  <div class="voice-card group">
+    <div class="voice-card-inner">
+      <div class="voice-avatar-wrapper" data-slot="avatar"></div>
+      <div class="voice-username-pill">
+        <span class="truncate" data-slot="username"></span>
+      </div>
+    </div>
+  </div>
+</template>
+
+<%# Move-to dropdown shell (voice_context_controller) %>
+<template id="tpl-move-dropdown">
+  <div class="absolute z-[70] w-48 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop">
+    <p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Move to</p>
+    <div data-slot="channels"></div>
+  </div>
+</template>
+
+<%# Move-to channel item (voice_context_controller) %>
+<template id="tpl-move-channel-item">
+  <button class="flex items-center w-full px-3 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded-sm">
+    <svg class="w-4 h-4 text-gray-500 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
+    <span class="truncate" data-slot="name"></span>
+  </button>
+</template>
+
 <%# Sidebar channel link (channel_sidebar_controller) %>
 <template id="tpl-sidebar-channel">
   <a data-turbo-frame="main-content"
      class="flex items-center px-2 py-1.5 rounded group relative text-gray-400 hover:bg-gray-700 hover:text-gray-200">
-    <span class="text-lg mr-1.5 opacity-60">#</span>
+    <span data-slot="icon" class="mr-1.5 opacity-60"></span>
     <span class="truncate text-sm font-medium flex-1" data-slot="name"></span>
   </a>
 </template>

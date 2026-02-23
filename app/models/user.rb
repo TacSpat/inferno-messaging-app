@@ -52,6 +52,9 @@ class User < ApplicationRecord
   has_many :gif_collections, dependent: :destroy
   has_many :gif_favorites, dependent: :destroy
 
+  # Voice providers
+  has_many :server_voice_providers, dependent: :destroy
+
   # Themes
   THEMES = %w[inferno frostfire boron brimstone plasma pulsar obsidian].freeze
 
@@ -122,6 +125,26 @@ class User < ApplicationRecord
 
   def remote?
     false
+  end
+
+  # LiveKit encrypted secret management
+  def livekit_api_secret
+    return nil if livekit_api_secret_enc.blank?
+    livekit_encryptor.decrypt_and_verify(livekit_api_secret_enc)
+  rescue ActiveSupport::MessageEncryptor::InvalidMessage
+    nil
+  end
+
+  def livekit_api_secret=(value)
+    if value.present?
+      self.livekit_api_secret_enc = livekit_encryptor.encrypt_and_sign(value)
+    else
+      self.livekit_api_secret_enc = nil
+    end
+  end
+
+  def livekit_configured?
+    livekit_url.present? && livekit_api_key.present? && livekit_api_secret_enc.present?
   end
 
   def friends_with_pubkey?(pubkey)
@@ -226,5 +249,12 @@ class User < ApplicationRecord
 
   def default_display_name
     self.display_name = username if display_name.blank?
+  end
+
+  def livekit_encryptor
+    key = ActiveSupport::KeyGenerator.new(
+      Rails.application.secret_key_base
+    ).generate_key("livekit secret encryption", 32)
+    ActiveSupport::MessageEncryptor.new(key)
   end
 end
