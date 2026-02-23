@@ -338,6 +338,11 @@ export default class extends Controller {
     this._muted = false
     this._deafened = false
 
+    // Render any participants already in the room (joined before us)
+    for (const participant of this.room.remoteParticipants.values()) {
+      this._ensureParticipantUI(participant)
+    }
+
     // Attach local level meter (cloned track) + start the level loop
     this._setupLocalLevelMeter()
     this._startLevelLoop()
@@ -447,11 +452,12 @@ export default class extends Controller {
     })
 
     room.on(RoomEvent.ParticipantConnected, (participant) => {
-      // Audio tracks auto-subscribe via adaptiveStream
+      this._ensureParticipantUI(participant)
     })
 
     room.on(RoomEvent.ParticipantDisconnected, (participant) => {
       this._detachAudioTrack(participant)
+      this._removeParticipantUI(participant)
     })
   }
 
@@ -947,6 +953,97 @@ export default class extends Controller {
         }
       }
     }
+  }
+
+  // ─── Cross-instance participant UI ──────────────────────────
+  // LiveKit tells us about remote participants, but the local database
+  // only has VoiceState records for local users. For cross-instance
+  // participants (no local VoiceState), we create DOM elements from
+  // the LiveKit participant metadata embedded in the token.
+
+  _ensureParticipantUI(participant) {
+    const userId = participant.identity
+    if (!userId || !this.currentChannelId) return
+
+    let meta = {}
+    try { meta = JSON.parse(participant.metadata || "{}") } catch (_) {}
+    const username = participant.name || userId.slice(0, 8)
+    const avatarUrl = meta.avatar_url || ""
+    const profileColor = meta.profile_color || "#1e1c1b"
+
+    // ── Sidebar ──
+    const sidebarContainer = document.querySelector(
+      `[data-voice-channel-participants="${this.currentChannelId}"]`
+    )
+    if (sidebarContainer && !sidebarContainer.querySelector(`[data-voice-user-id="${userId}"]`)) {
+      const row = document.createElement("div")
+      row.className = "flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
+      row.dataset.voiceUserId = userId
+      row.dataset.channelId = this.currentChannelId
+      row.dataset.voiceRemote = "true"
+
+      const avatarWrap = document.createElement("div")
+      avatarWrap.className = "relative"
+      if (avatarUrl) {
+        const img = document.createElement("img")
+        img.src = avatarUrl
+        img.className = "w-5 h-5 rounded-full object-cover voice-sidebar-avatar"
+        img.loading = "lazy"
+        avatarWrap.appendChild(img)
+      } else {
+        const fb = document.createElement("div")
+        fb.className = "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white voice-sidebar-avatar"
+        fb.style.backgroundColor = profileColor
+        fb.textContent = (username[0] || "?").toUpperCase()
+        avatarWrap.appendChild(fb)
+      }
+      row.appendChild(avatarWrap)
+
+      const name = document.createElement("span")
+      name.className = "ml-1.5 text-xs text-gray-300 truncate flex-1"
+      name.textContent = username
+      row.appendChild(name)
+
+      sidebarContainer.appendChild(row)
+    }
+
+    // ── Main voice view card ──
+    const grid = document.querySelector("[data-voice-participant-grid] .voice-grid")
+    if (grid && !grid.querySelector(`[data-voice-participant-id="${userId}"]`)) {
+      const tpl = document.getElementById("tpl-voice-card")
+      if (tpl) {
+        const card = tpl.content.cloneNode(true).querySelector(".voice-card")
+        card.dataset.voiceParticipantId = userId
+        card.dataset.voiceRemote = "true"
+        card.style.setProperty("--card-color", profileColor)
+
+        const avatarSlot = card.querySelector('[data-slot="avatar"]')
+        if (avatarUrl) {
+          const img = document.createElement("img")
+          img.src = avatarUrl
+          img.className = "voice-avatar"
+          avatarSlot.appendChild(img)
+        } else {
+          const fallback = document.createElement("div")
+          fallback.className = "voice-avatar-fallback"
+          fallback.style.backgroundColor = `color-mix(in srgb, ${profileColor}, white 20%)`
+          fallback.textContent = (username[0] || "?").toUpperCase()
+          avatarSlot.appendChild(fallback)
+        }
+
+        card.querySelector('[data-slot="username"]').textContent = username
+        grid.appendChild(card)
+      }
+    }
+  }
+
+  _removeParticipantUI(participant) {
+    const userId = participant.identity
+    if (!userId) return
+
+    // Only remove elements we created (marked with data-voice-remote)
+    document.querySelectorAll(`[data-voice-user-id="${userId}"][data-voice-remote]`).forEach(el => el.remove())
+    document.querySelectorAll(`[data-voice-participant-id="${userId}"][data-voice-remote]`).forEach(el => el.remove())
   }
 
   async _patchState(action, body) {
