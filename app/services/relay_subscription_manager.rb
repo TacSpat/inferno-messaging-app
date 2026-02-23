@@ -543,11 +543,9 @@ class RelaySubscriptionManager
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_request"
       Rails.logger.info("[RelaySubscriptionManager] Received voice_token_request from #{sender_pubkey[0..15]} own=#{own_event}")
       process_voice_token_request(sender_pubkey, parsed, event) unless own_event
-      return # Don't log as a DM event
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_response"
       Rails.logger.info("[RelaySubscriptionManager] Received voice_token_response from #{sender_pubkey[0..15]} own=#{own_event} request_id=#{parsed["request_id"]}")
       process_voice_token_response(sender_pubkey, parsed) unless own_event
-      return # Don't log as a DM event
     else
       # Regular DM message
       if own_event
@@ -1002,9 +1000,22 @@ class RelaySubscriptionManager
       tags: [["p", sender_pubkey]]
     )
     signed = signer.sign(resp_event)
-    RelayService.publish_to_all(signed.to_json)
+    event_message = JSON.generate(["EVENT", signed.to_json])
 
-    Rails.logger.info("[RelaySubscriptionManager] Sent voice token response for request #{data["request_id"]} to #{sender_pubkey[0..15]}")
+    # Send directly on our WebSocket connections (we're already on the EM thread)
+    sent_count = 0
+    @connections.each do |url, conn|
+      next unless conn[:ws]
+      begin
+        conn[:ws].send(event_message)
+        sent_count += 1
+        Rails.logger.info("[RelaySubscriptionManager] Voice response sent to relay #{url}")
+      rescue => e
+        Rails.logger.warn("[RelaySubscriptionManager] Voice response failed for #{url}: #{e.message}")
+      end
+    end
+
+    Rails.logger.info("[RelaySubscriptionManager] Sent voice token response for request #{data["request_id"]} to #{sender_pubkey[0..15]} via #{sent_count} relays")
   rescue => e
     Rails.logger.error("[RelaySubscriptionManager] Error processing voice token request: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}")
   end
