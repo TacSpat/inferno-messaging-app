@@ -19,7 +19,7 @@ class VoiceTokenRpcService
       payload = {
         type: "voice_token_request",
         request_id: request_id,
-        server_id: server.public_id,
+        server_nostr_group_id: server.nostr_group_id,
         channel_id: channel.public_id,
         user_pubkey: requesting_user.nostr_public_key,
         user_display_name: requesting_user.display_name.presence || requesting_user.username,

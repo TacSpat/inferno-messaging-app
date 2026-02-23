@@ -911,8 +911,11 @@ class RelaySubscriptionManager
 
   # Provider side: received a token request from a remote user
   def process_voice_token_request(sender_pubkey, data, event)
-    server = Server.find_by(public_id: data["server_id"])
-    return unless server
+    server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
+    unless server
+      Rails.logger.warn("[RelaySubscriptionManager] Voice token request: server not found for #{data["server_nostr_group_id"]}")
+      return
+    end
 
     channel = server.channels.find_by(public_id: data["channel_id"])
     return unless channel&.voice?
