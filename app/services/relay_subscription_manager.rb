@@ -529,9 +529,11 @@ class RelaySubscriptionManager
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
       process_dm_delete(sender_pubkey, parsed, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_request"
+      Rails.logger.info("[RelaySubscriptionManager] Received voice_token_request from #{sender_pubkey[0..15]} own=#{own_event}")
       process_voice_token_request(sender_pubkey, parsed, event) unless own_event
       return # Don't log as a DM event
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_response"
+      Rails.logger.info("[RelaySubscriptionManager] Received voice_token_response from #{sender_pubkey[0..15]} own=#{own_event} request_id=#{parsed["request_id"]}")
       process_voice_token_response(sender_pubkey, parsed) unless own_event
       return # Don't log as a DM event
     else

@@ -5,14 +5,16 @@ class VoiceTokenRpcService
   class RpcError < StandardError; end
 
   TIMEOUT = 10 # seconds
-  @pending_requests = Concurrent::Map.new # request_id => ResolvableFuture
+
+  # Use ||= so dev hot-reload doesn't wipe pending futures
+  @pending_requests ||= Concurrent::Map.new # request_id => ResolvableFuture
 
   class << self
     def request_token(provider_pubkey:, requesting_user:, server:, channel:)
       request_id = SecureRandom.hex(16)
       future = Concurrent::Promises.resolvable_future
 
-      @pending_requests[request_id] = future
+      pending_requests[request_id] = future
 
       payload = {
         type: "voice_token_request",
@@ -37,12 +39,13 @@ class VoiceTokenRpcService
       signed = signer.sign(event)
       RelayService.publish_to_all(signed.to_json)
 
-      Rails.logger.info("[VoiceTokenRpcService] Published token request #{request_id} to #{provider_pubkey[0..15]}")
+      Rails.logger.info("[VoiceTokenRpcService] Published token request #{request_id} to #{provider_pubkey[0..15]} (#{pending_requests.size} pending)")
 
       # Block until response arrives or timeout
       result = future.value!(TIMEOUT)
 
       unless future.resolved?
+        Rails.logger.warn("[VoiceTokenRpcService] Timeout waiting for #{request_id} (#{pending_requests.size} pending)")
         raise TimeoutError, "Voice provider did not respond within #{TIMEOUT}s"
       end
 
@@ -50,21 +53,27 @@ class VoiceTokenRpcService
 
       result
     ensure
-      @pending_requests.delete(request_id) if request_id
+      pending_requests.delete(request_id) if request_id
     end
 
     def resolve_request(request_id, result)
-      future = @pending_requests.delete(request_id)
+      future = pending_requests.delete(request_id)
       if future
         future.fulfill(result)
         Rails.logger.info("[VoiceTokenRpcService] Resolved request #{request_id}")
       else
-        Rails.logger.warn("[VoiceTokenRpcService] No pending request for #{request_id}")
+        Rails.logger.warn("[VoiceTokenRpcService] No pending request for #{request_id} (#{pending_requests.size} pending)")
       end
     end
 
     def pending_request?(request_id)
-      @pending_requests.key?(request_id)
+      pending_requests.key?(request_id)
+    end
+
+    private
+
+    def pending_requests
+      @pending_requests ||= Concurrent::Map.new
     end
   end
 end

@@ -37,17 +37,7 @@ class VoiceChannelsController < ApplicationController
       return
     end
 
-    # Remove any existing voice state for this user on this server
-    existing = VoiceState.find_by(user: current_user, server: @server)
-    existing&.destroy
-
-    # Create new voice state
-    voice_state = VoiceState.create!(
-      user: current_user,
-      channel: @channel,
-      server: @server
-    )
-
+    # Get the token first (may involve remote RPC), before creating voice state
     if svp.local?
       provider = svp.user
       # Assign provider to channel if new
@@ -72,6 +62,16 @@ class VoiceChannelsController < ApplicationController
       livekit_url = result[:livekit_url]
       provider_id = svp.provider_pubkey[0..15]
     end
+
+    # Only create voice state after successfully obtaining a token
+    existing = VoiceState.find_by(user: current_user, server: @server)
+    existing&.destroy
+
+    voice_state = VoiceState.create!(
+      user: current_user,
+      channel: @channel,
+      server: @server
+    )
 
     render json: {
       livekit_url: livekit_url,
