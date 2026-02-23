@@ -946,7 +946,7 @@ class RelaySubscriptionManager
     end
 
     # Generate token using an OpenStruct for remote user identity
-    token_user = OpenStruct.new(
+    token_user = ::OpenStruct.new(
       public_id: data["user_id"] || sender_pubkey[0..15],
       display_name: data["user_display_name"],
       username: data["user_display_name"],
