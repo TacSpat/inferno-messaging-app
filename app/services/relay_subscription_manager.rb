@@ -41,6 +41,20 @@ class RelaySubscriptionManager
 
   attr_reader :connections, :running
 
+  # Cache of remote instance owner pubkeys per server, learned from voice token requests.
+  # Allows the provider instance to publish voice state changes back to requesters.
+  @remote_owners ||= Hash.new { |h, k| h[k] = Set.new }
+
+  class << self
+    def known_remote_owners(server_id)
+      @remote_owners[server_id].to_a
+    end
+
+    def register_remote_owner(server_id, pubkey)
+      @remote_owners[server_id].add(pubkey)
+    end
+  end
+
   def initialize
     @connections = {} # relay_url => { ws:, subscriptions:, reconnect_timer: }
     @running = false
@@ -546,6 +560,8 @@ class RelaySubscriptionManager
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_response"
       Rails.logger.info("[RelaySubscriptionManager] Received voice_token_response from #{sender_pubkey[0..15]} own=#{own_event} request_id=#{parsed["request_id"]}")
       process_voice_token_response(sender_pubkey, parsed) unless own_event
+    elsif parsed.is_a?(Hash) && parsed["type"] == "voice_state_sync"
+      process_voice_state_sync(parsed) unless own_event
     else
       # Regular DM message
       if own_event
@@ -929,6 +945,9 @@ class RelaySubscriptionManager
       return
     end
 
+    # Remember this remote instance for voice state sync
+    self.class.register_remote_owner(server.id, sender_pubkey)
+
     channel = server.channels.find_by(public_id: data["channel_id"])
     return unless channel&.voice?
 
@@ -1031,6 +1050,35 @@ class RelaySubscriptionManager
     })
   rescue => e
     Rails.logger.error("[RelaySubscriptionManager] Error processing voice token response: #{e.message}")
+  end
+
+  # Received a voice state sync from a remote instance — broadcast to local ActionCable
+  def process_voice_state_sync(data)
+    server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
+    return unless server
+
+    action = data["action"]
+    if action == "join"
+      ServerChannel.broadcast_to(server, {
+        type: "voice_state_join",
+        channel_id: data["channel_id"],
+        user_id: data["user_id"],
+        voice_state_id: nil,
+        username: data["username"] || "Remote User",
+        avatar_url: data["avatar_url"],
+        profile_color: data["profile_color"]
+      })
+      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["username"]} joined #{data["channel_id"]}")
+    elsif action == "leave"
+      ServerChannel.broadcast_to(server, {
+        type: "voice_state_leave",
+        channel_id: data["channel_id"],
+        user_id: data["user_id"]
+      })
+      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["user_id"]} left #{data["channel_id"]}")
+    end
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing voice state sync: #{e.message}")
   end
 
   # ── Server State Event Handlers ──────────────────────────────────────
