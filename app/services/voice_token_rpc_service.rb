@@ -24,11 +24,8 @@ class VoiceTokenRpcService
         user_id: requesting_user.public_id
       }.to_json
 
-      encrypted = Nip44Service.encrypt(
-        requesting_user.nostr_private_key,
-        provider_pubkey,
-        payload
-      )
+      conversation_key = Nip44Service.conversation_key(requesting_user.nostr_private_key, provider_pubkey)
+      encrypted = Nip44Service.encrypt(payload, conversation_key)
 
       signer = Nostr::Signer.new(private_key: requesting_user.nostr_private_key)
       event = Nostr::Event.new(

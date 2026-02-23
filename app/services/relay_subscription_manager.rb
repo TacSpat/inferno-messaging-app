@@ -962,7 +962,8 @@ class RelaySubscriptionManager
       livekit_url: responder.livekit_url
     }.to_json
 
-    encrypted = Nip44Service.encrypt(responder.nostr_private_key, sender_pubkey, response_payload)
+    conversation_key = Nip44Service.conversation_key(responder.nostr_private_key, sender_pubkey)
+    encrypted = Nip44Service.encrypt(response_payload, conversation_key)
 
     signer = Nostr::Signer.new(private_key: responder.nostr_private_key)
     resp_event = Nostr::Event.new(
