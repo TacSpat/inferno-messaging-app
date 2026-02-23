@@ -561,7 +561,7 @@ class RelaySubscriptionManager
       Rails.logger.info("[RelaySubscriptionManager] Received voice_token_response from #{sender_pubkey[0..15]} own=#{own_event} request_id=#{parsed["request_id"]}")
       process_voice_token_response(sender_pubkey, parsed) unless own_event
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_state_sync"
-      process_voice_state_sync(parsed) unless own_event
+      process_voice_state_sync(sender_pubkey, parsed) unless own_event
     else
       # Regular DM message
       if own_event
@@ -1053,9 +1053,12 @@ class RelaySubscriptionManager
   end
 
   # Received a voice state sync from a remote instance — broadcast to local ActionCable
-  def process_voice_state_sync(data)
+  def process_voice_state_sync(sender_pubkey, data)
     server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
     return unless server
+
+    # Register this remote instance so we can send voice state updates back
+    self.class.register_remote_owner(server.id, sender_pubkey)
 
     action = data["action"]
     if action == "join"
@@ -1261,6 +1264,12 @@ class RelaySubscriptionManager
     server = find_server_from_event(event)
     return unless server
     return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    # Register this pubkey as a known remote instance for voice state sync
+    owner = User.owner
+    if owner && event["pubkey"] != owner.nostr_public_key
+      self.class.register_remote_owner(server.id, event["pubkey"])
+    end
 
     tags = event["tags"] || []
     deleted = tags.find { |t| t[0] == "deleted" }&.dig(1) == "true"
