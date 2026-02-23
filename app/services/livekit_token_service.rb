@@ -5,8 +5,10 @@ class LivekitTokenService
 
   # Generate a LiveKit access token for a user joining a voice channel.
   # provider: the User whose LiveKit credentials power this session.
+  # skip_permission_check: when true, grants full publish/subscribe (used for
+  #   remote token requests where the provider already verified permissions).
   # Returns a JWT string that the client uses with livekit-client.
-  def self.generate_token(user:, channel:, server:, provider:, ttl: 6.hours)
+  def self.generate_token(user:, channel:, server:, provider:, ttl: 6.hours, skip_permission_check: false)
     raise ConfigurationError, "Voice provider has no LiveKit credentials" unless provider.livekit_configured?
 
     api_key = provider.livekit_api_key
@@ -17,9 +19,14 @@ class LivekitTokenService
     name = user.display_name.presence || user.username
 
     # Determine permissions from user's role
-    membership = user.server_memberships.find_by(server: server)
-    can_publish = membership&.has_permission?("speak") != false
-    can_subscribe = membership&.has_permission?("connect_voice") != false
+    if skip_permission_check
+      can_publish = true
+      can_subscribe = true
+    else
+      membership = user.server_memberships.find_by(server: server)
+      can_publish = membership&.has_permission?("speak") != false
+      can_subscribe = membership&.has_permission?("connect_voice") != false
+    end
 
     now = Time.now.to_i
     payload = {

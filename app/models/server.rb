@@ -74,6 +74,7 @@ class Server < ApplicationRecord
   end
 
   # Pick the active provider with fewest current channel assignments (load balance).
+  # Returns the ServerVoiceProvider record (not the User).
   # exclude_ids: provider user IDs to skip (e.g., a failed provider during failover).
   def pick_voice_provider(exclude_ids: [])
     providers = server_voice_providers.active.includes(:user)
@@ -81,11 +82,12 @@ class Server < ApplicationRecord
     return nil if providers.empty?
 
     # Count how many channels each provider is currently serving
+    # Remote providers (no user_id) get load 0 since they don't track local channels
     provider_load = providers.each_with_object({}) do |svp, hash|
-      hash[svp] = Channel.where(current_voice_provider_id: svp.user_id).count
+      hash[svp] = svp.user_id ? Channel.where(current_voice_provider_id: svp.user_id).count : 0
     end
 
-    provider_load.min_by { |_svp, count| count }.first&.user
+    provider_load.min_by { |_svp, count| count }.first
   end
 
   private

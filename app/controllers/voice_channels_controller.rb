@@ -31,14 +31,11 @@ class VoiceChannelsController < ApplicationController
     end
 
     # Resolve provider: use channel's current if valid, else pick new one
-    provider = resolve_provider(@channel)
-    unless provider
+    svp = resolve_voice_provider(@channel)
+    unless svp
       render json: { error: "No voice providers available" }, status: :service_unavailable
       return
     end
-
-    # Assign provider to channel if new
-    @channel.update_column(:current_voice_provider_id, provider.id) if @channel.current_voice_provider_id != provider.id
 
     # Remove any existing voice state for this user on this server
     existing = VoiceState.find_by(user: current_user, server: @server)
@@ -51,23 +48,44 @@ class VoiceChannelsController < ApplicationController
       server: @server
     )
 
-    # Generate LiveKit token using provider's credentials
-    token = LivekitTokenService.generate_token(
-      user: current_user,
-      channel: @channel,
-      server: @server,
-      provider: provider
-    )
+    if svp.local?
+      provider = svp.user
+      # Assign provider to channel if new
+      @channel.update_column(:current_voice_provider_id, provider.id) if @channel.current_voice_provider_id != provider.id
+
+      token = LivekitTokenService.generate_token(
+        user: current_user,
+        channel: @channel,
+        server: @server,
+        provider: provider
+      )
+      livekit_url = provider.livekit_url
+      provider_id = provider.public_id
+    else
+      result = VoiceTokenRpcService.request_token(
+        provider_pubkey: svp.provider_pubkey,
+        requesting_user: current_user,
+        server: @server,
+        channel: @channel
+      )
+      token = result[:token]
+      livekit_url = result[:livekit_url]
+      provider_id = svp.provider_pubkey[0..15]
+    end
 
     render json: {
-      livekit_url: provider.livekit_url,
+      livekit_url: livekit_url,
       token: token,
       voice_state_id: voice_state.public_id,
       channel_id: @channel.public_id,
       channel_name: @channel.name,
-      provider_id: provider.public_id
+      provider_id: provider_id
     }
   rescue LivekitTokenService::ConfigurationError => e
+    render json: { error: e.message }, status: :service_unavailable
+  rescue VoiceTokenRpcService::TimeoutError
+    render json: { error: "Voice provider did not respond in time. Please try again." }, status: :gateway_timeout
+  rescue VoiceTokenRpcService::RpcError => e
     render json: { error: e.message }, status: :service_unavailable
   end
 
@@ -88,28 +106,46 @@ class VoiceChannelsController < ApplicationController
       exclude_ids << failed_user.id if failed_user
     end
 
-    provider = @server.pick_voice_provider(exclude_ids: exclude_ids)
-    unless provider
+    svp = @server.pick_voice_provider(exclude_ids: exclude_ids)
+    unless svp
       render json: { error: "All voice providers are offline" }, status: :service_unavailable
       return
     end
 
-    # Update channel's provider
-    @channel.update_column(:current_voice_provider_id, provider.id)
+    if svp.local?
+      provider = svp.user
+      @channel.update_column(:current_voice_provider_id, provider.id)
 
-    token = LivekitTokenService.generate_token(
-      user: current_user,
-      channel: @channel,
-      server: @server,
-      provider: provider
-    )
+      token = LivekitTokenService.generate_token(
+        user: current_user,
+        channel: @channel,
+        server: @server,
+        provider: provider
+      )
+      livekit_url = provider.livekit_url
+      provider_id = provider.public_id
+    else
+      result = VoiceTokenRpcService.request_token(
+        provider_pubkey: svp.provider_pubkey,
+        requesting_user: current_user,
+        server: @server,
+        channel: @channel
+      )
+      token = result[:token]
+      livekit_url = result[:livekit_url]
+      provider_id = svp.provider_pubkey[0..15]
+    end
 
     render json: {
-      livekit_url: provider.livekit_url,
+      livekit_url: livekit_url,
       token: token,
-      provider_id: provider.public_id
+      provider_id: provider_id
     }
   rescue LivekitTokenService::ConfigurationError => e
+    render json: { error: e.message }, status: :service_unavailable
+  rescue VoiceTokenRpcService::TimeoutError
+    render json: { error: "Voice provider did not respond in time. Please try again." }, status: :gateway_timeout
+  rescue VoiceTokenRpcService::RpcError => e
     render json: { error: e.message }, status: :service_unavailable
   end
 
@@ -138,13 +174,13 @@ class VoiceChannelsController < ApplicationController
   end
 
   # Resolve which provider to use for a channel.
+  # Returns a ServerVoiceProvider record.
   # If channel already has a valid active provider, use it.
   # Otherwise pick a new one via load balancing.
-  def resolve_provider(channel)
+  def resolve_voice_provider(channel)
     if channel.current_voice_provider_id.present?
-      # Check the current provider is still active for this server
       svp = @server.server_voice_providers.active.find_by(user_id: channel.current_voice_provider_id)
-      return svp.user if svp&.user&.livekit_configured?
+      return svp if svp&.local? && svp.user&.livekit_configured?
     end
 
     @server.pick_voice_provider

@@ -1,0 +1,73 @@
+require "concurrent"
+
+class VoiceTokenRpcService
+  class TimeoutError < StandardError; end
+  class RpcError < StandardError; end
+
+  TIMEOUT = 10 # seconds
+  @pending_requests = Concurrent::Map.new # request_id => ResolvableFuture
+
+  class << self
+    def request_token(provider_pubkey:, requesting_user:, server:, channel:)
+      request_id = SecureRandom.hex(16)
+      future = Concurrent::Promises.resolvable_future
+
+      @pending_requests[request_id] = future
+
+      payload = {
+        type: "voice_token_request",
+        request_id: request_id,
+        server_id: server.public_id,
+        channel_id: channel.public_id,
+        user_pubkey: requesting_user.nostr_public_key,
+        user_display_name: requesting_user.display_name.presence || requesting_user.username,
+        user_id: requesting_user.public_id
+      }.to_json
+
+      encrypted = Nip44Service.encrypt(
+        requesting_user.nostr_private_key,
+        provider_pubkey,
+        payload
+      )
+
+      signer = Nostr::Signer.new(private_key: requesting_user.nostr_private_key)
+      event = Nostr::Event.new(
+        kind: 14,
+        pubkey: requesting_user.nostr_public_key,
+        content: encrypted,
+        tags: [["p", provider_pubkey]]
+      )
+      signed = signer.sign(event)
+      RelayService.publish_to_all(signed.to_json)
+
+      Rails.logger.info("[VoiceTokenRpcService] Published token request #{request_id} to #{provider_pubkey[0..15]}")
+
+      # Block until response arrives or timeout
+      result = future.value!(TIMEOUT)
+
+      unless future.resolved?
+        raise TimeoutError, "Voice provider did not respond within #{TIMEOUT}s"
+      end
+
+      raise RpcError, "Voice provider returned no result" unless result
+
+      result
+    ensure
+      @pending_requests.delete(request_id) if request_id
+    end
+
+    def resolve_request(request_id, result)
+      future = @pending_requests.delete(request_id)
+      if future
+        future.fulfill(result)
+        Rails.logger.info("[VoiceTokenRpcService] Resolved request #{request_id}")
+      else
+        Rails.logger.warn("[VoiceTokenRpcService] No pending request for #{request_id}")
+      end
+    end
+
+    def pending_request?(request_id)
+      @pending_requests.key?(request_id)
+    end
+  end
+end

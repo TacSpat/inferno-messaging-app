@@ -280,6 +280,7 @@ class RelaySubscriptionManager
     app/services/nostr_sync_service.rb
     app/services/nostr_server_auth.rb
     app/services/nostr_server_sync_service.rb
+    app/services/voice_token_rpc_service.rb
     app/models/contact.rb
     app/models/message.rb
     app/models/conversation.rb
@@ -527,6 +528,12 @@ class RelaySubscriptionManager
       process_dm_edit(sender_pubkey, parsed, event)
     elsif parsed.is_a?(Hash) && parsed["type"] == "message_delete"
       process_dm_delete(sender_pubkey, parsed, event)
+    elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_request"
+      process_voice_token_request(sender_pubkey, parsed, event) unless own_event
+      return # Don't log as a DM event
+    elsif parsed.is_a?(Hash) && parsed["type"] == "voice_token_response"
+      process_voice_token_response(sender_pubkey, parsed) unless own_event
+      return # Don't log as a DM event
     else
       # Regular DM message
       if own_event
@@ -898,6 +905,93 @@ class RelaySubscriptionManager
     end
   end
 
+  # ── Voice Token RPC Handlers ────────────────────────────────────────
+
+  # Provider side: received a token request from a remote user
+  def process_voice_token_request(sender_pubkey, data, event)
+    server = Server.find_by(public_id: data["server_id"])
+    return unless server
+
+    channel = server.channels.find_by(public_id: data["channel_id"])
+    return unless channel&.voice?
+
+    # Verify requesting user is a member with voice permission
+    user = User.find_by(nostr_public_key: sender_pubkey)
+    if user
+      membership = server.server_memberships.find_by(user: user)
+      unless membership&.has_permission?("connect_voice")
+        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{sender_pubkey[0..15]} lacks connect_voice permission")
+        return
+      end
+    else
+      # Check remote membership
+      remote = server.remote_members.find_by(pubkey: sender_pubkey)
+      unless remote
+        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{sender_pubkey[0..15]} not a member")
+        return
+      end
+    end
+
+    # Find a local provider with LiveKit credentials
+    svp = server.server_voice_providers.active.where.not(user_id: nil).includes(:user)
+               .find { |s| s.user.livekit_configured? }
+    unless svp
+      Rails.logger.warn("[RelaySubscriptionManager] Voice token request: no local provider available for #{server.public_id}")
+      return
+    end
+
+    # Generate token using an OpenStruct for remote user identity
+    token_user = OpenStruct.new(
+      public_id: data["user_id"] || sender_pubkey[0..15],
+      display_name: data["user_display_name"],
+      username: data["user_display_name"],
+      effective_avatar_url: nil,
+      profile_color: nil
+    )
+    token = LivekitTokenService.generate_token(
+      user: token_user, channel: channel, server: server,
+      provider: svp.user, skip_permission_check: true
+    )
+
+    # Encrypt and publish response
+    responder = svp.user
+    response_payload = {
+      type: "voice_token_response",
+      request_id: data["request_id"],
+      token: token,
+      livekit_url: responder.livekit_url
+    }.to_json
+
+    encrypted = Nip44Service.encrypt(responder.nostr_private_key, sender_pubkey, response_payload)
+
+    signer = Nostr::Signer.new(private_key: responder.nostr_private_key)
+    resp_event = Nostr::Event.new(
+      kind: 14,
+      pubkey: responder.nostr_public_key,
+      content: encrypted,
+      tags: [["p", sender_pubkey]]
+    )
+    signed = signer.sign(resp_event)
+    RelayService.publish_to_all(signed.to_json)
+
+    Rails.logger.info("[RelaySubscriptionManager] Sent voice token response for request #{data["request_id"]} to #{sender_pubkey[0..15]}")
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing voice token request: #{e.message}")
+  end
+
+  # Requester side: received a token response from the provider
+  def process_voice_token_response(sender_pubkey, data)
+    request_id = data["request_id"]
+    return if request_id.blank?
+
+    VoiceTokenRpcService.resolve_request(request_id, {
+      token: data["token"],
+      livekit_url: data["livekit_url"]
+    })
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing voice token response: #{e.message}")
+  end
+
   # ── Server State Event Handlers ──────────────────────────────────────
 
   def find_server_from_event(event)
@@ -1047,6 +1141,33 @@ class RelaySubscriptionManager
     Rails.logger.info("[RelaySubscriptionManager] Attached #{field} from #{path}")
   end
 
+  # Sync voice provider records from metadata event tags.
+  # Creates local providers for users with LiveKit credentials,
+  # or remote providers (with provider_pubkey) for unknown pubkeys.
+  def sync_voice_providers(server, voice_provider_tags)
+    relay_pubkeys = voice_provider_tags.map { |t| t[1] }.compact.uniq
+    existing = server.server_voice_providers.includes(:user)
+    existing_by_pk = existing.index_by { |svp| svp.provider_pubkey || svp.user&.nostr_public_key }
+
+    # Add new providers
+    relay_pubkeys.each do |pubkey|
+      next if existing_by_pk[pubkey]
+      local_user = User.find_by(nostr_public_key: pubkey)
+      if local_user&.livekit_configured?
+        server.server_voice_providers.create(user: local_user)
+      else
+        server.server_voice_providers.create(provider_pubkey: pubkey)
+      end
+    rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+      nil
+    end
+
+    # Remove providers no longer in the relay event
+    existing_by_pk.each do |pk, svp|
+      svp.destroy unless relay_pubkeys.include?(pk)
+    end
+  end
+
   def process_server_metadata(event)
     server = find_server_from_event(event)
     return unless server
@@ -1067,12 +1188,14 @@ class RelaySubscriptionManager
     about_tag = tags.find { |t| t[0] == "about" }
     welcome_enabled_tag = tags.find { |t| t[0] == "welcome_enabled" }
     welcome_message_tag = tags.find { |t| t[0] == "welcome_message" }
+    voice_enabled_tag = tags.find { |t| t[0] == "voice_enabled" }
 
     attrs = {}
     attrs[:name] = name_tag[1] if name_tag&.dig(1).present?
     attrs[:description] = about_tag[1] if about_tag
     attrs[:welcome_message_enabled] = welcome_enabled_tag[1] == "true" if welcome_enabled_tag
     attrs[:welcome_message_template] = welcome_message_tag[1] if welcome_message_tag
+    attrs[:voice_enabled] = voice_enabled_tag[1] == "true" if voice_enabled_tag
 
     # Download icon/banner and attach via ActiveStorage
     picture_tag = tags.find { |t| t[0] == "picture" }
@@ -1086,6 +1209,11 @@ class RelaySubscriptionManager
     end
 
     server.update!(attrs) if attrs.any?
+
+    # Sync voice providers from relay event
+    voice_provider_tags = tags.select { |t| t[0] == "voice_provider" }
+    sync_voice_providers(server, voice_provider_tags)
+
     log_server_event(event)
 
     ServerChannel.broadcast_to(server, { type: "server_updated" })

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_130000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_22_140000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -644,9 +644,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_130000) do
     t.boolean "active", default: true, null: false
     t.datetime "created_at", null: false
     t.integer "position", default: 0, null: false
+    t.string "provider_pubkey"
     t.integer "server_id", null: false
     t.datetime "updated_at", null: false
-    t.integer "user_id", null: false
+    t.integer "user_id"
+    t.index ["server_id", "provider_pubkey"], name: "idx_svp_on_server_id_and_provider_pubkey", unique: true
     t.index ["server_id", "user_id"], name: "index_server_voice_providers_on_server_id_and_user_id", unique: true
     t.index ["server_id"], name: "index_server_voice_providers_on_server_id"
     t.index ["user_id"], name: "index_server_voice_providers_on_user_id"
@@ -844,7 +846,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_130000) do
   add_foreign_key "server_stickers", "servers"
   add_foreign_key "server_stickers", "users", column: "creator_id"
   add_foreign_key "server_voice_providers", "servers"
-  add_foreign_key "server_voice_providers", "users"
+  add_foreign_key "server_voice_providers", "users", on_delete: :nullify
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
   add_foreign_key "user_suspensions", "users"

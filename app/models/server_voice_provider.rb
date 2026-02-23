@@ -1,15 +1,24 @@
 class ServerVoiceProvider < ApplicationRecord
   belongs_to :server
-  belongs_to :user
+  belongs_to :user, optional: true
 
-  validates :user_id, uniqueness: { scope: :server_id, message: "is already a voice provider for this server" }
-  validate :user_has_livekit_configured, on: :create
+  validates :user_id, uniqueness: { scope: :server_id, message: "is already a voice provider for this server" }, if: -> { user_id.present? }
+  validates :provider_pubkey, presence: true, if: -> { user_id.blank? }
+  validate :user_has_livekit_configured, on: :create, if: -> { user_id.present? }
 
   scope :active, -> { where(active: true) }
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
 
-  after_create :assign_voice_provider_role
-  after_destroy :remove_voice_provider_role
+  after_create :assign_voice_provider_role, if: -> { user.present? }
+  after_destroy :remove_voice_provider_role, if: -> { user.present? }
+
+  def remote?
+    user_id.blank? && provider_pubkey.present?
+  end
+
+  def local?
+    !remote?
+  end
 
   private
 
