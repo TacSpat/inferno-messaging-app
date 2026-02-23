@@ -1,5 +1,6 @@
 require "faye/websocket"
 require "eventmachine"
+require "ostruct"
 
 # Persistent WebSocket pool to all configured relays.
 # Maintains subscriptions for NIP-29 groups (channels), Kind 4/14 (DMs),
