@@ -11,6 +11,11 @@ class VoiceTokenRpcService
 
   class << self
     def request_token(provider_pubkey:, requesting_user:, server:, channel:)
+      # Use instance owner for relay communication — the relay subscription
+      # is keyed on the owner's pubkey, so responses must be addressed to them.
+      owner = User.owner
+      raise RpcError, "Instance owner has no Nostr identity" unless owner&.nostr_private_key.present?
+
       request_id = SecureRandom.hex(16)
       future = Concurrent::Promises.resolvable_future
 
@@ -26,20 +31,20 @@ class VoiceTokenRpcService
         user_id: requesting_user.public_id
       }.to_json
 
-      conversation_key = Nip44Service.conversation_key(requesting_user.nostr_private_key, provider_pubkey)
+      conversation_key = Nip44Service.conversation_key(owner.nostr_private_key, provider_pubkey)
       encrypted = Nip44Service.encrypt(payload, conversation_key)
 
-      signer = Nostr::Signer.new(private_key: requesting_user.nostr_private_key)
+      signer = Nostr::Signer.new(private_key: owner.nostr_private_key)
       event = Nostr::Event.new(
         kind: 14,
-        pubkey: requesting_user.nostr_public_key,
+        pubkey: owner.nostr_public_key,
         content: encrypted,
         tags: [["p", provider_pubkey]]
       )
       signed = signer.sign(event)
       RelayService.publish_to_all(signed.to_json)
 
-      Rails.logger.info("[VoiceTokenRpcService] Published token request #{request_id} to #{provider_pubkey[0..15]} (#{pending_requests.size} pending)")
+      Rails.logger.info("[VoiceTokenRpcService] Published token request #{request_id} to #{provider_pubkey[0..15]} as #{owner.nostr_public_key[0..15]} (#{pending_requests.size} pending)")
 
       # Block until response arrives or timeout
       result = future.value!(TIMEOUT)

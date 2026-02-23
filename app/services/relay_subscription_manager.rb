@@ -921,7 +921,9 @@ class RelaySubscriptionManager
 
   # ── Voice Token RPC Handlers ────────────────────────────────────────
 
-  # Provider side: received a token request from a remote user
+  # Provider side: received a token request from a remote instance.
+  # sender_pubkey is the remote instance owner's pubkey (used for relay routing).
+  # The actual requesting user's info is in the encrypted payload (user_pubkey, user_id, etc.).
   def process_voice_token_request(sender_pubkey, data, event)
     server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
     unless server
@@ -932,19 +934,22 @@ class RelaySubscriptionManager
     channel = server.channels.find_by(public_id: data["channel_id"])
     return unless channel&.voice?
 
+    # The actual requesting user's pubkey is in the payload
+    requesting_pubkey = data["user_pubkey"] || sender_pubkey
+
     # Verify requesting user is a member with voice permission
-    user = User.find_by(nostr_public_key: sender_pubkey)
+    user = User.find_by(nostr_public_key: requesting_pubkey)
     if user
       membership = server.server_memberships.find_by(user: user)
       unless membership&.has_permission?("connect_voice")
-        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{sender_pubkey[0..15]} lacks connect_voice permission")
+        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{requesting_pubkey[0..15]} lacks connect_voice permission")
         return
       end
     else
-      # Check remote membership
-      remote = server.remote_members.find_by(pubkey: sender_pubkey)
+      # Check remote membership — remote members are trusted (relay already verified)
+      remote = server.remote_members.find_by(pubkey: requesting_pubkey)
       unless remote
-        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{sender_pubkey[0..15]} not a member")
+        Rails.logger.warn("[RelaySubscriptionManager] Voice token request denied: #{requesting_pubkey[0..15]} not a member")
         return
       end
     end
@@ -959,7 +964,7 @@ class RelaySubscriptionManager
 
     # Generate token using an OpenStruct for remote user identity
     token_user = ::OpenStruct.new(
-      public_id: data["user_id"] || sender_pubkey[0..15],
+      public_id: data["user_id"] || requesting_pubkey[0..15],
       display_name: data["user_display_name"],
       username: data["user_display_name"],
       effective_avatar_url: nil,
@@ -970,13 +975,20 @@ class RelaySubscriptionManager
       provider: svp.user, skip_permission_check: true
     )
 
-    # Encrypt and publish response
-    responder = svp.user
+    # Encrypt and publish response back to the sender (remote instance owner).
+    # Use the instance owner's identity for signing since our relay subscription
+    # is keyed on the owner's pubkey.
+    responder = User.owner
+    unless responder&.nostr_private_key.present?
+      Rails.logger.warn("[RelaySubscriptionManager] Voice token request: no owner identity for response")
+      return
+    end
+
     response_payload = {
       type: "voice_token_response",
       request_id: data["request_id"],
       token: token,
-      livekit_url: responder.livekit_url
+      livekit_url: svp.user.livekit_url
     }.to_json
 
     conversation_key = Nip44Service.conversation_key(responder.nostr_private_key, sender_pubkey)
@@ -994,7 +1006,7 @@ class RelaySubscriptionManager
 
     Rails.logger.info("[RelaySubscriptionManager] Sent voice token response for request #{data["request_id"]} to #{sender_pubkey[0..15]}")
   rescue => e
-    Rails.logger.error("[RelaySubscriptionManager] Error processing voice token request: #{e.message}")
+    Rails.logger.error("[RelaySubscriptionManager] Error processing voice token request: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}")
   end
 
   # Requester side: received a token response from the provider
