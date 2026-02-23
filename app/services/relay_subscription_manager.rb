@@ -306,11 +306,19 @@ class RelaySubscriptionManager
     event_id = event["id"]
     return if event_id.blank?
 
-    # Deduplicate — skip events we already have locally
-    return if NostrEventLog.already_processed?(event_id)
-
     kind = event["kind"]
     pubkey = event["pubkey"]
+
+    # Log all Kind 14 events for voice RPC debugging
+    if kind == KIND_DM
+      Rails.logger.info("[RelaySubscriptionManager] Inbound Kind 14 event_id=#{event_id[0..15]} from=#{pubkey&.[](0..15)}")
+    end
+
+    # Deduplicate — skip events we already have locally
+    if NostrEventLog.already_processed?(event_id)
+      Rails.logger.debug("[RelaySubscriptionManager] Skipping already processed event #{event_id[0..15]}") if kind == KIND_DM
+      return
+    end
 
     # For our own events: if already_processed returned false, this is from
     # another device running the same identity — process it normally.
