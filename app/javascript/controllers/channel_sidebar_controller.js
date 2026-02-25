@@ -620,7 +620,7 @@ export default class extends Controller {
       }
     }
 
-    // If the moved user is the current user, dispatch force-move
+    // If the moved user is the current user, dispatch force-move and navigate
     const currentUserId = document.body.dataset.currentUserId
     if (data.user_id === currentUserId) {
       window.dispatchEvent(new CustomEvent("voice:force-move", {
@@ -630,6 +630,9 @@ export default class extends Controller {
           voiceStateId: data.voice_state_id
         }
       }))
+      // Navigate to the new channel's view
+      const newChannelLink = this.element.querySelector(`a[data-channel-id="${data.to_channel_id}"]`)
+      if (newChannelLink) newChannelLink.click()
     }
 
     this._initVoiceSortables()
