@@ -584,15 +584,15 @@ export default class extends Controller {
   }
 
   handleVoiceMoved(data) {
-    // Remove participant from old channel's sidebar list
-    const oldContainer = this.element.querySelector(`[data-voice-channel-participants="${data.from_channel_id}"]`)
-    if (oldContainer) {
-      const participant = oldContainer.querySelector(`[data-voice-user-id="${data.user_id}"]`)
-      if (participant) participant.remove()
-      if (!oldContainer.children.length) oldContainer.remove()
-    }
+    // Remove participant from ALL channel sidebar lists
+    // (handles both normal broadcast and SortableJS drag which already moved the element)
+    this.element.querySelectorAll(`[data-voice-user-id="${data.user_id}"]`).forEach(el => {
+      const container = el.closest("[data-voice-channel-participants]")
+      el.remove()
+      if (container && !container.children.length) container.remove()
+    })
 
-    // Add participant to new channel's sidebar list
+    // Add participant to new channel's sidebar list (fresh element with correct channel_id)
     const newChannelLink = this.element.querySelector(`a[data-channel-id="${data.to_channel_id}"]`)
     if (newChannelLink) {
       let newContainer = this.element.querySelector(`[data-voice-channel-participants="${data.to_channel_id}"]`)
@@ -602,10 +602,8 @@ export default class extends Controller {
         newContainer.dataset.voiceChannelParticipants = data.to_channel_id
         newChannelLink.insertAdjacentElement("afterend", newContainer)
       }
-      if (!newContainer.querySelector(`[data-voice-user-id="${data.user_id}"]`)) {
-        const rowData = { ...data, channel_id: data.to_channel_id }
-        newContainer.appendChild(this._buildSidebarParticipant(rowData))
-      }
+      const rowData = { ...data, channel_id: data.to_channel_id }
+      newContainer.appendChild(this._buildSidebarParticipant(rowData))
     }
 
     // Update main voice view if viewing either channel
