@@ -1,0 +1,15 @@
+<div class="flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
+     data-voice-user-id="<%= user.public_id %>"
+     data-channel-id="<%= channel.public_id %>"
+     data-action="contextmenu->voice-context#show">
+  <div class="relative">
+    <% if user.effective_avatar_url.present? %>
+      <img src="<%= user.effective_avatar_url %>" class="w-5 h-5 rounded-full object-cover voice-sidebar-avatar" loading="lazy">
+    <% else %>
+      <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white voice-sidebar-avatar" style="background-color: <%= user.profile_color || '#1e1c1b' %>">
+        <%= user.username[0].upcase %>
+      </div>
+    <% end %>
+  </div>
+  <span class="ml-1.5 text-xs text-gray-300 truncate flex-1"><%= user.display_name.presence || user.username %></span>
+</div>

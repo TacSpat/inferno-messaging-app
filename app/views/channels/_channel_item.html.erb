@@ -35,10 +35,32 @@
     </div>
   <% end %>
 </a>
-<% if is_voice && (channel.voice_states.loaded? ? channel.voice_states.any? : channel.voice_states.exists?) %>
-  <div class="voice-participants" data-voice-channel-participants="<%= channel.public_id %>">
-    <% channel.voice_states.includes(:user).each do |vs| %>
-      <%= render partial: "voice_states/sidebar_participant", locals: { voice_state: vs } %>
-    <% end %>
-  </div>
+<% if is_voice %>
+  <% remote_states = RelaySubscriptionManager.remote_voice_states(channel.public_id).values %>
+  <% has_local = channel.voice_states.loaded? ? channel.voice_states.any? : channel.voice_states.exists? %>
+  <% if has_local || remote_states.any? %>
+    <div class="voice-participants" data-voice-channel-participants="<%= channel.public_id %>">
+      <% channel.voice_states.includes(:user).each do |vs| %>
+        <%= render partial: "voice_states/sidebar_participant", locals: { voice_state: vs } %>
+      <% end %>
+      <% remote_states.each do |rvs| %>
+        <div class="flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
+             data-voice-user-id="<%= rvs[:user_id] %>"
+             data-channel-id="<%= channel.public_id %>"
+             data-voice-remote="true"
+             data-action="contextmenu->voice-context#show">
+          <div class="relative">
+            <% if rvs[:avatar_url].present? %>
+              <img src="<%= rvs[:avatar_url] %>" class="w-5 h-5 rounded-full object-cover voice-sidebar-avatar" loading="lazy">
+            <% else %>
+              <div class="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white voice-sidebar-avatar" style="background-color: <%= rvs[:profile_color] || '#1e1c1b' %>">
+                <%= (rvs[:username] || "?")[0].upcase %>
+              </div>
+            <% end %>
+          </div>
+          <span class="ml-1.5 text-xs text-gray-300 truncate flex-1"><%= rvs[:username] || "Remote User" %></span>
+        </div>
+      <% end %>
+    </div>
+  <% end %>
 <% end %>

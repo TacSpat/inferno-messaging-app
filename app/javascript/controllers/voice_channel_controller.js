@@ -23,6 +23,7 @@ export default class extends Controller {
   static targets = [
     "controlsBar", "channelName", "statusText",
     "muteBtn", "muteIcon", "deafenBtn", "deafenIcon",
+    "cameraBtn", "cameraIcon",
     "screenShareBtn", "screenShareIcon", "disconnectBtn"
   ]
 
@@ -38,11 +39,20 @@ export default class extends Controller {
     this.currentProviderId = null
     this._muted = false
     this._deafened = false
+    this._screenSharing = false
+    this._cameraOn = false
+    this._screenShareTrack = null
     this._userInitiatedDisconnect = false
     this._reconnecting = false
     this._audioElements = new Map()
-    this._analysers = new Map()     // identity → { analyser } (remote only)
-    this._localMeter = null         // { clone, ctx, analyser } for local mic
+    this._videoElements = new Map()   // identity → screen share preview element
+    this._cameraElements = new Map()  // identity → camera video element
+    this._pendingScreenShares = new Map()      // identity → { track, participant, placeholder }
+    this._pendingScreenShareAudio = new Map()  // identity → { track, participant }
+    this._screenShareAudioElements = new Map() // identity → audio element (opt-in)
+    this._localPreviewVisHandler = null
+    this._analysers = new Map()       // identity → { analyser } (remote only)
+    this._localMeter = null           // { clone, ctx, analyser } for local mic
     this._levelRafId = null
 
     // Bind event listeners
@@ -341,6 +351,16 @@ export default class extends Controller {
     // Render any participants already in the room (joined before us)
     for (const participant of this.room.remoteParticipants.values()) {
       this._ensureParticipantUI(participant)
+      // Attach any already-published video tracks
+      for (const pub of participant.videoTrackPublications.values()) {
+        if (pub.track && pub.isSubscribed) {
+          if (pub.source === Track.Source.ScreenShare) {
+            this._showScreenSharePlaceholder(pub.track, participant)
+          } else if (pub.source === Track.Source.Camera) {
+            this._attachCameraTrack(pub.track, participant)
+          }
+        }
+      }
     }
 
     // Attach local level meter (cloned track) + start the level loop
@@ -375,6 +395,28 @@ export default class extends Controller {
     this._analysers.clear()
     if (this._audioContext) { this._audioContext.close().catch(() => {}); this._audioContext = null }
 
+    // Clean up video elements
+    this._videoElements.forEach(({ element, track }) => {
+      try { track.detach() } catch (_) {}
+      element.remove()
+    })
+    this._videoElements.clear()
+    this._cameraElements.forEach(({ video, track }) => {
+      try { track.detach() } catch (_) {}
+      video.remove()
+    })
+    this._cameraElements.clear()
+    this._pendingScreenShares.forEach(({ placeholder }) => placeholder?.remove())
+    this._pendingScreenShares.clear()
+    this._pendingScreenShareAudio.clear()
+    this._screenShareAudioElements.forEach(el => el.remove())
+    this._screenShareAudioElements.clear()
+    if (this._localPreviewVisHandler) {
+      document.removeEventListener("visibilitychange", this._localPreviewVisHandler)
+      this._localPreviewVisHandler = null
+    }
+    this._screenShareTrack = null
+
     // Notify backend
     if (this.currentServerId) {
       const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
@@ -397,6 +439,8 @@ export default class extends Controller {
     this.currentProviderId = null
     this._muted = false
     this._deafened = false
+    this._screenSharing = false
+    this._cameraOn = false
     this._userInitiatedDisconnect = false
     this._reconnecting = false
 
@@ -419,13 +463,65 @@ export default class extends Controller {
 
     room.on(RoomEvent.TrackSubscribed, (track, publication, participant) => {
       if (track.kind === Track.Kind.Audio) {
-        this._attachAudioTrack(track, participant)
+        if (publication.source === Track.Source.ScreenShareAudio) {
+          // Store screen share audio — only attached when user opts in
+          this._pendingScreenShareAudio.set(participant.identity, { track, participant })
+        } else {
+          this._attachAudioTrack(track, participant)
+        }
+      } else if (track.kind === Track.Kind.Video) {
+        if (publication.source === Track.Source.ScreenShare) {
+          this._showScreenSharePlaceholder(track, participant)
+        } else if (publication.source === Track.Source.Camera) {
+          this._attachCameraTrack(track, participant)
+        }
       }
     })
 
     room.on(RoomEvent.TrackUnsubscribed, (track, publication, participant) => {
       if (track.kind === Track.Kind.Audio) {
-        this._detachAudioTrack(participant)
+        if (publication.source === Track.Source.ScreenShareAudio) {
+          this._pendingScreenShareAudio.delete(participant.identity)
+          this._detachScreenShareAudio(participant.identity)
+        } else {
+          this._detachAudioTrack(participant)
+        }
+      } else if (track.kind === Track.Kind.Video) {
+        if (publication.source === Track.Source.ScreenShare) {
+          this._removePendingScreenShare(participant.identity)
+          this._detachScreenShareTrack(participant)
+        } else if (publication.source === Track.Source.Camera) {
+          this._detachCameraTrack(participant)
+        }
+      }
+    })
+
+    // Handle local track published (for local screen share / camera preview)
+    room.on(RoomEvent.LocalTrackPublished, (publication, participant) => {
+      if (publication.source === Track.Source.ScreenShare && publication.track) {
+        this._showLocalScreenSharePreview(publication.track, participant)
+      } else if (publication.source === Track.Source.Camera && publication.track) {
+        this._showLocalCameraPreview(publication.track, participant)
+      }
+    })
+
+    // Handle local track unpublished (browser "Stop sharing" button, etc.)
+    room.on(RoomEvent.LocalTrackUnpublished, (publication, participant) => {
+      if (publication.source === Track.Source.ScreenShare) {
+        if (this._screenSharing) {
+          this._screenSharing = false
+          this._screenShareTrack = null
+          this._detachScreenShareTrack(participant)
+          this._updateScreenShareIcon()
+          this._patchState("screen_share", { screen_share: false })
+        }
+      } else if (publication.source === Track.Source.Camera) {
+        if (this._cameraOn) {
+          this._cameraOn = false
+          this._detachCameraTrack(participant)
+          this._updateCameraIcon()
+          this._patchState("video", { video: false })
+        }
       }
     })
 
@@ -457,6 +553,9 @@ export default class extends Controller {
 
     room.on(RoomEvent.ParticipantDisconnected, (participant) => {
       this._detachAudioTrack(participant)
+      this._removePendingScreenShare(participant.identity)
+      this._pendingScreenShareAudio.delete(participant.identity)
+      this._detachScreenShareAudio(participant.identity)
       this._removeParticipantUI(participant)
     })
   }
@@ -826,12 +925,436 @@ export default class extends Controller {
   }
 
   toggleScreenShare() {
-    // Screen share is a future feature — show picker when implemented
-    console.log("[VoiceChannel] Screen share not yet implemented")
+    if (!this.room) return
+    if (this._screenSharing) {
+      this._stopScreenShare()
+    } else {
+      this._showScreenSharePicker()
+    }
+  }
+
+  async toggleCamera() {
+    if (!this.room) return
+    const turningOn = !this._cameraOn
+    this._cameraOn = turningOn
+    this._updateCameraIcon()
+
+    if (!turningOn) {
+      // Detach video element BEFORE disabling the track to avoid frozen frame
+      const localId = this.room.localParticipant?.identity
+      if (localId) this._detachCameraTrack({ identity: localId })
+    }
+
+    try {
+      await this.room.localParticipant.setCameraEnabled(turningOn)
+    } catch (e) {
+      console.warn("[VoiceChannel] toggleCamera failed:", e)
+      this._cameraOn = false
+      this._updateCameraIcon()
+      return
+    }
+    this._patchState("video", { video: this._cameraOn })
   }
 
   disconnectVoice() {
     this._disconnectRoom()
+  }
+
+  // ─── Screen Share ─────────────────────────────────────────
+
+  _showScreenSharePicker() {
+    const tpl = document.getElementById("tpl-screen-share-picker")
+    if (!tpl) return
+    const overlay = tpl.content.cloneNode(true).querySelector("[data-ss-picker-overlay]")
+    document.body.appendChild(overlay)
+
+    // Load saved settings from localStorage
+    const savedRes = localStorage.getItem("ss-resolution") || "1080"
+    const savedFps = localStorage.getItem("ss-framerate") || "30"
+    const savedContent = localStorage.getItem("ss-content-type") || "smoothness"
+    const savedAudio = localStorage.getItem("ss-audio") !== "false"
+
+    // Wire pill group toggles
+    overlay.querySelectorAll("[data-ss-group]").forEach(group => {
+      const groupName = group.dataset.ssGroup
+      const defaultVal = { resolution: savedRes, frameRate: savedFps, contentType: savedContent }[groupName]
+      group.querySelectorAll(".ss-pill").forEach(pill => {
+        if (pill.dataset.value === defaultVal) pill.classList.add("ss-pill-active")
+        pill.addEventListener("click", () => {
+          group.querySelectorAll(".ss-pill").forEach(p => p.classList.remove("ss-pill-active"))
+          pill.classList.add("ss-pill-active")
+        })
+      })
+    })
+
+    // Wire audio toggle
+    const audioToggle = overlay.querySelector("[data-ss-audio-toggle]")
+    if (savedAudio) audioToggle.classList.add("ss-audio-on")
+    audioToggle.addEventListener("click", () => {
+      audioToggle.classList.toggle("ss-audio-on")
+    })
+
+    // Close/Cancel
+    const close = () => overlay.remove()
+    overlay.querySelector("[data-ss-close]").addEventListener("click", close)
+    overlay.querySelector("[data-ss-cancel]").addEventListener("click", close)
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close() })
+
+    // Go Live
+    overlay.querySelector("[data-ss-go-live]").addEventListener("click", () => {
+      const getActive = (groupName) => {
+        const active = overlay.querySelector(`[data-ss-group="${groupName}"] .ss-pill-active`)
+        return active?.dataset.value
+      }
+      const settings = {
+        resolution: parseInt(getActive("resolution") || "1080", 10),
+        frameRate: parseInt(getActive("frameRate") || "30", 10),
+        contentType: getActive("contentType") || "smoothness",
+        audio: audioToggle.classList.contains("ss-audio-on")
+      }
+
+      // Save to localStorage
+      localStorage.setItem("ss-resolution", String(settings.resolution))
+      localStorage.setItem("ss-framerate", String(settings.frameRate))
+      localStorage.setItem("ss-content-type", settings.contentType)
+      localStorage.setItem("ss-audio", String(settings.audio))
+
+      close()
+      this._startScreenShare(settings)
+    })
+  }
+
+  async _startScreenShare(settings) {
+    if (!this.room || this._screenSharing) return
+
+    const captureOptions = {
+      resolution: {
+        width: { ideal: Math.round(settings.resolution * 16 / 9) },
+        height: { ideal: settings.resolution }
+      },
+      contentHint: settings.contentType === "clarity" ? "detail" : "motion",
+      audio: settings.audio
+    }
+    if (settings.contentType === "clarity") {
+      captureOptions.resolution.frameRate = { ideal: Math.min(settings.frameRate, 15) }
+    } else {
+      captureOptions.resolution.frameRate = { ideal: settings.frameRate }
+    }
+
+    try {
+      await this.room.localParticipant.setScreenShareEnabled(true, captureOptions)
+      this._screenSharing = true
+      this._updateScreenShareIcon()
+      this._patchState("screen_share", { screen_share: true })
+    } catch (e) {
+      // User cancelled the browser picker or error
+      console.warn("[VoiceChannel] Screen share failed:", e)
+    }
+  }
+
+  async _stopScreenShare() {
+    if (!this.room) return
+    try {
+      await this.room.localParticipant.setScreenShareEnabled(false)
+    } catch (e) {
+      console.warn("[VoiceChannel] Stop screen share failed:", e)
+    }
+    this._screenSharing = false
+    this._screenShareTrack = null
+    // Remove local preview
+    const localId = this.room.localParticipant?.identity
+    if (localId) this._detachScreenShareTrack({ identity: localId })
+    this._updateScreenShareIcon()
+    this._patchState("screen_share", { screen_share: false })
+  }
+
+  _updateScreenShareIcon() {
+    if (!this.hasScreenShareBtnTarget) return
+    const btn = this.screenShareBtnTarget
+    if (this._screenSharing) {
+      btn.classList.add("text-green-400")
+      btn.classList.remove("text-gray-300")
+    } else {
+      btn.classList.remove("text-green-400")
+      btn.classList.add("text-gray-300")
+    }
+  }
+
+  _updateCameraIcon() {
+    if (!this.hasCameraBtnTarget) return
+    const btn = this.cameraBtnTarget
+    if (this._cameraOn) {
+      btn.classList.add("text-green-400")
+      btn.classList.remove("text-gray-300")
+    } else {
+      btn.classList.remove("text-green-400")
+      btn.classList.add("text-gray-300")
+    }
+  }
+
+  // ─── Video track attach/detach ────────────────────────────
+
+  _getParticipantMeta(participant) {
+    let meta = {}
+    try { meta = JSON.parse(participant.metadata || "{}") } catch (_) {}
+    return {
+      username: participant.name || participant.identity?.slice(0, 8) || "Unknown",
+      avatarUrl: meta.avatar_url || ""
+    }
+  }
+
+  _attachScreenShareTrack(track, participant) {
+    const identity = participant.identity
+    // Avoid duplicates
+    if (this._videoElements.has(identity)) return
+
+    const { username } = this._getParticipantMeta(participant)
+    const container = document.querySelector("[data-voice-participant-grid]")
+    if (!container) return
+
+    const preview = document.createElement("div")
+    preview.className = "voice-screen-preview"
+    preview.dataset.screenShareIdentity = identity
+
+    const video = track.attach()
+    video.className = "voice-screen-video"
+    preview.appendChild(video)
+
+    const badge = document.createElement("div")
+    badge.className = "voice-live-badge"
+    badge.textContent = "LIVE"
+    preview.appendChild(badge)
+
+    const label = document.createElement("div")
+    label.className = "voice-screen-label"
+    label.textContent = `${username}'s screen`
+    preview.appendChild(label)
+
+    // Click to toggle between card (inside grid) and theatre (above grid)
+    preview.addEventListener("click", () => {
+      this._toggleVideoTheatre(identity)
+    })
+
+    // Start in card format inside the grid (users opt in to theatre)
+    preview.classList.add("voice-screen-preview--card")
+    const grid = container.querySelector(".voice-grid")
+    if (grid) {
+      grid.appendChild(preview)
+    } else {
+      container.appendChild(preview)
+    }
+
+    this._videoElements.set(identity, { element: preview, track, theatre: false })
+  }
+
+  _detachScreenShareTrack(participant) {
+    const identity = participant.identity
+    const entry = this._videoElements.get(identity)
+    if (entry) {
+      const { element, track } = entry
+      // Properly detach the LiveKit track so no frozen frame remains
+      try { track.detach() } catch (_) {}
+      element.remove()
+      this._videoElements.delete(identity)
+    }
+    // Clean up local preview visibility handler
+    if (this._localPreviewVisHandler && identity === this.room?.localParticipant?.identity) {
+      document.removeEventListener("visibilitychange", this._localPreviewVisHandler)
+      this._localPreviewVisHandler = null
+    }
+    // Clean up screen share audio if user was watching
+    this._detachScreenShareAudio(identity)
+  }
+
+  _showLocalScreenSharePreview(track, participant) {
+    this._attachScreenShareTrack(track, participant)
+
+    // Pause local preview when the user tabs away to save resources
+    const identity = participant.identity
+    this._localPreviewVisHandler = () => {
+      const entry = this._videoElements.get(identity)
+      if (!entry) return
+      const video = entry.element.querySelector("video")
+      if (!video) return
+
+      if (document.hidden) {
+        video.pause()
+        let overlay = entry.element.querySelector(".voice-screen-paused-overlay")
+        if (!overlay) {
+          overlay = document.createElement("div")
+          overlay.className = "voice-screen-paused-overlay"
+          overlay.innerHTML = `
+            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <span class="text-sm text-gray-300 font-medium text-center px-4">You are still streaming</span>
+            <span class="text-xs text-gray-500 text-center px-4">Preview paused to save resources</span>
+          `
+          entry.element.appendChild(overlay)
+        }
+        overlay.style.display = ""
+      } else {
+        video.play().catch(() => {})
+        const overlay = entry.element.querySelector(".voice-screen-paused-overlay")
+        if (overlay) overlay.style.display = "none"
+      }
+    }
+    document.addEventListener("visibilitychange", this._localPreviewVisHandler)
+  }
+
+  _showScreenSharePlaceholder(track, participant) {
+    const identity = participant.identity
+    if (this._pendingScreenShares.has(identity) || this._videoElements.has(identity)) return
+
+    const { username } = this._getParticipantMeta(participant)
+    const container = document.querySelector("[data-voice-participant-grid]")
+    if (!container) return
+
+    const placeholder = document.createElement("div")
+    placeholder.className = "voice-screen-placeholder voice-screen-preview--card"
+    placeholder.dataset.screenShareIdentity = identity
+
+    placeholder.innerHTML = `
+      <svg class="w-10 h-10 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+      <span class="text-sm text-gray-300 font-medium">${this._escapeHtml(username)} is streaming</span>
+      <button class="voice-watch-btn">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Watch Stream
+      </button>
+    `
+
+    placeholder.querySelector(".voice-watch-btn").addEventListener("click", (e) => {
+      e.stopPropagation()
+      this._watchScreenShare(identity)
+    })
+
+    const grid = container.querySelector(".voice-grid")
+    if (grid) {
+      grid.appendChild(placeholder)
+    } else {
+      container.appendChild(placeholder)
+    }
+
+    this._pendingScreenShares.set(identity, { track, participant, placeholder })
+  }
+
+  _watchScreenShare(identity) {
+    const pending = this._pendingScreenShares.get(identity)
+    if (!pending) return
+
+    const { track, participant, placeholder } = pending
+    placeholder.remove()
+    this._pendingScreenShares.delete(identity)
+
+    // Attach the video track
+    this._attachScreenShareTrack(track, participant)
+
+    // Attach any pending screen share audio
+    const audioEntry = this._pendingScreenShareAudio.get(identity)
+    if (audioEntry) {
+      const el = audioEntry.track.attach()
+      el.id = `voice-ss-audio-${identity}`
+      el.style.display = "none"
+      document.body.appendChild(el)
+      this._screenShareAudioElements.set(identity, el)
+      this._pendingScreenShareAudio.delete(identity)
+    }
+  }
+
+  _removePendingScreenShare(identity) {
+    const pending = this._pendingScreenShares.get(identity)
+    if (pending) {
+      pending.placeholder.remove()
+      this._pendingScreenShares.delete(identity)
+    }
+  }
+
+  _detachScreenShareAudio(identity) {
+    const el = this._screenShareAudioElements.get(identity)
+    if (el) {
+      el.remove()
+      this._screenShareAudioElements.delete(identity)
+    }
+  }
+
+  _escapeHtml(str) {
+    const div = document.createElement("div")
+    div.textContent = str
+    return div.innerHTML
+  }
+
+  // Toggle screen share between theatre (large, above grid) and card (inside grid)
+  _toggleVideoTheatre(identity) {
+    const entry = this._videoElements.get(identity)
+    if (!entry) return
+    const { element } = entry
+    const container = document.querySelector("[data-voice-participant-grid]")
+    if (!container) return
+    const grid = container.querySelector(".voice-grid")
+    if (!grid) return
+
+    if (entry.theatre) {
+      // Collapse to card: move into the grid, apply card sizing
+      element.classList.add("voice-screen-preview--card")
+      grid.prepend(element)
+      entry.theatre = false
+    } else {
+      // Expand to theatre: move above the grid, remove card sizing
+      element.classList.remove("voice-screen-preview--card")
+      container.insertBefore(element, grid)
+      entry.theatre = true
+    }
+  }
+
+  _attachCameraTrack(track, participant) {
+    const identity = participant.identity
+    // Avoid duplicates
+    if (this._cameraElements.has(identity)) return
+
+    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
+    if (!card) return
+
+    const inner = card.querySelector(".voice-card-inner")
+    if (!inner) return
+
+    const video = track.attach()
+    video.className = "voice-camera-video"
+    video.dataset.cameraIdentity = identity
+    inner.appendChild(video)
+
+    // Hide the avatar
+    const avatarWrapper = inner.querySelector(".voice-avatar-wrapper")
+    if (avatarWrapper) avatarWrapper.style.display = "none"
+
+    this._cameraElements.set(identity, { video, track })
+  }
+
+  _detachCameraTrack(participant) {
+    const identity = participant.identity
+    const entry = this._cameraElements.get(identity)
+    if (entry) {
+      const { video, track } = entry
+      // Properly detach the LiveKit track so no frozen frame remains
+      try { track.detach() } catch (_) {}
+      video.remove()
+      this._cameraElements.delete(identity)
+    }
+
+    // Restore avatar
+    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
+    if (card) {
+      const avatarWrapper = card.querySelector(".voice-avatar-wrapper")
+      if (avatarWrapper) avatarWrapper.style.display = ""
+    }
+  }
+
+  _showLocalCameraPreview(track, participant) {
+    this._attachCameraTrack(track, participant)
   }
 
   // ─── UI helpers ────────────────────────────────────────────
@@ -981,6 +1504,7 @@ export default class extends Controller {
       row.dataset.voiceUserId = userId
       row.dataset.channelId = this.currentChannelId
       row.dataset.voiceRemote = "true"
+      row.dataset.action = "contextmenu->voice-context#show"
 
       const avatarWrap = document.createElement("div")
       avatarWrap.className = "relative"
@@ -1015,6 +1539,7 @@ export default class extends Controller {
         const card = tpl.content.cloneNode(true).querySelector(".voice-card")
         card.dataset.voiceParticipantId = userId
         card.dataset.voiceRemote = "true"
+        card.dataset.action = "contextmenu->voice-context#show"
         card.style.setProperty("--card-color", profileColor)
 
         const avatarSlot = card.querySelector('[data-slot="avatar"]')
@@ -1040,6 +1565,10 @@ export default class extends Controller {
   _removeParticipantUI(participant) {
     const userId = participant.identity
     if (!userId) return
+
+    // Clean up any video tracks for this participant
+    this._detachScreenShareTrack(participant)
+    this._detachCameraTrack(participant)
 
     // Only remove elements we created (marked with data-voice-remote)
     document.querySelectorAll(`[data-voice-user-id="${userId}"][data-voice-remote]`).forEach(el => el.remove())

@@ -1,0 +1,93 @@
+<% can_mute = my_membership&.has_permission?("mute_members") || my_membership&.owner? %>
+<% can_deafen = my_membership&.has_permission?("deafen_members") || my_membership&.owner? %>
+<% can_move = my_membership&.has_permission?("move_members") || my_membership&.owner? %>
+<% is_owner = server.owner == target_user %>
+
+<div class="w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 px-1.5 text-sm">
+  <%# Profile %>
+  <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+          data-context-action="viewProfile"
+          data-user-id="<%= target_user.public_id %>"
+          data-server-id="<%= server.public_id %>">
+    Profile
+  </button>
+
+  <% if is_self %>
+    <%# Self-actions %>
+    <div class="border-t border-gray-700 my-1"></div>
+
+    <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+            data-context-action="selfMute">
+      <span>Mute</span>
+      <div class="w-8 h-4 rounded-full transition-colors <%= 'bg-accent' if voice_state&.self_mute %> <%= 'bg-gray-600' unless voice_state&.self_mute %> relative">
+        <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform <%= 'translate-x-4' if voice_state&.self_mute %> <%= 'translate-x-0.5' unless voice_state&.self_mute %>"></span>
+      </div>
+    </button>
+
+    <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+            data-context-action="selfDeafen">
+      <span>Deafen</span>
+      <div class="w-8 h-4 rounded-full transition-colors <%= 'bg-accent' if voice_state&.self_deaf %> <%= 'bg-gray-600' unless voice_state&.self_deaf %> relative">
+        <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform <%= 'translate-x-4' if voice_state&.self_deaf %> <%= 'translate-x-0.5' unless voice_state&.self_deaf %>"></span>
+      </div>
+    </button>
+  <% end %>
+
+  <% unless is_self %>
+    <%# Moderation actions for other users %>
+    <% if can_mute || can_deafen || can_move %>
+      <div class="border-t border-gray-700 my-1"></div>
+    <% end %>
+
+    <% if can_mute %>
+      <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-accent-light hover:bg-accent/20 rounded cursor-pointer"
+              data-context-action="serverMute"
+              data-user-id="<%= target_user.public_id %>"
+              data-server-id="<%= server.public_id %>">
+        <span>Server Mute</span>
+        <div class="w-8 h-4 rounded-full transition-colors <%= 'bg-accent' if voice_state&.server_mute %> <%= 'bg-gray-600' unless voice_state&.server_mute %> relative">
+          <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform <%= 'translate-x-4' if voice_state&.server_mute %> <%= 'translate-x-0.5' unless voice_state&.server_mute %>"></span>
+        </div>
+      </button>
+    <% end %>
+
+    <% if can_deafen %>
+      <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-accent-light hover:bg-accent/20 rounded cursor-pointer"
+              data-context-action="serverDeafen"
+              data-user-id="<%= target_user.public_id %>"
+              data-server-id="<%= server.public_id %>">
+        <span>Server Deafen</span>
+        <div class="w-8 h-4 rounded-full transition-colors <%= 'bg-accent' if voice_state&.server_deaf %> <%= 'bg-gray-600' unless voice_state&.server_deaf %> relative">
+          <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform <%= 'translate-x-4' if voice_state&.server_deaf %> <%= 'translate-x-0.5' unless voice_state&.server_deaf %>"></span>
+        </div>
+      </button>
+    <% end %>
+
+    <% if can_move && !is_owner %>
+      <div class="relative context-move-wrapper">
+        <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+                data-context-action="moveToChannel"
+                data-user-id="<%= target_user.public_id %>"
+                data-server-id="<%= server.public_id %>"
+                data-voice-channels="<%= server.channels.where(channel_type: :voice).where.not(id: voice_state&.channel_id).ordered.map { |c| { id: c.public_id, name: c.name } }.to_json %>">
+          <span>Move to Channel</span>
+          <svg class="w-3 h-3 ml-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <button class="flex items-center w-full px-2.5 py-1.5 text-danger-light hover:bg-danger/20 rounded cursor-pointer"
+              data-context-action="disconnectMember"
+              data-user-id="<%= target_user.public_id %>"
+              data-server-id="<%= server.public_id %>"
+              data-username="<%= target_user.display_name.presence || target_user.username %>">
+        Disconnect
+      </button>
+    <% end %>
+  <% end %>
+
+  <div class="border-t border-gray-700 my-1"></div>
+  <button class="flex items-center w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+          onclick="navigator.clipboard.writeText('<%= target_user.public_id %>')">
+    Copy User ID
+  </button>
+</div>

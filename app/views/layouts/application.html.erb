@@ -147,7 +147,7 @@
 
           <!-- Channels list -->
           <% _membership = current_user.server_memberships.find_by(server: @server) %>
-          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
+          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-can-move-members-value="<%= _membership&.has_permission?('move_members') || _membership&.owner? || false %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
             <%# Uncategorized channels first %>
             <% @server.channels.uncategorized.where(channel_type: [:text, :voice, :announcement]).ordered.each do |channel| %>
               <% channel_access = channel.visible_to?(current_user) %>
@@ -182,6 +182,11 @@
                       data-action="click->voice-channel#toggleDeafen"
                       data-voice-channel-target="deafenBtn">
                 <svg class="w-5 h-5" data-voice-channel-target="deafenIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M15.54 8.46a5 5 0 010 7.07"/></svg>
+              </button>
+              <button type="button" class="p-1.5 rounded hover:bg-gray-600 text-gray-300 hover:text-white transition cursor-pointer" title="Camera"
+                      data-action="click->voice-channel#toggleCamera"
+                      data-voice-channel-target="cameraBtn">
+                <svg class="w-5 h-5" data-voice-channel-target="cameraIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
               </button>
               <button type="button" class="p-1.5 rounded hover:bg-gray-600 text-gray-300 hover:text-white transition cursor-pointer" title="Share Screen"
                       data-action="click->voice-channel#toggleScreenShare"

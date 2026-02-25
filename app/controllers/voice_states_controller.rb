@@ -20,6 +20,20 @@ class VoiceStatesController < ApplicationController
     render json: { success: true, self_deaf: @voice_state.self_deaf, self_mute: @voice_state.self_mute }
   end
 
+  # PATCH /voice_states/screen_share
+  def screen_share
+    @voice_state.update!(screen_share_on: params[:screen_share] == true || params[:screen_share] == "true")
+    @voice_state.broadcast_update
+    render json: { success: true, screen_share_on: @voice_state.screen_share_on }
+  end
+
+  # PATCH /voice_states/video
+  def video
+    @voice_state.update!(video_on: params[:video] == true || params[:video] == "true")
+    @voice_state.broadcast_update
+    render json: { success: true, video_on: @voice_state.video_on }
+  end
+
   private
 
   def set_voice_state

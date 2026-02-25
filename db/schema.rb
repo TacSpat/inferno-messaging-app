@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_22_140000) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -663,6 +663,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_22_140000) do
     t.bigint "owner_id", null: false
     t.string "public_id", limit: 12, null: false
     t.json "relay_urls"
+    t.json "remote_owner_pubkeys", default: []
     t.datetime "updated_at", null: false
     t.boolean "voice_enabled", default: false
     t.bigint "welcome_channel_id"

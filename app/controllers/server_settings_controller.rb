@@ -190,6 +190,7 @@ class ServerSettingsController < ApplicationController
       )
     end
 
+    publish_server_state(:metadata)
     redirect_to server_settings_voice_path(@server), notice: "Voice settings updated."
   end
 
@@ -201,6 +202,8 @@ class ServerSettingsController < ApplicationController
 
     svp = @server.server_voice_providers.new(user: current_user)
     if svp.save
+      publish_server_state(:metadata)
+      publish_server_state(:member, pubkey: current_user.nostr_public_key)
       redirect_to server_settings_voice_path(@server), notice: "You're now a voice provider for this server!"
     else
       redirect_to server_settings_voice_path(@server), alert: svp.errors.full_messages.join(", ")
@@ -211,6 +214,8 @@ class ServerSettingsController < ApplicationController
     svp = @server.server_voice_providers.find_by(user: current_user)
     if svp
       svp.destroy
+      publish_server_state(:metadata)
+      publish_server_state(:member, pubkey: current_user.nostr_public_key)
       redirect_to server_settings_voice_path(@server), notice: "You've opted out as a voice provider."
     else
       redirect_to server_settings_voice_path(@server), alert: "You're not a voice provider for this server."

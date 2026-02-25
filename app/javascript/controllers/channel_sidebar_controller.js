@@ -1,8 +1,9 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer from "../lib/cable"
+import Sortable from "sortablejs"
 
 export default class extends Controller {
-  static values = { serverId: String, autoJoinVoice: { type: Boolean, default: true } }
+  static values = { serverId: String, autoJoinVoice: { type: Boolean, default: true }, canMoveMembers: { type: Boolean, default: false } }
 
   connect() {
     this.subscription = consumer.subscriptions.create(
@@ -30,6 +31,9 @@ export default class extends Controller {
       }
     }
     document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
+
+    this._voiceSortables = []
+    this._initVoiceSortables()
   }
 
   disconnect() {
@@ -37,6 +41,7 @@ export default class extends Controller {
     this.element.removeEventListener("click", this._onChannelClick, true)
     document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
     this._channelCache.clear()
+    this._destroyVoiceSortables()
   }
 
   _getCurrentChannelId(frame) {
@@ -388,8 +393,8 @@ export default class extends Controller {
       }
 
       // Don't add if already present
-      if (!container.querySelector(`[data-voice-user-id="${data.user_id}"]`) && data.html) {
-        container.insertAdjacentHTML("beforeend", data.html)
+      if (!container.querySelector(`[data-voice-user-id="${data.user_id}"]`)) {
+        container.appendChild(this._buildSidebarParticipant(data))
       }
     }
 
@@ -439,6 +444,8 @@ export default class extends Controller {
         }
       }
     }
+
+    this._initVoiceSortables()
   }
 
   handleVoiceLeave(data) {
@@ -485,6 +492,8 @@ export default class extends Controller {
       const bar = document.getElementById("voice-controls-bar")
       if (bar) bar.classList.add("hidden")
     }
+
+    this._initVoiceSortables()
   }
 
   handleVoiceUpdate(data) {
@@ -585,7 +594,7 @@ export default class extends Controller {
 
     // Add participant to new channel's sidebar list
     const newChannelLink = this.element.querySelector(`a[data-channel-id="${data.to_channel_id}"]`)
-    if (newChannelLink && data.html) {
+    if (newChannelLink) {
       let newContainer = this.element.querySelector(`[data-voice-channel-participants="${data.to_channel_id}"]`)
       if (!newContainer) {
         newContainer = document.createElement("div")
@@ -594,7 +603,8 @@ export default class extends Controller {
         newChannelLink.insertAdjacentElement("afterend", newContainer)
       }
       if (!newContainer.querySelector(`[data-voice-user-id="${data.user_id}"]`)) {
-        newContainer.insertAdjacentHTML("beforeend", data.html)
+        const rowData = { ...data, channel_id: data.to_channel_id }
+        newContainer.appendChild(this._buildSidebarParticipant(rowData))
       }
     }
 
@@ -621,6 +631,8 @@ export default class extends Controller {
         }
       }))
     }
+
+    this._initVoiceSortables()
   }
 
   _showEmptyStateIfEmpty(wrapper) {
@@ -659,6 +671,40 @@ export default class extends Controller {
     return card
   }
 
+  _buildSidebarParticipant(data) {
+    const row = document.createElement("div")
+    row.className = "flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
+    row.dataset.voiceUserId = data.user_id
+    row.dataset.channelId = data.channel_id
+    row.dataset.voiceStateId = data.voice_state_id || ""
+
+    const avatarWrap = document.createElement("div")
+    avatarWrap.className = "relative"
+
+    if (data.avatar_url) {
+      const img = document.createElement("img")
+      img.src = data.avatar_url
+      img.className = "w-5 h-5 rounded-full object-cover voice-sidebar-avatar"
+      img.loading = "lazy"
+      avatarWrap.appendChild(img)
+    } else {
+      const fb = document.createElement("div")
+      fb.className = "w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold text-white voice-sidebar-avatar"
+      fb.style.backgroundColor = data.profile_color || "#1e1c1b"
+      fb.textContent = (data.username?.[0] || "?").toUpperCase()
+      avatarWrap.appendChild(fb)
+    }
+
+    row.appendChild(avatarWrap)
+
+    const name = document.createElement("span")
+    name.className = "ml-1.5 text-xs text-gray-300 truncate flex-1"
+    name.textContent = data.username || "Unknown"
+    row.appendChild(name)
+
+    return row
+  }
+
   _buildVoiceEmptyState(channelName) {
     const tpl = document.getElementById("tpl-voice-empty-state").content.cloneNode(true)
     tpl.querySelector('[data-slot="channel-name"]').textContent = channelName
@@ -689,5 +735,74 @@ export default class extends Controller {
     })
     if (html !== escaped) el.innerHTML = html
     else el.textContent = name
+  }
+
+  // ─── Voice participant drag-and-drop ───────────────────────
+
+  _initVoiceSortables() {
+    this._destroyVoiceSortables()
+    if (!this.canMoveMembersValue) return
+
+    // Ensure every voice channel has a drop target container
+    this.element.querySelectorAll("a[data-voice-channel]").forEach(link => {
+      const channelId = link.dataset.channelId
+      if (!this.element.querySelector(`[data-voice-channel-participants="${channelId}"]`)) {
+        const container = document.createElement("div")
+        container.className = "voice-participants"
+        container.dataset.voiceChannelParticipants = channelId
+        link.insertAdjacentElement("afterend", container)
+      }
+    })
+
+    this.element.querySelectorAll("[data-voice-channel-participants]").forEach(container => {
+      const sortable = Sortable.create(container, {
+        group: "voice-participants",
+        animation: 150,
+        ghostClass: "opacity-20",
+        chosenClass: "bg-gray-600",
+        dragClass: "shadow-lg",
+        fallbackOnBody: true,
+        draggable: "[data-voice-user-id]",
+        onEnd: (evt) => this._handleVoiceParticipantDrop(evt)
+      })
+      this._voiceSortables.push(sortable)
+    })
+  }
+
+  _destroyVoiceSortables() {
+    if (this._voiceSortables) {
+      this._voiceSortables.forEach(s => s.destroy())
+      this._voiceSortables = []
+    }
+  }
+
+  async _handleVoiceParticipantDrop(evt) {
+    const item = evt.item
+    const fromContainer = evt.from
+    const toContainer = evt.to
+    if (!toContainer || fromContainer === toContainer) return
+
+    const userId = item.dataset.voiceUserId
+    const toChannelId = toContainer.dataset.voiceChannelParticipants
+    if (!userId || !toChannelId) return
+
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      const response = await fetch(`/servers/${this.serverIdValue}/voice/move/${userId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ channel_id: toChannelId })
+      })
+      if (!response.ok) {
+        // Revert: move item back to original container
+        fromContainer.appendChild(item)
+      }
+    } catch (e) {
+      console.warn("[ChannelSidebar] Voice move failed:", e)
+      fromContainer.appendChild(item)
+    }
   }
 }

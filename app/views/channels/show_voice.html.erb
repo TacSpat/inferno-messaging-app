@@ -18,12 +18,13 @@
     <div class="flex-1"></div>
 
     <% if @channel.voice_user_limit > 0 %>
-      <span class="text-xs text-gray-500 mr-2"><%= @voice_states.count %>/<%= @channel.voice_user_limit %></span>
+      <span class="text-xs text-gray-500 mr-2"><%= @voice_states.count + @remote_voice_states.size %>/<%= @channel.voice_user_limit %></span>
     <% end %>
   </div>
 
   <!-- Voice channel content -->
-  <div class="flex-1 flex flex-col min-h-0" style="background: #0a0a09;" data-voice-content>
+  <div class="flex-1 flex flex-col min-h-0" style="background: #0a0a09;" data-voice-content
+       data-controller="voice-context" data-voice-context-server-id-value="<%= @server.public_id %>">
     <% if !@voice_configured %>
       <!-- No voice providers available -->
       <div class="flex-1 flex items-center justify-center p-4">
@@ -44,7 +45,7 @@
           <% end %>
         </div>
       </div>
-    <% elsif @voice_states.any? %>
+    <% elsif @voice_states.any? || @remote_voice_states.any? %>
       <!-- Participant grid -->
       <div class="flex-1 p-3 overflow-y-auto" data-voice-participant-grid>
         <div class="voice-grid h-full">
@@ -52,6 +53,7 @@
             <div class="voice-card group"
                  data-voice-participant-id="<%= vs.user.public_id %>"
                  data-voice-state-id="<%= vs.public_id %>"
+                 data-action="contextmenu->voice-context#show"
                  style="--card-color: <%= vs.user.profile_color || '#1e1c1b' %>">
               <div class="voice-card-inner">
                 <!-- Avatar -->
@@ -82,6 +84,28 @@
                 <!-- Username pill -->
                 <div class="voice-username-pill">
                   <span class="truncate"><%= vs.user.display_name.presence || vs.user.username %></span>
+                </div>
+              </div>
+            </div>
+          <% end %>
+          <% @remote_voice_states.each do |rvs| %>
+            <div class="voice-card group"
+                 data-voice-participant-id="<%= rvs[:user_id] %>"
+                 data-voice-remote="true"
+                 data-action="contextmenu->voice-context#show"
+                 style="--card-color: <%= rvs[:profile_color] || '#1e1c1b' %>">
+              <div class="voice-card-inner">
+                <div class="voice-avatar-wrapper">
+                  <% if rvs[:avatar_url].present? %>
+                    <img src="<%= rvs[:avatar_url] %>" class="voice-avatar">
+                  <% else %>
+                    <div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, <%= rvs[:profile_color] || '#1e1c1b' %>, white 20%)">
+                      <%= (rvs[:username] || "?")[0].upcase %>
+                    </div>
+                  <% end %>
+                </div>
+                <div class="voice-username-pill">
+                  <span class="truncate"><%= rvs[:username] || "Remote User" %></span>
                 </div>
               </div>
             </div>

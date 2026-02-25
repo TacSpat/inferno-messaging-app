@@ -118,6 +118,13 @@ class NostrServerPublishJob < ApplicationJob
     end
     tags << ["welcome_message", @server.welcome_message_template || ""]
     tags << ["welcome_enabled", @server.welcome_message_enabled?.to_s]
+    tags << ["voice_enabled", @server.voice_enabled?.to_s]
+
+    # Include voice provider pubkeys so other clients can create ServerVoiceProvider records
+    @server.server_voice_providers.active.includes(:user).each do |svp|
+      next unless svp.user.nostr_public_key.present? && svp.user.livekit_configured?
+      tags << ["voice_provider", svp.user.nostr_public_key]
+    end
 
     tags << ["deleted", "true"] if options[:deleted]
     tags

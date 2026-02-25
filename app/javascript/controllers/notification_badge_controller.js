@@ -758,6 +758,20 @@ export default class extends Controller {
       return
     }
 
+    // Voice participant (sidebar or main view)
+    const voiceUserEl = event.target.closest("[data-voice-user-id]") || event.target.closest("[data-voice-participant-id]")
+    if (voiceUserEl) {
+      event.preventDefault()
+      this.closeMenu()
+      const userId = voiceUserEl.dataset.voiceUserId || voiceUserEl.dataset.voiceParticipantId
+      const serverId = this.currentServerId
+        || document.querySelector("[data-channel-sidebar-server-id-value]")?.dataset.channelSidebarServerIdValue
+      if (userId && serverId) {
+        this._showVoiceParticipantMenu(event.clientX, event.clientY, userId, serverId)
+      }
+      return
+    }
+
     // Server icon
     const serverEl = event.target.closest("[data-server-id]")
     if (serverEl) {
@@ -769,7 +783,7 @@ export default class extends Controller {
 
     // Channel item (skip if right-clicking a voice participant — those have their own context menu)
     const channelEl = event.target.closest("[data-channel-id]")
-    if (channelEl && !event.target.closest("[data-voice-state-id]")) {
+    if (channelEl) {
       event.preventDefault()
       this.closeMenu()
       this.showChannelContextMenu(event.clientX, event.clientY, channelEl.dataset.channelId)
@@ -920,6 +934,155 @@ export default class extends Controller {
     })
 
     this.renderContextMenu(x, y, items)
+  }
+
+  async _showVoiceParticipantMenu(x, y, userId, serverId) {
+    try {
+      const response = await fetch(`/servers/${serverId}/voice/context_menu/${userId}`, {
+        headers: { "X-Requested-With": "XMLHttpRequest" }
+      })
+      if (!response.ok) return
+
+      const html = await response.text()
+      const menu = document.createElement("div")
+      menu.className = "fixed z-[100] context-pop"
+      menu.id = "notif-context-menu"
+      menu.setAttribute("data-voice-context-menu", "")
+      menu.innerHTML = html
+
+      document.body.appendChild(menu)
+
+      // Position within viewport
+      const pad = 24
+      const rect = menu.getBoundingClientRect()
+      let left = x, top = y
+      if (left + rect.width > window.innerWidth - pad) left = window.innerWidth - rect.width - pad
+      if (left < pad) left = pad
+      if (top + rect.height > window.innerHeight - pad) top = y - rect.height
+      if (top < pad) top = pad
+      menu.style.left = `${left}px`
+      menu.style.top = `${top}px`
+
+      this._bindVoiceMenuActions(menu, serverId)
+    } catch (e) {
+      console.warn("[VoiceContext] Failed to load context menu:", e)
+    }
+  }
+
+  _bindVoiceMenuActions(menu, serverId) {
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+
+    menu.querySelectorAll("[data-context-action]").forEach(btn => {
+      const action = btn.dataset.contextAction
+
+      if (action === "viewProfile") {
+        btn.addEventListener("click", () => {
+          this.closeMenu()
+          document.dispatchEvent(new CustomEvent("inferno:open-profile-overlay", {
+            detail: { userId: btn.dataset.userId, serverId: btn.dataset.serverId },
+            bubbles: true
+          }))
+        })
+      } else if (action === "selfMute") {
+        btn.addEventListener("click", () => {
+          this.closeMenu()
+          const voiceCtrl = document.querySelector("[data-controller~='voice-channel']")
+          if (voiceCtrl) {
+            this.application.getControllerForElementAndIdentifier(voiceCtrl, "voice-channel")?.toggleMute()
+          }
+        })
+      } else if (action === "selfDeafen") {
+        btn.addEventListener("click", () => {
+          this.closeMenu()
+          const voiceCtrl = document.querySelector("[data-controller~='voice-channel']")
+          if (voiceCtrl) {
+            this.application.getControllerForElementAndIdentifier(voiceCtrl, "voice-channel")?.toggleDeafen()
+          }
+        })
+      } else if (action === "serverMute") {
+        btn.addEventListener("click", () => {
+          this.closeMenu()
+          fetch(`/servers/${serverId}/voice/server_mute/${btn.dataset.userId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
+          }).catch(() => {})
+        })
+      } else if (action === "serverDeafen") {
+        btn.addEventListener("click", () => {
+          this.closeMenu()
+          fetch(`/servers/${serverId}/voice/server_deafen/${btn.dataset.userId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
+          }).catch(() => {})
+        })
+      } else if (action === "moveToChannel") {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation()
+          this._showVoiceMoveDropdown(menu, btn, serverId)
+        })
+      } else if (action === "disconnectMember") {
+        btn.addEventListener("click", () => {
+          const username = btn.dataset.username
+          if (confirm(`Disconnect ${username} from voice?`)) {
+            fetch(`/servers/${serverId}/voice/disconnect/${btn.dataset.userId}`, {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }
+            }).catch(() => {})
+          }
+          this.closeMenu()
+        })
+      }
+    })
+  }
+
+  _showVoiceMoveDropdown(menu, btn, serverId) {
+    // Remove existing move dropdown
+    const existing = document.querySelector("[data-voice-move-dropdown]")
+    if (existing) { existing.remove(); return }
+
+    const channels = JSON.parse(btn.dataset.voiceChannels || "[]")
+    const userId = btn.dataset.userId
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+
+    const tpl = document.getElementById("tpl-move-dropdown")
+    if (!tpl) return
+
+    const dropdown = tpl.content.cloneNode(true).firstElementChild
+    dropdown.setAttribute("data-voice-move-dropdown", "")
+    const slot = dropdown.querySelector("[data-slot='channels']")
+
+    if (channels.length === 0) {
+      slot.innerHTML = '<p class="px-3 py-2 text-xs text-gray-500">No other voice channels</p>'
+    } else {
+      const itemTpl = document.getElementById("tpl-move-channel-item")
+      channels.forEach(ch => {
+        const item = itemTpl.content.cloneNode(true).querySelector("button")
+        item.querySelector("[data-slot='name']").textContent = ch.name
+        item.addEventListener("click", () => {
+          fetch(`/servers/${serverId}/voice/move/${userId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+            body: JSON.stringify({ channel_id: ch.id })
+          }).catch(() => {})
+          this.closeMenu()
+        })
+        slot.appendChild(item)
+      })
+    }
+
+    // Position to the right of the move button
+    const wrapper = btn.closest(".context-move-wrapper")
+    const wrapperRect = wrapper.getBoundingClientRect()
+    dropdown.style.position = "fixed"
+    let ddLeft = wrapperRect.right + 4
+    if (ddLeft + 200 > window.innerWidth) ddLeft = wrapperRect.left - 200
+    let ddTop = wrapperRect.top
+    if (ddTop + 260 > window.innerHeight) ddTop = window.innerHeight - 264
+    dropdown.style.left = `${ddLeft}px`
+    dropdown.style.top = `${ddTop}px`
+
+    document.body.appendChild(dropdown)
+    dropdown.addEventListener("click", (e) => e.stopPropagation())
   }
 
   showMessageContextMenu(x, y, messageEl, clickTarget) {
@@ -1305,6 +1468,8 @@ export default class extends Controller {
   closeMenu() {
     const existing = document.getElementById("notif-context-menu")
     if (existing) existing.remove()
+    const moveDD = document.querySelector("[data-voice-move-dropdown]")
+    if (moveDD) moveDD.remove()
   }
 
   // ---- Actions ----

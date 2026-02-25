@@ -41,17 +41,55 @@ class RelaySubscriptionManager
 
   attr_reader :connections, :running
 
-  # Cache of remote instance owner pubkeys per server, learned from voice token requests.
-  # Allows the provider instance to publish voice state changes back to requesters.
-  @remote_owners ||= Hash.new { |h, k| h[k] = Set.new }
+  # Shared file-based cache for cross-process data (web + SolidQueue worker).
+  def self.shared_cache
+    @shared_cache ||= ActiveSupport::Cache::FileStore.new(Rails.root.join("tmp/cache/relay_sub_mgr"))
+  end
 
   class << self
+    # ── Remote instance owner discovery (DB-backed) ──
+
     def known_remote_owners(server_id)
-      @remote_owners[server_id].to_a
+      server = Server.find_by(id: server_id)
+      return [] unless server
+      (server.remote_owner_pubkeys || []).uniq
     end
 
     def register_remote_owner(server_id, pubkey)
-      @remote_owners[server_id].add(pubkey)
+      server = Server.find_by(id: server_id)
+      return unless server
+
+      existing = server.remote_owner_pubkeys || []
+      unless existing.include?(pubkey)
+        server.update_column(:remote_owner_pubkeys, existing + [pubkey])
+        Rails.logger.info("[RelaySubscriptionManager] Registered remote owner #{pubkey[0..15]} for server #{server_id}")
+      end
+    end
+
+    # ── Remote voice state cache (file-backed, cross-process) ──
+
+    REMOTE_VOICE_STATES_PREFIX = "remote_voice_states".freeze
+
+    def remote_voice_states(channel_public_id)
+      shared_cache.read("#{REMOTE_VOICE_STATES_PREFIX}:#{channel_public_id}") || {}
+    end
+
+    def cache_remote_voice_state(channel_public_id, data)
+      key = "#{REMOTE_VOICE_STATES_PREFIX}:#{channel_public_id}"
+      states = shared_cache.read(key) || {}
+      states[data[:user_id]] = data
+      shared_cache.write(key, states)
+    end
+
+    def remove_remote_voice_state(channel_public_id, user_id)
+      key = "#{REMOTE_VOICE_STATES_PREFIX}:#{channel_public_id}"
+      states = shared_cache.read(key) || {}
+      states.delete(user_id)
+      if states.empty?
+        shared_cache.delete(key)
+      else
+        shared_cache.write(key, states)
+      end
     end
   end
 
@@ -1060,25 +1098,38 @@ class RelaySubscriptionManager
     # Register this remote instance so we can send voice state updates back
     self.class.register_remote_owner(server.id, sender_pubkey)
 
+    channel_id = data["channel_id"]
+    user_id = data["user_id"]
     action = data["action"]
+
     if action == "join"
+      # Persist in cache so page refreshes show remote participants
+      self.class.cache_remote_voice_state(channel_id, {
+        user_id: user_id,
+        username: data["username"] || "Remote User",
+        avatar_url: data["avatar_url"],
+        profile_color: data["profile_color"]
+      })
+
       ServerChannel.broadcast_to(server, {
         type: "voice_state_join",
-        channel_id: data["channel_id"],
-        user_id: data["user_id"],
+        channel_id: channel_id,
+        user_id: user_id,
         voice_state_id: nil,
         username: data["username"] || "Remote User",
         avatar_url: data["avatar_url"],
         profile_color: data["profile_color"]
       })
-      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["username"]} joined #{data["channel_id"]}")
+      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["username"]} joined #{channel_id}")
     elsif action == "leave"
+      self.class.remove_remote_voice_state(channel_id, user_id)
+
       ServerChannel.broadcast_to(server, {
         type: "voice_state_leave",
-        channel_id: data["channel_id"],
-        user_id: data["user_id"]
+        channel_id: channel_id,
+        user_id: user_id
       })
-      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["user_id"]} left #{data["channel_id"]}")
+      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{user_id} left #{channel_id}")
     end
   rescue => e
     Rails.logger.error("[RelaySubscriptionManager] Error processing voice state sync: #{e.message}")

@@ -15,6 +15,7 @@ class ChannelsController < ApplicationController
 
     if @channel.voice?
       @voice_states = @channel.voice_states.includes(:user)
+      @remote_voice_states = RelaySubscriptionManager.remote_voice_states(@channel.public_id).values
       @voice_configured = @server.voice_ready?
       render "channels/show_voice"
       return

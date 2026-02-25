@@ -21,7 +21,13 @@ class NostrVoiceStateSyncJob < ApplicationJob
 
     # Don't send to ourselves
     target_pubkeys.delete(owner.nostr_public_key)
-    return if target_pubkeys.empty?
+
+    if target_pubkeys.empty?
+      Rails.logger.info("[NostrVoiceStateSyncJob] No target pubkeys for server #{server_id} — skipping #{action} sync")
+      return
+    end
+
+    Rails.logger.info("[NostrVoiceStateSyncJob] Publishing #{action} to #{target_pubkeys.size} target(s) for #{user_public_id}")
 
     payload = {
       type: "voice_state_sync",

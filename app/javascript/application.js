@@ -99,6 +99,7 @@ import ClipboardController from "./controllers/clipboard_controller"
 import NostrSearchController from "./controllers/nostr_search_controller"
 import EncryptedChannelController from "./controllers/encrypted_channel_controller"
 import VoiceChannelController from "./controllers/voice_channel_controller"
+import VoiceContextController from "./controllers/voice_context_controller"
 import VoiceSettingsController from "./controllers/voice_settings_controller"
 import VoiceDeviceSelectController from "./controllers/voice_device_select_controller"
 import ChannelTypeController from "./controllers/channel_type_controller"
@@ -140,6 +141,7 @@ application.register("clipboard", ClipboardController)
 application.register("nostr-search", NostrSearchController)
 application.register("encrypted-channel", EncryptedChannelController)
 application.register("voice-channel", VoiceChannelController)
+application.register("voice-context", VoiceContextController)
 application.register("voice-settings", VoiceSettingsController)
 application.register("voice-device-select", VoiceDeviceSelectController)
 application.register("channel-type", ChannelTypeController)
