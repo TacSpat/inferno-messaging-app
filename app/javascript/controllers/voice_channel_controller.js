@@ -175,12 +175,36 @@ export default class extends Controller {
 
   async _handleForceMove(e) {
     const { toChannelId, toChannelName, voiceStateId } = e.detail
-    // The backend already moved our voice state; we just need to reconnect
-    // to the new LiveKit room
+    // Prevent the old room's Disconnected event from triggering failover
+    this._userInitiatedDisconnect = true
+
+    // Clean up old room + media elements
     if (this.room) {
       this.room.disconnect()
       this.room = null
     }
+    this._audioElements.forEach(el => el.remove())
+    this._audioElements.clear()
+    this._gainNodes?.clear()
+    this._analysers.clear()
+    this._videoElements.forEach(({ element, track }) => {
+      try { track.detach() } catch (_) {}
+      element.remove()
+    })
+    this._videoElements.clear()
+    this._cameraElements.forEach(({ video, track }) => {
+      try { track.detach() } catch (_) {}
+      video.remove()
+    })
+    this._cameraElements.clear()
+    this._pendingScreenShares.forEach(({ placeholder }) => placeholder?.remove())
+    this._pendingScreenShares.clear()
+    this._pendingScreenShareAudio.clear()
+    this._screenShareAudioElements.forEach(el => el.remove())
+    this._screenShareAudioElements.clear()
+    this._stopLevelLoop()
+    this._cleanupLocalLevelMeter()
+
     this.voiceStateId = voiceStateId
     this.currentChannelId = toChannelId
 
@@ -190,9 +214,11 @@ export default class extends Controller {
 
     // Re-join with a new token for the new channel
     try {
+      this._userInitiatedDisconnect = false
       await this._joinChannel(toChannelId, this.currentServerId)
     } catch (err) {
       console.error("[VoiceChannel] Force-move reconnect failed:", err)
+      this._userInitiatedDisconnect = false
     }
   }
 
@@ -351,6 +377,7 @@ export default class extends Controller {
     // Render any participants already in the room (joined before us)
     for (const participant of this.room.remoteParticipants.values()) {
       this._ensureParticipantUI(participant)
+      this._updateRemoteParticipantMuteIcons(participant)
       // Attach any already-published video tracks
       for (const pub of participant.videoTrackPublications.values()) {
         if (pub.track && pub.isSubscribed) {
@@ -545,6 +572,14 @@ export default class extends Controller {
         console.warn("[VoiceChannel] Disconnected after reconnect attempts:", reason)
         this._attemptFailover()
       }
+    })
+
+    // Remote participant mutes/unmutes a track → update their voice card icons
+    room.on(RoomEvent.TrackMuted, (publication, participant) => {
+      if (!participant.isLocal) this._updateRemoteParticipantMuteIcons(participant)
+    })
+    room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
+      if (!participant.isLocal) this._updateRemoteParticipantMuteIcons(participant)
     })
 
     room.on(RoomEvent.ParticipantConnected, (participant) => {
@@ -1135,6 +1170,20 @@ export default class extends Controller {
       this._toggleVideoTheatre(identity)
     })
 
+    // Add close button for remote streams (stop watching)
+    const localId = this.room?.localParticipant?.identity
+    if (identity !== localId) {
+      const closeBtn = document.createElement("button")
+      closeBtn.className = "voice-screen-close-btn"
+      closeBtn.title = "Stop watching"
+      closeBtn.innerHTML = '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>'
+      closeBtn.addEventListener("click", (e) => {
+        e.stopPropagation()
+        this._unwatchScreenShare(identity)
+      })
+      preview.appendChild(closeBtn)
+    }
+
     // Start in card format inside the grid (users opt in to theatre)
     preview.classList.add("voice-screen-preview--card")
     const grid = container.querySelector(".voice-grid")
@@ -1144,7 +1193,7 @@ export default class extends Controller {
       container.appendChild(preview)
     }
 
-    this._videoElements.set(identity, { element: preview, track, theatre: false })
+    this._videoElements.set(identity, { element: preview, track, participant, theatre: false })
   }
 
   _detachScreenShareTrack(participant) {
@@ -1280,6 +1329,18 @@ export default class extends Controller {
       el.remove()
       this._screenShareAudioElements.delete(identity)
     }
+  }
+
+  _unwatchScreenShare(identity) {
+    const entry = this._videoElements.get(identity)
+    if (!entry) return
+    const { element, track, participant } = entry
+    try { track.detach() } catch (_) {}
+    element.remove()
+    this._videoElements.delete(identity)
+    this._detachScreenShareAudio(identity)
+    // Re-show the placeholder so they can watch again
+    this._showScreenSharePlaceholder(track, participant)
   }
 
   _escapeHtml(str) {
@@ -1474,6 +1535,28 @@ export default class extends Controller {
         if (inner) {
           inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
         }
+      }
+    }
+  }
+
+  _updateRemoteParticipantMuteIcons(participant) {
+    const userId = participant.identity
+    const card = document.querySelector(`[data-voice-participant-id="${userId}"]`)
+    if (!card) return
+
+    const existingIcons = card.querySelector(".voice-status-icons")
+    if (existingIcons) existingIcons.remove()
+
+    const isMuted = !participant.isMicrophoneEnabled
+    if (isMuted) {
+      const inner = card.querySelector(".voice-card-inner")
+      if (inner) {
+        inner.insertAdjacentHTML("beforeend",
+          `<div class="voice-status-icons"><div class="voice-status-badge">` +
+          `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">` +
+          `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>` +
+          `<line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/>` +
+          `</svg></div></div>`)
       }
     }
   }

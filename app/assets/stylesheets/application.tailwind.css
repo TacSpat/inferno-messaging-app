@@ -1050,6 +1050,28 @@
     opacity: 0.9;
     box-shadow: 0 0 12px rgb(var(--accent) / 0.4);
   }
+  /* Close/stop watching button on screen share */
+  .voice-screen-close-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 1.75rem;
+    height: 1.75rem;
+    border-radius: 9999px;
+    background: rgba(0, 0, 0, 0.7);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 15;
+  }
+  .voice-screen-preview:hover .voice-screen-close-btn { opacity: 1; }
+  .voice-screen-close-btn:hover { background: rgba(220, 38, 38, 0.8); }
+
   /* Paused stream overlay for local preview */
   .voice-screen-paused-overlay {
     position: absolute;
