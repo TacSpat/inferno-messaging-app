@@ -46,7 +46,6 @@
       <% remote_states.each do |rvs| %>
         <div class="flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
              data-voice-user-id="<%= rvs[:user_id] %>"
-             data-channel-id="<%= channel.public_id %>"
              data-voice-remote="true"
              data-action="contextmenu->voice-context#show">
           <div class="relative">

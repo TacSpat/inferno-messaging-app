@@ -615,6 +615,28 @@ export default class extends Controller {
         const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
         if (card) card.remove()
         this._showEmptyStateIfEmpty(wrapper)
+      } else if (currentChannelId === data.to_channel_id) {
+        // Add card to new channel view
+        const gridContainer = document.querySelector("[data-voice-participant-grid]")
+        const emptyState = document.querySelector("[data-voice-empty-state]")
+        const color = data.profile_color || "#1e1c1b"
+        const cardEl = this._buildVoiceCard(data, color)
+
+        if (emptyState) {
+          const gridOuter = document.createElement("div")
+          gridOuter.className = "flex-1 p-3 overflow-y-auto"
+          gridOuter.dataset.voiceParticipantGrid = ""
+          const gridInner = document.createElement("div")
+          gridInner.className = "voice-grid h-full"
+          gridInner.appendChild(cardEl)
+          gridOuter.appendChild(gridInner)
+          emptyState.replaceWith(gridOuter)
+        } else if (gridContainer) {
+          const grid = gridContainer.querySelector(".voice-grid") || gridContainer
+          if (!grid.querySelector(`[data-voice-participant-id="${data.user_id}"]`)) {
+            grid.appendChild(cardEl)
+          }
+        }
       }
     }
 
@@ -676,7 +698,6 @@ export default class extends Controller {
     const row = document.createElement("div")
     row.className = "flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
     row.dataset.voiceUserId = data.user_id
-    row.dataset.channelId = data.channel_id
     row.dataset.voiceStateId = data.voice_state_id || ""
 
     const avatarWrap = document.createElement("div")
@@ -763,7 +784,7 @@ export default class extends Controller {
         chosenClass: "bg-gray-600",
         dragClass: "shadow-lg",
         fallbackOnBody: true,
-        draggable: "[data-voice-user-id]",
+        draggable: "[data-voice-user-id]:not([data-voice-remote])",
         onEnd: (evt) => this._handleVoiceParticipantDrop(evt)
       })
       this._voiceSortables.push(sortable)
@@ -784,6 +805,7 @@ export default class extends Controller {
     if (!toContainer || fromContainer === toContainer) return
 
     const userId = item.dataset.voiceUserId
+    const fromChannelId = fromContainer.dataset.voiceChannelParticipants
     const toChannelId = toContainer.dataset.voiceChannelParticipants
     if (!userId || !toChannelId) return
 
@@ -798,12 +820,21 @@ export default class extends Controller {
         body: JSON.stringify({ channel_id: toChannelId })
       })
       if (!response.ok) {
-        // Revert: move item back to original container
-        fromContainer.appendChild(item)
+        // Revert: the broadcast won't arrive, so move item back.
+        // Containers may have changed during await — re-query by channel ID.
+        const origContainer = this.element.querySelector(`[data-voice-channel-participants="${fromChannelId}"]`)
+        if (origContainer && item.parentNode) {
+          origContainer.appendChild(item)
+        }
+        this._initVoiceSortables()
       }
     } catch (e) {
       console.warn("[ChannelSidebar] Voice move failed:", e)
-      fromContainer.appendChild(item)
+      const origContainer = this.element.querySelector(`[data-voice-channel-participants="${fromChannelId}"]`)
+      if (origContainer && item.parentNode) {
+        origContainer.appendChild(item)
+      }
+      this._initVoiceSortables()
     }
   }
 }
