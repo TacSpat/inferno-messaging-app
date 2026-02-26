@@ -32,6 +32,14 @@ export default class extends Controller {
     }
     document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
 
+    // Keep _activeChannelId in sync after Turbo frame navigations we didn't intercept
+    this._onFrameLoad = (e) => {
+      if (e.target.id !== "main-content") return
+      const newId = this._getCurrentChannelId(e.target)
+      if (newId) this._activeChannelId = newId
+    }
+    document.addEventListener("turbo:frame-load", this._onFrameLoad)
+
     this._voiceSortables = []
     this._initVoiceSortables()
   }
@@ -40,6 +48,7 @@ export default class extends Controller {
     if (this.subscription) this.subscription.unsubscribe()
     this.element.removeEventListener("click", this._onChannelClick, true)
     document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
+    document.removeEventListener("turbo:frame-load", this._onFrameLoad)
     this._channelCache.clear()
     this._destroyVoiceSortables()
   }
@@ -62,10 +71,12 @@ export default class extends Controller {
 
     const targetId = link.dataset.channelId
     const isVoice = link.dataset.voiceChannel === "true"
-    const sameChannel = targetId === this._activeChannelId
+    // Detect same channel via tracked ID or visual state (fallback if _activeChannelId is stale)
+    const sameChannel = targetId === this._activeChannelId || link.classList.contains("bg-gray-600")
 
     // Same channel — no-op (but voice channels still try to join below)
     if (sameChannel) {
+      this._activeChannelId = targetId
       e.preventDefault()
       e.stopPropagation()
       if (!isVoice) return
@@ -519,6 +530,17 @@ export default class extends Controller {
         } else if (data.self_deaf && nameSpan) {
           nameSpan.insertAdjacentHTML("afterend", '<svg class="voice-deaf-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
         }
+
+        // Toggle broadcast badge on avatar
+        const avatarWrap = participant.querySelector(".relative")
+        if (avatarWrap) {
+          const existingBadge = avatarWrap.querySelector(".voice-broadcast-badge")
+          if (data.broadcasting && !existingBadge) {
+            avatarWrap.insertAdjacentHTML("beforeend", this._broadcastBadgeHtml())
+          } else if (!data.broadcasting && existingBadge) {
+            existingBadge.remove()
+          }
+        }
       }
 
       // Update main voice view card status icons
@@ -717,6 +739,10 @@ export default class extends Controller {
       avatarWrap.appendChild(fb)
     }
 
+    if (data.broadcasting) {
+      avatarWrap.insertAdjacentHTML("beforeend", this._broadcastBadgeHtml())
+    }
+
     row.appendChild(avatarWrap)
 
     const name = document.createElement("span")
@@ -725,6 +751,10 @@ export default class extends Controller {
     row.appendChild(name)
 
     return row
+  }
+
+  _broadcastBadgeHtml() {
+    return '<div class="voice-broadcast-badge" title="Broadcasting to children"><svg class="w-1.5 h-1.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg></div>'
   }
 
   _buildVoiceEmptyState(channelName) {

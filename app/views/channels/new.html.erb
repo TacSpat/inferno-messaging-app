@@ -1,100 +1,132 @@
-<div class="flex items-center justify-center min-h-screen bg-gray-900">
-  <div class="w-full max-w-md bg-gray-800 rounded-lg shadow-xl p-8">
-    <h1 class="text-xl font-bold text-white mb-1">Create Channel</h1>
-    <p class="text-sm text-gray-400 mb-6">in <%= @server.name %></p>
+<div class="flex items-center justify-center min-h-screen" style="background: #0e0d0c;">
+  <div class="w-full max-w-lg mx-4">
+    <!-- Header -->
+    <div class="mb-6">
+      <h1 class="text-xl font-bold text-white">Create Channel</h1>
+      <p class="text-sm text-gray-500 mt-0.5">in <%= @server.name %></p>
+    </div>
 
-    <%= form_with model: [@server, @channel], class: "space-y-4", data: { controller: "encrypted-channel channel-type" } do |f| %>
+    <%= form_with model: [@server, @channel], data: { controller: "encrypted-channel channel-type" } do |f| %>
       <% if @channel.errors.any? %>
-        <div class="bg-danger/20 border border-danger/40 rounded-lg p-3">
+        <div class="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-5">
           <% @channel.errors.full_messages.each do |msg| %>
-            <p class="text-sm text-red-300"><%= msg %></p>
+            <p class="text-sm text-danger-light"><%= msg %></p>
           <% end %>
         </div>
       <% end %>
-      <div>
-        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Channel Type</label>
-        <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {},
-            class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm",
-            data: { action: "change->channel-type#toggle", channel_type_target: "select" } %>
-      </div>
-      <div>
-        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Category</label>
-        <%= f.collection_select :category_id, @server.categories.ordered, :id, :name, { include_blank: "No Category" }, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
-      </div>
 
-      <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
-        <%= f.label :name, "Channel Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <div class="flex items-center bg-gray-900 border border-gray-700 rounded px-3 py-2">
-          <span class="text-gray-500 mr-1">#</span>
-          <div class="flex-1 relative">
-            <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
-            <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-500 focus:outline-none text-sm relative z-10", placeholder: "new-channel", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+      <!-- Basics -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
+        <div class="p-5 space-y-4">
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Type</label>
+              <%= f.select :channel_type, Channel.channel_types.keys.map { |t| [t.capitalize, t] }, {},
+                  class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition",
+                  data: { action: "change->channel-type#toggle", channel_type_target: "select" } %>
+            </div>
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Category</label>
+              <%= f.collection_select :category_id, @server.categories.ordered, :id, :name, { include_blank: "None" }, class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition" %>
+            </div>
           </div>
-          <button type="button" class="text-gray-400 hover:text-gray-200 ml-1 shrink-0 cursor-pointer" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          </button>
-        </div>
-      </div>
 
-      <div>
-        <%= f.label :topic, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm", placeholder: "What's this channel about?" %>
-      </div>
+          <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
+            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Channel Name</label>
+            <div class="flex items-center bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/20 transition">
+              <span class="text-gray-600 mr-1.5 text-sm">#</span>
+              <div class="flex-1 relative">
+                <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
+                <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-600 focus:outline-none text-sm relative z-10", placeholder: "new-channel", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+              </div>
+              <button type="button" class="text-gray-500 hover:text-gray-300 ml-1.5 shrink-0 cursor-pointer transition" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
+                <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </button>
+            </div>
+          </div>
 
-      <!-- Voice channel options (shown when channel_type is voice) -->
-      <div data-channel-type-target="voiceOptions" class="hidden border border-gray-700 rounded-lg p-4 space-y-4">
-        <h3 class="text-sm font-semibold text-white">Voice Channel Options</h3>
-
-        <div>
-          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Bitrate</label>
-          <%= f.select :voice_bitrate,
-              [["32 kbps (Low)", 32000], ["64 kbps (Normal)", 64000], ["96 kbps (High)", 96000], ["128 kbps (Very High)", 128000], ["256 kbps (Best)", 256000]],
-              { selected: 64000 },
-              class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
-          <p class="text-xs text-gray-500 mt-1">Higher bitrate = better quality but uses more bandwidth</p>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">User Limit</label>
-          <%= f.number_field :voice_user_limit, value: 0, min: 0, max: 99, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm" %>
-          <p class="text-xs text-gray-500 mt-1">0 = unlimited</p>
-        </div>
-
-        <label class="flex items-center gap-3 cursor-pointer">
-          <%= f.check_box :video_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer" %>
           <div>
-            <span class="text-sm font-medium text-white">Enable Video</span>
-            <p class="text-xs text-gray-400">Allow members to share their camera in this channel</p>
+            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Topic <span class="text-gray-600 normal-case tracking-normal font-normal">— optional</span></label>
+            <%= f.text_field :topic, class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition", placeholder: "What's this channel about?" %>
           </div>
-        </label>
-      </div>
-
-      <!-- Encrypted channel toggle -->
-      <div class="border border-gray-700 rounded-lg p-4 space-y-3">
-        <label class="flex items-center gap-3 cursor-pointer">
-          <%= f.check_box :encrypted, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer", data: { action: "change->encrypted-channel#toggle", encrypted_channel_target: "checkbox" } %>
-          <div>
-            <span class="text-sm font-medium text-white">Encrypted Channel</span>
-            <p class="text-xs text-gray-400">Messages are encrypted on relays. Only members with allowed roles can access this channel.</p>
-          </div>
-        </label>
-
-        <div data-encrypted-channel-target="roleSelector" class="hidden space-y-2 pt-2 border-t border-gray-700">
-          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide">Allowed Roles</label>
-          <p class="text-xs text-gray-500 mb-2">Select which roles can access this channel. Admins and owners always have access.</p>
-          <% @server.roles.where.not(name: "@everyone").ordered.reject(&:owner?).each do |role| %>
-            <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-700 cursor-pointer">
-              <input type="checkbox" name="channel[allowed_role_ids][]" value="<%= role.public_id %>" class="w-3.5 h-3.5 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
-              <span class="w-3 h-3 rounded-full shrink-0" style="background-color: <%= role.color || '#99aab5' %>"></span>
-              <span class="text-sm text-gray-200"><%= role.name %></span>
-            </label>
-          <% end %>
         </div>
       </div>
 
-      <div class="flex items-center gap-3 pt-2">
-        <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-400 hover:text-gray-200" %>
-        <%= f.submit "Create Channel", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+      <!-- Voice channel options -->
+      <div data-channel-type-target="voiceOptions" class="hidden mb-4">
+        <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden">
+          <div class="px-5 py-3 border-b border-gray-700/50 flex items-center gap-2">
+            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>
+            <span class="text-sm font-semibold text-gray-300">Voice Settings</span>
+          </div>
+          <div class="p-5 space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Bitrate</label>
+                <%= f.select :voice_bitrate,
+                    [["32 kbps", 32000], ["64 kbps", 64000], ["96 kbps", 96000], ["128 kbps", 128000], ["256 kbps", 256000]],
+                    { selected: 64000 },
+                    class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition" %>
+              </div>
+              <div>
+                <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">User Limit</label>
+                <%= f.number_field :voice_user_limit, value: 0, min: 0, max: 99, class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition", placeholder: "0 = unlimited" %>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Hearth</label>
+              <select name="channel[parent_channel_id]" class="w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition">
+                <option value="">None (standalone)</option>
+                <% @server.channels.voice.ordered.each do |vc| %>
+                  <% next if vc.ancestor_channels.length >= 2 %>
+                  <option value="<%= vc.public_id %>" <%= 'selected' if @parent_channel && vc == @parent_channel %>><%= "\u00A0\u00A0" * vc.ancestor_channels.length %><%= vc.name %></option>
+                <% end %>
+              </select>
+              <p class="text-[11px] text-gray-600 mt-1.5">Audio from the hearth radiates down to all its embers</p>
+            </div>
+
+            <div class="flex items-center gap-4 pt-1">
+              <label class="flex items-center gap-2.5 cursor-pointer">
+                <%= f.check_box :video_enabled, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer" %>
+                <span class="text-sm text-gray-300">Enable video</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Encrypted channel -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-6">
+        <div class="p-5 space-y-3">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <%= f.check_box :encrypted, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer", data: { action: "change->encrypted-channel#toggle", encrypted_channel_target: "checkbox" } %>
+            <div>
+              <span class="text-sm font-medium text-white">Encrypted Channel</span>
+              <p class="text-xs text-gray-500">Messages are encrypted on relays. Only allowed roles can access.</p>
+            </div>
+          </label>
+
+          <div data-encrypted-channel-target="roleSelector" class="hidden space-y-2 pt-3 border-t border-gray-700/50">
+            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Allowed Roles</label>
+            <p class="text-[11px] text-gray-600 mb-2">Admins and owners always have access.</p>
+            <div class="space-y-0.5">
+              <% @server.roles.where.not(name: "@everyone").ordered.reject(&:owner?).each do |role| %>
+                <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-700/50 cursor-pointer transition">
+                  <input type="checkbox" name="channel[allowed_role_ids][]" value="<%= role.public_id %>" class="w-3.5 h-3.5 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer">
+                  <span class="w-2.5 h-2.5 rounded-full shrink-0" style="background-color: <%= role.color || '#99aab5' %>"></span>
+                  <span class="text-sm text-gray-300"><%= role.name %></span>
+                </label>
+              <% end %>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex items-center gap-4">
+        <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-500 hover:text-gray-300 transition" %>
+        <%= f.submit "Create Channel", class: "bg-confirm hover:bg-confirm-light text-white font-semibold px-6 py-2.5 rounded-lg transition cursor-pointer text-sm" %>
       </div>
     <% end %>
   </div>

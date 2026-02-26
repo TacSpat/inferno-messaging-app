@@ -1,3 +1,4 @@
+<% indent = local_assigns[:indent] || 0 %>
 <% unread = channel.text? ? channel.unread_for?(current_user) : false %>
 <% mention_count = channel.text? ? current_user.notifications.unread.for_channel(channel.id).count : 0 %>
 <% is_read_only = local_assigns[:read_only] %>
@@ -6,7 +7,7 @@
    data-turbo-frame="main-content"
    data-channel-id="<%= channel.public_id %>"
    <%= 'data-voice-channel=true' if is_voice %>
-   class="flex items-center px-2 py-1.5 rounded group relative
+   class="flex items-center px-2 py-1.5 rounded group relative <%= 'ml-3' if indent > 0 %>
           <%= if is_read_only
                 active ? 'bg-gray-600 text-gray-500' : 'text-gray-500 hover:bg-gray-700 hover:text-gray-400'
               elsif active
@@ -59,6 +60,15 @@
           </div>
           <span class="ml-1.5 text-xs text-gray-300 truncate flex-1"><%= rvs[:username] || "Remote User" %></span>
         </div>
+      <% end %>
+    </div>
+  <% end %>
+  <% if channel.child_channels.any? %>
+    <div class="voice-child-channels">
+      <% channel.child_channels.ordered.each do |child| %>
+        <% child_access = child.visible_to?(current_user) %>
+        <% next unless child_access %>
+        <%= render partial: "channels/channel_item", locals: { channel: child, server: server, active: (defined?(@channel) && child == @channel), indent: indent + 1, read_only: child_access == :read_only } %>
       <% end %>
     </div>
   <% end %>

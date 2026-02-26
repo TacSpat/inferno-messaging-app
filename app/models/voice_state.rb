@@ -48,7 +48,8 @@ class VoiceState < ApplicationRecord
       server_mute: server_mute,
       server_deaf: server_deaf,
       video_on: video_on,
-      screen_share_on: screen_share_on
+      screen_share_on: screen_share_on,
+      broadcasting: broadcasting
     })
   rescue => e
     Rails.logger.error "[VoiceState] broadcast_update failed: #{e.message}"

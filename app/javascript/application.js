@@ -51,6 +51,15 @@ Turbo.setConfirmMethod((message) => {
   })
 })
 
+// Retry failed image loads once after 3s (covers race with background sync)
+document.addEventListener("error", (e) => {
+  if (e.target.tagName === "IMG" && !e.target.dataset.retried) {
+    e.target.dataset.retried = "1"
+    const src = e.target.src
+    setTimeout(() => { e.target.src = ""; e.target.src = src }, 3000)
+  }
+}, true)
+
 // Restore emoji PUA maps from localStorage (for page refresh resilience)
 try {
   const stored = localStorage.getItem('_emojiMap')
@@ -103,6 +112,7 @@ import VoiceContextController from "./controllers/voice_context_controller"
 import VoiceSettingsController from "./controllers/voice_settings_controller"
 import VoiceDeviceSelectController from "./controllers/voice_device_select_controller"
 import ChannelTypeController from "./controllers/channel_type_controller"
+import ServerIconPreviewController from "./controllers/server_icon_preview_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -145,4 +155,5 @@ application.register("voice-context", VoiceContextController)
 application.register("voice-settings", VoiceSettingsController)
 application.register("voice-device-select", VoiceDeviceSelectController)
 application.register("channel-type", ChannelTypeController)
+application.register("server-icon-preview", ServerIconPreviewController)
 // rebuild trigger

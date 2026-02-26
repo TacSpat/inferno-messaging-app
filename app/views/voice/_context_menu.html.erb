@@ -34,6 +34,34 @@
   <% end %>
 
   <% unless is_self %>
+    <%# Per-user volume slider %>
+    <% if local_assigns[:in_same_voice] %>
+      <div class="border-t border-gray-700 my-1"></div>
+      <div class="px-2.5 py-1.5">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-gray-400 text-xs">User Volume</span>
+          <span class="text-gray-500 text-[10px]" data-volume-label>100%</span>
+        </div>
+        <input type="range" min="0" max="200" value="100"
+               class="w-full h-1 accent-accent cursor-pointer"
+               data-context-action="userVolume"
+               data-user-id="<%= target_user.public_id %>">
+      </div>
+    <% end %>
+
+    <%# Showcase user (only when current user is in a hearth/ancestor of this user's channel) %>
+    <% if local_assigns[:can_showcase] %>
+      <div class="border-t border-gray-700 my-1"></div>
+      <button class="flex items-center gap-2 w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+              data-context-action="showcaseUser"
+              data-user-id="<%= target_user.public_id %>"
+              data-server-id="<%= server.public_id %>"
+              data-child-channel-id="<%= voice_state&.channel&.public_id %>">
+        <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+        Showcase User
+      </button>
+    <% end %>
+
     <%# Moderation actions for other users %>
     <% if can_mute || can_deafen || can_move %>
       <div class="border-t border-gray-700 my-1"></div>

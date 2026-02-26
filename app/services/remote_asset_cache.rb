@@ -43,6 +43,20 @@ class RemoteAssetCache
     nil
   end
 
+  # Returns the local cached path if the file already exists on disk,
+  # without making any HTTP requests. Used for fast lookups in views.
+  def self.cached_path(remote_url)
+    return nil if remote_url.blank?
+
+    uri = URI.parse(remote_url) rescue nil
+    return nil unless uri&.host
+
+    hash = Digest::SHA256.hexdigest(remote_url)
+    ext = File.extname(uri.path).presence || ".png"
+    local_path = "/cached_assets/#{hash}#{ext}"
+    File.exist?(CACHE_DIR.join("#{hash}#{ext}")) ? local_path : nil
+  end
+
   # Cache multiple URLs in one call. Returns a hash of { remote_url => local_path }.
   def self.cache_all(urls)
     urls.each_with_object({}) do |url, map|

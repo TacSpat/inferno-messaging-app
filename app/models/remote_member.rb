@@ -46,11 +46,13 @@ class RemoteMember < ApplicationRecord
   end
 
   def update_from_metadata(metadata)
+    pic = metadata["picture"]
+    ban = metadata["banner"]
     update(
       display_name: metadata["display_name"].presence || metadata["name"],
       username: metadata["name"],
-      avatar_url: metadata["picture"],
-      banner_url: metadata["banner"],
+      avatar_url: pic.present? ? (RemoteAssetCache.cache(pic) || pic) : avatar_url,
+      banner_url: ban.present? ? (RemoteAssetCache.cache(ban) || ban) : banner_url,
       bio: metadata["about"],
       nip05: metadata["nip05"],
       profile_fetched_at: Time.current

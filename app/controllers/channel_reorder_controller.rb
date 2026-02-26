@@ -8,14 +8,27 @@ class ChannelReorderController < ApplicationController
     channels_data = params[:channels] || []
     categories_data = params[:categories] || []
 
+    hierarchy_changed = false
+
     ActiveRecord::Base.transaction do
       channels_data.each do |ch|
         channel = @server.channels.find_by(public_id: ch[:id])
         next unless channel
         cat = ch[:category_id].present? ? @server.categories.find_by(public_id: ch[:category_id]) : nil
+
+        # Resolve parent_channel_id (voice hierarchy)
+        new_parent_id = if ch[:parent_channel_id].present?
+          parent = @server.channels.voice.find_by(public_id: ch[:parent_channel_id])
+          parent&.id
+        end
+
+        old_parent_id = channel.parent_channel_id
+        hierarchy_changed = true if old_parent_id != new_parent_id
+
         channel.update_columns(
           position: ch[:position].to_i,
-          category_id: cat&.id
+          category_id: cat&.id,
+          parent_channel_id: new_parent_id
         )
       end
 
@@ -26,12 +39,16 @@ class ChannelReorderController < ApplicationController
       end
     end
 
-    # Broadcast the new order to all clients
-    ServerChannel.broadcast_to(@server, {
-      type: "sidebar_reorder",
-      channels: channels_data.as_json,
-      categories: categories_data.as_json
-    })
+    # If hierarchy changed, do a full sidebar refresh so clients re-render nesting
+    if hierarchy_changed
+      ServerChannel.broadcast_to(@server, { type: "sidebar_refresh" })
+    else
+      ServerChannel.broadcast_to(@server, {
+        type: "sidebar_reorder",
+        channels: channels_data.as_json,
+        categories: categories_data.as_json
+      })
+    end
 
     publish_server_structure
     head :ok

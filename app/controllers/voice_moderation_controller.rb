@@ -17,13 +17,23 @@ class VoiceModerationController < ApplicationController
     end
 
     @voice_state = VoiceState.find_by(user: @target_user, server: @server)
+    @my_voice_state = VoiceState.find_by(user: current_user, server: @server)
     @my_membership = current_user.server_memberships.find_by(server: @server)
+
+    # Determine if current user is in a parent/ancestor of the target's channel
+    can_showcase = false
+    if @voice_state && @my_voice_state && @voice_state.channel_id != @my_voice_state.channel_id
+      can_showcase = @voice_state.channel.ancestor_channels.include?(@my_voice_state.channel)
+    end
+
     render partial: "voice/context_menu", locals: {
       target_user: @target_user,
       voice_state: @voice_state,
       server: @server,
       my_membership: @my_membership,
-      is_self: @target_user == current_user
+      is_self: @target_user == current_user,
+      in_same_voice: @voice_state && @my_voice_state && @voice_state.channel_id == @my_voice_state.channel_id,
+      can_showcase: can_showcase
     }, layout: false
   end
 

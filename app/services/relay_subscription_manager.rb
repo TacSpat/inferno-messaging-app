@@ -1574,12 +1574,14 @@ class RelaySubscriptionManager
         remote.username = profile_data["profile_name"] if profile_data["profile_name"].present?
         remote.display_name = profile_data["profile_display_name"].presence || profile_data["profile_name"] if profile_data["profile_display_name"].present? || profile_data["profile_name"].present?
         if profile_data["profile_picture"].present?
-          remote.avatar_url = profile_data["profile_picture"]
-          BlossomCacheJob.perform_later(profile_data["profile_picture"])
+          original_avatar = profile_data["profile_picture"]
+          remote.avatar_url = RemoteAssetCache.cache(original_avatar) || original_avatar
+          BlossomCacheJob.perform_later(original_avatar)
         end
         if profile_data["profile_banner"].present?
-          remote.banner_url = profile_data["profile_banner"]
-          BlossomCacheJob.perform_later(profile_data["profile_banner"])
+          original_banner = profile_data["profile_banner"]
+          remote.banner_url = RemoteAssetCache.cache(original_banner) || original_banner
+          BlossomCacheJob.perform_later(original_banner)
         end
         remote.bio = profile_data["profile_about"] if profile_data["profile_about"].present?
         remote.profile_color = profile_data["profile_color"] if profile_data["profile_color"].present?

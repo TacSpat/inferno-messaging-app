@@ -97,6 +97,34 @@ export default class extends Controller {
             controller?.toggleDeafen()
           }
         })
+      } else if (action === "userVolume") {
+        // Per-user volume slider — load saved value and bind input
+        const userId = btn.dataset.userId
+        const saved = localStorage.getItem(`user-vol-${userId}`)
+        if (saved) btn.value = saved
+        const label = btn.closest("div")?.querySelector("[data-volume-label]")
+        if (label) label.textContent = `${btn.value}%`
+        btn.addEventListener("input", (e) => {
+          e.stopPropagation()
+          const vol = parseInt(btn.value, 10)
+          if (label) label.textContent = `${vol}%`
+          localStorage.setItem(`user-vol-${userId}`, vol)
+          this._setUserVolume(userId, vol / 100)
+        })
+        // Apply saved volume immediately if different from default
+        if (saved) this._setUserVolume(userId, parseInt(saved, 10) / 100)
+      } else if (action === "showcaseUser") {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation()
+          this._showcaseUser(serverId, btn.dataset.userId, btn.dataset.childChannelId)
+          this.closeMenu()
+        })
+      } else if (action === "showcaseChannel") {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation()
+          this._showcaseChannel(serverId, btn.dataset.childChannelId)
+          this.closeMenu()
+        })
       } else if (action === "serverMute") {
         btn.addEventListener("click", (e) => {
           e.stopPropagation()
@@ -222,6 +250,45 @@ export default class extends Controller {
       })
     } catch (e) {
       console.warn("[VoiceContext] Move failed:", e)
+    }
+  }
+
+  _setUserVolume(userId, gain) {
+    const voiceCtrl = document.querySelector("[data-controller~='voice-channel']")
+    if (!voiceCtrl) return
+    const controller = this.application.getControllerForElementAndIdentifier(voiceCtrl, "voice-channel")
+    controller?.setUserVolume(userId, gain)
+  }
+
+  async _showcaseUser(serverId, userId, childChannelId) {
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      await fetch(`/servers/${serverId}/voice_showcases`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ child_channel_id: childChannelId, user_id: userId })
+      })
+    } catch (e) {
+      console.warn("[VoiceContext] Showcase user failed:", e)
+    }
+  }
+
+  async _showcaseChannel(serverId, childChannelId) {
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      await fetch(`/servers/${serverId}/voice_showcases`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ child_channel_id: childChannelId })
+      })
+    } catch (e) {
+      console.warn("[VoiceContext] Showcase channel failed:", e)
     }
   }
 

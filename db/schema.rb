@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_25_100003) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -97,6 +97,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
     t.string "nostr_relay_url"
     t.json "nostr_relay_urls"
     t.boolean "nsfw"
+    t.bigint "parent_channel_id"
     t.json "permissions_overrides"
     t.integer "position"
     t.string "public_id", limit: 12, null: false
@@ -110,6 +111,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
     t.index ["category_id"], name: "index_channels_on_category_id"
     t.index ["current_voice_provider_id"], name: "index_channels_on_current_voice_provider_id"
     t.index ["nostr_group_id"], name: "index_channels_on_nostr_group_id"
+    t.index ["parent_channel_id"], name: "index_channels_on_parent_channel_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
     t.index ["server_id"], name: "index_channels_on_server_id"
   end
@@ -765,7 +767,25 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
     t.index ["remote_domain"], name: "index_versions_on_remote_domain", where: "(remote_domain IS NOT NULL)"
   end
 
+  create_table "voice_showcases", force: :cascade do |t|
+    t.integer "approved_by_id"
+    t.integer "child_channel_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "parent_channel_id", null: false
+    t.string "public_id"
+    t.integer "server_id", null: false
+    t.datetime "updated_at", null: false
+    t.integer "user_id"
+    t.index ["approved_by_id"], name: "index_voice_showcases_on_approved_by_id"
+    t.index ["child_channel_id"], name: "index_voice_showcases_on_child_channel_id"
+    t.index ["parent_channel_id"], name: "index_voice_showcases_on_parent_channel_id"
+    t.index ["public_id"], name: "index_voice_showcases_on_public_id", unique: true
+    t.index ["server_id"], name: "index_voice_showcases_on_server_id"
+    t.index ["user_id"], name: "index_voice_showcases_on_user_id"
+  end
+
   create_table "voice_states", force: :cascade do |t|
+    t.boolean "broadcasting", default: false, null: false
     t.bigint "channel_id", null: false
     t.datetime "created_at", null: false
     t.string "public_id", limit: 12, null: false
@@ -798,6 +818,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
   add_foreign_key "channel_reads", "channels"
   add_foreign_key "channel_reads", "users"
   add_foreign_key "channels", "categories"
+  add_foreign_key "channels", "channels", column: "parent_channel_id", on_delete: :cascade
   add_foreign_key "channels", "servers"
   add_foreign_key "channels", "users", column: "current_voice_provider_id"
   add_foreign_key "conversation_participants", "conversations"
@@ -854,6 +875,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_23_072654) do
   add_foreign_key "user_suspensions", "users", column: "lifted_by_id"
   add_foreign_key "user_suspensions", "users", column: "suspended_by_id"
   add_foreign_key "users", "remote_users", column: "remote_user_detail_id"
+  add_foreign_key "voice_showcases", "channels", column: "child_channel_id"
+  add_foreign_key "voice_showcases", "channels", column: "parent_channel_id"
+  add_foreign_key "voice_showcases", "servers"
+  add_foreign_key "voice_showcases", "users"
+  add_foreign_key "voice_showcases", "users", column: "approved_by_id"
   add_foreign_key "voice_states", "channels"
   add_foreign_key "voice_states", "servers"
   add_foreign_key "voice_states", "users"

@@ -131,6 +131,38 @@
       </div>
     <% end %>
 
+    <% if @channel.child_channels.any? %>
+      <!-- Monitor panel for hearth channels with embers -->
+      <div class="shrink-0 border-t border-gray-800" style="background: #0e0d0c;" data-voice-monitor-panel data-voice-monitor-server="<%= @server.public_id %>">
+        <button type="button" class="w-full px-4 py-2 flex items-center justify-between text-sm text-gray-400 hover:text-gray-200"
+                onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-180')">
+          <span class="font-medium">Monitor</span>
+          <svg class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div class="hidden px-4 pb-3 space-y-2">
+          <% @channel.child_channels.ordered.each do |child| %>
+            <div class="flex items-center gap-3 py-1.5 px-2 rounded bg-gray-800/50" data-monitor-child="<%= child.public_id %>">
+              <label class="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
+                <input type="checkbox" class="w-3.5 h-3.5 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer"
+                       data-action="change->voice-channel#toggleMonitor"
+                       data-monitor-channel-id="<%= child.public_id %>">
+                <span class="text-sm text-gray-300 truncate"><%= render_name_with_emojis(child.name, @server) %></span>
+              </label>
+              <span class="text-xs text-gray-500 shrink-0"><%= child.voice_states.count %> users</span>
+              <button type="button" class="shrink-0 p-1 rounded hover:bg-gray-700 text-gray-500 hover:text-green-400 transition cursor-pointer" title="Showcase ember"
+                      data-action="click->voice-channel#showcaseChannel"
+                      data-showcase-channel-id="<%= child.public_id %>">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
+              </button>
+              <input type="range" min="0" max="100" value="80" class="w-20 h-1 accent-accent cursor-pointer"
+                     data-action="input->voice-channel#setMonitorVolume"
+                     data-monitor-volume-channel="<%= child.public_id %>">
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+
     <!-- Join / Connected bar -->
     <div class="shrink-0 px-4 py-3 flex items-center justify-center" style="background: #0e0d0c;"
          data-voice-panel-status data-voice-panel-channel="<%= @channel.public_id %>" data-voice-panel-server="<%= @server.public_id %>">

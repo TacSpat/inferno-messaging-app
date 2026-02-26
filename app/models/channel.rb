@@ -3,6 +3,8 @@ class Channel < ApplicationRecord
   include InstanceLimits
   belongs_to :server
   belongs_to :category, optional: true
+  belongs_to :parent_channel, class_name: "Channel", optional: true
+  has_many :child_channels, class_name: "Channel", foreign_key: :parent_channel_id, dependent: :destroy
   has_many :messages, dependent: :destroy
   has_many :channel_reads, dependent: :destroy
   has_many :nostr_event_logs, dependent: :destroy
@@ -25,9 +27,21 @@ class Channel < ApplicationRecord
             format: { with: /\A[a-z0-9 _\-:\u{00A0}-\u{10FFFF}]+\z/, message: "lowercase letters, numbers, spaces, hyphens, underscores, and emojis only" }
   validates :channel_type, presence: true
   validate :within_channel_limit, on: :create
+  validate :parent_channel_valid, if: -> { parent_channel_id.present? }
 
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
   scope :uncategorized, -> { where(category_id: nil) }
+
+  # Returns ancestor chain from immediate parent up to root (bottom-up order)
+  def ancestor_channels
+    ancestors = []
+    current = parent_channel
+    while current
+      ancestors << current
+      current = current.parent_channel
+    end
+    ancestors
+  end
 
   # All channels are Nostr-backed
   after_create :assign_nostr_group_id
@@ -156,6 +170,24 @@ class Channel < ApplicationRecord
 
   def assign_nostr_group_id
     update_column(:nostr_group_id, generate_group_id) if nostr_group_id.blank?
+  end
+
+  def parent_channel_valid
+    if parent_channel&.server_id != server_id
+      errors.add(:parent_channel, "hearth must be in the same server")
+    end
+    unless parent_channel&.voice?
+      errors.add(:parent_channel, "hearth must be a voice channel")
+    end
+    if ancestor_channels.length >= 3
+      errors.add(:parent_channel, "maximum nesting depth is 3 levels")
+    end
+    if parent_channel_id == id
+      errors.add(:parent_channel, "cannot be its own hearth")
+    end
+    if id.present? && ancestor_channels.any? { |a| a.id == id }
+      errors.add(:parent_channel, "would create a circular reference")
+    end
   end
 
   def within_channel_limit

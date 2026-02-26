@@ -119,12 +119,24 @@ class ChannelsController < ApplicationController
   def new
     category = params[:category_id].present? ? @server.categories.find_by(public_id: params[:category_id]) : nil
     @channel = @server.channels.new(category: category)
+    if params[:parent_channel_id].present?
+      @parent_channel = @server.channels.voice.find_by(public_id: params[:parent_channel_id])
+      if @parent_channel
+        @channel.channel_type = :voice
+        @channel.category = @parent_channel.category
+      end
+    end
   end
 
   def create
     @channel = @server.channels.new(channel_params)
     if params[:channel] && params[:channel][:category_id].present?
       @channel.category = @server.categories.find_by(public_id: params[:channel].delete(:category_id))
+    end
+    if params[:channel] && params[:channel][:parent_channel_id].present?
+      @channel.parent_channel = @server.channels.voice.find_by(public_id: params[:channel].delete(:parent_channel_id))
+    else
+      @channel.parent_channel = nil
     end
     if @channel.save
       ServerChannel.broadcast_to(@server, {
@@ -147,6 +159,10 @@ class ChannelsController < ApplicationController
   def update
     if params[:channel] && params[:channel][:category_id].present?
       @channel.category = @server.categories.find_by(public_id: params[:channel].delete(:category_id))
+    end
+    if params[:channel]&.key?(:parent_channel_id)
+      pid = params[:channel].delete(:parent_channel_id)
+      @channel.parent_channel = pid.present? ? @server.channels.voice.find_by(public_id: pid) : nil
     end
     @channel.assign_attributes(channel_params)
     encryption_changed = @channel.encrypted_changed?
@@ -215,7 +231,7 @@ class ChannelsController < ApplicationController
   end
 
   def channel_params
-    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, :voice_bitrate, :voice_user_limit, :video_enabled, allowed_role_ids: [])
+    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, :voice_bitrate, :voice_user_limit, :video_enabled, :parent_channel_id, allowed_role_ids: [])
     if permitted[:encrypted] == "1" || permitted[:encrypted] == true
       role_ids = (permitted.delete(:allowed_role_ids) || []).reject(&:blank?)
       permitted[:permissions_overrides] = { "allowed_role_ids" => role_ids }

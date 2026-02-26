@@ -1238,3 +1238,43 @@
     box-shadow: none;
   }
 }
+
+/* ─── Voice broadcast badge on sidebar avatars ─────────────── */
+
+.voice-broadcast-badge {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  background: #22c55e;
+  border: 1.5px solid var(--color-gray-800, #1e1c1b);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+}
+
+.sortable-chosen {
+  background-color: rgb(75 85 99); /* gray-600 */
+}
+
+/* ─── Channel nesting drag-drop ─────────────────────────────── */
+
+.channel-nest-target {
+  outline: 1.5px solid rgb(var(--accent) / 0.5);
+  outline-offset: -1px;
+  border-radius: 4px;
+  background: rgb(var(--accent) / 0.08);
+}
+
+.channel-nest-dropzone {
+  padding: 2px 0;
+  animation: nest-fade-in 150ms ease-out;
+}
+
+@keyframes nest-fade-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}

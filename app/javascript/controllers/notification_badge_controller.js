@@ -877,6 +877,33 @@ export default class extends Controller {
       },
     ]
 
+    // Voice channel extras
+    const channelEl = document.querySelector(`[data-channel-id="${channelId}"]`)
+    if (channelEl?.dataset.voiceChannel) {
+      // Monitor volume slider — shown when this is a descendant of the user's current voice channel
+      const voiceCtrl = document.querySelector("[data-controller~='voice-channel']")
+      const controller = voiceCtrl
+        ? this.application.getControllerForElementAndIdentifier(voiceCtrl, "voice-channel")
+        : null
+      const myChannelId = controller?.currentChannelId
+
+      if (myChannelId && myChannelId !== channelId && this._isDescendantOfChannel(channelEl, myChannelId)) {
+        items.push({ separator: true })
+        const slider = this._buildChildVolumeSlider(channelId)
+        items.push({ customEl: slider })
+      }
+
+      // "Kindle Ember" — create a nested voice channel under this one
+      if (this.canManage) {
+        items.push({ separator: true })
+        items.push({
+          icon: `<svg class="w-4 h-4 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>`,
+          label: "Kindle Ember",
+          action: () => { window.location.href = `/servers/${serverId}/channels/new?parent_channel_id=${channelId}` }
+        })
+      }
+    }
+
     if (this.canManage) {
       items.push({ separator: true })
       items.push({
@@ -1425,6 +1452,12 @@ export default class extends Controller {
         return
       }
 
+      // Support raw DOM element items (e.g. volume sliders)
+      if (item.customEl) {
+        menu.appendChild(item.customEl)
+        return
+      }
+
       const btn = document.createElement("button")
       const baseClass = "flex items-center w-full px-2.5 py-1.5 text-sm rounded cursor-pointer"
       if (item.disabled) {
@@ -1470,6 +1503,75 @@ export default class extends Controller {
     if (existing) existing.remove()
     const moveDD = document.querySelector("[data-voice-move-dropdown]")
     if (moveDD) moveDD.remove()
+  }
+
+  // ---- Ember Volume Helpers ----
+
+  _isDescendantOfChannel(childEl, ancestorChannelId) {
+    // Walk up nested .voice-child-channels containers checking if any parent matches
+    let container = childEl.closest(".voice-child-channels")
+    while (container) {
+      let sibling = container.previousElementSibling
+      while (sibling) {
+        if (sibling.dataset?.channelId === ancestorChannelId) return true
+        sibling = sibling.previousElementSibling
+      }
+      // Go up another level
+      container = container.parentElement?.closest(".voice-child-channels")
+    }
+    return false
+  }
+
+  _buildChildVolumeSlider(childChannelId) {
+    const wrapper = document.createElement("div")
+    wrapper.className = "px-2.5 py-1.5"
+
+    const row = document.createElement("div")
+    row.className = "flex items-center justify-between mb-1"
+
+    const label = document.createElement("span")
+    label.className = "text-gray-400 text-xs"
+    label.textContent = "Monitor Volume"
+
+    const volLabel = document.createElement("span")
+    volLabel.className = "text-gray-500 text-[10px] shrink-0"
+    const saved = localStorage.getItem(`monitor-vol-${childChannelId}`)
+    volLabel.textContent = `${saved ?? 80}%`
+
+    row.appendChild(label)
+    row.appendChild(volLabel)
+    wrapper.appendChild(row)
+
+    const slider = document.createElement("input")
+    slider.type = "range"
+    slider.min = "0"
+    slider.max = "100"
+    slider.value = saved ?? "80"
+    slider.className = "w-full h-1 accent-accent cursor-pointer"
+
+    slider.addEventListener("input", (e) => {
+      e.stopPropagation()
+      const vol = parseInt(slider.value, 10)
+      volLabel.textContent = `${vol}%`
+      localStorage.setItem(`monitor-vol-${childChannelId}`, vol)
+      // Update the voice channel controller's monitor volume if active
+      const voiceCtrl = document.querySelector("[data-controller~='voice-channel']")
+      if (voiceCtrl) {
+        const controller = this.application.getControllerForElementAndIdentifier(voiceCtrl, "voice-channel")
+        if (controller?._monitoredRooms?.has(childChannelId)) {
+          controller.setMonitorVolume({
+            target: { dataset: { monitorVolumeChannel: childChannelId }, value: String(vol) }
+          })
+        }
+      }
+    })
+
+    // Prevent menu from closing when interacting with slider
+    slider.addEventListener("click", e => e.stopPropagation())
+    slider.addEventListener("mousedown", e => e.stopPropagation())
+
+    wrapper.appendChild(slider)
+    return wrapper
   }
 
   // ---- Actions ----

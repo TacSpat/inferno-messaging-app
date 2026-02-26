@@ -1,107 +1,135 @@
-<div class="flex items-center justify-center min-h-screen bg-gray-900">
-  <div class="w-full max-w-2xl bg-gray-800 rounded-lg shadow-xl p-8">
+<div class="flex items-center justify-center min-h-screen" style="background: #0e0d0c;">
+  <div class="w-full max-w-2xl mx-4 py-8">
+    <!-- Header -->
     <div class="flex items-center justify-between mb-6">
-      <h1 class="text-2xl font-bold text-white">Server Settings</h1>
-      <%= link_to "✕", server_channel_path(@server, @server.channels.ordered.first), class: "text-gray-400 hover:text-white text-xl" %>
+      <h1 class="text-xl font-bold text-white">Server Settings</h1>
+      <%= link_to server_channel_path(@server, @server.channels.ordered.first), class: "w-8 h-8 flex items-center justify-center rounded-lg text-gray-500 hover:text-gray-300 hover:bg-gray-700/50 transition" do %>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      <% end %>
     </div>
 
-    <%= form_with model: @server, html: { multipart: true }, class: "space-y-6" do |f| %>
+    <%= form_with model: @server, html: { multipart: true }, data: { controller: "server-icon-preview" } do |f| %>
       <% if @server.errors.any? %>
-        <div class="bg-danger-dark/20 border border-danger-dark rounded-lg p-4">
+        <div class="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-5">
           <% @server.errors.full_messages.each do |msg| %>
             <p class="text-sm text-danger-light"><%= msg %></p>
           <% end %>
         </div>
       <% end %>
 
-      <!-- Server Icon -->
-      <div>
-        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">Server Icon</label>
-        <div class="flex items-center gap-4">
-          <div class="w-20 h-20 rounded-2xl bg-gray-700 flex items-center justify-center text-2xl font-bold text-white overflow-hidden">
-            <% if @server.icon.attached? %>
-              <%= image_tag @server.icon, class: "w-full h-full object-cover" %>
-            <% else %>
-              <%= @server.name.split.map(&:first).join[0..1].upcase %>
-            <% end %>
+      <!-- Identity -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
+        <div class="p-6 space-y-5">
+          <!-- Icon + Name row -->
+          <div class="flex gap-5">
+            <div class="shrink-0">
+              <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Icon</label>
+              <label class="block w-20 h-20 rounded-2xl bg-gray-900 border-2 <%= @server.icon.attached? ? 'border-solid border-gray-700' : 'border-dashed border-gray-700' %> hover:border-gray-500 flex items-center justify-center cursor-pointer overflow-hidden transition group" data-server-icon-preview-target="iconLabel">
+                <div class="flex flex-col items-center <%= 'hidden' if @server.icon.attached? %>" data-server-icon-preview-target="iconPlaceholder">
+                  <svg class="w-6 h-6 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                <% if @server.icon.attached? %>
+                  <img src="<%= url_for(@server.icon) %>" class="w-full h-full object-cover" data-server-icon-preview-target="iconPreview">
+                <% else %>
+                  <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="iconPreview">
+                <% end %>
+                <%= f.file_field :icon, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewIcon", server_icon_preview_target: "iconInput" } %>
+              </label>
+            </div>
+            <div class="flex-1 min-w-0">
+              <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
+                <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Server Name</label>
+                <div class="flex items-center bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/20 transition">
+                  <div class="flex-1 relative">
+                    <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
+                    <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-600 focus:outline-none text-sm relative z-10", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+                  </div>
+                  <button type="button" class="text-gray-500 hover:text-gray-300 ml-1.5 shrink-0 cursor-pointer transition" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
+                    <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-          <%= f.file_field :icon, accept: "image/*", class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-accent hover:file:bg-accent-dark file:cursor-pointer" %>
+
+          <div>
+            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Description</label>
+            <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3.5 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm resize-none transition", placeholder: "What's this server about?" %>
+          </div>
+
+          <!-- Banner -->
+          <div>
+            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Banner</label>
+            <label class="block w-full h-28 rounded-lg bg-gray-900 border-2 <%= @server.banner.attached? ? 'border-solid border-gray-700' : 'border-dashed border-gray-700' %> hover:border-gray-500 flex items-center justify-center cursor-pointer overflow-hidden transition group" data-server-icon-preview-target="bannerLabel">
+              <div class="flex flex-col items-center gap-1.5 <%= 'hidden' if @server.banner.attached? %>" data-server-icon-preview-target="bannerPlaceholder">
+                <svg class="w-6 h-6 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+                <span class="text-xs text-gray-500 group-hover:text-gray-400 transition">Click to upload a banner</span>
+              </div>
+              <% if @server.banner.attached? %>
+                <img src="<%= url_for(@server.banner) %>" class="w-full h-full object-cover" data-server-icon-preview-target="bannerPreview">
+              <% else %>
+                <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="bannerPreview">
+              <% end %>
+              <%= f.file_field :banner, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewBanner", server_icon_preview_target: "bannerInput" } %>
+            </label>
+          </div>
         </div>
       </div>
 
-      <!-- Server Name -->
-      <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
-        <%= f.label :name, "Server Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <div class="flex items-center bg-gray-900 border border-gray-700 rounded px-3 py-2">
-          <div class="flex-1 relative">
-            <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
-            <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-500 focus:outline-none text-sm relative z-10", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+      <!-- Invite Link -->
+      <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
+        <div class="p-5">
+          <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Invite Link</label>
+          <div class="flex items-center bg-gray-900 border border-gray-700/50 rounded-lg px-3.5 py-2.5">
+            <span class="text-sm text-gray-400 flex-1 truncate select-all"><%= request.base_url %>/inferno/invite/<%= @server.invites.active_invites.first&.code %></span>
+            <button type="button" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent.trim()); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 1500)" class="text-accent-light hover:text-accent text-xs font-semibold ml-3 shrink-0 cursor-pointer transition">Copy</button>
           </div>
-          <button type="button" class="text-gray-400 hover:text-gray-200 ml-1 shrink-0 cursor-pointer" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          </button>
         </div>
       </div>
 
-      <!-- Description -->
-      <div>
-        <%= f.label :description, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm resize-none", placeholder: "What's this server about?" %>
-      </div>
-
-      <!-- Server Banner -->
-      <div>
-        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">Server Banner</label>
-        <% if @server.banner.attached? %>
-          <div class="mb-2 rounded overflow-hidden h-24">
-            <%= image_tag @server.banner, class: "w-full h-full object-cover" %>
-          </div>
-        <% end %>
-        <%= f.file_field :banner, accept: "image/*", class: "text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-accent hover:file:bg-accent-dark file:cursor-pointer" %>
-      </div>
-
-      <!-- Invite Code -->
-      <div>
-        <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Invite Link</label>
-        <div class="flex items-center bg-gray-900 border border-gray-700 rounded px-3 py-2">
-          <span class="text-sm text-gray-400 flex-1"><%= request.base_url %>/inferno/invite/<%= @server.invites.active_invites.first&.code %></span>
-          <button type="button" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent.trim())" class="text-accent-light hover:text-accent text-xs font-semibold ml-2">Copy</button>
-        </div>
-      </div>
-
-      <!-- Actions -->
-      <div class="flex items-center justify-between pt-4 border-t border-gray-700">
-        <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-400 hover:text-gray-200" %>
-        <%= f.submit "Save Changes", class: "bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm" %>
+      <!-- Save -->
+      <div class="flex items-center gap-4 mb-8">
+        <%= link_to "Cancel", server_channel_path(@server, @server.channels.ordered.first), class: "text-sm text-gray-500 hover:text-gray-300 transition" %>
+        <%= f.submit "Save Changes", class: "bg-confirm hover:bg-confirm-light text-white font-semibold px-6 py-2.5 rounded-lg transition cursor-pointer text-sm" %>
       </div>
     <% end %>
 
-    <!-- Members section -->
-    <div class="mt-8 pt-6 border-t border-gray-700">
-      <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-3">Members (<%= @server.members.count %>)</h3>
-      <div class="space-y-2">
+    <!-- Members -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
+      <div class="px-5 py-3 border-b border-gray-700/50 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
+          <span class="text-sm font-semibold text-gray-300">Members</span>
+        </div>
+        <span class="text-xs text-gray-500 bg-gray-900 px-2 py-0.5 rounded-full"><%= @server.members.count %></span>
+      </div>
+      <div class="divide-y divide-gray-700/30">
         <% @server.server_memberships.includes(:membership_roles, :roles, :user).each do |membership| %>
-          <div class="flex items-center justify-between bg-gray-900 rounded-lg px-4 py-3">
-            <div class="flex items-center">
-              <div class="w-8 h-8 rounded-full bg-accent flex items-center justify-center text-sm font-bold text-white">
-                <%= membership.user.username[0].upcase %>
+          <div class="flex items-center justify-between px-5 py-3">
+            <div class="flex items-center min-w-0">
+              <div class="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center text-xs font-bold text-white shrink-0 overflow-hidden">
+                <% if membership.user.effective_avatar_url.present? %>
+                  <img src="<%= membership.user.effective_avatar_url %>" class="w-full h-full object-cover">
+                <% else %>
+                  <%= membership.user.username[0].upcase %>
+                <% end %>
               </div>
-              <div class="ml-3">
-                <p class="text-sm text-white font-medium"><%= membership.user.display_name_for(@server) %></p>
-                <p class="text-xs text-gray-500"><%= membership.user.tag %></p>
+              <div class="ml-3 min-w-0">
+                <p class="text-sm text-white font-medium truncate"><%= membership.user.display_name_for(@server) %></p>
+                <p class="text-[11px] text-gray-500 truncate"><%= membership.user.tag %></p>
               </div>
             </div>
-            <div class="flex flex-wrap items-center gap-1">
+            <div class="flex flex-wrap items-center gap-1 ml-3 shrink-0">
               <% assigned = membership.roles.sort_by { |r| -r.position } %>
               <% if assigned.any? %>
                 <% assigned.each do |role| %>
-                  <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full <%= role.owner? ? 'bg-yellow-600/20 text-yellow-400' : role.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
-                    <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                  <span class="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-md <%= role.owner? ? 'bg-yellow-500/10 text-yellow-400' : role.admin? ? 'bg-red-500/10 text-red-400' : 'bg-gray-700/50 text-gray-400' %>">
+                    <span class="w-1.5 h-1.5 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
                     <%= role.name %>
                   </span>
                 <% end %>
               <% else %>
-                <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>
+                <span class="text-[11px] text-gray-600">@everyone</span>
               <% end %>
             </div>
           </div>
@@ -111,14 +139,13 @@
 
     <!-- Danger zone -->
     <% if @server.owner == current_user %>
-      <div class="mt-8 pt-6 border-t border-gray-700">
-        <h3 class="text-sm font-semibold text-danger-light mb-3">Danger Zone</h3>
-        <div class="flex items-center justify-between">
+      <div class="bg-gray-800 rounded-xl border border-danger/20 overflow-hidden">
+        <div class="p-5 flex items-center justify-between">
           <div>
-            <p class="text-sm text-gray-300">Delete Server</p>
-            <p class="text-xs text-gray-500">This action cannot be undone.</p>
+            <p class="text-sm font-medium text-gray-300">Delete Server</p>
+            <p class="text-xs text-gray-500 mt-0.5">This action cannot be undone.</p>
           </div>
-          <%= button_to "Delete Server", server_path(@server), method: :delete, data: { turbo_confirm: "Are you sure you want to delete #{@server.name}? This cannot be undone." }, class: "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light text-white text-sm font-medium px-4 py-2 rounded transition cursor-pointer" %>
+          <%= button_to "Delete Server", server_path(@server), method: :delete, data: { turbo_confirm: "Are you sure you want to delete #{@server.name}? This cannot be undone." }, class: "text-sm text-danger-light hover:text-danger font-medium cursor-pointer transition" %>
         </div>
       </div>
     <% end %>

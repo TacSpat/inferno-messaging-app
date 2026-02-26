@@ -27,6 +27,13 @@ class VoiceStatesController < ApplicationController
     render json: { success: true, screen_share_on: @voice_state.screen_share_on }
   end
 
+  # PATCH /voice_states/broadcasting
+  def broadcasting
+    @voice_state.update!(broadcasting: params[:broadcasting] == true || params[:broadcasting] == "true")
+    @voice_state.broadcast_update
+    render json: { success: true, broadcasting: @voice_state.broadcasting }
+  end
+
   # PATCH /voice_states/video
   def video
     @voice_state.update!(video_on: params[:video] == true || params[:video] == "true")

@@ -24,11 +24,15 @@ module MemberInterface
   end
 
   def effective_avatar_url
-    avatar_url
+    return nil if avatar_url.blank?
+    return avatar_url if avatar_url.start_with?("/")
+    RemoteAssetCache.cached_path(avatar_url) || avatar_url
   end
 
   def effective_banner_url
-    banner_url
+    return nil if banner_url.blank?
+    return banner_url if banner_url.start_with?("/")
+    RemoteAssetCache.cached_path(banner_url) || banner_url
   end
 
   def display_name_for(_server = nil)

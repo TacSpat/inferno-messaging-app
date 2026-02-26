@@ -88,6 +88,18 @@ Rails.application.routes.draw do
     post "voice/rejoin/:channel_id", to: "voice_channels#rejoin", as: :voice_rejoin
     delete "voice/leave", to: "voice_channels#leave", as: :voice_leave
     post "voice/leave", to: "voice_channels#leave"  # sendBeacon compatibility
+    post "voice/monitor/:channel_id", to: "voice_channels#monitor", as: :voice_monitor
+
+    # Voice showcases
+    resources :voice_showcases, only: [:create, :destroy] do
+      member do
+        post :approve
+        post :deny
+      end
+      collection do
+        post :request_speak
+      end
+    end
 
     # Voice moderation
     get "voice/context_menu/:user_id", to: "voice_moderation#context_menu", as: :voice_context_menu
@@ -102,6 +114,7 @@ Rails.application.routes.draw do
   patch "voice_states/self_deafen", to: "voice_states#self_deafen"
   patch "voice_states/screen_share", to: "voice_states#screen_share"
   patch "voice_states/video", to: "voice_states#video"
+  patch "voice_states/broadcasting", to: "voice_states#broadcasting"
 
   # Server settings
   scope "servers/:server_id/settings", as: "server_settings" do

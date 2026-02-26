@@ -3,7 +3,8 @@ import {
   Room,
   RoomEvent,
   Track,
-  DisconnectReason
+  DisconnectReason,
+  DataPacket_Kind
 } from "livekit-client"
 
 const VOICE_SESSION_KEY = "voice-active-session"
@@ -24,7 +25,8 @@ export default class extends Controller {
     "controlsBar", "channelName", "statusText",
     "muteBtn", "muteIcon", "deafenBtn", "deafenIcon",
     "cameraBtn", "cameraIcon",
-    "screenShareBtn", "screenShareIcon", "disconnectBtn"
+    "screenShareBtn", "screenShareIcon", "disconnectBtn",
+    "broadcastBtn", "requestSpeakBtn"
   ]
 
   connect() {
@@ -51,6 +53,10 @@ export default class extends Controller {
     this._pendingScreenShareAudio = new Map()  // identity → { track, participant }
     this._screenShareAudioElements = new Map() // identity → audio element (opt-in)
     this._localPreviewVisHandler = null
+    this._ancestorRooms = new Map()     // channelId → { room, audioElements, gainNodes, analysers, channelId, channelName }
+    this._monitoredRooms = new Map()    // channelId → { room, audioElements, gainNodes, analysers, volume }
+    this._broadcasting = false
+    this._childChannels = []            // [{channel_id, name, participant_count}]
     this._analysers = new Map()       // identity → { analyser } (remote only)
     this._localMeter = null           // { clone, ctx, analyser } for local mic
     this._levelRafId = null
@@ -202,6 +208,18 @@ export default class extends Controller {
     this._pendingScreenShareAudio.clear()
     this._screenShareAudioElements.forEach(el => el.remove())
     this._screenShareAudioElements.clear()
+    // Clean up ancestor rooms on force-move
+    for (const [, state] of this._ancestorRooms) {
+      this._cleanupAncestorState(state)
+      try { state.room.disconnect() } catch (_) {}
+    }
+    this._ancestorRooms.clear()
+    // Clean up monitored rooms
+    for (const [, state] of this._monitoredRooms) {
+      this._cleanupMonitorState(state)
+      try { state.room.disconnect() } catch (_) {}
+    }
+    this._monitoredRooms.clear()
     this._stopLevelLoop()
     this._cleanupLocalLevelMeter()
 
@@ -225,7 +243,10 @@ export default class extends Controller {
   _handleOutputVolumeChanged(e) {
     const { volume } = e.detail
     if (!this._deafened) {
-      this._setRemoteVolumes(volume / 100)
+      const gain = volume / 100
+      this._setRemoteVolumes(gain)
+      this._setAncestorVolumes(gain)
+      // Monitor volumes use their own per-child slider, not the global output
     }
   }
 
@@ -394,12 +415,22 @@ export default class extends Controller {
     this._setupLocalLevelMeter()
     this._startLevelLoop()
 
+    // Connect to ancestor rooms (subscribe-only) for cascading audio
+    if (data.ancestor_rooms && data.ancestor_rooms.length > 0) {
+      await this._connectAncestorRooms(data.ancestor_rooms)
+    }
+
+    // Store ember channels for monitor/broadcast UI
+    this._childChannels = data.child_channels || []
+    this._broadcasting = false
+
     // Persist session for reconnect on refresh
     this._saveSession()
 
     // Show controls bar
     this._showControlsBar(data.channel_name || "Voice")
     this._updateVoicePanelStatus("connected")
+    this._updateHierarchyButtons()
   }
 
   async _disconnectRoom() {
@@ -420,6 +451,21 @@ export default class extends Controller {
     this._audioElements.clear()
     this._gainNodes?.clear()
     this._analysers.clear()
+
+    // Clean up ancestor rooms
+    for (const [, state] of this._ancestorRooms) {
+      this._cleanupAncestorState(state)
+      try { state.room.disconnect() } catch (_) {}
+    }
+    this._ancestorRooms.clear()
+
+    // Clean up monitored rooms
+    for (const [, state] of this._monitoredRooms) {
+      this._cleanupMonitorState(state)
+      try { state.room.disconnect() } catch (_) {}
+    }
+    this._monitoredRooms.clear()
+
     if (this._audioContext) { this._audioContext.close().catch(() => {}); this._audioContext = null }
 
     // Clean up video elements
@@ -627,7 +673,21 @@ export default class extends Controller {
     if (this._deafened) {
       this._setParticipantVolume(participant.identity, 0)
     } else {
-      this._setParticipantVolume(participant.identity, this._getOutputGain())
+      // Apply per-user volume if saved, otherwise use default output gain
+      const userGain = this._userVolumes?.get(participant.identity)
+      const outputGain = this._getOutputGain()
+      this._setParticipantVolume(participant.identity, userGain != null ? outputGain * userGain : outputGain)
+    }
+
+    // Load saved per-user volume from localStorage
+    const savedVol = localStorage.getItem(`user-vol-${participant.identity}`)
+    if (savedVol) {
+      const vol = parseInt(savedVol, 10) / 100
+      if (!this._userVolumes) this._userVolumes = new Map()
+      this._userVolumes.set(participant.identity, vol)
+      if (!this._deafened) {
+        this._setParticipantVolume(participant.identity, this._getOutputGain() * vol)
+      }
     }
   }
 
@@ -939,10 +999,15 @@ export default class extends Controller {
       this.room.localParticipant.setMicrophoneEnabled(false)
       this._cleanupLocalLevelMeter()
       this._setRemoteVolumes(0)
+      this._setAncestorVolumes(0)
+      this._setMonitorVolumesAll(0)
     } else {
       // Undeafen → unmute and restore volume to saved gain
       this._muted = false
-      this._setRemoteVolumes(this._getOutputGain())
+      const gain = this._getOutputGain()
+      this._setRemoteVolumes(gain)
+      this._setAncestorVolumes(gain)
+      this._restoreMonitorVolumes()
       try {
         await this.room.localParticipant.setMicrophoneEnabled(true)
         this._setupLocalLevelMeter()
@@ -1480,9 +1545,19 @@ export default class extends Controller {
     }
   }
 
+  // Public: set per-user volume (called from voice context menu)
+  setUserVolume(userId, gain) {
+    if (!this._userVolumes) this._userVolumes = new Map()
+    this._userVolumes.set(userId, gain)
+    // The LiveKit identity is the user's public_id
+    this._setParticipantVolume(userId, this._deafened ? 0 : gain * this._getOutputGain())
+  }
+
   _setRemoteVolumes(gain) {
     this._audioElements.forEach((el, identity) => {
-      this._setParticipantVolume(identity, gain)
+      // Apply per-user volume multiplier if set
+      const userGain = this._userVolumes?.get(identity)
+      this._setParticipantVolume(identity, userGain != null ? gain * userGain : gain)
     })
   }
 
@@ -1681,5 +1756,439 @@ export default class extends Controller {
     toast.textContent = message
     document.body.appendChild(toast)
     setTimeout(() => toast.remove(), 5000)
+  }
+
+  // ─── Hierarchical Voice: Ancestor Rooms ──────────────────────
+
+  async _connectAncestorRooms(ancestorRooms) {
+    for (const info of ancestorRooms) {
+      const room = new Room({ adaptiveStream: true, dynacast: true })
+      const state = {
+        room,
+        audioElements: new Map(),
+        gainNodes: new Map(),
+        analysers: new Map(),
+        channelId: info.channel_id,
+        channelName: info.channel_name
+      }
+      this._ancestorRooms.set(info.channel_id, state)
+
+      this._setupAncestorRoomEvents(room, state)
+      try {
+        await room.connect(info.livekit_url, info.token)
+        console.log(`[VoiceChannel] Connected to ancestor room: ${info.channel_name}`)
+
+        // Attach existing participants' audio and video
+        for (const p of room.remoteParticipants.values()) {
+          for (const pub of p.audioTrackPublications.values()) {
+            if (pub.track && pub.isSubscribed) {
+              this._attachAncestorAudioTrack(pub.track, p, state)
+            }
+          }
+          for (const pub of p.videoTrackPublications.values()) {
+            if (pub.track && pub.isSubscribed) {
+              if (pub.source === Track.Source.ScreenShare) {
+                this._showScreenSharePlaceholder(pub.track, p, state.channelName)
+              } else if (pub.source === Track.Source.Camera) {
+                this._attachCameraTrack(pub.track, p)
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`[VoiceChannel] Failed to connect ancestor room ${info.channel_name}:`, err)
+      }
+    }
+  }
+
+  _setupAncestorRoomEvents(room, state) {
+    room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        this._attachAncestorAudioTrack(track, participant, state)
+      } else if (track.kind === Track.Kind.Video) {
+        if (pub.source === Track.Source.ScreenShare) {
+          this._showScreenSharePlaceholder(track, participant, state.channelName)
+        } else if (pub.source === Track.Source.Camera) {
+          this._attachCameraTrack(track, participant)
+        }
+      }
+    })
+    room.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        this._detachAncestorAudioTrack(participant, state)
+      } else if (track.kind === Track.Kind.Video) {
+        if (pub.source === Track.Source.ScreenShare) {
+          this._detachScreenShareTrack(participant)
+        } else if (pub.source === Track.Source.Camera) {
+          this._detachCameraTrack(participant)
+        }
+      }
+    })
+    room.on(RoomEvent.DataReceived, (payload, participant) => {
+      try {
+        const msg = JSON.parse(new TextDecoder().decode(payload))
+        if (msg.type === "broadcast") {
+          const gainNode = state.gainNodes.get(msg.identity)
+          if (gainNode) {
+            const vol = msg.on ? this._getOutputGain() : 0
+            gainNode.gain.setValueAtTime(vol, this._audioContext.currentTime)
+          }
+        }
+      } catch (_) {}
+    })
+    room.on(RoomEvent.Disconnected, () => {
+      this._cleanupAncestorState(state)
+    })
+  }
+
+  _attachAncestorAudioTrack(track, participant, state) {
+    const el = track.attach()
+    el.id = `voice-ancestor-audio-${state.channelId}-${participant.identity}`
+    el.style.display = "none"
+    document.body.appendChild(el)
+    state.audioElements.set(participant.identity, el)
+
+    try {
+      if (!this._audioContext) this._audioContext = new AudioContext()
+      if (this._audioContext.state === "suspended") this._audioContext.resume()
+
+      const source = this._audioContext.createMediaElementSource(el)
+      const gainNode = this._audioContext.createGain()
+      const analyser = this._audioContext.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.3
+      source.connect(analyser)
+      analyser.connect(gainNode)
+      gainNode.connect(this._audioContext.destination)
+
+      state.gainNodes.set(participant.identity, gainNode)
+      state.analysers.set(participant.identity, { analyser })
+
+      // Respect deafen state
+      const vol = this._deafened ? 0 : this._getOutputGain()
+      gainNode.gain.setValueAtTime(vol, this._audioContext.currentTime)
+    } catch (e) {
+      // Fallback: no gain node
+    }
+  }
+
+  _detachAncestorAudioTrack(participant, state) {
+    const el = state.audioElements.get(participant.identity)
+    if (el) {
+      el.remove()
+      state.audioElements.delete(participant.identity)
+    }
+    state.gainNodes.delete(participant.identity)
+    state.analysers.delete(participant.identity)
+  }
+
+  _cleanupAncestorState(state) {
+    state.audioElements.forEach(el => el.remove())
+    state.audioElements.clear()
+    state.gainNodes.clear()
+    state.analysers.clear()
+  }
+
+  _setAncestorVolumes(gain) {
+    for (const [, state] of this._ancestorRooms) {
+      for (const [, gainNode] of state.gainNodes) {
+        if (this._audioContext) {
+          gainNode.gain.setValueAtTime(gain, this._audioContext.currentTime)
+        }
+      }
+    }
+  }
+
+  // ─── Hierarchical Voice: Monitor Mode ────────────────────────
+
+  async toggleMonitor(e) {
+    const channelId = e.target?.dataset?.monitorChannelId
+    if (!channelId || !this.currentServerId) return
+
+    if (this._monitoredRooms.has(channelId)) {
+      this._detachMonitor(channelId)
+      return
+    }
+
+    // Fetch subscribe-only token from monitor endpoint
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      const response = await fetch(`/servers/${this.currentServerId}/voice/monitor/${channelId}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        }
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        this._showError(data.error || "Failed to start monitoring")
+        e.target.checked = false
+        return
+      }
+
+      const room = new Room({ adaptiveStream: true, dynacast: true })
+      const savedVol = parseInt(localStorage.getItem(`monitor-vol-${channelId}`) ?? "80", 10) / 100
+      const state = {
+        room,
+        audioElements: new Map(),
+        gainNodes: new Map(),
+        analysers: new Map(),
+        channelId: data.channel_id,
+        channelName: data.channel_name,
+        volume: savedVol
+      }
+      this._monitoredRooms.set(channelId, state)
+
+      this._setupMonitorRoomEvents(room, state)
+      await room.connect(data.livekit_url, data.token)
+      console.log(`[VoiceChannel] Monitoring: ${data.channel_name}`)
+
+      // Attach existing participants
+      for (const p of room.remoteParticipants.values()) {
+        for (const pub of p.audioTrackPublications.values()) {
+          if (pub.track && pub.isSubscribed) {
+            this._attachMonitorAudioTrack(pub.track, p, state)
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[VoiceChannel] Monitor failed:", err)
+      this._showError("Failed to start monitoring")
+      e.target.checked = false
+    }
+  }
+
+  _setupMonitorRoomEvents(room, state) {
+    room.on(RoomEvent.TrackSubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        this._attachMonitorAudioTrack(track, participant, state)
+      }
+    })
+    room.on(RoomEvent.TrackUnsubscribed, (track, pub, participant) => {
+      if (track.kind === Track.Kind.Audio) {
+        this._detachMonitorAudioTrack(participant, state)
+      }
+    })
+    room.on(RoomEvent.Disconnected, () => {
+      this._cleanupMonitorState(state)
+    })
+  }
+
+  _attachMonitorAudioTrack(track, participant, state) {
+    const el = track.attach()
+    el.id = `voice-monitor-audio-${state.channelId}-${participant.identity}`
+    el.style.display = "none"
+    document.body.appendChild(el)
+    state.audioElements.set(participant.identity, el)
+
+    try {
+      if (!this._audioContext) this._audioContext = new AudioContext()
+      if (this._audioContext.state === "suspended") this._audioContext.resume()
+
+      const source = this._audioContext.createMediaElementSource(el)
+      const gainNode = this._audioContext.createGain()
+      const analyser = this._audioContext.createAnalyser()
+      analyser.fftSize = 256
+      analyser.smoothingTimeConstant = 0.3
+      source.connect(analyser)
+      analyser.connect(gainNode)
+      gainNode.connect(this._audioContext.destination)
+
+      state.gainNodes.set(participant.identity, gainNode)
+      state.analysers.set(participant.identity, { analyser })
+
+      const vol = this._deafened ? 0 : state.volume
+      gainNode.gain.setValueAtTime(vol, this._audioContext.currentTime)
+    } catch (e) {
+      // Fallback
+    }
+  }
+
+  _detachMonitorAudioTrack(participant, state) {
+    const el = state.audioElements.get(participant.identity)
+    if (el) {
+      el.remove()
+      state.audioElements.delete(participant.identity)
+    }
+    state.gainNodes.delete(participant.identity)
+    state.analysers.delete(participant.identity)
+  }
+
+  _cleanupMonitorState(state) {
+    state.audioElements.forEach(el => el.remove())
+    state.audioElements.clear()
+    state.gainNodes.clear()
+    state.analysers.clear()
+  }
+
+  _detachMonitor(channelId) {
+    const state = this._monitoredRooms.get(channelId)
+    if (!state) return
+    this._cleanupMonitorState(state)
+    try { state.room.disconnect() } catch (_) {}
+    this._monitoredRooms.delete(channelId)
+    console.log(`[VoiceChannel] Stopped monitoring: ${channelId}`)
+  }
+
+  setMonitorVolume(e) {
+    const channelId = e.target?.dataset?.monitorVolumeChannel
+    if (!channelId) return
+    const vol = parseInt(e.target.value, 10) / 100
+    localStorage.setItem(`monitor-vol-${channelId}`, e.target.value)
+
+    const state = this._monitoredRooms.get(channelId)
+    if (!state) return
+    state.volume = vol
+    if (this._deafened) return
+    for (const [, gainNode] of state.gainNodes) {
+      if (this._audioContext) {
+        gainNode.gain.setValueAtTime(vol, this._audioContext.currentTime)
+      }
+    }
+  }
+
+  _setMonitorVolumesAll(gain) {
+    for (const [, state] of this._monitoredRooms) {
+      for (const [, gainNode] of state.gainNodes) {
+        if (this._audioContext) {
+          gainNode.gain.setValueAtTime(gain, this._audioContext.currentTime)
+        }
+      }
+    }
+  }
+
+  _restoreMonitorVolumes() {
+    for (const [, state] of this._monitoredRooms) {
+      for (const [, gainNode] of state.gainNodes) {
+        if (this._audioContext) {
+          gainNode.gain.setValueAtTime(state.volume, this._audioContext.currentTime)
+        }
+      }
+    }
+  }
+
+  // ─── Hierarchical Voice: Broadcast Toggle ────────────────────
+
+  toggleBroadcast() {
+    if (!this.room) return
+    this._broadcasting = !this._broadcasting
+    this._updateBroadcastIcon()
+    this._updateSelfBroadcastBadge()
+
+    // Notify all room participants via data message
+    const data = JSON.stringify({
+      type: "broadcast",
+      on: this._broadcasting,
+      identity: this.room.localParticipant.identity
+    })
+    this.room.localParticipant.publishData(
+      new TextEncoder().encode(data),
+      { reliable: true }
+    )
+
+    // Persist to VoiceState for late joiners
+    this._patchState("broadcasting", { broadcasting: this._broadcasting })
+  }
+
+  _updateSelfBroadcastBadge() {
+    const currentUserId = document.body.dataset.currentUserId
+    if (!currentUserId) return
+    const selfRow = document.querySelector(`[data-voice-user-id="${currentUserId}"]`)
+    if (!selfRow) return
+    const avatarWrap = selfRow.querySelector(".relative")
+    if (!avatarWrap) return
+    const existing = avatarWrap.querySelector(".voice-broadcast-badge")
+    if (this._broadcasting && !existing) {
+      avatarWrap.insertAdjacentHTML("beforeend", '<div class="voice-broadcast-badge" title="Broadcasting to children"><svg class="w-1.5 h-1.5 text-white" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg></div>')
+    } else if (!this._broadcasting && existing) {
+      existing.remove()
+    }
+  }
+
+  _updateBroadcastIcon() {
+    if (!this.hasBroadcastBtnTarget) return
+    const btn = this.broadcastBtnTarget
+    if (this._broadcasting) {
+      btn.classList.add("text-green-400")
+      btn.classList.remove("text-gray-300")
+    } else {
+      btn.classList.remove("text-green-400")
+      btn.classList.add("text-gray-300")
+    }
+  }
+
+  // ─── Hierarchical Voice: Showcase Channel ───────────────────
+
+  async showcaseChannel(e) {
+    const channelId = e.target?.closest("[data-showcase-channel-id]")?.dataset.showcaseChannelId
+    if (!channelId || !this.currentServerId) return
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      await fetch(`/servers/${this.currentServerId}/voice_showcases`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        },
+        body: JSON.stringify({ child_channel_id: channelId })
+      })
+    } catch (err) {
+      console.warn("[VoiceChannel] Showcase channel failed:", err)
+    }
+  }
+
+  // ─── Hierarchical Voice: Request to Speak ────────────────────
+
+  async requestToSpeak() {
+    if (!this.currentServerId) return
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    try {
+      const response = await fetch(`/servers/${this.currentServerId}/voice_showcases/request_speak`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": csrfToken
+        }
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        this._showError(data.error || "Failed to send request")
+        return
+      }
+      // Show confirmation
+      const toast = document.createElement("div")
+      toast.className = "fixed top-4 right-4 z-50 bg-green-600 text-white px-4 py-2 rounded-lg shadow-lg"
+      toast.textContent = "Request to speak sent"
+      document.body.appendChild(toast)
+      setTimeout(() => toast.remove(), 3000)
+    } catch (err) {
+      this._showError("Failed to send request")
+    }
+  }
+
+  // ─── Hierarchical Voice: UI Helpers ──────────────────────────
+
+  _updateHierarchyButtons() {
+    // Show broadcast button if channel has children
+    if (this.hasBroadcastBtnTarget) {
+      if (this._childChannels.length > 0) {
+        this.broadcastBtnTarget.classList.remove("hidden")
+      } else {
+        this.broadcastBtnTarget.classList.add("hidden")
+      }
+    }
+
+    // Show request-to-speak button if channel has a parent
+    // (we know it has a parent if there are ancestor rooms)
+    if (this.hasRequestSpeakBtnTarget) {
+      if (this._ancestorRooms.size > 0) {
+        this.requestSpeakBtnTarget.classList.remove("hidden")
+      } else {
+        this.requestSpeakBtnTarget.classList.add("hidden")
+      }
+    }
+
+    this._updateBroadcastIcon()
   }
 }

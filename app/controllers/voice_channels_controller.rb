@@ -73,13 +73,37 @@ class VoiceChannelsController < ApplicationController
       server: @server
     )
 
+    # Generate subscribe-only tokens for ancestor rooms (audio cascades down)
+    ancestor_rooms = @channel.ancestor_channels.filter_map do |ancestor|
+      ancestor_svp = resolve_voice_provider(ancestor)
+      next unless ancestor_svp&.local? && ancestor_svp.user&.livekit_configured?
+      ancestor_provider = ancestor_svp.user
+      ancestor_token = LivekitTokenService.generate_subscribe_only_token(
+        user: current_user, channel: ancestor, server: @server, provider: ancestor_provider
+      )
+      {
+        room_name: LivekitTokenService.room_name_for(@server, ancestor),
+        token: ancestor_token,
+        livekit_url: ancestor_provider.livekit_url,
+        channel_id: ancestor.public_id,
+        channel_name: ancestor.name
+      }
+    end
+
+    # Include ember channels for monitor mode
+    child_channels = @channel.child_channels.ordered.map do |c|
+      { channel_id: c.public_id, name: c.name, participant_count: c.voice_states.count }
+    end
+
     render json: {
       livekit_url: livekit_url,
       token: token,
       voice_state_id: voice_state.public_id,
       channel_id: @channel.public_id,
       channel_name: @channel.name,
-      provider_id: provider_id
+      provider_id: provider_id,
+      ancestor_rooms: ancestor_rooms,
+      child_channels: child_channels
     }
   rescue LivekitTokenService::ConfigurationError => e
     render json: { error: e.message }, status: :service_unavailable
@@ -136,10 +160,28 @@ class VoiceChannelsController < ApplicationController
       provider_id = svp.provider_pubkey[0..15]
     end
 
+    # Generate subscribe-only tokens for ancestor rooms on rejoin
+    ancestor_rooms = @channel.ancestor_channels.filter_map do |ancestor|
+      ancestor_svp = resolve_voice_provider(ancestor)
+      next unless ancestor_svp&.local? && ancestor_svp.user&.livekit_configured?
+      ancestor_provider = ancestor_svp.user
+      ancestor_token = LivekitTokenService.generate_subscribe_only_token(
+        user: current_user, channel: ancestor, server: @server, provider: ancestor_provider
+      )
+      {
+        room_name: LivekitTokenService.room_name_for(@server, ancestor),
+        token: ancestor_token,
+        livekit_url: ancestor_provider.livekit_url,
+        channel_id: ancestor.public_id,
+        channel_name: ancestor.name
+      }
+    end
+
     render json: {
       livekit_url: livekit_url,
       token: token,
-      provider_id: provider_id
+      provider_id: provider_id,
+      ancestor_rooms: ancestor_rooms
     }
   rescue LivekitTokenService::ConfigurationError => e
     render json: { error: e.message }, status: :service_unavailable
@@ -159,6 +201,40 @@ class VoiceChannelsController < ApplicationController
     end
 
     render json: { success: true }
+  end
+
+  # POST /servers/:server_id/voice/monitor/:channel_id
+  # Get a subscribe-only token for monitoring an ember channel
+  def monitor
+    child_channel = @server.channels.voice.find_by!(public_id: params[:channel_id])
+
+    # Verify user is in a hearth/ancestor of this ember
+    voice_state = VoiceState.find_by(user: current_user, server: @server)
+    unless voice_state && child_channel.ancestor_channels.any? { |a| a.id == voice_state.channel_id }
+      render json: { error: "Not in a hearth channel" }, status: :forbidden
+      return
+    end
+
+    svp = resolve_voice_provider(child_channel)
+    unless svp&.local? && svp.user&.livekit_configured?
+      render json: { error: "No voice provider available for this channel" }, status: :service_unavailable
+      return
+    end
+
+    provider = svp.user
+    token = LivekitTokenService.generate_subscribe_only_token(
+      user: current_user, channel: child_channel, server: @server, provider: provider
+    )
+
+    render json: {
+      token: token,
+      livekit_url: provider.livekit_url,
+      room_name: LivekitTokenService.room_name_for(@server, child_channel),
+      channel_id: child_channel.public_id,
+      channel_name: child_channel.name
+    }
+  rescue LivekitTokenService::ConfigurationError => e
+    render json: { error: e.message }, status: :service_unavailable
   end
 
   private
