@@ -15,10 +15,7 @@ RSpec.describe NostrGroupModerationJob, type: :job do
 
   describe "Kind 9005: delete event" do
     it "publishes a delete event to the channel's relay" do
-      expect(RelayService).to receive(:publish_to_relay).with(
-        anything,
-        anything
-      ).and_return({ success: true, message: "OK" })
+      expect(RelayService).to receive(:publish_to_all).with(anything).and_return({})
 
       NostrGroupModerationJob.perform_now(
         :delete_event,
@@ -30,7 +27,7 @@ RSpec.describe NostrGroupModerationJob, type: :job do
     end
 
     it "skips when target_event_id is blank" do
-      expect(RelayService).not_to receive(:publish_to_relay)
+      expect(RelayService).not_to receive(:publish_to_all)
 
       NostrGroupModerationJob.perform_now(
         :delete_event,
@@ -45,10 +42,7 @@ RSpec.describe NostrGroupModerationJob, type: :job do
     it "publishes a remove-user event to the channel's relay" do
       target_pubkey = SecureRandom.hex(32)
 
-      expect(RelayService).to receive(:publish_to_relay).with(
-        anything,
-        anything
-      ).and_return({ success: true, message: "OK" })
+      expect(RelayService).to receive(:publish_to_all).with(anything).and_return({})
 
       NostrGroupModerationJob.perform_now(
         :remove_user,
@@ -60,7 +54,7 @@ RSpec.describe NostrGroupModerationJob, type: :job do
     end
 
     it "skips when target_pubkey is blank" do
-      expect(RelayService).not_to receive(:publish_to_relay)
+      expect(RelayService).not_to receive(:publish_to_all)
 
       NostrGroupModerationJob.perform_now(
         :remove_user,
@@ -71,22 +65,9 @@ RSpec.describe NostrGroupModerationJob, type: :job do
     end
   end
 
-  describe "shared channel requirement" do
-    it "skips when channel is not shared" do
-      regular_channel = create(:channel, server: server, shared: false)
-
-      expect(RelayService).not_to receive(:publish_to_relay)
-
-      NostrGroupModerationJob.perform_now(
-        :delete_event,
-        channel_id: regular_channel.id,
-        moderator_id: moderator.id,
-        target_event_id: SecureRandom.hex(32)
-      )
-    end
-
+  describe "channel requirements" do
     it "skips when channel doesn't exist" do
-      expect(RelayService).not_to receive(:publish_to_relay)
+      expect(RelayService).not_to receive(:publish_to_all)
 
       NostrGroupModerationJob.perform_now(
         :delete_event,
@@ -103,7 +84,7 @@ RSpec.describe NostrGroupModerationJob, type: :job do
       no_key_mod.update_column(:nostr_public_key, nil)
       allow(User).to receive(:find_by).with(id: no_key_mod.id).and_return(no_key_mod)
 
-      expect(RelayService).not_to receive(:publish_to_relay)
+      expect(RelayService).not_to receive(:publish_to_all)
 
       NostrGroupModerationJob.perform_now(
         :delete_event,

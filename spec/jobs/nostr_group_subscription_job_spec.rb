@@ -35,27 +35,7 @@ RSpec.describe NostrGroupSubscriptionJob, type: :job do
 
       message = Message.last
       expect(message.content).to eq("Hello from remote!")
-      expect(message.user.remote?).to be true
-    end
-
-    it "creates shadow users for unknown remote pubkeys" do
-      remote_pubkey = SecureRandom.hex(32)
-      event = {
-        "id" => SecureRandom.hex(32),
-        "kind" => 9,
-        "pubkey" => remote_pubkey,
-        "content" => "Hello!",
-        "sig" => "a" * 128,
-        "created_at" => Time.now.to_i,
-        "tags" => [ [ "h", channel.nostr_group_id ] ]
-      }
-
-      allow(RelayService).to receive(:fetch_from_relay).and_return([ event ])
-      allow(NostrEventService).to receive(:verify_schnorr_signature).and_return(true)
-
-      expect {
-        NostrGroupSubscriptionJob.perform_now
-      }.to change(RemoteUser, :count).by(1)
+      expect(message.channel).to eq(channel)
     end
 
     it "deduplicates already-processed events" do

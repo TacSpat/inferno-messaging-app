@@ -187,7 +187,7 @@ class MessagesController < ApplicationController
 
   def publish_channel_message_to_nostr(message, channel)
     user = message.user
-    event_content = message.content || ""
+    event_content = resolve_active_storage_urls(message.content || "")
     tags = [["h", channel.nostr_group_id]]
 
     if channel.encrypted? && channel.channel_public_key.present?
@@ -222,5 +222,27 @@ class MessagesController < ApplicationController
     RelayService.publish_to_all(signed_hash)
   rescue => e
     Rails.logger.error("Failed to publish channel message to Nostr: #{e.message}")
+  end
+
+  # Replace local Active Storage paths with Blossom URLs so remote instances can access them.
+  def resolve_active_storage_urls(content)
+    content.gsub(%r{/rails/active_storage/blobs/(?:redirect/)?([^/\s]+)/[^\s]+}) do |match|
+      signed_id = $1
+      blob = ActiveStorage::Blob.find_signed(signed_id)
+      next match unless blob
+
+      # Return cached Blossom URL if already uploaded
+      cached = blob.metadata&.dig("blossom_url")
+      next cached if cached.present?
+
+      # Upload to Blossom and cache the URL
+      data = blob.download
+      result = BlossomClientService.upload(StringIO.new(data), content_type: blob.content_type || "application/octet-stream", filename: blob.filename.to_s)
+      blob.update!(metadata: (blob.metadata || {}).merge("blossom_url" => result[:url], "sha256" => result[:sha256]))
+      result[:url]
+    rescue => e
+      Rails.logger.warn("[MessagesController] Failed to resolve Active Storage URL to Blossom: #{e.message}")
+      match
+    end
   end
 end

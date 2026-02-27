@@ -8,7 +8,7 @@ class NostrSyncJob < ApplicationJob
     # Also sync server state for all joined servers
     user.servers.find_each do |server|
       next unless server.nostr_group_id.present?
-      NostrServerSyncService.new(server.nostr_group_id, joining_user: user).sync_state
+      NostrServerSyncService.new(server.nostr_group_id, joining_user: user).sync_all
     rescue => e
       Rails.logger.warn("[NostrSyncJob] Failed to sync server #{server.nostr_group_id}: #{e.message}")
     end

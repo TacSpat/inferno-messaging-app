@@ -7,6 +7,7 @@ export default class extends Controller {
   static values = {
     channelId: String,
     serverId: String,
+    baseUrl: String,
     oldestMessageId: String,
     hasOlder: Boolean,
     newestMessageId: String,
@@ -335,9 +336,15 @@ export default class extends Controller {
   jumpToBottom() {
     this.clearSavedAnchor()
     if (this.hasNewerValue) {
-      const serverId = this.serverIdValue
-      const channelId = this.channelIdValue
-      window.Turbo.visit(`/servers/${serverId}/channels/${channelId}`)
+      if (this.baseUrlValue) {
+        // DM context — reload the conversation page to get latest messages
+        const convUrl = this.baseUrlValue.replace(/\/dm_messages$/, "")
+        window.Turbo.visit(convUrl)
+      } else {
+        const serverId = this.serverIdValue
+        const channelId = this.channelIdValue
+        window.Turbo.visit(`/servers/${serverId}/channels/${channelId}`)
+      }
     } else {
       this.scrollToBottom()
     }
@@ -434,10 +441,9 @@ export default class extends Controller {
     if (this._loadingOlder || !this.hasOlderValue || !this.oldestMessageIdValue) return
     this._loadingOlder = true
 
-    const serverId = this.serverIdValue
-    const channelId = this.channelIdValue
     const beforeId = this.oldestMessageIdValue
-    const url = `/servers/${serverId}/channels/${channelId}/older_messages?before=${beforeId}`
+    const base = this.baseUrlValue || `/servers/${this.serverIdValue}/channels/${this.channelIdValue}`
+    const url = `${base}/older_messages?before=${beforeId}`
 
     try {
       const response = await fetch(url, {
@@ -496,10 +502,9 @@ export default class extends Controller {
     if (this._loadingNewer || !this.hasNewerValue || !this.newestMessageIdValue) return
     this._loadingNewer = true
 
-    const serverId = this.serverIdValue
-    const channelId = this.channelIdValue
     const afterId = this.newestMessageIdValue
-    const url = `/servers/${serverId}/channels/${channelId}/newer_messages?after=${afterId}`
+    const base = this.baseUrlValue || `/servers/${this.serverIdValue}/channels/${this.channelIdValue}`
+    const url = `${base}/newer_messages?after=${afterId}`
 
     try {
       const response = await fetch(url, {
@@ -631,9 +636,8 @@ export default class extends Controller {
   }
 
   async loadAroundMessage(messageId) {
-    const serverId = this.serverIdValue
-    const channelId = this.channelIdValue
-    const url = `/servers/${serverId}/channels/${channelId}/around_messages?around=${messageId}`
+    const base = this.baseUrlValue || `/servers/${this.serverIdValue}/channels/${this.channelIdValue}`
+    const url = `${base}/around_messages?around=${messageId}`
 
     try {
       const response = await fetch(url, {

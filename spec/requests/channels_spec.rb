@@ -42,9 +42,8 @@ RSpec.describe "Channels", type: :request do
       server.server_memberships.create!(user: regular_user)
       sign_in regular_user
 
-      expect {
-        get new_server_channel_path(server.public_id)
-      }.to raise_error(Pundit::NotAuthorizedError)
+      get new_server_channel_path(server.public_id)
+      expect(response).to redirect_to(server_channel_path(server, server.channels.ordered.first))
     end
   end
 
@@ -70,9 +69,8 @@ RSpec.describe "Channels", type: :request do
       server.server_memberships.create!(user: regular_user)
       sign_in regular_user
 
-      expect {
-        post server_channels_path(server.public_id), params: { channel: { name: "test", channel_type: "text" } }
-      }.to raise_error(Pundit::NotAuthorizedError)
+      post server_channels_path(server.public_id), params: { channel: { name: "test", channel_type: "text" } }
+      expect(response).to redirect_to(server_channel_path(server, server.channels.ordered.first))
     end
   end
 end

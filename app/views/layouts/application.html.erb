@@ -221,7 +221,8 @@
                   <%= current_user.username[0].upcase %>
                 </div>
               <% end %>
-              <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-900 bg-gray-500" data-user-status-dot></div>
+              <div class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-900 bg-gray-500 cursor-pointer hover:ring-2 hover:ring-white/20" data-user-status-dot data-action="click->appearance#toggleStatusPicker"></div>
+              <%= render "shared/status_picker" %>
             </div>
             <div class="ml-2 flex-1 min-w-0">
               <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>

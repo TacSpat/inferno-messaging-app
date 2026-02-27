@@ -252,6 +252,10 @@
   --color-toggle-on: #3b82f6;
 }
 
+.turbo-progress-bar {
+  background-color: rgb(var(--accent));
+}
+
 /* Theme switch crossfade via View Transitions API */
 ::view-transition-old(root) {
   animation: vt-fade-out 0.4s ease-in-out both;
@@ -688,6 +692,95 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: rgb(var(--accent) / 0.45);
+  }
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(var(--accent) / 0.25) transparent;
+  }
+
+  /* Checkboxes */
+  input[type="checkbox"] {
+    accent-color: rgb(var(--accent));
+  }
+
+  /* Number input — themed inline chevron spinners */
+  .number-input-wrap {
+    position: relative;
+    display: flex;
+    width: 100%;
+  }
+  /* Hide native spinners globally (before JS wraps them) */
+  input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    display: none;
+  }
+  .number-input-wrap input[type="number"] {
+    padding-right: 1.75rem;
+    width: 100%;
+  }
+  .number-input-wrap .num-btn {
+    position: absolute;
+    right: 0;
+    width: 1.5rem;
+    height: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    color: rgb(var(--accent) / 0.7);
+    border: none;
+    cursor: pointer;
+    transition: color 0.15s;
+    z-index: 1;
+    padding: 0;
+    line-height: 1;
+  }
+  .number-input-wrap .num-btn:hover {
+    color: rgb(var(--accent));
+  }
+  .number-input-wrap .num-btn-up {
+    top: 0;
+    padding-top: 0.25rem;
+    border-radius: 0 0.4rem 0 0;
+  }
+  .number-input-wrap .num-btn-down {
+    bottom: 0;
+    padding-bottom: 0.25rem;
+    border-radius: 0 0 0.4rem 0;
+  }
+  .number-input-wrap .num-btn svg {
+    width: 10px;
+    height: 10px;
+  }
+
+  /* Range sliders */
+  input[type="range"] {
+    accent-color: rgb(var(--accent));
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    background: rgb(var(--accent) / 0.2);
+    border-radius: 3px;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    background: rgb(var(--accent));
+  }
+  input[type="range"]::-moz-range-track {
+    background: rgb(var(--accent) / 0.2);
+    border-radius: 3px;
+  }
+  input[type="range"]::-moz-range-thumb {
+    background: rgb(var(--accent));
+    border: none;
+  }
+  input[type="range"]::-moz-range-progress {
+    background: rgb(var(--accent) / 0.5);
+    border-radius: 3px;
   }
 
   /* Text selection — accent ember */

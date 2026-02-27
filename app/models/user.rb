@@ -88,9 +88,8 @@ class User < ApplicationRecord
     first
   end
 
-  # Full tag like "Tac#0420"
   def tag
-    "#{username}##{discriminator}"
+    username
   end
 
   # Display name cascade: server nickname > display_name > username

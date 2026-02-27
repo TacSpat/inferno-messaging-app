@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_25_100003) do
+ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -397,10 +397,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_25_100003) do
     t.integer "kind", null: false
     t.bigint "message_id"
     t.string "pubkey", null: false
+    t.integer "server_id"
     t.datetime "updated_at", null: false
     t.index ["channel_id"], name: "index_nostr_event_logs_on_channel_id"
     t.index ["event_id"], name: "index_nostr_event_logs_on_event_id", unique: true
     t.index ["message_id"], name: "index_nostr_event_logs_on_message_id"
+    t.index ["server_id"], name: "index_nostr_event_logs_on_server_id"
   end
 
   create_table "nostr_events", force: :cascade do |t|
@@ -845,6 +847,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_25_100003) do
   add_foreign_key "moderation_reports", "users", column: "reviewed_by_id"
   add_foreign_key "nostr_event_logs", "channels"
   add_foreign_key "nostr_event_logs", "messages"
+  add_foreign_key "nostr_event_logs", "servers"
   add_foreign_key "notifications", "channels"
   add_foreign_key "notifications", "messages"
   add_foreign_key "notifications", "servers"

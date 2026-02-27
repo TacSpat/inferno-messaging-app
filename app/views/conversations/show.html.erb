@@ -1,6 +1,6 @@
-<%= turbo_frame_tag "main-content", class: "flex flex-col flex-1 min-h-0", data: { turbo_action: "advance" } do %>
+<%= turbo_frame_tag "main-content", class: "flex flex-col flex-1 min-h-0 min-w-0", data: { turbo_action: "advance" } do %>
 <% user_servers_dm = current_user.servers.includes(:server_emojis).map { |s| { id: s.public_id, name: s.name } } %>
-<div data-controller="dm-message-form unified-picker" data-dm-message-form-conversation-id-value="<%= @conversation.public_id %>" data-unified-picker-can-send-gifs-value="true" data-unified-picker-can-send-custom-emojis-value="true" data-unified-picker-can-send-custom-stickers-value="true" data-unified-picker-user-servers-value="<%= user_servers_dm.to_json %>" class="flex flex-col flex-1 min-h-0">
+<div data-controller="dm-message-form unified-picker" data-dm-message-form-conversation-id-value="<%= @conversation.public_id %>" data-unified-picker-can-send-gifs-value="true" data-unified-picker-can-send-custom-emojis-value="true" data-unified-picker-can-send-custom-stickers-value="true" data-unified-picker-user-servers-value="<%= user_servers_dm.to_json %>" class="flex flex-col flex-1 min-h-0 min-w-0">
 
 <!-- DM header -->
 <div class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
@@ -31,14 +31,17 @@
 </div>
 
 <!-- Content area: messages + optional profile panel -->
-<div class="flex flex-1 min-h-0">
+<div class="flex flex-1 min-h-0 min-w-0">
   <!-- Messages column -->
-  <div class="flex flex-col flex-1 min-h-0">
+  <div class="flex flex-col flex-1 min-h-0 min-w-0">
     <!-- Messages area -->
     <div id="messages"
-         class="flex-1 overflow-y-auto px-2 sm:px-4 py-4 space-y-0.5 relative"
+         class="flex-1 overflow-y-auto overflow-x-hidden px-2 sm:px-4 py-4 space-y-0.5 relative"
          data-controller="scroll-position image-preview gif-save message-actions"
-         data-scroll-position-channel-id-value="dm_<%= @conversation.public_id %>">
+         data-scroll-position-channel-id-value="dm_<%= @conversation.public_id %>"
+         data-scroll-position-base-url-value="<%= conversation_dm_messages_path(@conversation) %>"
+         data-scroll-position-has-older-value="<%= @has_older %>"
+         <% if @messages.any? %>data-scroll-position-oldest-message-id-value="<%= @messages.first.public_id %>"<% end %>>
       <% if @messages.empty? %>
         <div class="flex flex-col items-center justify-center h-full text-center">
           <% if @other_user %>

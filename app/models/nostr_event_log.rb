@@ -1,6 +1,7 @@
 class NostrEventLog < ApplicationRecord
   belongs_to :message, optional: true
   belongs_to :channel, optional: true
+  belongs_to :server, optional: true
 
   DIRECTIONS = %w[inbound outbound].freeze
 

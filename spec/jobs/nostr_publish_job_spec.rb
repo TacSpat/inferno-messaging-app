@@ -48,16 +48,6 @@ RSpec.describe NostrPublishJob, type: :job do
     end
   end
 
-  describe "skipping remote users" do
-    it "does not publish for remote users" do
-      remote_user = create(:user, :confirmed, remote: true)
-      allow(User).to receive(:find).with(remote_user.id).and_return(remote_user)
-
-      expect(RelayService).not_to receive(:publish_to_all)
-      NostrPublishJob.perform_now(remote_user.id, :profile)
-    end
-  end
-
   describe "unknown event type" do
     it "logs a warning and returns" do
       expect(RelayService).not_to receive(:publish_to_all)

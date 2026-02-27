@@ -26,6 +26,7 @@ class ServerSettingsController < ApplicationController
 
   def members
     @memberships = @server.server_memberships.includes(:membership_roles, :roles, user: { avatar_attachment: :blob }).order(joined_at: :desc)
+    @remote_members = @server.remote_members.includes(:remote_membership_roles, :roles).order(joined_at: :desc)
     @all_roles = @server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).ordered
   end
 
@@ -151,19 +152,19 @@ class ServerSettingsController < ApplicationController
   end
 
   def audit_log
-    server_item_ids = {
-      "Server" => [ @server.id ],
-      "Channel" => @server.channel_ids,
-      "Role" => @server.role_ids,
-      "ServerMembership" => @server.server_membership_ids,
-      "Ban" => @server.ban_ids,
-      "Category" => @server.category_ids,
-      "Invite" => @server.invite_ids
-    }
-    conditions = server_item_ids.map do |type, ids|
-      PaperTrail::Version.where(item_type: type, item_id: ids)
-    end
-    @versions = conditions.reduce(:or).order(created_at: :desc).limit(50)
+    admin_kinds = [
+      RelaySubscriptionManager::KIND_SERVER_METADATA,
+      RelaySubscriptionManager::KIND_SERVER_STRUCTURE,
+      RelaySubscriptionManager::KIND_SERVER_ROLES,
+      RelaySubscriptionManager::KIND_SERVER_MEMBER,
+      RelaySubscriptionManager::KIND_SERVER_EMOJIS,
+      RelaySubscriptionManager::KIND_SERVER_STICKERS,
+      RelaySubscriptionManager::KIND_SERVER_BAN,
+      RelaySubscriptionManager::KIND_SERVER_INVITE
+    ]
+    @events = NostrEventLog.where(server: @server, kind: admin_kinds)
+                           .order(event_created_at: :desc)
+                           .limit(50)
   end
 
   def voice

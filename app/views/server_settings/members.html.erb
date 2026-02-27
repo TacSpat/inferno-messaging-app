@@ -1,22 +1,69 @@
-<h1 class="text-xl font-bold text-white mb-6">Members (<%= @memberships.count %>)</h1>
+<%
+  # Build a unified list: each entry is a hash with common fields
+  all_members = @memberships.map { |m|
+    {
+      type: :local,
+      obj: m,
+      display_name: m.user.display_name_for(@server),
+      tag: m.user.tag,
+      joined_at: m.joined_at,
+      roles: m.roles.sort_by { |r| -r.position },
+      avatar_url: m.user.effective_avatar_url,
+      profile_color: m.user.try(:profile_color) || '#1e1c1b',
+      initial: m.user.username[0]&.upcase,
+      public_id: m.public_id,
+      owner: m.owner?,
+      kick_path: server_settings_kick_member_path(@server, m),
+      ban_user_id: m.user.public_id,
+      confirm_name: m.user.username,
+      role_ids: m.roles.reject(&:owner?).map(&:public_id)
+    }
+  } + @remote_members.map { |r|
+    {
+      type: :remote,
+      obj: r,
+      display_name: r.display_name_for(@server),
+      tag: r.tag,
+      joined_at: r.joined_at,
+      roles: r.roles.sort_by { |rr| -rr.position },
+      avatar_url: r.effective_avatar_url,
+      profile_color: r.try(:profile_color) || '#1e1c1b',
+      initial: (r.username.presence || r.pubkey[0..1]).to_s[0]&.upcase,
+      public_id: r.public_id,
+      owner: false,
+      kick_path: server_settings_kick_remote_member_path(@server, r),
+      ban_user_id: r.public_id,
+      confirm_name: r.display_name_for(@server),
+      role_ids: r.roles.map(&:public_id)
+    }
+  }
+
+  all_members.sort_by! { |m| m[:joined_at] || Time.at(0) }.reverse!
+%>
+
+<h1 class="text-xl font-bold text-white mb-6">Members (<%= all_members.size %>)</h1>
 
 <div class="space-y-2">
-  <% @memberships.each do |membership| %>
+  <% all_members.each do |member| %>
     <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
       <div class="flex items-center">
-        <div class="w-10 h-10 rounded-full bg-accent flex items-center justify-center text-sm font-bold text-white">
-          <%= membership.user.username[0].upcase %>
+        <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white overflow-hidden"
+             style="background-color: <%= member[:avatar_url].present? ? 'transparent' : member[:profile_color] %>">
+          <% if member[:avatar_url].present? %>
+            <%= image_tag member[:avatar_url], class: "w-full h-full object-cover" %>
+          <% else %>
+            <%= member[:initial] %>
+          <% end %>
         </div>
         <div class="ml-3">
-          <p class="text-sm text-white font-medium"><%= membership.user.display_name_for(@server) %></p>
-          <p class="text-xs text-gray-500"><%= membership.user.tag %> • Joined <%= membership.joined_at&.strftime("%b %d, %Y") %></p>
+          <p class="text-sm text-white font-medium"><%= member[:display_name] %></p>
+          <p class="text-xs text-gray-500"><%= member[:tag] %> • Joined <%= member[:joined_at]&.strftime("%b %d, %Y") %></p>
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <div class="flex flex-wrap gap-1" data-member-roles-target="badges" data-membership-id="<%= membership.public_id %>">
-          <% assigned = membership.roles.sort_by { |r| -r.position } %>
-          <% if assigned.any? %>
-            <% assigned.each do |role| %>
+        <div class="flex flex-wrap gap-1" data-member-roles-target="badges" data-membership-id="<%= member[:public_id] %>">
+          <% if member[:roles].any? %>
+            <% member[:roles].each do |role| %>
               <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full <%= role.owner? ? 'bg-yellow-600/20 text-yellow-400' : role.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
                 <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
                 <%= role.name %>
@@ -27,33 +74,35 @@
           <% end %>
         </div>
         <% if @current_membership&.admin? %>
-          <div class="relative" data-controller="member-roles"
-               data-member-roles-server-id-value="<%= @server.public_id %>"
-               data-member-roles-membership-id-value="<%= membership.public_id %>"
-               data-member-roles-all-roles-value="<%= @all_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
-               data-member-roles-current-role-ids-value="<%= membership.roles.reject(&:owner?).map(&:public_id).to_json %>">
-            <button class="text-xs text-accent-light hover:text-accent cursor-pointer"
-                    data-action="click->member-roles#toggle">
-              Manage Roles
-            </button>
-            <div class="absolute right-0 top-8 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl py-2 z-50 hidden"
-                 data-member-roles-target="dropdown">
-              <p class="px-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase">Assign Roles</p>
-              <% @all_roles.reject(&:everyone?).each do |role| %>
-                <label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
-                  <input type="checkbox" value="<%= role.public_id %>"
-                         class="mr-2 accent-accent"
-                         data-action="change->member-roles#toggleRole"
-                         <%= 'checked' if membership.roles.include?(role) %>>
-                  <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
-                  <span class="text-sm text-gray-300"><%= role.name %></span>
-                </label>
-              <% end %>
+          <% if member[:type] == :local %>
+            <div class="relative" data-controller="member-roles"
+                 data-member-roles-server-id-value="<%= @server.public_id %>"
+                 data-member-roles-membership-id-value="<%= member[:public_id] %>"
+                 data-member-roles-all-roles-value="<%= @all_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
+                 data-member-roles-current-role-ids-value="<%= member[:role_ids].to_json %>">
+              <button class="text-xs text-accent-light hover:text-accent cursor-pointer"
+                      data-action="click->member-roles#toggle">
+                Manage Roles
+              </button>
+              <div class="absolute right-0 top-8 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl py-2 z-50 hidden"
+                   data-member-roles-target="dropdown">
+                <p class="px-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase">Assign Roles</p>
+                <% @all_roles.reject(&:everyone?).each do |role| %>
+                  <label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
+                    <input type="checkbox" value="<%= role.public_id %>"
+                           class="mr-2 accent-accent"
+                           data-action="change->member-roles#toggleRole"
+                           <%= 'checked' if member[:role_ids].include?(role.public_id) %>>
+                    <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
+                    <span class="text-sm text-gray-300"><%= role.name %></span>
+                  </label>
+                <% end %>
+              </div>
             </div>
-          </div>
-          <% unless membership.owner? %>
-            <%= button_to "Kick", server_settings_kick_member_path(@server, membership), method: :delete, data: { turbo_confirm: "Kick #{membership.user.username}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
-            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: membership.user.public_id }, method: :post, data: { turbo_confirm: "Ban #{membership.user.username}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
+          <% end %>
+          <% unless member[:owner] %>
+            <%= button_to "Kick", member[:kick_path], method: :delete, data: { turbo_confirm: "Kick #{member[:confirm_name]}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
+            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: member[:ban_user_id] }, method: :post, data: { turbo_confirm: "Ban #{member[:confirm_name]}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
           <% end %>
         <% end %>
       </div>

@@ -27,7 +27,6 @@ module NostrTestHelpers
 
   def stub_relay_service
     allow(RelayService).to receive(:publish_to_all).and_return({})
-    allow(RelayService).to receive(:publish_to_relay).and_return({ success: true, message: "OK" })
     allow(RelayService).to receive(:fetch_from_all).and_return([])
     allow(RelayService).to receive(:fetch_from_relay).and_return([])
   end

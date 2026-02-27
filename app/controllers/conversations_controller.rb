@@ -46,6 +46,7 @@ class ConversationsController < ApplicationController
       .distinct
     @messages = @conversation.messages.includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)
                              .order(created_at: :asc).last(50)
+    @has_older = @messages.any? && @conversation.messages.where("created_at < ?", @messages.first.created_at).exists?
     @message = Message.new
     @other_user = @conversation.other_user(current_user) if @conversation.direct?
     if @other_user.nil? && @conversation.counterparty_pubkey.present?

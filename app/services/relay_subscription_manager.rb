@@ -108,6 +108,7 @@ class RelaySubscriptionManager
     Thread.new do
       EventMachine.run do
         connect_to_all_relays
+        start_periodic_sync
       end
     end
   end
@@ -175,6 +176,26 @@ class RelaySubscriptionManager
     relay_urls.each do |url|
       connect_to_relay(url)
     end
+  end
+
+  def start_periodic_sync
+    # Run once on startup, then every hour
+    Thread.new { run_periodic_sync }
+    EventMachine.add_periodic_timer(3600) do
+      Thread.new { run_periodic_sync }
+    end
+  end
+
+  def run_periodic_sync
+    Server.find_each do |server|
+      next unless server.nostr_group_id.present?
+      NostrServerSyncService.new(server.nostr_group_id).sync_all
+    rescue => e
+      Rails.logger.warn("[RelaySubscriptionManager] Periodic sync failed for #{server.nostr_group_id}: #{e.message}")
+    end
+    Rails.logger.info("[RelaySubscriptionManager] Periodic sync complete")
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Periodic sync error: #{e.message}")
   end
 
   def connect_to_relay(url)
@@ -1231,11 +1252,12 @@ class RelaySubscriptionManager
     Rails.logger.warn("[RelaySubscriptionManager] broadcast_member_update failed: #{e.message}")
   end
 
-  def log_server_event(event)
+  def log_server_event(event, server: nil)
     NostrEventLog.create!(
       event_id: event["id"],
       kind: event["kind"],
       pubkey: event["pubkey"],
+      server: server,
       direction: "inbound",
       event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
@@ -1328,7 +1350,7 @@ class RelaySubscriptionManager
     if deleted
       Rails.logger.info("[RelaySubscriptionManager] Server #{server.nostr_group_id} marked deleted via Nostr — destroying locally")
       ServerChannel.broadcast_to(server, { type: "server_deleted" })
-      log_server_event(event)
+      log_server_event(event, server: server)
       server.destroy
       return
     end
@@ -1363,7 +1385,7 @@ class RelaySubscriptionManager
     voice_provider_tags = tags.select { |t| t[0] == "voice_provider" }
     sync_voice_providers(server, voice_provider_tags)
 
-    log_server_event(event)
+    log_server_event(event, server: server)
 
     ServerChannel.broadcast_to(server, { type: "server_updated" })
     Rails.logger.info("[RelaySubscriptionManager] Updated server metadata for #{server.nostr_group_id}")
@@ -1427,7 +1449,7 @@ class RelaySubscriptionManager
       server.channels.where.not(public_id: remote_ch_ids).destroy_all if remote_ch_ids.any?
     end
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     ServerChannel.broadcast_to(server, { type: "sidebar_reorder" })
     Rails.logger.info("[RelaySubscriptionManager] Synced server structure for #{server.nostr_group_id}")
   rescue ActiveRecord::RecordNotUnique
@@ -1468,7 +1490,7 @@ class RelaySubscriptionManager
       end
     end
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     ServerChannel.broadcast_to(server, { type: "roles_updated" })
     Rails.logger.info("[RelaySubscriptionManager] Synced server roles for #{server.nostr_group_id}")
   rescue ActiveRecord::RecordNotUnique
@@ -1512,7 +1534,7 @@ class RelaySubscriptionManager
           })
         end
       end
-      log_server_event(event)
+      log_server_event(event, server: server)
       Rails.logger.info("[RelaySubscriptionManager] Member removed from #{server.nostr_group_id}: #{member_pubkey[0..15]}")
       return
     end
@@ -1635,7 +1657,7 @@ class RelaySubscriptionManager
       end
     end
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     Rails.logger.info("[RelaySubscriptionManager] Synced member for #{server.nostr_group_id}: #{member_pubkey[0..15]}")
   rescue ActiveRecord::RecordNotUnique
     nil
@@ -1682,7 +1704,7 @@ class RelaySubscriptionManager
     # Remove emojis not in the event
     server.server_emojis.where.not(name: remote_names).destroy_all if remote_names.any?
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     Rails.logger.info("[RelaySubscriptionManager] Synced server emojis for #{server.nostr_group_id}")
   rescue ActiveRecord::RecordNotUnique
     nil
@@ -1729,7 +1751,7 @@ class RelaySubscriptionManager
 
     server.server_stickers.where.not(name: remote_names).destroy_all if remote_names.any?
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     Rails.logger.info("[RelaySubscriptionManager] Synced server stickers for #{server.nostr_group_id}")
   rescue ActiveRecord::RecordNotUnique
     nil
@@ -1767,7 +1789,7 @@ class RelaySubscriptionManager
       Rails.logger.info("[RelaySubscriptionManager] Banned #{banned_pubkey[0..15]} from #{server.nostr_group_id}")
     end
 
-    log_server_event(event)
+    log_server_event(event, server: server)
   rescue ActiveRecord::RecordNotUnique
     nil
   rescue => e
@@ -1809,7 +1831,7 @@ class RelaySubscriptionManager
       end
     end
 
-    log_server_event(event)
+    log_server_event(event, server: server)
   rescue ActiveRecord::RecordNotUnique
     nil
   rescue => e
@@ -1890,7 +1912,7 @@ class RelaySubscriptionManager
       html: html
     })
 
-    log_server_event(event)
+    log_server_event(event, server: server)
     Rails.logger.debug("[RelaySubscriptionManager] Processed reaction from #{reactor_pubkey[0..15]} on #{target_event_id[0..15]}")
   rescue ActiveRecord::RecordNotUnique
     nil

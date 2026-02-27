@@ -30,7 +30,8 @@ class Message < ApplicationRecord
   scope :ordered, -> { order(created_at: :asc) }
   scope :recent, -> { order(created_at: :desc) }
 
-  IMAGE_URL_REGEX = /(?:https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?|(?:https?:\/\/\S+)?\/rails\/active_storage\/\S+)/i
+  BLOSSOM_DOMAINS = %w[blossom.primal.net cdn.satellite.earth].freeze
+  IMAGE_URL_REGEX = /(?:https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?|(?:https?:\/\/\S+)?\/rails\/active_storage\/\S+|https?:\/\/(?:#{BLOSSOM_DOMAINS.map { |d| Regexp.escape(d) }.join("|")})\/[0-9a-f]{64}\b)/i
   YOUTUBE_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})(?:[&?][\S]*)*/i
   INSTAGRAM_REGEX = /(?:https?:\/\/)?(?:www\.)?(?:instagram\.com|kkinstagram\.com)\/(reel|p)\/([\w-]+)/i
   VIDEO_URL_REGEX = /https?:\/\/\S+\.(?:mp4|webm|mov|ogv)(?:\?\S*)?/i
@@ -82,17 +83,33 @@ class Message < ApplicationRecord
   end
 
   def unfurl_images(html)
-    html.gsub(/<a[^>]*href="([^"]+)"[^>]*>([^<]*)<\/a>/) do |match|
+    # First, convert linked image URLs
+    html = html.gsub(/<a[^>]*href="([^"]+)"[^>]*>([^<]*)<\/a>/) do |match|
       url = $1
       # Strip trailing JSON artifacts that Redcarpet autolink may include (e.g. "] from ["url"])
       url = url.sub(/(?:%22%5[dD]|%22|%5[dD]|["\]\[,})+>])+\z/, "")
-      if url.match?(IMAGE_URL_REGEX)
+      if image_url?(url)
         fname = begin; File.basename(URI.parse(url).path); rescue; "image"; end
         %(<div class="mt-2"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" loading="lazy" data-preview-src="#{url}" data-preview-filename="#{fname}"></div>)
       else
         match
       end
     end
+    # Also convert bare Active Storage paths (e.g. stickers) that Redcarpet doesn't autolink.
+    # Only match paths preceded by start-of-string, >, or whitespace (not mid-URL like http://host/rails/...).
+    html.gsub(%r{(^|(?<=[>\s]))(/rails/active_storage/\S+?)(?=<|$|\s)}m) do |match|
+      url = $2
+      fname = begin; File.basename(URI.parse(url).path); rescue; "sticker"; end
+      %(<div class="mt-2"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" loading="lazy" data-preview-src="#{url}" data-preview-filename="#{fname}"></div>)
+    end
+  end
+
+  def image_url?(url)
+    return true if url.match?(IMAGE_URL_REGEX)
+    # Also match any configured Blossom server URLs (sha256 hash paths)
+    BlossomClientService.blossom_server_urls.any? { |base| url.start_with?(base) && url.match?(%r{/[0-9a-f]{64}\b}) }
+  rescue
+    false
   end
 
 def unfurl_links(html, sync_tenor: true)
@@ -287,7 +304,7 @@ end
   # Collect other URL previews (non-image, non-youtube)
   seen_urls = Set.new
   (content || "").scan(URL_REGEX).each do |url|
-    next if url.match?(IMAGE_URL_REGEX)
+    next if image_url?(url)
     next if url.match?(YOUTUBE_REGEX)
     next if url.match?(MESSAGE_LINK_REGEX)
     next if url.match?(INSTAGRAM_REGEX)
@@ -488,6 +505,7 @@ end
 
   def create_mention_notifications
     return if system_message?
+    return unless user
     server = channel&.server
     return unless server
 

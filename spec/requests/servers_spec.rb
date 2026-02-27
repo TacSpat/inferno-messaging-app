@@ -60,14 +60,14 @@ RSpec.describe "Servers", type: :request do
       expect(response).to redirect_to(root_path)
     end
 
-    it "denies non-owner deletion" do
+    it "allows member deletion" do
       other_user = create(:user, :confirmed)
       server.server_memberships.create!(user: other_user)
       sign_in other_user
 
       expect {
         delete server_path(server.public_id)
-      }.to raise_error(Pundit::NotAuthorizedError)
+      }.to change(Server, :count).by(-1)
     end
   end
 end

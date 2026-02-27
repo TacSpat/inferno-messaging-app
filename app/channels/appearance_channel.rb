@@ -1,8 +1,18 @@
 class AppearanceChannel < ApplicationCable::Channel
+  MANUAL_STATES = %w[dnd invisible].freeze
+
   def subscribed
-    current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current)
-    broadcast_presence_later("online")
-    publish_nostr_status("online")
+    manual = params[:manual_status].to_s.presence
+    if manual && %w[dnd invisible].include?(manual)
+      current_user.update_columns(online_state: User.online_states[manual.to_sym], online_at: Time.current)
+      broadcast_state = manual == "invisible" ? "offline" : manual
+      broadcast_presence_later(broadcast_state)
+      publish_nostr_status(broadcast_state)
+    else
+      current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current)
+      broadcast_presence_later("online")
+      publish_nostr_status("online")
+    end
   end
 
   def unsubscribed
@@ -10,20 +20,40 @@ class AppearanceChannel < ApplicationCable::Channel
   end
 
   def ping(data = {})
-    state = data["state"] == "idle" ? :idle : :online
-    current_user.update_columns(online_state: User.online_states[state], online_at: Time.current)
+    if current_user.dnd? || current_user.invisible?
+      current_user.update_columns(online_at: Time.current)
+    else
+      state = data["state"] == "idle" ? :idle : :online
+      current_user.update_columns(online_state: User.online_states[state], online_at: Time.current)
+    end
   end
 
   def away
+    return if current_user.dnd? || current_user.invisible?
+
     current_user.update_columns(online_state: User.online_states[:idle], online_at: Time.current)
     broadcast_presence("idle")
     publish_nostr_status("idle")
   end
 
   def back
+    return if current_user.dnd? || current_user.invisible?
+
     current_user.update_columns(online_state: User.online_states[:online], online_at: Time.current)
     broadcast_presence("online")
     publish_nostr_status("online")
+  end
+
+  def set_status(data)
+    status = data["status"].to_s
+    return unless %w[online idle dnd invisible].include?(status)
+
+    current_user.update_columns(online_state: User.online_states[status.to_sym], online_at: Time.current)
+
+    # Invisible users appear offline to others
+    broadcast_state = status == "invisible" ? "offline" : status
+    broadcast_presence(broadcast_state)
+    publish_nostr_status(broadcast_state)
   end
 
   private

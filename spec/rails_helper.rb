@@ -22,7 +22,6 @@ RSpec.configure do |config|
   config.include FactoryBot::Syntax::Methods
   config.include Devise::Test::IntegrationHelpers, type: :request
   config.include NostrTestHelpers
-  config.include AdminHelpers, type: :request
 
   # Use test adapter to prevent perform_later from hitting Redis/Sidekiq
   ActiveJob::Base.queue_adapter = :test
@@ -30,7 +29,6 @@ RSpec.configure do |config|
   WebMock.disable_net_connect!(allow_localhost: true)
 
   config.before(:each) do
-    InstanceConfig.first_or_create!
     # Stub ActionCable broadcasts globally to prevent errors in tests
     allow(ChannelChatChannel).to receive(:broadcast_to) if defined?(ChannelChatChannel)
     allow(ServerChannel).to receive(:broadcast_to) if defined?(ServerChannel)

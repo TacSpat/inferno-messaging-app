@@ -6,6 +6,34 @@ class DmMessagesController < ApplicationController
   before_action :set_message, only: [:update, :destroy]
   before_action :validate_file_types, only: [:create, :update]
 
+  def older_messages
+    before_message = @conversation.messages.find_by(public_id: params[:before])
+    return head :bad_request unless before_message
+
+    @messages = @conversation.messages
+                  .includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)
+                  .where("messages.created_at < ?", before_message.created_at)
+                  .ordered.last(50)
+    @has_older = @messages.any? && @conversation.messages.where("created_at < ?", @messages.first.created_at).exists?
+
+    response.headers["X-Has-Older"] = @has_older.to_s
+    render partial: "dm_messages/older_messages", locals: { messages: @messages, has_older: @has_older }
+  end
+
+  def newer_messages
+    after_message = @conversation.messages.find_by(public_id: params[:after])
+    return head :bad_request unless after_message
+
+    @messages = @conversation.messages
+                  .includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)
+                  .where("messages.created_at > ?", after_message.created_at)
+                  .ordered.first(50)
+    @has_newer = @messages.any? && @conversation.messages.where("created_at > ?", @messages.last.created_at).exists?
+
+    response.headers["X-Has-Newer"] = @has_newer.to_s
+    render partial: "dm_messages/newer_messages", locals: { messages: @messages, has_newer: @has_newer }
+  end
+
   def create
     participant = @conversation.conversation_participants.find_by(user: current_user)
     unless participant

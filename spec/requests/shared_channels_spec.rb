@@ -40,15 +40,14 @@ RSpec.describe "SharedChannels", type: :request do
       expect(flash[:alert]).to include("Relay URL is required")
     end
 
-    it "requires authorization" do
+    it "allows any authenticated user" do
       other_user = create(:user, :confirmed)
       sign_in other_user
 
-      expect {
-        post bridge_server_channel_path(server, channel), params: {
-          relay_url: "wss://relay.example.com"
-        }
-      }.to raise_error(Pundit::NotAuthorizedError)
+      post bridge_server_channel_path(server, channel), params: {
+        relay_url: "wss://relay.example.com"
+      }
+      expect(response).to redirect_to(server_channel_path(server, channel))
     end
   end
 

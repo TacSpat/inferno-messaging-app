@@ -111,12 +111,49 @@ class NostrHistoryFetcher
         next
       end
 
-      # Skip friend request/response messages
-      parsed = JSON.parse(plaintext) rescue nil
-      next if parsed.is_a?(Hash) && %w[friend_request friend_response].include?(parsed["type"])
+      # Extract content from structured payloads (same logic as RelaySubscriptionManager)
+      content = plaintext
+      files = nil
+      emoji_urls = nil
+      begin
+        parsed = JSON.parse(plaintext)
+        if parsed.is_a?(Hash)
+          if parsed["type"] == "message"
+            content = parsed["content"] || ""
+            files = parsed["files"]
+            if files.is_a?(Array) && files.any?
+              content += "\n" unless content.empty?
+              content += files.join("\n")
+            end
+            emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
+          elsif parsed.key?("type")
+            # Skip non-message payloads (friend_request, friend_response, message_delete, message_edit, etc.)
+            next
+          end
+        end
+      rescue JSON::ParserError
+        # Plain text — use as-is
+      end
+
+      # Cache remote file URLs locally
+      if files.is_a?(Array) && files.any?
+        cached = RemoteAssetCache.cache_all(files)
+        cached.each { |remote, local| content = content.gsub(remote, local) }
+      end
+
+      # Replace custom emoji shortcodes with locally-cached images
+      if emoji_urls.present?
+        emoji_urls.each do |name, url|
+          cached_url = RemoteAssetCache.cache(url) || url
+          img = %(<img src="#{ERB::Util.html_escape(cached_url)}" alt=":#{ERB::Util.html_escape(name)}:" class="inline-block align-text-bottom" style="height:1.375em;width:auto" loading="lazy">)
+          content = content.gsub(/:#{Regexp.escape(name)}:/i, img)
+        end
+      end
+
+      next if content.blank?
 
       message = conversation.messages.create!(
-        content: plaintext,
+        content: content,
         public_id: SecureRandom.alphanumeric(12),
         nostr_event_id: event["id"],
         created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current

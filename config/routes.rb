@@ -171,6 +171,10 @@ Rails.application.routes.draw do
       post :accept
     end
     resources :dm_messages, only: [:create, :update, :destroy] do
+      collection do
+        get :older_messages
+        get :newer_messages
+      end
       member do
         post :toggle_reaction, controller: "dm_reactions", action: "toggle"
       end

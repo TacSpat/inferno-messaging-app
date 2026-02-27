@@ -60,6 +60,48 @@ document.addEventListener("error", (e) => {
   }
 }, true)
 
+// Retry failed image loads once after 3s (covers race with background sync)
+document.addEventListener("error", (e) => {
+  if (e.target.tagName === "IMG" && !e.target.dataset.retried) {
+    e.target.dataset.retried = "1"
+    const src = e.target.src
+    setTimeout(() => { e.target.src = ""; e.target.src = src }, 3000)
+  }
+}, true)
+
+// Themed number input spinners — subtle inline chevrons
+function wrapNumberInputs(root = document) {
+  const chevronUp = '<svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 5L5 1L9 5"/></svg>'
+  const chevronDown = '<svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1L5 5L9 1"/></svg>'
+
+  root.querySelectorAll('input[type="number"]').forEach(input => {
+    if (input.closest('.number-input-wrap')) return
+    const wrap = document.createElement('div')
+    wrap.className = 'number-input-wrap'
+    input.parentNode.insertBefore(wrap, input)
+    wrap.appendChild(input)
+
+    const up = document.createElement('button')
+    up.type = 'button'
+    up.className = 'num-btn num-btn-up'
+    up.innerHTML = chevronUp
+    up.tabIndex = -1
+    up.addEventListener('click', () => { input.stepUp(); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })) })
+
+    const down = document.createElement('button')
+    down.type = 'button'
+    down.className = 'num-btn num-btn-down'
+    down.innerHTML = chevronDown
+    down.tabIndex = -1
+    down.addEventListener('click', () => { input.stepDown(); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })) })
+
+    wrap.appendChild(up)
+    wrap.appendChild(down)
+  })
+}
+document.addEventListener('turbo:load', () => wrapNumberInputs())
+document.addEventListener('turbo:frame-render', (e) => wrapNumberInputs(e.target))
+
 // Restore emoji PUA maps from localStorage (for page refresh resilience)
 try {
   const stored = localStorage.getItem('_emojiMap')

@@ -44,7 +44,7 @@ module MemberInterface
   end
 
   def tag
-    "#{username.presence || pubkey[0..8]}#0000"
+    username.presence || pubkey[0..8]
   end
 
   def nostr_public_key

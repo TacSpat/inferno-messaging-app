@@ -17,7 +17,7 @@ class MentionsController < ApplicationController
 
     # Users
     server.members.where("LOWER(username) LIKE ?", "%#{query}%").limit(8).each do |user|
-      results << { type: "user", id: user.public_id, name: user.username, display: "@#{user.username}", discriminator: user.discriminator }
+      results << { type: "user", id: user.public_id, name: user.username, display: "@#{user.username}" }
     end
 
     # Roles
