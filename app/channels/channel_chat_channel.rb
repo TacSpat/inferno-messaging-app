@@ -65,8 +65,8 @@ class ChannelChatChannel < ApplicationCable::Channel
       pubkey: current_user.nostr_public_key,
       content: content,
       tags: [
-        ["h", @channel.nostr_group_id],
-        ["p", current_user.nostr_public_key]
+        [ "h", @channel.nostr_group_id ],
+        [ "p", current_user.nostr_public_key ]
       ]
     )
     signed = signer.sign(event)

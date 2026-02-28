@@ -25,18 +25,18 @@ class RelayChannel < ApplicationCable::Channel
     end
   rescue => e
     Rails.logger.error("[RelayChannel] Error: #{e.message}")
-    transmit ["NOTICE", "error: #{e.message}"]
+    transmit [ "NOTICE", "error: #{e.message}" ]
   end
 
   private
 
   def handle_req(data)
     sub_id = data[1]
-    return transmit(["NOTICE", "missing subscription id"]) unless sub_id.present?
+    return transmit([ "NOTICE", "missing subscription id" ]) unless sub_id.present?
 
     # Support multiple filters per REQ
     filters = data[2..].select { |f| f.is_a?(Hash) }
-    return transmit(["NOTICE", "missing filter"]) if filters.empty?
+    return transmit([ "NOTICE", "missing filter" ]) if filters.empty?
 
     # Query stored events matching filters
     filters.each do |filter|
