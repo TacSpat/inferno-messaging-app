@@ -7,6 +7,8 @@ import {
   DataPacket_Kind
 } from "livekit-client"
 
+import { RnnoiseProcessor } from "../lib/rnnoise_processor"
+
 const VOICE_SESSION_KEY = "voice-active-session"
 
 /**
@@ -26,7 +28,7 @@ export default class extends Controller {
     "muteBtn", "muteIcon", "deafenBtn", "deafenIcon",
     "cameraBtn", "cameraIcon",
     "screenShareBtn", "screenShareIcon", "disconnectBtn",
-    "broadcastBtn", "requestSpeakBtn"
+    "broadcastBtn", "requestSpeakBtn", "hierarchyRow"
   ]
 
   connect() {
@@ -52,6 +54,7 @@ export default class extends Controller {
     this._pendingScreenShares = new Map()      // identity → { track, participant, placeholder }
     this._pendingScreenShareAudio = new Map()  // identity → { track, participant }
     this._screenShareAudioElements = new Map() // identity → audio element (opt-in)
+    this._screenShareGainNodes = new Map()     // identity → gainNode
     this._localPreviewVisHandler = null
     this._ancestorRooms = new Map()     // channelId → { room, audioElements, gainNodes, analysers, channelId, channelName }
     this._monitoredRooms = new Map()    // channelId → { room, audioElements, gainNodes, analysers, volume }
@@ -69,8 +72,10 @@ export default class extends Controller {
     this._onServerDeafen = this._handleServerDeafen.bind(this)
     this._onBeforeUnload = this._handleBeforeUnload.bind(this)
     this._onOutputVolumeChanged = this._handleOutputVolumeChanged.bind(this)
+    this._onNoiseSuppressionChanged = this._handleNoiseSuppressionChanged.bind(this)
     this._onEchoCancellationChanged = this._handleEchoCancellationChanged.bind(this)
     this._onAgcChanged = this._handleAgcChanged.bind(this)
+    this._onInputSensitivityChanged = this._handleInputSensitivityChanged.bind(this)
     this._onInputDeviceChanged = this._handleInputDeviceChanged.bind(this)
     this._onOutputDeviceChanged = this._handleOutputDeviceChanged.bind(this)
 
@@ -81,8 +86,10 @@ export default class extends Controller {
     window.addEventListener("voice:server-deafen", this._onServerDeafen)
     window.addEventListener("beforeunload", this._onBeforeUnload)
     window.addEventListener("voice:output-volume-changed", this._onOutputVolumeChanged)
+    window.addEventListener("voice:noise-suppression-changed", this._onNoiseSuppressionChanged)
     window.addEventListener("voice:echo-cancellation-changed", this._onEchoCancellationChanged)
     window.addEventListener("voice:agc-changed", this._onAgcChanged)
+    window.addEventListener("voice:input-sensitivity-changed", this._onInputSensitivityChanged)
     window.addEventListener("voice:input-device-changed", this._onInputDeviceChanged)
     window.addEventListener("voice:output-device-changed", this._onOutputDeviceChanged)
 
@@ -99,8 +106,10 @@ export default class extends Controller {
     window.removeEventListener("voice:server-deafen", this._onServerDeafen)
     window.removeEventListener("beforeunload", this._onBeforeUnload)
     window.removeEventListener("voice:output-volume-changed", this._onOutputVolumeChanged)
+    window.removeEventListener("voice:noise-suppression-changed", this._onNoiseSuppressionChanged)
     window.removeEventListener("voice:echo-cancellation-changed", this._onEchoCancellationChanged)
     window.removeEventListener("voice:agc-changed", this._onAgcChanged)
+    window.removeEventListener("voice:input-sensitivity-changed", this._onInputSensitivityChanged)
     window.removeEventListener("voice:input-device-changed", this._onInputDeviceChanged)
     window.removeEventListener("voice:output-device-changed", this._onOutputDeviceChanged)
     this._disconnectRoom()
@@ -208,6 +217,7 @@ export default class extends Controller {
     this._pendingScreenShareAudio.clear()
     this._screenShareAudioElements.forEach(el => el.remove())
     this._screenShareAudioElements.clear()
+    this._screenShareGainNodes.clear()
     // Clean up ancestor rooms on force-move
     for (const [, state] of this._ancestorRooms) {
       this._cleanupAncestorState(state)
@@ -262,7 +272,7 @@ export default class extends Controller {
     const opts = {
       autoGainControl: localStorage.getItem("voice-auto-gain-control") !== "false",
       echoCancellation: localStorage.getItem("voice-echo-cancellation") !== "false",
-      noiseSuppression: true
+      noiseSuppression: localStorage.getItem("voice-noise-suppression") !== "false"
     }
     if (deviceId && deviceId !== "default") {
       opts.deviceId = { ideal: deviceId }
@@ -272,12 +282,21 @@ export default class extends Controller {
 
   // ─── Live settings handlers ──────────────────────────────────
 
+  async _handleNoiseSuppressionChanged() {
+    await this._republishMicWithCurrentSettings()
+    await this._syncNoiseProcessor()
+  }
+
   async _handleEchoCancellationChanged() {
     await this._republishMicWithCurrentSettings()
   }
 
   async _handleAgcChanged() {
     await this._republishMicWithCurrentSettings()
+  }
+
+  _handleInputSensitivityChanged() {
+    this._speakThreshold = this._computeSpeakThreshold()
   }
 
   async _handleInputDeviceChanged(e) {
@@ -303,14 +322,47 @@ export default class extends Controller {
     }
   }
 
+  // Attach or detach the RNNoise processor based on stored preference.
+  async _syncNoiseProcessor() {
+    if (!this.room || this._muted) return
+    const enabled = localStorage.getItem("voice-noise-suppression") !== "false"
+    const pub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)
+    const localTrack = pub?.track
+    if (!localTrack) return
+
+    if (enabled && !this._rnnoiseProcessor) {
+      try {
+        this._rnnoiseProcessor = new RnnoiseProcessor()
+        await localTrack.setProcessor(this._rnnoiseProcessor)
+        console.log("[VoiceChannel] RNNoise processor attached")
+      } catch (e) {
+        console.warn("[VoiceChannel] RNNoise attach failed:", e)
+        this._rnnoiseProcessor = null
+      }
+    } else if (!enabled && this._rnnoiseProcessor) {
+      try {
+        await localTrack.stopProcessor()
+      } catch (_) {}
+      this._rnnoiseProcessor = null
+      console.log("[VoiceChannel] RNNoise processor detached")
+    }
+  }
+
   // Republish mic track with updated audio processing constraints (echo, AGC)
   async _republishMicWithCurrentSettings() {
     if (!this.room || this._muted) return
     try {
+      // Processor must be detached before disabling the track
+      if (this._rnnoiseProcessor) {
+        const pub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)
+        try { await pub?.track?.stopProcessor() } catch (_) {}
+        this._rnnoiseProcessor = null
+      }
       await this.room.localParticipant.setMicrophoneEnabled(false)
       this._cleanupLocalLevelMeter()
       await this.room.localParticipant.setMicrophoneEnabled(true, this._audioCaptureOptions())
       this._setupLocalLevelMeter()
+      await this._syncNoiseProcessor()
       console.log("[VoiceChannel] Republished mic with updated audio processing settings")
     } catch (err) {
       console.warn("[VoiceChannel] Failed to republish mic:", err)
@@ -395,6 +447,9 @@ export default class extends Controller {
     this._muted = false
     this._deafened = false
 
+    // Attach RNNoise processor if noise suppression is enabled
+    await this._syncNoiseProcessor()
+
     // Render any participants already in the room (joined before us)
     for (const participant of this.room.remoteParticipants.values()) {
       this._ensureParticipantUI(participant)
@@ -437,6 +492,7 @@ export default class extends Controller {
     this._userInitiatedDisconnect = true
     this._stopLevelLoop()
     this._cleanupLocalLevelMeter()
+    this._rnnoiseProcessor = null
 
     // Clear persisted session — explicit disconnect should not auto-rejoin
     this._clearSession()
@@ -484,6 +540,7 @@ export default class extends Controller {
     this._pendingScreenShareAudio.clear()
     this._screenShareAudioElements.forEach(el => el.remove())
     this._screenShareAudioElements.clear()
+    this._screenShareGainNodes.clear()
     if (this._localPreviewVisHandler) {
       document.removeEventListener("visibilitychange", this._localPreviewVisHandler)
       this._localPreviewVisHandler = null
@@ -743,9 +800,21 @@ export default class extends Controller {
     this._localMeter = null
   }
 
+  // Convert the settings slider (-100..0) to an RMS threshold for the level loop.
+  // The slider scale is a linear percentage mapped to -100..0, NOT real dB —
+  // so we use a squared curve to map it to the 0..0.30 RMS range that the
+  // time-domain analyser produces for typical speech.
+  _computeSpeakThreshold() {
+    const auto = localStorage.getItem("voice-sensitivity-auto") !== "false"
+    if (auto) return 0.03
+    const slider = parseInt(localStorage.getItem("voice-sensitivity-threshold") ?? "-50", 10)
+    const pct = (slider + 100) / 100            // 0..1  (-100→0, -50→0.5, 0→1)
+    return 0.001 + pct * pct * 0.30             // squared curve: -50→0.076, -80→0.013, -20→0.193
+  }
+
   _startLevelLoop() {
     if (this._levelRafId) return
-    const SPEAK_THRESHOLD = 0.07  // minimum level (0-1) to count as speaking
+    this._speakThreshold = this._computeSpeakThreshold()
     const SMOOTH = 0.35           // exponential smoothing (0 = instant, 1 = frozen)
     this._smoothedLevels = new Map()
     let debugCounter = 0
@@ -808,7 +877,7 @@ export default class extends Controller {
         console.log("[VoiceLevel]", dbg.join(", ") || "(none)", `| speaking=${document.querySelectorAll(".voice-speaking").length}`)
       }
 
-      this._applyLevelsToDOM(levels, SPEAK_THRESHOLD)
+      this._applyLevelsToDOM(levels, this._speakThreshold)
     }
     this._levelRafId = requestAnimationFrame(tick)
   }
@@ -1235,6 +1304,15 @@ export default class extends Controller {
       this._toggleVideoTheatre(identity)
     })
 
+    // Right-click context menu for volume / mute / broadcast
+    preview.addEventListener("contextmenu", (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      window.dispatchEvent(new CustomEvent("voice:stream-context", {
+        detail: { identity, x: e.clientX, y: e.clientY }
+      }))
+    })
+
     // Add close button for remote streams (stop watching)
     const localId = this.room?.localParticipant?.identity
     if (identity !== localId) {
@@ -1377,6 +1455,20 @@ export default class extends Controller {
       document.body.appendChild(el)
       this._screenShareAudioElements.set(identity, el)
       this._pendingScreenShareAudio.delete(identity)
+
+      // Web Audio gain chain for volume control
+      try {
+        if (!this._audioContext) this._audioContext = new AudioContext()
+        if (this._audioContext.state === "suspended") this._audioContext.resume()
+        const source = this._audioContext.createMediaElementSource(el)
+        const gainNode = this._audioContext.createGain()
+        source.connect(gainNode)
+        gainNode.connect(this._audioContext.destination)
+        this._screenShareGainNodes.set(identity, gainNode)
+        // Restore saved volume
+        const saved = localStorage.getItem(`ss-vol-${identity}`)
+        if (saved) gainNode.gain.value = parseInt(saved, 10) / 100
+      } catch (e) { /* fallback: no gain node */ }
     }
   }
 
@@ -1394,6 +1486,7 @@ export default class extends Controller {
       el.remove()
       this._screenShareAudioElements.delete(identity)
     }
+    this._screenShareGainNodes.delete(identity)
   }
 
   _unwatchScreenShare(identity) {
@@ -1551,6 +1644,24 @@ export default class extends Controller {
     this._userVolumes.set(userId, gain)
     // The LiveKit identity is the user's public_id
     this._setParticipantVolume(userId, this._deafened ? 0 : gain * this._getOutputGain())
+  }
+
+  // Public: set screen share audio volume (called from stream context menu)
+  setScreenShareVolume(identity, gain) {
+    const gainNode = this._screenShareGainNodes.get(identity)
+    if (gainNode) {
+      gainNode.gain.value = gain
+    } else {
+      const el = this._screenShareAudioElements.get(identity)
+      if (el) el.volume = Math.min(1, Math.max(0, gain))
+    }
+  }
+
+  // Public: toggle mute on a screen share's audio
+  muteScreenShareAudio(identity) {
+    const el = this._screenShareAudioElements.get(identity)
+    if (el) el.muted = !el.muted
+    return el?.muted ?? false
   }
 
   _setRemoteVolumes(gain) {
@@ -2170,23 +2281,24 @@ export default class extends Controller {
   // ─── Hierarchical Voice: UI Helpers ──────────────────────────
 
   _updateHierarchyButtons() {
-    // Show broadcast button if channel has children
+    const hasChildren = this._childChannels.length > 0
+    const hasParent = this._ancestorRooms.size > 0
+
     if (this.hasBroadcastBtnTarget) {
-      if (this._childChannels.length > 0) {
-        this.broadcastBtnTarget.classList.remove("hidden")
-      } else {
-        this.broadcastBtnTarget.classList.add("hidden")
-      }
+      this.broadcastBtnTarget.classList.toggle("hidden", !hasChildren)
+      this.broadcastBtnTarget.classList.toggle("flex", hasChildren)
     }
 
-    // Show request-to-speak button if channel has a parent
-    // (we know it has a parent if there are ancestor rooms)
     if (this.hasRequestSpeakBtnTarget) {
-      if (this._ancestorRooms.size > 0) {
-        this.requestSpeakBtnTarget.classList.remove("hidden")
-      } else {
-        this.requestSpeakBtnTarget.classList.add("hidden")
-      }
+      this.requestSpeakBtnTarget.classList.toggle("hidden", !hasParent)
+      this.requestSpeakBtnTarget.classList.toggle("flex", hasParent)
+    }
+
+    // Show the row only if at least one button is visible
+    if (this.hasHierarchyRowTarget) {
+      const show = hasChildren || hasParent
+      this.hierarchyRowTarget.classList.toggle("hidden", !show)
+      this.hierarchyRowTarget.classList.toggle("flex", show)
     }
 
     this._updateBroadcastIcon()

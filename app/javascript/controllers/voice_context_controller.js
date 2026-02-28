@@ -15,10 +15,14 @@ export default class extends Controller {
     this.menu = null
     this.moveDropdown = null
     this.boundClose = this.closeMenu.bind(this)
+    this._boundEscape = (e) => { if (e.key === "Escape") this.closeMenu() }
+    this._onStreamContext = (e) => this.showStreamMenu(e)
+    window.addEventListener("voice:stream-context", this._onStreamContext)
   }
 
   disconnect() {
     this.closeMenu()
+    window.removeEventListener("voice:stream-context", this._onStreamContext)
   }
 
   async show(event) {
@@ -55,10 +59,139 @@ export default class extends Controller {
         horizontalAlign: "left"
       })
       this._bindActions(serverId)
-      setTimeout(() => document.addEventListener("click", this.boundClose), 10)
+      setTimeout(() => {
+        document.addEventListener("click", this.boundClose)
+        document.addEventListener("keydown", this._boundEscape)
+      }, 10)
     } catch (e) {
       console.warn("[VoiceContext] Failed to load context menu:", e)
     }
+  }
+
+  showStreamMenu(event) {
+    this.closeMenu()
+    const { identity, x, y } = event.detail
+    if (!identity) return
+
+    const voiceEl = document.querySelector("[data-controller~='voice-channel']")
+    if (!voiceEl) return
+    const vc = this.application.getControllerForElementAndIdentifier(voiceEl, "voice-channel")
+    if (!vc) return
+
+    const hasAudio = vc._screenShareAudioElements.has(identity)
+    const isLocal = identity === vc.room?.localParticipant?.identity
+    const hasChildren = vc._childChannels?.length > 0
+
+    // Nothing to show if no audio and no broadcast option
+    if (!hasAudio && !(isLocal && hasChildren)) return
+
+    const wrapper = document.createElement("div")
+    wrapper.className = "w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 px-1.5 text-sm"
+
+    // Volume slider + mute for remote screen shares with audio
+    if (hasAudio && !isLocal) {
+      const saved = localStorage.getItem(`ss-vol-${identity}`)
+      const savedVal = saved ? parseInt(saved, 10) : 100
+
+      // Volume slider
+      const volDiv = document.createElement("div")
+      volDiv.className = "px-2.5 py-1.5"
+      volDiv.innerHTML = `
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-gray-400 text-xs">Stream Volume</span>
+          <span class="text-gray-500 text-[10px]" data-ss-vol-label>${savedVal}%</span>
+        </div>
+        <input type="range" min="0" max="200" value="${savedVal}"
+               class="w-full h-1 accent-accent cursor-pointer"
+               data-ss-vol-slider>
+      `
+      wrapper.appendChild(volDiv)
+
+      const slider = volDiv.querySelector("[data-ss-vol-slider]")
+      const label = volDiv.querySelector("[data-ss-vol-label]")
+      slider.addEventListener("input", (e) => {
+        e.stopPropagation()
+        const vol = parseInt(slider.value, 10)
+        label.textContent = `${vol}%`
+        localStorage.setItem(`ss-vol-${identity}`, vol)
+        vc.setScreenShareVolume(identity, vol / 100)
+      })
+
+      // Mute toggle
+      const el = vc._screenShareAudioElements.get(identity)
+      const isMuted = el?.muted ?? false
+      const sep = document.createElement("div")
+      sep.className = "border-t border-gray-700 my-1"
+      wrapper.appendChild(sep)
+
+      const muteBtn = document.createElement("button")
+      muteBtn.className = "flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+      muteBtn.innerHTML = `
+        <span>${isMuted ? "Unmute" : "Mute"} Stream Audio</span>
+        <div class="w-8 h-4 rounded-full transition-colors ${isMuted ? "bg-accent" : "bg-gray-600"} relative">
+          <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform ${isMuted ? "translate-x-4" : "translate-x-0.5"}"></span>
+        </div>
+      `
+      muteBtn.addEventListener("click", (e) => {
+        e.stopPropagation()
+        const nowMuted = vc.muteScreenShareAudio(identity)
+        const toggle = muteBtn.querySelector(".rounded-full")
+        const knob = muteBtn.querySelector(".rounded-full span")
+        const lbl = muteBtn.querySelector("span")
+        lbl.textContent = `${nowMuted ? "Unmute" : "Mute"} Stream Audio`
+        toggle.classList.toggle("bg-accent", nowMuted)
+        toggle.classList.toggle("bg-gray-600", !nowMuted)
+        knob.classList.toggle("translate-x-4", nowMuted)
+        knob.classList.toggle("translate-x-0.5", !nowMuted)
+      })
+      wrapper.appendChild(muteBtn)
+    }
+
+    // Broadcast toggle for local stream in parent channels with children
+    if (isLocal && hasChildren) {
+      if (wrapper.children.length > 0) {
+        const sep = document.createElement("div")
+        sep.className = "border-t border-gray-700 my-1"
+        wrapper.appendChild(sep)
+      }
+
+      const broadcastBtn = document.createElement("button")
+      broadcastBtn.className = "flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer"
+      const isOn = vc._broadcasting
+      broadcastBtn.innerHTML = `
+        <span>Broadcast to Children</span>
+        <div class="w-8 h-4 rounded-full transition-colors ${isOn ? "bg-green-500" : "bg-gray-600"} relative">
+          <span class="block w-3 h-3 bg-white rounded-full absolute top-0.5 transition-transform ${isOn ? "translate-x-4" : "translate-x-0.5"}"></span>
+        </div>
+      `
+      broadcastBtn.addEventListener("click", (e) => {
+        e.stopPropagation()
+        vc.toggleBroadcast()
+        const nowOn = vc._broadcasting
+        const toggle = broadcastBtn.querySelector(".rounded-full")
+        const knob = broadcastBtn.querySelector(".rounded-full span")
+        toggle.classList.toggle("bg-green-500", nowOn)
+        toggle.classList.toggle("bg-gray-600", !nowOn)
+        knob.classList.toggle("translate-x-4", nowOn)
+        knob.classList.toggle("translate-x-0.5", !nowOn)
+      })
+      wrapper.appendChild(broadcastBtn)
+    }
+
+    this.menu = document.createElement("div")
+    this.menu.className = "fixed z-[60] context-pop"
+    this.menu.setAttribute("data-voice-context-menu", "")
+    this.menu.appendChild(wrapper)
+
+    document.body.appendChild(this.menu)
+    positionPopup(this.menu, { x, y }, {
+      preferredSide: "below",
+      horizontalAlign: "left"
+    })
+    setTimeout(() => {
+      document.addEventListener("click", this.boundClose)
+      document.addEventListener("keydown", this._boundEscape)
+    }, 10)
   }
 
   _bindActions(serverId) {
@@ -304,5 +437,6 @@ export default class extends Controller {
       this.menu = null
     }
     document.removeEventListener("click", this.boundClose)
+    document.removeEventListener("keydown", this._boundEscape)
   }
 }
