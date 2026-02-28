@@ -25,10 +25,12 @@ Rails.application.configure do
   config.active_storage.service = :local
 
   # Assume all access to the app is happening through a SSL-terminating reverse proxy.
-  config.assume_ssl = true
+  # Disabled for desktop app (runs on localhost without SSL).
+  config.assume_ssl = ENV["INFERNO_DATA_DIR"].blank?
 
   # Force all access to the app over SSL, use Strict-Transport-Security, and use secure cookies.
-  config.force_ssl = true
+  # Disabled for desktop app.
+  config.force_ssl = ENV["INFERNO_DATA_DIR"].blank?
 
   # Skip http-to-https redirect for the default health check endpoint.
   # config.ssl_options = { redirect: { exclude: ->(request) { request.path == "/up" } } }
@@ -87,6 +89,12 @@ Rails.application.configure do
     config.hosts << ".#{ENV['INSTANCE_DOMAIN']}" # subdomains (relay.*, www.*, etc.)
   end
 
+  # Desktop app: allow localhost access when running as a Tauri sidecar
+  if ENV["INFERNO_DATA_DIR"].present?
+    config.hosts << "localhost"
+    config.hosts << "127.0.0.1"
+  end
+
   # Skip DNS rebinding protection for the health check endpoint.
   config.host_authorization = { exclude: ->(request) { request.path == "/up" } }
 
@@ -95,6 +103,16 @@ Rails.application.configure do
     config.action_cable.allowed_request_origins = [
       "https://#{ENV['INSTANCE_DOMAIN']}",
       "wss://#{ENV['INSTANCE_DOMAIN']}"
+    ]
+  end
+
+  # Desktop app: allow ActionCable from localhost and Tauri webview
+  if ENV["INFERNO_DATA_DIR"].present?
+    config.action_cable.allowed_request_origins ||= []
+    config.action_cable.allowed_request_origins += [
+      "http://localhost:13100",
+      "http://127.0.0.1:13100",
+      %r{^tauri://}
     ]
   end
 end

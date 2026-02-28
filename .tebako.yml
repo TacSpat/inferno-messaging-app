@@ -1,0 +1,6 @@
+options:
+  entry-point: bin/inferno-server
+  root: .
+  output: src-tauri/binaries/inferno-server-x86_64-unknown-linux-gnu
+  Ruby: 3.4.2
+  patchelf: true

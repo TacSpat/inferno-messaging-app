@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Build a minimal Tebako binary by staging only production files.
+# This avoids packaging node_modules, .git, logs, tmp, test files, etc.
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+STAGE_DIR="$(mktemp -d)"
+TARGET_TRIPLE="${1:-x86_64-unknown-linux-gnu}"
+OUTPUT="$PROJECT_ROOT/src-tauri/binaries/inferno-server-$TARGET_TRIPLE"
+
+echo "==> Staging production files to $STAGE_DIR"
+
+# Copy only production-necessary directories
+rsync -a --delete \
+  --include='app/***' \
+  --include='bin/***' \
+  --include='config/***' \
+  --include='config.ru' \
+  --include='db/***' \
+  --include='lib/***' \
+  --include='public/***' \
+  --include='vendor/***' \
+  --include='Gemfile' \
+  --include='Gemfile.lock' \
+  --include='Rakefile' \
+  --include='VERSION' \
+  --exclude='*' \
+  "$PROJECT_ROOT/" "$STAGE_DIR/"
+
+# Remove development-only files from the stage
+rm -rf "$STAGE_DIR/spec" "$STAGE_DIR/features" "$STAGE_DIR/test"
+rm -rf "$STAGE_DIR/app/assets/stylesheets/application.tailwind.css"  # source CSS, builds/ has compiled
+
+# Configure bundler to skip development/test gems
+# (Tebako runs bundle install internally)
+cd "$STAGE_DIR"
+mkdir -p .bundle
+cat > .bundle/config <<BUNDLE
+---
+BUNDLE_WITHOUT: "development:test"
+BUNDLE
+
+echo "==> Staged directory size:"
+du -sh "$STAGE_DIR"
+du -sh "$STAGE_DIR"/*/ 2>/dev/null | sort -rh | head -10
+
+echo ""
+echo "==> Running tebako press..."
+tebako press \
+  -e bin/inferno-server \
+  -r "$STAGE_DIR" \
+  -o "$OUTPUT" \
+  -R 3.4.2 \
+  --patchelf
+
+echo ""
+echo "==> Cleaning up staging directory"
+rm -rf "$STAGE_DIR"
+
+echo "==> Done! Binary size:"
+ls -lh "$OUTPUT"

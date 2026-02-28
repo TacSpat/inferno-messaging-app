@@ -129,6 +129,181 @@ const _inviteBadgeObserver = new MutationObserver((mutations) => {
 })
 _inviteBadgeObserver.observe(document.body, { childList: true, subtree: true })
 
+// Custom styled select dropdowns — replaces native <select> with themed dropdown
+// so the open-state popup matches the dark UI (native GTK popups ignore CSS).
+const chevronSvg = '<svg class="cs-chevron" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 4.5L6 7.5L9 4.5"/></svg>'
+
+function wrapSelectElements(root = document) {
+  root.querySelectorAll("select").forEach(select => {
+    if (select.closest(".custom-select-wrap")) return
+    if (select.multiple) return  // skip multi-selects
+
+    // Inherit every class the <select> had (bg, border, rounded, etc.)
+    const origClasses = select.className
+
+    const wrap = document.createElement("div")
+    wrap.className = "custom-select-wrap"
+
+    // Preserve original data attributes on the wrapper for Stimulus target lookups
+    select.parentNode.insertBefore(wrap, select)
+    wrap.appendChild(select)
+
+    // Create the visible button (styled like the original select)
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.className = `custom-select-btn ${origClasses}`
+    btn.setAttribute("aria-haspopup", "listbox")
+    btn.setAttribute("aria-expanded", "false")
+
+    // Label span
+    const label = document.createElement("span")
+    label.className = "cs-label truncate"
+    btn.appendChild(label)
+    btn.insertAdjacentHTML("beforeend", chevronSvg)
+    wrap.appendChild(btn)
+
+    // Dropdown list
+    const list = document.createElement("div")
+    list.className = "custom-select-list"
+    list.setAttribute("role", "listbox")
+    list.hidden = true
+    wrap.appendChild(list)
+
+    let focusedIdx = -1
+
+    function buildOptions() {
+      list.innerHTML = ""
+      const options = Array.from(select.options)
+      options.forEach((opt, i) => {
+        const item = document.createElement("div")
+        item.className = "custom-select-option"
+        item.setAttribute("role", "option")
+        item.dataset.value = opt.value
+        item.textContent = opt.textContent
+        if (opt.selected) item.classList.add("selected")
+        item.addEventListener("mousedown", (e) => {
+          e.preventDefault()
+          select.value = opt.value
+          select.dispatchEvent(new Event("change", { bubbles: true }))
+          updateLabel()
+          close()
+        })
+        list.appendChild(item)
+      })
+      updateLabel()
+    }
+
+    function updateLabel() {
+      const sel = select.options[select.selectedIndex]
+      label.textContent = sel ? sel.textContent : ""
+      // Update selected styling
+      list.querySelectorAll(".custom-select-option").forEach(item => {
+        item.classList.toggle("selected", item.dataset.value === select.value)
+      })
+    }
+
+    function positionList() {
+      const rect = btn.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom - 8
+      const spaceAbove = rect.top - 8
+      const listHeight = Math.min(240, list.scrollHeight)
+
+      if (spaceBelow >= listHeight || spaceBelow >= spaceAbove) {
+        list.style.top = `${rect.bottom + 2}px`
+      } else {
+        list.style.top = `${rect.top - listHeight - 2}px`
+      }
+      list.style.left = `${rect.left}px`
+      list.style.minWidth = `${rect.width}px`
+    }
+
+    function open() {
+      buildOptions()
+      list.hidden = false
+      wrap.classList.add("open")
+      btn.setAttribute("aria-expanded", "true")
+      positionList()
+      // Scroll selected into view
+      const selItem = list.querySelector(".selected")
+      if (selItem) selItem.scrollIntoView({ block: "nearest" })
+      focusedIdx = Array.from(select.options).findIndex(o => o.selected)
+      updateFocus()
+    }
+
+    function close() {
+      list.hidden = true
+      wrap.classList.remove("open")
+      btn.setAttribute("aria-expanded", "false")
+      focusedIdx = -1
+    }
+
+    function updateFocus() {
+      const items = list.querySelectorAll(".custom-select-option")
+      items.forEach((it, i) => it.classList.toggle("focused", i === focusedIdx))
+      if (focusedIdx >= 0 && items[focusedIdx]) {
+        items[focusedIdx].scrollIntoView({ block: "nearest" })
+      }
+    }
+
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault()
+      if (list.hidden) { open() } else { close() }
+    })
+
+    btn.addEventListener("keydown", (e) => {
+      const items = list.querySelectorAll(".custom-select-option")
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault()
+        if (list.hidden) {
+          open()
+        } else if (focusedIdx >= 0 && items[focusedIdx]) {
+          items[focusedIdx].dispatchEvent(new MouseEvent("mousedown"))
+        }
+      } else if (e.key === "Escape") {
+        close()
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault()
+        if (list.hidden) { open(); return }
+        focusedIdx = Math.min(focusedIdx + 1, items.length - 1)
+        updateFocus()
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault()
+        if (list.hidden) { open(); return }
+        focusedIdx = Math.max(focusedIdx - 1, 0)
+        updateFocus()
+      }
+    })
+
+    // Close on outside click
+    document.addEventListener("mousedown", (e) => {
+      if (!wrap.contains(e.target)) close()
+    })
+
+    // Close on scroll so fixed-position list doesn't float away
+    document.addEventListener("scroll", () => {
+      if (!list.hidden) close()
+    }, true)
+
+    // Watch for programmatic option changes (e.g. voice device enumeration)
+    const observer = new MutationObserver(() => {
+      updateLabel()
+      if (!list.hidden) buildOptions()
+    })
+    observer.observe(select, { childList: true, subtree: true, attributes: true })
+
+    // Also listen for programmatic value changes
+    select.addEventListener("change", () => updateLabel())
+
+    buildOptions()
+  })
+}
+document.addEventListener("turbo:load", () => wrapSelectElements())
+document.addEventListener("turbo:frame-render", (e) => wrapSelectElements(e.target))
+// Run immediately for the initial page load
+if (document.readyState !== "loading") { wrapSelectElements() } else {
+  document.addEventListener("DOMContentLoaded", () => wrapSelectElements())
+}
+
 // Restore emoji PUA maps from localStorage (for page refresh resilience)
 try {
   const stored = localStorage.getItem('_emojiMap')

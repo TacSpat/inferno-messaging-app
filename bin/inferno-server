@@ -1,0 +1,27 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Tebako entry point for the Inferno desktop sidecar.
+# Runs database migrations then starts Puma.
+
+ENV["RAILS_ENV"] ||= "production"
+ENV["PORT"] ||= "13100"
+
+# Boot Rails
+require_relative "../config/boot"
+require_relative "../config/application"
+Rails.application.initialize!
+
+# Run db:prepare (creates + migrates)
+$stdout.puts "[inferno-server] Preparing database..."
+ActiveRecord::Tasks::DatabaseTasks.prepare_all
+
+# Start Puma via Rack handler
+$stdout.puts "[inferno-server] Starting Puma on port #{ENV['PORT']}..."
+require "rack/handler/puma"
+Rack::Handler::Puma.run(
+  Rails.application,
+  Host: "127.0.0.1",
+  Port: Integer(ENV["PORT"]),
+  Silent: false
+)
