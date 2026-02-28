@@ -20,6 +20,7 @@ class Users::SessionsController < Devise::SessionsController
         unless resource.servers.include?(server)
           invite.increment_uses!
           server.server_memberships.create!(user: resource)
+          NostrServerPublishJob.perform_later(resource.id, server.id, "invite", invite_code: invite.code)
         end
         return server_channel_path(server, server.channels.ordered.first)
       end

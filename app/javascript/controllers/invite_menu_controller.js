@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 
 export default class extends Controller {
   static targets = ["panel", "linkText", "copyBtn", "generateBtn"]
-  static values = { baseUrl: String, serverId: String }
+  static values = { baseUrl: String, serverId: String, nostrGroupId: String }
 
   toggle(event) {
     event.stopPropagation()
@@ -40,7 +40,7 @@ export default class extends Controller {
 
       if (response.ok) {
         const data = await response.json()
-        const url = `${this.baseUrlValue}/inferno/invite/${data.code}`
+        const url = data.naddr || `${this.baseUrlValue}/inferno/invite/${data.nostr_group_id || this.nostrGroupIdValue}/${data.code}`
         this.linkTextTarget.textContent = url
         this.linkTextTarget.classList.remove("italic", "text-gray-500")
         this.linkTextTarget.classList.add("text-gray-300", "select-all")

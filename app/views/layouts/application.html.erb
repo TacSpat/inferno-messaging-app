@@ -11,6 +11,9 @@
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
     <%= action_cable_meta_tag %>
+    <% if user_signed_in? %>
+      <meta name="user-server-gids" content="<%= current_user.servers.where.not(nostr_group_id: nil).pluck(:nostr_group_id).join(",") %>">
+    <% end %>
     <%= yield :head %>
     <style>
       /* Mobile sidebar transitions */
@@ -117,7 +120,7 @@
                 <%= button_to "Leave Server", leave_server_path(@server), method: :delete, class: "flex items-center w-full px-2.5 py-1.5 text-sm text-danger-light hover:bg-danger/20 rounded cursor-pointer", data: { turbo_confirm: "Leave #{@server.name}?" } %>
               <% end %>
               <% if membership&.has_permission?("create_invite") %>
-                <div data-controller="invite-menu" data-invite-menu-base-url-value="<%= request.base_url %>" data-invite-menu-server-id-value="<%= @server.public_id %>">
+                <div data-controller="invite-menu" data-invite-menu-base-url-value="<%= request.base_url %>" data-invite-menu-server-id-value="<%= @server.public_id %>" data-invite-menu-nostr-group-id-value="<%= @server.nostr_group_id %>">
                   <button type="button" data-action="invite-menu#toggle" class="flex items-center w-full px-2.5 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer">
                     <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
                     Invite People
@@ -126,7 +129,7 @@
                     <% active_invite = @server.invites.active_invites.first %>
                     <% if active_invite %>
                       <div class="flex items-center gap-2 bg-gray-900 rounded px-2.5 py-1.5">
-                        <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono flex-1 select-all truncate"><%= request.base_url %>/inferno/invite/<%= active_invite.code %></span>
+                        <span data-invite-menu-target="linkText" class="text-xs text-gray-300 font-mono flex-1 select-all truncate"><%= active_invite.to_naddr || "#{request.base_url}/inferno/invite/#{@server.nostr_group_id}/#{active_invite.code}" %></span>
                         <button type="button" data-invite-menu-target="copyBtn" data-action="invite-menu#copy" class="text-accent-light hover:text-accent text-xs font-semibold shrink-0 cursor-pointer">Copy</button>
                       </div>
                     <% else %>

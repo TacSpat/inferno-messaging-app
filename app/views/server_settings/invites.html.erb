@@ -46,7 +46,7 @@
         <div class="px-4 py-3 flex items-center justify-between gap-4">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
-              <% invite_link = "#{request.base_url}/inferno/invite/#{invite.code}?from=#{Rails.application.config.x.instance_domain}" %>
+              <% invite_link = invite.to_naddr || "#{request.base_url}/inferno/invite/#{@server.nostr_group_id}/#{invite.code}" %>
               <span class="text-sm text-gray-300 font-mono select-all truncate"><%= invite_link %></span>
               <button type="button" onclick="navigator.clipboard.writeText('<%= invite_link %>'); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 2000)" class="text-accent-light hover:text-accent text-xs font-semibold shrink-0">Copy</button>
             </div>

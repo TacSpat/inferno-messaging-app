@@ -470,6 +470,8 @@ export default class extends Controller {
     const text = this.inputTarget.value
     let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     html = html.replace(/(https?:\/\/[^\s<>]+)/gi, '<span class="text-accent-light">$1</span>')
+    // Highlight nostr: URIs
+    html = html.replace(/(nostr:naddr1[a-z0-9]+)/gi, '<span class="text-accent-light">$1</span>')
     html = html.replace(/\*\*(.+?)\*\*/g, '<span class="text-white font-bold">**$1**</span>')
     html = html.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<span class="text-white italic">*$1*</span>')
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')

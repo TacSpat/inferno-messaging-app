@@ -154,7 +154,10 @@ Rails.application.routes.draw do
     end
   end
 
-  # Invites
+  # Invites (new format with nostr_group_id)
+  get "inferno/invite/:nostr_group_id/:code", to: "invites#show", as: :nostr_invite
+  post "inferno/invite/:nostr_group_id/:code/accept", to: "invites#accept", as: :accept_nostr_invite
+  # Legacy format (backwards compat)
   get "inferno/invite/:code", to: "invites#show", as: :invite
   post "inferno/invite/:code/accept", to: "invites#accept", as: :accept_invite
   get "invite/:code", to: redirect("/inferno/invite/%{code}")

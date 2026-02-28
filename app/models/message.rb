@@ -39,7 +39,8 @@ class Message < ApplicationRecord
   TENOR_REGEX = /https?:\/\/tenor\.com\/view\/([\w-]+)-(\d+)/i
   REDDIT_REGEX = /https?:\/\/(?:www\.)?(?:old\.)?reddit\.com\/r\/(\w+)\/comments\/(\w+)(?:\/([^\s\/\?#]*))?/i
   URL_REGEX = /https?:\/\/[^\s<>]+/i
-  INFERNO_INVITE_REGEX = /https?:\/\/[^\s<>]+\/inferno\/invite\/([a-zA-Z0-9]+)/i
+  INFERNO_INVITE_REGEX = /https?:\/\/[^\s<>]+\/inferno\/invite\/(?:(inferno-[a-zA-Z0-9]+)\/)?([a-zA-Z0-9]+)/i
+  NOSTR_INVITE_REGEX = /nostr:(naddr1[a-z0-9]+)/i
   NOSTR_SERVER_REGEX = /(?:https?:\/\/[^\s<>]+)?\/inferno\/server\/(inferno-[a-zA-Z0-9]+)/i
   DISCORD_LINK_REGEX = /https?:\/\/(?:discord\.com|discordapp\.com)\/channels\/(\d+)\/(\d+)\/(\d+)/i
   MESSAGE_LINK_REGEX = /\/servers\/([a-zA-Z0-9]+)\/channels\/([a-zA-Z0-9]+)#message[-_]([a-zA-Z0-9]+)/
@@ -54,7 +55,7 @@ class Message < ApplicationRecord
     html = render_content_html(sync_tenor: false)
     update_column(:rendered_content_cached, html)
     TenorUnfurlJob.perform_later(id) if content.match?(TENOR_REGEX)
-    InviteUnfurlJob.perform_later(id) if content.match?(INFERNO_INVITE_REGEX)
+    InviteUnfurlJob.perform_later(id) if content.match?(INFERNO_INVITE_REGEX) || content.match?(NOSTR_INVITE_REGEX)
     NostrServerUnfurlJob.perform_later(id) if content.match?(NOSTR_SERVER_REGEX)
   end
 
@@ -65,6 +66,7 @@ class Message < ApplicationRecord
       no_intra_emphasis: true, tables: true
     )
     html = markdown.render(content)
+    html = linkify_nostr_uris(html)
     html = render_mentions(html)
     html = render_custom_emojis(html)
     html = enlarge_emoji_only(html)
@@ -233,18 +235,18 @@ end
 
   # Collect Inferno invite embeds
   local_domain = Rails.application.config.x.instance_domain
-  (content || "").scan(INFERNO_INVITE_REGEX).each do |code_match|
-    invite_code = code_match.is_a?(Array) ? code_match[0] : code_match
+  (content || "").scan(INFERNO_INVITE_REGEX).each do |gid, invite_code|
     next if embeds.any? { |e| e.include?("invite-embed-#{invite_code}") }
 
     # Find the full URL from content for stripping
-    full_url_match = (content || "").match(/https?:\/\/[^\s<>]+\/inferno\/invite\/#{Regexp.escape(invite_code)}/)
+    full_url_match = (content || "").match(/https?:\/\/[^\s<>]+\/inferno\/invite\/(?:#{Regexp.escape(gid)}\/)?#{Regexp.escape(invite_code)}/i) if gid.present?
+    full_url_match ||= (content || "").match(/https?:\/\/[^\s<>]+\/inferno\/invite\/#{Regexp.escape(invite_code)}/)
     full_url = full_url_match[0] if full_url_match
     invite_url = full_url
 
     if full_url
       # Strip the raw link from rendered HTML
-      html = html.gsub(/<a[^>]*href="[^"]*\/inferno\/invite\/#{Regexp.escape(invite_code)}[^"]*"[^>]*>[^<]*<\/a>/, "")
+      html = html.gsub(/<a[^>]*href="[^"]*\/inferno\/invite\/[^"]*#{Regexp.escape(invite_code)}[^"]*"[^>]*>[^<]*<\/a>/, "")
       html = html.gsub(/<p>\s*<\/p>/, "")
     end
 
@@ -257,22 +259,80 @@ end
     end
     is_local = parsed_url && (parsed_authority == local_domain || parsed_authority == request_host)
 
-    if is_local
-      # Local invite — look up directly from DB
-      invite = Invite.find_by(code: invite_code)
-      if invite&.usable?
-        server = invite.server
-        embeds << render_invite_embed_html(server, invite_code, local_domain, local: true)
+    # Try local DB lookup first (works for both local and remote invites if server is synced)
+    invite = Invite.find_by(code: invite_code)
+
+    # If no local invite but we have a gid, try finding server and looking up
+    if invite.nil? && gid.present?
+      server = Server.find_by(nostr_group_id: gid)
+      invite = server.invites.find_by(code: invite_code) if server
+    end
+
+    if invite
+      server = invite.server
+      if invite.usable?
+        embeds << render_invite_embed_html(server, invite_code, gid || server.nostr_group_id, local: is_local)
+      else
+        reason = if invite.expired? then :expired
+                 elsif !invite.active? then :revoked
+                 elsif invite.maxed_out? then :maxed_out
+                 else :expired end
+        embeds << render_expired_invite_embed_html(server.name, reason, gid || server.nostr_group_id, invite_code)
       end
+    elsif is_local
+      # Local URL but invite not found — skip
     elsif sync_tenor
       # Synchronous remote fetch (fallback/edit path)
       data = fetch_invite_json(full_url)
       if data
-        embeds << render_remote_invite_embed_html(data, full_url)
+        embeds << render_remote_invite_embed_html(data, full_url, gid)
       end
     else
       # Async placeholder for InviteUnfurlJob
-      embeds << %(<div class="mt-2 invite-placeholder" data-invite-code="#{invite_code}" data-invite-url="#{ERB::Util.html_escape(full_url)}"><a href="#{ERB::Util.html_escape(full_url)}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-gray-400 text-sm">Loading invite...</span></a></div>)
+      embeds << %(<div class="mt-2 invite-placeholder" data-invite-code="#{invite_code}" data-invite-url="#{ERB::Util.html_escape(full_url)}" data-invite-gid="#{gid}"><a href="#{ERB::Util.html_escape(full_url)}" target="_blank" rel="noopener" class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-gray-400 text-sm">Loading invite...</span></a></div>)
+    end
+  end
+
+  # Collect nostr:naddr invite embeds
+  (content || "").scan(NOSTR_INVITE_REGEX).each do |naddr_raw|
+    naddr_str = naddr_raw.is_a?(Array) ? naddr_raw[0] : naddr_raw
+    decoded = Invite.decode_naddr(naddr_str)
+    next unless decoded
+
+    invite_code = decoded[:code]
+    gid = decoded[:nostr_group_id]
+    next if embeds.any? { |e| e.include?("invite-embed-#{invite_code}") }
+
+    # Strip the nostr:naddr link (as <a> tag or raw text) from rendered HTML
+    html = html.gsub(/<a[^>]*href="nostr:#{Regexp.escape(naddr_str)}"[^>]*>[^<]*<\/a>/, "")
+    html = html.gsub(/nostr:#{Regexp.escape(naddr_str)}/, "")
+    html = html.gsub(/<p>\s*<\/p>/, "")
+
+    # Try local DB lookup
+    invite = Invite.find_by(code: invite_code)
+    invite ||= Server.find_by(nostr_group_id: gid)&.invites&.find_by(code: invite_code) if gid.present?
+
+    if invite
+      server = invite.server
+      if invite.usable?
+        embeds << render_invite_embed_html(server, invite_code, gid || server.nostr_group_id, local: true)
+      else
+        reason = if invite.expired? then :expired
+                 elsif !invite.active? then :revoked
+                 elsif invite.maxed_out? then :maxed_out
+                 else :expired end
+        embeds << render_expired_invite_embed_html(server.name, reason, gid, invite_code)
+      end
+    elsif sync_tenor
+      # Synchronous: fetch from relay
+      info = gid.present? ? NostrServerSyncService.fetch_metadata_preview(gid) : nil
+      if info && info[:name].present?
+        data = { "server_name" => info[:name], "icon_url" => info[:picture_url], "member_count" => info[:member_count] || 0, "online_count" => 0, "invite_code" => invite_code, "nostr_group_id" => gid }
+        embeds << render_remote_invite_embed_html(data, "/inferno/invite/#{gid}/#{invite_code}", gid)
+      end
+    else
+      # Async placeholder for InviteUnfurlJob
+      embeds << %(<div class="mt-2 invite-placeholder" data-invite-code="#{invite_code}" data-invite-naddr="#{ERB::Util.html_escape(naddr_str)}" data-invite-gid="#{gid}"><div class="flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 px-3 py-2.5"><div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center"><svg class="w-5 h-5 text-gray-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg></div><span class="text-gray-400 text-sm">Loading invite...</span></div></div>)
     end
   end
 
@@ -359,6 +419,15 @@ end
 
   private
 
+  # Convert nostr: URIs to clickable <a> tags (Redcarpet only autolinks http/https)
+  def linkify_nostr_uris(html)
+    html.gsub(/(nostr:(naddr1[a-z0-9]+))/) do
+      uri = $1
+      truncated = "#{uri[0..25]}...#{uri[-8..]}"
+      %(<a href="#{ERB::Util.html_escape(uri)}" class="text-accent-light hover:underline break-all" data-turbo="false">#{ERB::Util.html_escape(truncated)}</a>)
+    end
+  end
+
   def has_files?
     files.attached? || files.any?
   end
@@ -417,7 +486,7 @@ end
     nil
   end
 
-  def render_invite_embed_html(server, invite_code, instance_domain, local: true)
+  def render_invite_embed_html(server, invite_code, nostr_group_id = nil, local: true)
     icon_html = if server.icon.attached?
       icon_url = Rails.application.routes.url_helpers.rails_blob_path(server.icon, only_path: true)
       %(<img src="#{icon_url}" class="w-12 h-12 rounded-xl object-cover shrink-0" />)
@@ -425,21 +494,33 @@ end
       %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-white shrink-0">#{ERB::Util.html_escape(server.name[0].upcase)}</div>)
     end
 
-    member_count = server.members.count
+    member_count = server.total_member_count
     online_count = server.members.where(online_state: :online).count
+    gid = nostr_group_id || server.nostr_group_id
+    gid_attr = gid.present? ? %( data-invite-gid="#{ERB::Util.html_escape(gid)}") : ""
 
     if local
       first_channel = server.channels.ordered.first
       link_url = first_channel ? "/servers/#{server.public_id}/channels/#{first_channel.public_id}" : "#"
-      target_attr = ""
-      nav_attr = ' data-turbo="false"'
     else
-      link_url = "/inferno/invite/#{invite_code}"
-      target_attr = ""
-      nav_attr = ' data-turbo="false"'
+      link_url = gid.present? ? "/inferno/invite/#{gid}/#{invite_code}" : "/inferno/invite/#{invite_code}"
     end
 
-    %(<a href="#{link_url}"#{target_attr}#{nav_attr} class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-invite-embed="true" data-invite-embed-#{invite_code}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+    %(<a href="#{link_url}" data-turbo="false" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-3.5 group" data-invite-embed="true" data-invite-embed-#{invite_code}#{gid_attr}>#{icon_html}<div class="min-w-0"><div class="text-xs text-gray-500 mb-1">You've been invited to join a server</div><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div></div></a>)
+  end
+
+  def render_expired_invite_embed_html(server_name, reason, nostr_group_id = nil, invite_code = nil)
+    initial = (server_name || "?")[0].upcase
+    icon_html = %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-gray-500 shrink-0">#{ERB::Util.html_escape(initial)}</div>)
+
+    reason_text = case reason
+      when :expired then "Invite Expired"
+      when :revoked then "Invite No Longer Valid"
+      when :maxed_out then "Invite Reached Max Uses"
+      else "Invite Unavailable"
+    end
+
+    %(<div class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/40 px-3 py-3.5 opacity-60" data-invite-embed="true" data-invite-embed-#{invite_code || "expired"}>#{icon_html}<div class="min-w-0"><div class="text-gray-400 font-semibold text-sm truncate">#{ERB::Util.html_escape(server_name)}</div><div class="text-xs text-gray-500">#{reason_text}</div><div class="text-xs text-gray-500 mt-0.5">Inferno</div></div></div>)
   end
 
   def render_nostr_server_embed_html(server, nostr_group_id)
@@ -450,14 +531,13 @@ end
       %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-white shrink-0">#{ERB::Util.html_escape(server.name[0].upcase)}</div>)
     end
 
-    member_count = server.members.count
+    member_count = server.total_member_count
     online_count = server.members.where(online_state: :online).count
-    instance_domain = Rails.application.config.x.instance_domain
 
     first_channel = server.channels.ordered.first
     link_url = first_channel ? "/servers/#{server.public_id}/channels/#{first_channel.public_id}" : "/inferno/server/#{nostr_group_id}"
 
-    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{ERB::Util.html_escape(server.name)}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online_count} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{member_count} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno</div></div></a>)
   end
 
   def render_remote_nostr_server_embed_html(info, nostr_group_id)
@@ -470,13 +550,12 @@ end
 
     name = ERB::Util.html_escape(info[:name] || "Unknown Server")
     members = info[:member_count] || 0
-    instance_domain = Rails.application.config.x.instance_domain
     link_url = "/inferno/server/#{ERB::Util.html_escape(nostr_group_id)}"
 
-    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{ERB::Util.html_escape(instance_domain)}</div></div></a>)
+    %(<a href="#{link_url}" data-turbo="false" data-turbo-frame="_top" class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-nostr-server-embed="true" data-nostr-server-#{nostr_group_id}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno</div></div></a>)
   end
 
-  def render_remote_invite_embed_html(data, invite_url)
+  def render_remote_invite_embed_html(data, invite_url, gid = nil)
     icon_html = if data["icon_url"].present?
       %(<img src="#{ERB::Util.html_escape(data["icon_url"])}" class="w-12 h-12 rounded-xl object-cover shrink-0" />)
     else
@@ -487,11 +566,13 @@ end
     name = ERB::Util.html_escape(data["server_name"] || "Unknown Server")
     online = data["online_count"] || 0
     members = data["member_count"] || 0
-    domain = ERB::Util.html_escape(data["instance_domain"] || "unknown")
+    nostr_gid = gid || data["nostr_group_id"]
+    invite_code = data["invite_code"] || ""
+    gid_attr = nostr_gid.present? ? %( data-invite-gid="#{ERB::Util.html_escape(nostr_gid)}") : ""
 
-    # Rewrite to local Nostr server link if nostr_group_id is available
-    if data["nostr_group_id"].present?
-      link_url = "/inferno/server/#{ERB::Util.html_escape(data["nostr_group_id"])}"
+    # Rewrite to local Nostr invite/server link if nostr_group_id is available
+    if nostr_gid.present?
+      link_url = invite_code.present? ? "/inferno/invite/#{ERB::Util.html_escape(nostr_gid)}/#{ERB::Util.html_escape(invite_code)}" : "/inferno/server/#{ERB::Util.html_escape(nostr_gid)}"
       target_attr = ' data-turbo="false" data-turbo-frame="_top"'
       rel_attr = ""
     else
@@ -500,7 +581,7 @@ end
       rel_attr = ' rel="noopener"'
     end
 
-    %(<a href="#{link_url}"#{target_attr}#{rel_attr} class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-2.5 group" data-invite-embed="true" data-invite-embed-#{ERB::Util.html_escape(data["invite_code"]||"")}>#{icon_html}<div class="min-w-0"><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div><div class="text-xs text-gray-500 mt-0.5">Inferno · #{domain}</div></div></a>)
+    %(<a href="#{link_url}"#{target_attr}#{rel_attr} class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/60 hover:bg-gray-700/60 transition-colors no-underline px-3 py-3.5 group" data-invite-embed="true" data-invite-embed-#{ERB::Util.html_escape(invite_code)}#{gid_attr}>#{icon_html}<div class="min-w-0"><div class="text-xs text-gray-500 mb-1">You've been invited to join a server</div><div class="text-white font-semibold text-sm group-hover:underline truncate">#{name}</div><div class="flex items-center gap-3 text-xs text-gray-400"><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>#{online} Online</span><span class="flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>#{members} Members</span></div></div></a>)
   end
 
   def create_mention_notifications

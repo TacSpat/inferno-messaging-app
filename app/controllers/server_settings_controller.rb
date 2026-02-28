@@ -129,7 +129,7 @@ class ServerSettingsController < ApplicationController
 
     respond_to do |format|
       format.html { redirect_to server_settings_invites_path(@server), notice: "Invite created." }
-      format.json { render json: { code: invite.code } }
+      format.json { render json: { code: invite.code, nostr_group_id: @server.nostr_group_id, naddr: invite.to_naddr } }
     end
   end
 

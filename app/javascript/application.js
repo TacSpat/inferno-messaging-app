@@ -97,6 +97,38 @@ function wrapNumberInputs(root = document) {
 document.addEventListener('turbo:load', () => wrapNumberInputs())
 document.addEventListener('turbo:frame-render', (e) => wrapNumberInputs(e.target))
 
+// Invite embed "Joined" badge detection — runs on page load AND dynamically
+// when new messages arrive via ActionCable (innerHTML/outerHTML insertions).
+function badgeJoinedInvites(root = document) {
+  const meta = document.querySelector('meta[name="user-server-gids"]')
+  if (!meta) return
+  const gids = new Set(meta.content.split(",").filter(Boolean))
+  if (!gids.size) return
+  root.querySelectorAll("[data-invite-gid]").forEach(el => {
+    if (el.querySelector(".invite-joined-badge")) return
+    const gid = el.dataset.inviteGid
+    if (!gids.has(gid)) return
+    const badge = document.createElement("span")
+    badge.className = "invite-joined-badge ml-auto text-xs font-semibold text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded shrink-0"
+    badge.textContent = "Joined"
+    el.appendChild(badge)
+  })
+}
+document.addEventListener("turbo:load", () => badgeJoinedInvites())
+document.addEventListener("turbo:frame-render", (e) => badgeJoinedInvites(e.target))
+// MutationObserver catches messages inserted via ActionCable (innerHTML/outerHTML)
+const _inviteBadgeObserver = new MutationObserver((mutations) => {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (node.nodeType !== 1) continue
+      if (node.matches?.("[data-invite-gid]") || node.querySelector?.("[data-invite-gid]")) {
+        badgeJoinedInvites(node.matches?.("[data-invite-gid]") ? node.parentElement : node)
+      }
+    }
+  }
+})
+_inviteBadgeObserver.observe(document.body, { childList: true, subtree: true })
+
 // Restore emoji PUA maps from localStorage (for page refresh resilience)
 try {
   const stored = localStorage.getItem('_emojiMap')
