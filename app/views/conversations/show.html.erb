@@ -237,6 +237,41 @@
             </div>
           <% end %>
         </div>
+
+        <% dm_pubkey = @other_user&.nostr_public_key || @dm_contact&.pubkey %>
+        <% dm_friend = Contact.find_by(pubkey: dm_pubkey) if dm_pubkey.present? %>
+        <% if dm_friend || dm_pubkey.present? %>
+          <div class="mt-2">
+            <% if dm_friend&.accepted? %>
+              <%= button_to friendship_path(dm_friend), method: :delete,
+                    class: "w-full py-1.5 text-sm text-danger-light hover:bg-danger/20 rounded cursor-pointer text-center",
+                    data: { turbo_confirm: "Remove friend?" } do %>
+                Remove Friend
+              <% end %>
+            <% elsif dm_friend&.pending_outgoing? %>
+              <div class="w-full py-1.5 text-sm text-gray-500 text-center">Friend Request Sent</div>
+            <% elsif dm_friend&.pending_incoming? %>
+              <div class="flex gap-2">
+                <%= button_to accept_friendship_path(dm_friend), method: :post,
+                      class: "flex-1 py-1.5 text-sm text-green-400 hover:bg-green-600/20 rounded cursor-pointer text-center" do %>
+                  Accept
+                <% end %>
+                <%= button_to decline_friendship_path(dm_friend), method: :post,
+                      class: "flex-1 py-1.5 text-sm text-gray-400 hover:bg-gray-700 rounded cursor-pointer text-center" do %>
+                  Decline
+                <% end %>
+              </div>
+            <% elsif dm_pubkey.present? %>
+              <% npub_val = @other_user&.npub || @dm_contact&.npub %>
+              <% if npub_val.present? %>
+                <%= button_to friendships_path(tag: npub_val), method: :post,
+                      class: "w-full py-1.5 text-sm text-white bg-accent hover:bg-accent-light rounded cursor-pointer text-center font-medium" do %>
+                  Add Friend
+                <% end %>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
       </div>
     </aside>
   <% end %>

@@ -43,6 +43,8 @@ class FriendshipsController < ApplicationController
     contact.friendship_status = :pending_outgoing
     contact.save!
 
+    broadcast_friend_update
+
     # Send friend request as NIP-44 encrypted DM (in background, don't block response)
     user = current_user
     Thread.new { send_friend_request_dm_async(user, pubkey) }

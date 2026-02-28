@@ -165,13 +165,37 @@
           <div id="voice-controls-bar" data-turbo-permanent class="hidden voice-controls-inferno" style="background-color: #141312;"
                data-controller="voice-channel"
                data-voice-channel-target="controlsBar">
-            <div class="px-3 py-2">
-              <div class="flex items-center mb-1">
-                <svg class="w-4 h-4 text-green-500 mr-1.5 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-                <span class="text-sm font-medium text-green-500" data-voice-channel-target="statusText">Voice Connected</span>
+            <!-- Header: status + disconnect -->
+            <div class="flex items-center justify-between px-3 pt-2 pb-1">
+              <div class="min-w-0">
+                <div class="flex items-center">
+                  <svg class="w-4 h-4 text-green-500 mr-1.5 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
+                  <span class="text-sm font-medium text-green-500" data-voice-channel-target="statusText">Voice Connected</span>
+                </div>
+                <p class="text-xs text-gray-400 truncate" data-voice-channel-target="channelName"></p>
               </div>
-              <p class="text-xs text-gray-400 truncate" data-voice-channel-target="channelName"></p>
+              <button type="button" class="p-1.5 rounded bg-danger/20 hover:bg-danger/40 text-danger-light hover:text-danger transition cursor-pointer shrink-0 ml-2" title="Disconnect"
+                      data-action="click->voice-channel#disconnectVoice"
+                      data-voice-channel-target="disconnectBtn">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"/></svg>
+              </button>
             </div>
+            <!-- Hierarchy controls row (above main controls) — hidden when not applicable -->
+            <div class="hidden items-center justify-center gap-1.5 px-3 pb-1" data-voice-channel-target="hierarchyRow">
+              <button type="button" class="hidden flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium text-gray-300 hover:text-white hover:bg-gray-600 transition cursor-pointer" title="Broadcast to child channels"
+                      data-action="click->voice-channel#toggleBroadcast"
+                      data-voice-channel-target="broadcastBtn">
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+                <span>Broadcast</span>
+              </button>
+              <button type="button" class="hidden flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium text-gray-300 hover:text-white hover:bg-gray-600 transition cursor-pointer" title="Request to speak in parent channel"
+                      data-action="click->voice-channel#requestToSpeak"
+                      data-voice-channel-target="requestSpeakBtn">
+                <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/></svg>
+                <span>Ask to Speak</span>
+              </button>
+            </div>
+            <!-- Main controls: mute, deafen, camera, screen share -->
             <div class="flex items-center justify-center gap-2 px-3 pb-2">
               <button type="button" class="p-1.5 rounded hover:bg-gray-600 text-gray-300 hover:text-white transition cursor-pointer" title="Mute"
                       data-action="click->voice-channel#toggleMute"
@@ -192,21 +216,6 @@
                       data-action="click->voice-channel#toggleScreenShare"
                       data-voice-channel-target="screenShareBtn">
                 <svg class="w-5 h-5" data-voice-channel-target="screenShareIcon" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
-              </button>
-              <button type="button" class="hidden p-1.5 rounded hover:bg-gray-600 text-gray-300 hover:text-white transition cursor-pointer" title="Broadcast to children"
-                      data-action="click->voice-channel#toggleBroadcast"
-                      data-voice-channel-target="broadcastBtn">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>
-              </button>
-              <button type="button" class="hidden p-1.5 rounded hover:bg-gray-600 text-gray-300 hover:text-white transition cursor-pointer" title="Request to Speak"
-                      data-action="click->voice-channel#requestToSpeak"
-                      data-voice-channel-target="requestSpeakBtn">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 11l5-5m0 0l5 5m-5-5v12"/></svg>
-              </button>
-              <button type="button" class="p-1.5 rounded bg-danger/20 hover:bg-danger/40 text-danger-light hover:text-danger transition cursor-pointer" title="Disconnect"
-                      data-action="click->voice-channel#disconnectVoice"
-                      data-voice-channel-target="disconnectBtn">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"/></svg>
               </button>
             </div>
           </div>

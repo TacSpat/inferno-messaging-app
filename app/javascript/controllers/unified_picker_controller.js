@@ -27,6 +27,7 @@ export default class extends Controller {
     this.userFavoriteIds = new Set()
     this.collapsedSections = JSON.parse(localStorage.getItem("picker_collapsed") || "{}")
     this.frequentlyUsed = JSON.parse(localStorage.getItem(FREQUENTLY_USED_KEY) || "[]")
+      .filter(e => e.type !== "custom" || (e.url && e.url.length > 0))
 
     // GIF sub-view state: null = home, "_trending", or a collection public_id
     this.gifSubView = null
@@ -542,7 +543,7 @@ export default class extends Controller {
       html += this.collapsibleSection("freq_emoji", "🕐 Frequently Used", collapsed, () => {
         return `<div class="flex flex-wrap gap-0.5">${this.frequentlyUsed.map(e => {
           if (e.type === "custom") {
-            return `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.url || "")}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+            return `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.url || "")}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy" onerror="this.parentElement.remove()"></button>`
           }
           return `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectEmoji" data-emoji="${e.emoji}">${e.emoji}</button>`
         }).join("")}</div>`
@@ -562,7 +563,7 @@ export default class extends Controller {
         const collapsed = this.collapsedSections[`emoji_${server.id}`]
         html += this.collapsibleSection(`emoji_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
           return `<div class="flex flex-wrap gap-0.5">${filtered.map(e =>
-            `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+            `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-action="click->unified-picker#selectCustomEmoji" data-emoji-name="${this.escapeAttr(e.name)}" data-emoji-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy" onerror="this.parentElement.remove()"></button>`
           ).join("")}</div>`
         })
       }
@@ -1155,7 +1156,7 @@ export default class extends Controller {
       html += `<div class="mb-2"><div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1">🕐 Frequently Used</div><div class="flex flex-wrap gap-0.5">`
       this.frequentlyUsed.forEach(e => {
         if (e.type === "custom") {
-          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.url)}" class="w-6 h-6 object-contain" loading="lazy" onerror="this.parentElement.remove()"></button>`
         } else {
           html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center text-xl hover:bg-gray-700 rounded cursor-pointer" data-reaction-emoji="${e.emoji}">${e.emoji}</button>`
         }
@@ -1175,7 +1176,7 @@ export default class extends Controller {
 
         html += `<div class="mb-2"><div class="text-xs font-semibold text-gray-400 uppercase px-1 py-1">${this.escapeHtml(server.name)}</div><div class="flex flex-wrap gap-0.5">`
         filtered.forEach(e => {
-          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" data-reaction-custom-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy"></button>`
+          html += `<button type="button" class="w-9 h-9 sm:w-8 sm:h-8 flex items-center justify-center hover:bg-gray-700 rounded cursor-pointer" data-reaction-custom="${this.escapeAttr(e.name)}" data-reaction-custom-url="${this.escapeAttr(e.image_url)}" title=":${this.escapeAttr(e.name)}:"><img src="${this.escapeAttr(e.image_url)}" class="w-6 h-6 object-contain" loading="lazy" onerror="this.parentElement.remove()"></button>`
         })
         html += `</div></div>`
       }

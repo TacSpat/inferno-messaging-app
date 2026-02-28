@@ -30,7 +30,15 @@
     <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-800 <%= status_color %>"></div>
   </div>
   <div class="ml-2 flex-1 min-w-0">
-    <span class="text-sm truncate block" style="color: <%= member.role_color_for(server) %>"><%= member.display_name_for(server) %></span>
+    <span class="text-sm truncate block flex items-center" style="color: <%= member.role_color_for(server) %>">
+      <%= member.display_name_for(server) %>
+      <% member_pubkey = member.try(:nostr_public_key) || member.try(:pubkey) %>
+      <% if member_pubkey.present? && local_assigns[:friend_pubkeys]&.include?(member_pubkey) %>
+        <svg class="w-3 h-3 text-accent-light shrink-0 ml-0.5" fill="currentColor" viewBox="0 0 20 20" title="Friend">
+          <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v1h8v-1zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-1a5.97 5.97 0 00-.75-2.906A3.005 3.005 0 0119 17v1h-3zM4.75 14.094A5.97 5.97 0 004 17v1H1v-1a3 3 0 013.75-2.906z"/>
+        </svg>
+      <% end %>
+    </span>
     <% if member.status.present? && !is_offline %>
       <span class="text-xs text-gray-500 truncate block"><%= member.status_emoji %> <%= member.status %></span>
     <% end %>

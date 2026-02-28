@@ -64,7 +64,7 @@
     </div>
   <% end %>
   <% if channel.child_channels.any? %>
-    <div class="voice-child-channels">
+    <div class="voice-child-channels" data-parent-channel="<%= channel.public_id %>">
       <% channel.child_channels.ordered.each do |child| %>
         <% child_access = child.visible_to?(current_user) %>
         <% next unless child_access %>

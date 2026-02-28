@@ -51,21 +51,16 @@ Turbo.setConfirmMethod((message) => {
   })
 })
 
-// Retry failed image loads once after 3s (covers race with background sync)
+// Retry failed image loads once after 3s (covers race with background sync).
+// If the retry also fails, apply a subtle placeholder style instead of the ugly broken icon.
 document.addEventListener("error", (e) => {
-  if (e.target.tagName === "IMG" && !e.target.dataset.retried) {
+  if (e.target.tagName !== "IMG") return
+  if (!e.target.dataset.retried) {
     e.target.dataset.retried = "1"
     const src = e.target.src
     setTimeout(() => { e.target.src = ""; e.target.src = src }, 3000)
-  }
-}, true)
-
-// Retry failed image loads once after 3s (covers race with background sync)
-document.addEventListener("error", (e) => {
-  if (e.target.tagName === "IMG" && !e.target.dataset.retried) {
-    e.target.dataset.retried = "1"
-    const src = e.target.src
-    setTimeout(() => { e.target.src = ""; e.target.src = src }, 3000)
+  } else {
+    e.target.classList.add("img-broken")
   }
 }, true)
 

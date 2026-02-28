@@ -41,6 +41,9 @@ class UserCardsController < ApplicationController
         avatar_url = @member.try(:effective_avatar_url) || @member.try(:avatar_url)
         banner_url = @member.try(:effective_banner_url) || @member.try(:banner_url)
 
+        member_pubkey = @member.try(:nostr_public_key) || @member.try(:pubkey)
+        contact = Contact.find_by(pubkey: member_pubkey) if member_pubkey.present?
+
         render json: {
           public_id: @member.public_id,
           username: @member.try(:username) || @member.try(:display_name) || "Unknown",
@@ -58,7 +61,11 @@ class UserCardsController < ApplicationController
           roles: roles,
           member_since: is_remote ? @member.joined_at&.strftime("%b %d, %Y") : membership&.joined_at&.strftime("%b %d, %Y"),
           account_created: @member.created_at.strftime("%b %d, %Y"),
-          remote: is_remote
+          remote: is_remote,
+          friendship_status: contact&.friendship_status || "none",
+          contact_id: contact&.id,
+          nostr_pubkey: member_pubkey,
+          is_self: @member.is_a?(User) && @member.id == current_user.id
         }
       end
     end

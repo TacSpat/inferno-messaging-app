@@ -22,6 +22,7 @@ class Channel < ApplicationRecord
   enum :channel_type, { text: 0, voice: 1, announcement: 2 }
 
   before_validation { self.name = name.downcase if name.present? }
+  before_create :set_position_to_end
 
   validates :name, presence: true, length: { maximum: 100 },
             format: { with: /\A[a-z0-9 _\-:\u{00A0}-\u{10FFFF}]+\z/, message: "lowercase letters, numbers, spaces, hyphens, underscores, and emojis only" }
@@ -138,6 +139,17 @@ class Channel < ApplicationRecord
   end
 
   private
+
+  def set_position_to_end
+    siblings = if parent_channel_id.present?
+      server.channels.where(parent_channel_id: parent_channel_id)
+    elsif category_id.present?
+      server.channels.where(category_id: category_id, parent_channel_id: nil)
+    else
+      server.channels.where(category_id: nil, parent_channel_id: nil)
+    end
+    self.position = (siblings.maximum(:position) || -1) + 1
+  end
 
   def generate_channel_keypair_on_encrypt!
     generate_channel_keypair!

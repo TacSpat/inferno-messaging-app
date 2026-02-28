@@ -44,6 +44,35 @@
           <p class="text-xs text-white/80"><%= member.bio %></p>
         </div>
       <% end %>
+      <% unless member == current_user %>
+        <% card_pubkey = member.try(:nostr_public_key) || member.try(:pubkey) %>
+        <% card_contact = Contact.find_by(pubkey: card_pubkey) if card_pubkey.present? %>
+        <% if card_contact || card_pubkey.present? %>
+          <div class="border-t border-white/10 pt-2 flex gap-2">
+            <% if card_contact&.accepted? %>
+              <%= button_to friendship_path(card_contact), method: :delete,
+                    class: "flex-1 text-center py-1 text-xs text-danger-light hover:bg-danger/20 rounded cursor-pointer",
+                    data: { turbo: false, turbo_confirm: "Remove friend?" } do %>
+                Remove Friend
+              <% end %>
+            <% elsif card_contact&.pending_outgoing? %>
+              <span class="flex-1 text-center py-1 text-xs text-gray-500">Request Sent</span>
+            <% elsif card_contact&.pending_incoming? %>
+              <%= button_to accept_friendship_path(card_contact), method: :post,
+                    class: "flex-1 text-center py-1 text-xs text-green-400 hover:bg-green-600/20 rounded cursor-pointer",
+                    data: { turbo: false } do %>
+                Accept Request
+              <% end %>
+            <% elsif card_pubkey.present? && member.try(:npub).present? %>
+              <%= button_to friendships_path(tag: member.npub), method: :post,
+                    class: "flex-1 text-center py-1 text-xs text-gray-300 hover:bg-gray-700 hover:text-white rounded cursor-pointer",
+                    data: { turbo: false } do %>
+                Add Friend
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
       <% if server %>
         <% if member.remote? %>
           <% visible_roles = member.roles.where.not(name: "@everyone").ordered %>

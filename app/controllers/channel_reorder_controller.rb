@@ -51,6 +51,17 @@ class ChannelReorderController < ApplicationController
     end
 
     publish_server_structure
+
+    # Immediately notify remote instances so their sidebars update in real-time
+    if User.owner&.nostr_public_key.present?
+      NostrChannelReorderSyncJob.perform_later(
+        @server.id,
+        channels_data.as_json,
+        categories_data.as_json,
+        hierarchy_changed
+      )
+    end
+
     head :ok
   end
 

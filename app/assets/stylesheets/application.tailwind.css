@@ -267,6 +267,18 @@
 @keyframes vt-fade-in { from { opacity: 0; } }
 
 @layer base {
+  /* Broken image fallback — replaces the ugly browser icon with a subtle placeholder */
+  img.img-broken {
+    display: inline-block;
+    overflow: hidden;
+    color: transparent;
+    background: rgb(44 42 41);
+    border-radius: 0.25rem;
+  }
+  img.img-broken[class*="rounded-full"] {
+    border-radius: 9999px;
+  }
+
   .message-content { overflow-wrap: break-word; overflow-x: hidden; }
   .message-content p { margin-bottom: 0.25rem; }
   .message-content .emoji-only { font-size: 3.5rem; line-height: 1.2; }
@@ -1349,8 +1361,34 @@
   box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
 }
 
-.sortable-chosen {
-  background-color: rgb(75 85 99); /* gray-600 */
+/* ─── Channel drag-and-drop ─────────────────────────────────── */
+
+.channel-drop-line {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  height: 2px;
+  background: rgb(var(--accent));
+  border-radius: 1px;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 0 4px rgb(var(--accent) / 0.5);
+}
+
+.channel-drag-ghost {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  opacity: 0.9;
+  transform: scale(1.02);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  background: rgb(55 65 81); /* gray-700 */
+  max-width: 220px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
 }
 
 /* ─── Channel nesting drag-drop ─────────────────────────────── */
@@ -1367,7 +1405,86 @@
   animation: nest-fade-in 150ms ease-out;
 }
 
+.channel-drop-target {
+  outline: 1.5px dashed rgb(var(--accent) / 0.4);
+  outline-offset: -1px;
+  border-radius: 6px;
+  background: rgb(var(--accent) / 0.04);
+}
+
 @keyframes nest-fade-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Voice channel nesting tree ───────────────────────────── */
+
+.voice-child-channels {
+  position: relative;
+  padding-left: 26px;
+}
+
+.voice-child-channels > .ml-3 {
+  margin-left: 0;
+}
+
+.voice-child-channels > [data-channel-id] {
+  position: relative;
+}
+
+/* L-connector: vertical down from top, curves into horizontal branch */
+.voice-child-channels > [data-channel-id]::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 0;
+  width: 7px;
+  height: calc(50% + 1px);
+  border-left: 2px solid rgb(var(--accent) / 0.3);
+  border-bottom: 2px solid rgb(var(--accent) / 0.3);
+  border-bottom-left-radius: 6px;
+}
+
+/* Continue vertical line below the junction for non-last channels */
+.voice-child-channels > [data-channel-id]:not(:last-of-type)::after {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: calc(50% + 1px);
+  bottom: 0;
+  border-left: 2px solid rgb(var(--accent) / 0.3);
+}
+
+/* Each child gets its own animation with a unique duration — never syncs */
+.voice-child-channels > a:nth-of-type(1)::before,
+.voice-child-channels > a:nth-of-type(1)::after { animation: ember-glow 11s ease-in-out infinite; }
+.voice-child-channels > a:nth-of-type(2)::before,
+.voice-child-channels > a:nth-of-type(2)::after { animation: ember-glow 17s ease-in-out infinite; }
+.voice-child-channels > a:nth-of-type(3)::before,
+.voice-child-channels > a:nth-of-type(3)::after { animation: ember-glow 23s ease-in-out infinite; }
+
+/* Bridge the vertical line through participants/nested containers between channels */
+.voice-child-channels > :not([data-channel-id]):has(~ [data-channel-id]) {
+  position: relative;
+}
+
+.voice-child-channels > :not([data-channel-id]):has(~ [data-channel-id])::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid rgb(var(--accent) / 0.3);
+  animation: ember-glow 19s ease-in-out infinite;
+}
+
+@keyframes ember-glow {
+  0%, 100% {
+    border-color: rgb(var(--accent-light) / 0.35);
+    filter: drop-shadow(0 0 2px rgb(var(--accent) / 0.2));
+  }
+  50% {
+    border-color: rgb(var(--accent-light) / 0.5);
+    filter: drop-shadow(0 0 5px rgb(var(--accent) / 0.3)) drop-shadow(0 0 2px rgb(var(--accent-light) / 0.2));
+  }
 }

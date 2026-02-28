@@ -46,6 +46,7 @@
     end
     sections.sort_by! { |s| -s[:position] }
   %>
+  <% friend_pubkeys = Contact.friends.pluck(:pubkey).to_set %>
   <div class="py-4 px-2" data-server-members-target="list">
     <% sections.each do |section| %>
       <% if section[:type] == :role %>
@@ -56,7 +57,7 @@
           <%= section[:role].name %> — <%= section[:members].count %>
         </h3>
         <% section[:members].each do |member| %>
-          <%= render partial: "servers/member_item", locals: { member: member, server: server } %>
+          <%= render partial: "servers/member_item", locals: { member: member, server: server, friend_pubkeys: friend_pubkeys } %>
         <% end %>
       <% else %>
         <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2"
@@ -65,7 +66,7 @@
           Online — <%= section[:members].count %>
         </h3>
         <% section[:members].each do |member| %>
-          <%= render partial: "servers/member_item", locals: { member: member, server: server } %>
+          <%= render partial: "servers/member_item", locals: { member: member, server: server, friend_pubkeys: friend_pubkeys } %>
         <% end %>
       <% end %>
     <% end %>
@@ -76,7 +77,7 @@
         Offline — <%= offline_members.count %>
       </h3>
       <% offline_members.each do |member| %>
-        <%= render partial: "servers/member_item", locals: { member: member, server: server } %>
+        <%= render partial: "servers/member_item", locals: { member: member, server: server, friend_pubkeys: friend_pubkeys } %>
       <% end %>
     <% end %>
   </div>

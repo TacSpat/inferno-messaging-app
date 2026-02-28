@@ -1809,6 +1809,44 @@ export default class extends Controller {
         // Account created
         overlay.querySelector('[data-slot="account-created"]').textContent = data.account_created
 
+        // Friend actions
+        if (!data.is_self && data.nostr_pubkey) {
+          const friendSection = overlay.querySelector('[data-slot="friend-actions"]')
+          friendSection.classList.remove("hidden")
+          const btnContainer = overlay.querySelector('[data-slot="friend-buttons"]')
+
+          if (data.friendship_status === "accepted") {
+            const btn = document.createElement("button")
+            btn.className = "flex-1 py-1.5 text-sm text-danger-light hover:bg-danger/20 rounded cursor-pointer"
+            btn.textContent = "Remove Friend"
+            btn.addEventListener("click", () => this._friendAction("DELETE", `/friendships/${data.contact_id}`, btn, friendSection))
+            btnContainer.appendChild(btn)
+          } else if (data.friendship_status === "pending_outgoing") {
+            const span = document.createElement("span")
+            span.className = "flex-1 text-center py-1.5 text-sm text-gray-500"
+            span.textContent = "Friend Request Sent"
+            btnContainer.appendChild(span)
+          } else if (data.friendship_status === "pending_incoming") {
+            const acceptBtn = document.createElement("button")
+            acceptBtn.className = "flex-1 py-1.5 text-sm text-green-400 hover:bg-green-600/20 rounded cursor-pointer"
+            acceptBtn.textContent = "Accept Request"
+            acceptBtn.addEventListener("click", () => this._friendAction("POST", `/friendships/${data.contact_id}/accept`, acceptBtn, friendSection))
+            btnContainer.appendChild(acceptBtn)
+
+            const declineBtn = document.createElement("button")
+            declineBtn.className = "flex-1 py-1.5 text-sm text-gray-400 hover:bg-gray-700 rounded cursor-pointer"
+            declineBtn.textContent = "Decline"
+            declineBtn.addEventListener("click", () => this._friendAction("POST", `/friendships/${data.contact_id}/decline`, declineBtn, friendSection))
+            btnContainer.appendChild(declineBtn)
+          } else {
+            const btn = document.createElement("button")
+            btn.className = "flex-1 py-1.5 text-sm text-white bg-accent hover:bg-accent-light rounded cursor-pointer font-medium"
+            btn.textContent = "Add Friend"
+            btn.addEventListener("click", () => this._friendAction("POST", "/friendships", btn, friendSection, { tag: data.nostr_pubkey }))
+            btnContainer.appendChild(btn)
+          }
+        }
+
         // Close handlers
         const closeBtn = overlay.querySelector('[data-slot="close"]')
         closeBtn.addEventListener("click", () => this._closeProfileOverlay())
@@ -1835,6 +1873,30 @@ export default class extends Controller {
     if (this._profileOverlayEscHandler) {
       document.removeEventListener("keydown", this._profileOverlayEscHandler)
       this._profileOverlayEscHandler = null
+    }
+  }
+
+  async _friendAction(method, url, btn, section, body = {}) {
+    const csrf = document.querySelector("meta[name=csrf-token]")?.content
+    btn.disabled = true
+    btn.textContent = "..."
+    try {
+      const opts = {
+        method,
+        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json", "Accept": "application/json" },
+      }
+      if (method !== "DELETE" && Object.keys(body).length) opts.body = JSON.stringify(body)
+      const res = await fetch(url, opts)
+      const data = await res.json()
+      const container = section.querySelector('[data-slot="friend-buttons"]')
+      container.innerHTML = ""
+      const msg = document.createElement("span")
+      msg.className = "flex-1 text-center py-1.5 text-sm text-gray-400"
+      msg.textContent = data.status === "sent" ? "Request Sent" : data.status === "accepted" ? "Friends" : "Done"
+      container.appendChild(msg)
+    } catch {
+      btn.disabled = false
+      btn.textContent = "Error — try again"
     }
   }
 

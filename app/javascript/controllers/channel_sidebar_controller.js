@@ -42,11 +42,16 @@ export default class extends Controller {
 
     this._voiceSortables = []
     this._initVoiceSortables()
+
+    // Reinit voice sortables after channel reorder (same element, both controllers)
+    this._onReorderDone = () => this._initVoiceSortables()
+    this.element.addEventListener("channel-reorder:done", this._onReorderDone)
   }
 
   disconnect() {
     if (this.subscription) this.subscription.unsubscribe()
     this.element.removeEventListener("click", this._onChannelClick, true)
+    this.element.removeEventListener("channel-reorder:done", this._onReorderDone)
     document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
     document.removeEventListener("turbo:frame-load", this._onFrameLoad)
     this._channelCache.clear()
@@ -332,6 +337,12 @@ export default class extends Controller {
   }
 
   reorderSidebar(data) {
+    // If this client just performed a drag-reorder, DOM is already correct — skip
+    if (window._skipNextSidebarReorder && Date.now() - window._skipNextSidebarReorder < 5000) {
+      window._skipNextSidebarReorder = null
+      return
+    }
+
     const { channels, categories } = data
 
     // Sort categories by position and reorder DOM
@@ -345,9 +356,13 @@ export default class extends Controller {
 
     // Move channels to their correct category/position
     if (channels?.length) {
-      // Group by category
+      // Separate root channels from nested (parent_channel_id set)
+      const rootChannels = channels.filter(ch => !ch.parent_channel_id)
+      const nestedChannels = channels.filter(ch => ch.parent_channel_id)
+
+      // Group root channels by category
       const byCat = {}
-      channels.forEach(ch => {
+      rootChannels.forEach(ch => {
         const key = ch.category_id || "__uncategorized__"
         if (!byCat[key]) byCat[key] = []
         byCat[key].push(ch)
@@ -360,10 +375,10 @@ export default class extends Controller {
       if (byCat["__uncategorized__"]) {
         const firstCat = this.element.querySelector("[data-category-id]")
         byCat["__uncategorized__"].forEach(ch => {
-          const el = this.element.querySelector(`[data-channel-id="${ch.id}"]`)
-          if (!el) return
-          if (firstCat) firstCat.before(el)
-          else this.element.appendChild(el)
+          this._moveChannelGroup(ch.id, el => {
+            if (firstCat) firstCat.before(el)
+            else this.element.appendChild(el)
+          })
         })
       }
 
@@ -375,11 +390,48 @@ export default class extends Controller {
         const container = catEl.querySelector("[data-category-collapse-target='channels']")
         if (!container) return
         group.forEach(ch => {
-          const el = this.element.querySelector(`[data-channel-id="${ch.id}"]`)
-          if (el) container.appendChild(el)
+          this._moveChannelGroup(ch.id, el => container.appendChild(el))
         })
       })
+
+      // Place nested channels inside their parent's voice-child-channels
+      nestedChannels.sort((a, b) => a.position - b.position).forEach(ch => {
+        const parentLink = this.element.querySelector(`[data-channel-id="${ch.parent_channel_id}"]`)
+        if (!parentLink) return
+        let childContainer = this.element.querySelector(
+          `.voice-child-channels[data-parent-channel="${ch.parent_channel_id}"]`
+        )
+        if (!childContainer) {
+          childContainer = document.createElement("div")
+          childContainer.className = "voice-child-channels"
+          childContainer.dataset.parentChannel = ch.parent_channel_id
+          const participants = this.element.querySelector(
+            `.voice-participants[data-voice-channel-participants="${ch.parent_channel_id}"]`
+          )
+          ;(participants || parentLink).after(childContainer)
+        }
+        this._moveChannelGroup(ch.id, el => childContainer.appendChild(el))
+      })
     }
+
+    this._initVoiceSortables()
+  }
+
+  // Move a channel's <a> tag plus its voice-participants and voice-child-channels
+  // as an atomic group. The placeFn receives each element to place in the DOM.
+  _moveChannelGroup(channelId, placeFn) {
+    const el = this.element.querySelector(`[data-channel-id="${channelId}"]`)
+    if (!el) return
+    const parts = [el]
+    const participants = this.element.querySelector(
+      `.voice-participants[data-voice-channel-participants="${channelId}"]`
+    )
+    if (participants) parts.push(participants)
+    const childContainer = this.element.querySelector(
+      `.voice-child-channels[data-parent-channel="${channelId}"]`
+    )
+    if (childContainer) parts.push(childContainer)
+    parts.forEach(p => placeFn(p))
   }
 
   refreshPage() {

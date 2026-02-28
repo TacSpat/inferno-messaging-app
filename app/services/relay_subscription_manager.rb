@@ -621,6 +621,8 @@ class RelaySubscriptionManager
       process_voice_token_response(sender_pubkey, parsed) unless own_event
     elsif parsed.is_a?(Hash) && parsed["type"] == "voice_state_sync"
       process_voice_state_sync(sender_pubkey, parsed) unless own_event
+    elsif parsed.is_a?(Hash) && parsed["type"] == "channel_reorder_sync"
+      process_channel_reorder_sync(sender_pubkey, parsed) unless own_event
     else
       # Regular DM message
       if own_event
@@ -1156,6 +1158,56 @@ class RelaySubscriptionManager
     Rails.logger.error("[RelaySubscriptionManager] Error processing voice state sync: #{e.message}")
   end
 
+  def process_channel_reorder_sync(sender_pubkey, data)
+    server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
+    return unless server
+
+    # Register this remote instance for future sync messages
+    self.class.register_remote_owner(server.id, sender_pubkey)
+
+    channels_data = data["channels"] || []
+    categories_data = data["categories"] || []
+    hierarchy_changed = data["hierarchy_changed"] == true
+
+    ActiveRecord::Base.transaction do
+      channels_data.each do |ch|
+        channel = server.channels.find_by(public_id: ch["id"])
+        next unless channel
+
+        cat = ch["category_id"].present? ? server.categories.find_by(public_id: ch["category_id"]) : nil
+        new_parent_id = if ch["parent_channel_id"].present?
+          server.channels.voice.find_by(public_id: ch["parent_channel_id"])&.id
+        end
+
+        channel.update_columns(
+          position: ch["position"].to_i,
+          category_id: cat&.id,
+          parent_channel_id: new_parent_id
+        )
+      end
+
+      categories_data.each do |cat|
+        category = server.categories.find_by(public_id: cat["id"])
+        next unless category
+        category.update_columns(position: cat["position"].to_i)
+      end
+    end
+
+    if hierarchy_changed
+      ServerChannel.broadcast_to(server, { type: "sidebar_refresh" })
+    else
+      ServerChannel.broadcast_to(server, {
+        type: "sidebar_reorder",
+        channels: channels_data,
+        categories: categories_data
+      })
+    end
+
+    Rails.logger.info("[RelaySubscriptionManager] Channel reorder sync applied for server #{server.nostr_group_id} (hierarchy_changed=#{hierarchy_changed})")
+  rescue => e
+    Rails.logger.error("[RelaySubscriptionManager] Error processing channel reorder sync: #{e.message}")
+  end
+
   # ── Server State Event Handlers ──────────────────────────────────────
 
   def find_server_from_event(event)
@@ -1450,7 +1502,7 @@ class RelaySubscriptionManager
     end
 
     log_server_event(event, server: server)
-    ServerChannel.broadcast_to(server, { type: "sidebar_reorder" })
+    ServerChannel.broadcast_to(server, { type: "sidebar_refresh" })
     Rails.logger.info("[RelaySubscriptionManager] Synced server structure for #{server.nostr_group_id}")
   rescue ActiveRecord::RecordNotUnique
     nil
