@@ -276,7 +276,8 @@ GEM
       logger
     mini_mime (1.1.5)
     mini_portile2 (2.8.9)
-    minitest (6.0.1)
+    minitest (6.0.2)
+      drb (~> 2.0)
       prism (~> 1.5)
     msgpack (1.8.0)
     multi_test (1.1.0)
@@ -453,8 +454,8 @@ GEM
       rexml (~> 3.2, >= 3.2.5)
       rubyzip (>= 1.2.2, < 4.0)
       websocket (~> 1.0)
-    shoulda-matchers (6.5.0)
-      activesupport (>= 5.2.0)
+    shoulda-matchers (7.0.1)
+      activesupport (>= 7.1)
     solid_cache (1.0.10)
       activejob (>= 7.2)
       activerecord (>= 7.2)
@@ -568,7 +569,7 @@ DEPENDENCIES
   rspec-rails (~> 7.1)
   rubocop-rails-omakase
   selenium-webdriver
-  shoulda-matchers (~> 6.4)
+  shoulda-matchers (~> 7.0)
   solid_cache
   solid_queue
   sqlite3 (>= 2.1)

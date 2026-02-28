@@ -73,7 +73,7 @@ group :test do
   gem "cucumber-rails", "~> 3.1", require: false
   gem "database_cleaner-active_record", "~> 2.2"
   gem "webmock", "~> 3.24"
-  gem "shoulda-matchers", "~> 6.4"
+  gem "shoulda-matchers", "~> 7.0"
 end
 
 gem "devise", "~> 5.0"
