@@ -70,7 +70,7 @@ group :test do
   gem "capybara"
   gem "selenium-webdriver"
 
-  gem "cucumber-rails", "~> 3.1", require: false
+  gem "cucumber-rails", "~> 4.0", require: false
   gem "database_cleaner-active_record", "~> 2.2"
   gem "webmock", "~> 3.24"
   gem "shoulda-matchers", "~> 6.4"
