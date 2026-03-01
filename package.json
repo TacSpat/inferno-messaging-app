@@ -2,6 +2,12 @@
   "name": "inferno",
   "version": "0.2.0",
   "private": true,
+  "description": "Inferno messaging app",
+  "author": {
+    "name": "TacSpat",
+    "email": "tacspat@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/TacSpat/inferno-messaging-app",
   "main": "electron/main.js",
   "scripts": {
     "build": "bun bun.config.js",

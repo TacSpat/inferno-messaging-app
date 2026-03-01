@@ -131,8 +131,10 @@ jobs:
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
+          bun run build
+          bun run build:css
           $env:SECRET_KEY_BASE = "placeholder"
-          $env:SKIP_BUN_INSTALL = "true"
+          $env:SKIP_JS_BUILD = "true"
           bundle exec rails assets:precompile
 
       - name: Build Tebako binary
