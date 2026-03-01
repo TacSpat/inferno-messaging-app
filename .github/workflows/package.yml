@@ -23,7 +23,15 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsodium-dev libsodium23 libfuse2 libboost-all-dev
+          sudo apt-get install -y libsodium-dev libsodium23 libfuse2 \
+            build-essential pkg-config bison flex autoconf binutils-dev \
+            libevent-dev acl-dev libfmt-dev libjemalloc-dev libiberty-dev \
+            libdouble-conversion-dev liblz4-dev liblzma-dev libssl-dev libunwind-dev \
+            libboost-filesystem-dev libboost-program-options-dev libboost-system-dev \
+            libboost-iostreams-dev libboost-date-time-dev libboost-context-dev \
+            libboost-regex-dev libboost-thread-dev libbrotli-dev libdwarf-dev \
+            libelf-dev libgoogle-glog-dev libffi-dev libgdbm-dev libyaml-dev \
+            libncurses-dev libreadline-dev libutfcpp-dev
 
       - uses: ruby/setup-ruby@v1
         with:
