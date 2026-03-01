@@ -14,7 +14,7 @@ env:
   RAILS_ENV: production
 
 jobs:
-  # ─── Linux AppImage ──────────────────────────────────────────
+  # ─── Linux (AppImage + deb) ─────────────────────────────────
   linux:
     runs-on: ubuntu-22.04
     steps:
@@ -48,22 +48,39 @@ jobs:
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
 
-      - name: Build AppImage
-        run: packaging/linux/build_appimage.sh ./inferno
+      - name: Re-install node dependencies (for Electron)
+        run: |
+          git checkout -- .
+          bun install --frozen-lockfile
+
+      - name: Stage sidecar binary
+        run: |
+          mkdir -p binaries
+          cp inferno binaries/inferno-server
+
+      - name: Build Electron app
+        run: bun run electron:build --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Inferno-Linux-AppImage
-          path: Inferno-x86_64.AppImage
+          name: Inferno-Linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Inferno-x86_64.AppImage
+          files: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest-linux.yml
 
-  # ─── macOS .app bundle ──────────────────────────────────────
+  # ─── macOS (dmg + zip) ─────────────────────────────────────
   macos:
     runs-on: macos-14
     steps:
@@ -95,22 +112,41 @@ jobs:
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
 
-      - name: Build macOS .app bundle
-        run: packaging/macos/build_macos.sh ./inferno
+      - name: Re-install node dependencies (for Electron)
+        run: |
+          git checkout -- .
+          bun install --frozen-lockfile
+
+      - name: Stage sidecar binary
+        run: |
+          mkdir -p binaries
+          cp inferno binaries/inferno-server
+
+      - name: Build Electron app
+        run: bun run electron:build --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Inferno-macOS
-          path: Inferno-macos.zip
+          path: |
+            dist/*.dmg
+            dist/*.zip
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Inferno-macos.zip
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
 
-  # ─── Windows installer ──────────────────────────────────────
+  # ─── Windows (NSIS installer) ──────────────────────────────
   windows:
     runs-on: windows-latest
     steps:
@@ -149,25 +185,36 @@ jobs:
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
-      - name: Prepare installer files
+      - name: Re-install node dependencies (for Electron)
         shell: bash
         run: |
-          cp inferno.exe packaging/windows/inferno.exe
+          git checkout -- .
+          bun install --frozen-lockfile
 
-      - name: Build Windows installer
-        shell: cmd
+      - name: Stage sidecar binary
+        shell: bash
         run: |
-          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" packaging\windows\inferno.iss
-        # Inno Setup is pre-installed on windows-latest runners
+          mkdir -p binaries
+          cp inferno.exe binaries/inferno-server.exe
+
+      - name: Build Electron app
+        shell: bash
+        run: bun run electron:build --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Inferno-Windows-Setup
-          path: packaging/windows/Inferno-Setup.exe
+          name: Inferno-Windows
+          path: dist/*.exe
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/windows/Inferno-Setup.exe
+          files: |
+            dist/*.exe
+            dist/latest.yml

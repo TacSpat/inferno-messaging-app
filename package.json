@@ -1,17 +1,20 @@
 {
   "name": "inferno",
+  "version": "0.2.0",
   "private": true,
+  "main": "electron/main.js",
   "scripts": {
     "build": "bun bun.config.js",
     "build:css": "tailwindcss -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/tailwind.css",
-    "tauri": "tauri",
-    "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "electron:dev": "electron .",
+    "electron:build": "electron-builder"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2"
+    "electron": "^35",
+    "electron-builder": "^26"
   },
   "dependencies": {
+    "electron-updater": "^6",
     "@hotwired/stimulus": "^3.2.2",
     "@hotwired/turbo-rails": "^8.0.12",
     "@rails/actioncable": "^7.2.0",
