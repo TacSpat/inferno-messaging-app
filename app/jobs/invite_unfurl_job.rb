@@ -92,10 +92,12 @@ class InviteUnfurlJob < ApplicationJob
       if invite.usable?
         message.send(:render_invite_embed_html, server, invite_code, gid || server.nostr_group_id, local: is_local)
       else
-        reason = if invite.expired? then :expired
-                 elsif !invite.active? then :revoked
-                 elsif invite.maxed_out? then :maxed_out
-                 else :expired end
+        reason =
+          if invite.expired? then :expired
+          elsif !invite.active? then :revoked
+          elsif invite.maxed_out? then :maxed_out
+          else :expired
+          end
         message.send(:render_expired_invite_embed_html, server.name, reason, gid || server.nostr_group_id, invite_code)
       end
     elsif gid.present?
