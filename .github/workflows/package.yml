@@ -179,7 +179,7 @@ jobs:
           update: true
           install: git tar bison flex
           pacboy: >-
-            toolchain:p cmake:p ninja:p autotools:p make:p bison:p flex:p
+            toolchain:p cmake:p ninja:p autotools:p make:p
             boost:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
             ncurses:p openssl:p libyaml:p libxslt:p ruby:p
 
