@@ -53,12 +53,19 @@ jobs:
 
       - name: Build Tebako binary
         run: |
+          cp package.json package.json.bak
+          cp bun.lock bun.lock.bak
+          cp -r electron electron.bak
+          cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
-          git checkout -- .
+          cp package.json.bak package.json
+          cp bun.lock.bak bun.lock
+          cp -r electron.bak electron
+          cp electron-builder.yml.bak electron-builder.yml
           bun install --frozen-lockfile
 
       - name: Stage sidecar binary
@@ -95,7 +102,11 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install system dependencies
-        run: brew install libsodium
+        run: |
+          brew install gnu-sed pkg-config bison flex binutils libffi gdbm zlib \
+            ncurses double-conversion boost jemalloc fmt glog libevent libsodium \
+            lz4 xz libyaml openssl@3
+          echo "$(brew --prefix bison)/bin" >> $GITHUB_PATH
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -117,12 +128,19 @@ jobs:
 
       - name: Build Tebako binary
         run: |
+          cp package.json package.json.bak
+          cp bun.lock bun.lock.bak
+          cp -r electron electron.bak
+          cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
-          git checkout -- .
+          cp package.json.bak package.json
+          cp bun.lock.bak bun.lock
+          cp -r electron.bak electron
+          cp electron-builder.yml.bak electron-builder.yml
           bun install --frozen-lockfile
 
       - name: Stage sidecar binary
@@ -192,12 +210,19 @@ jobs:
       - name: Build Tebako binary
         shell: bash
         run: |
+          cp package.json package.json.bak
+          cp bun.lock bun.lock.bak
+          cp -r electron electron.bak
+          cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
           tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
-          git checkout -- .
+          Copy-Item package.json.bak package.json
+          Copy-Item bun.lock.bak bun.lock
+          Copy-Item -Recurse electron.bak electron
+          Copy-Item electron-builder.yml.bak electron-builder.yml
           bun install --frozen-lockfile
 
       - name: Stage sidecar binary
