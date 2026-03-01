@@ -216,9 +216,9 @@ jobs:
       - name: Install Tebako
         shell: msys2 {0}
         run: |
-          echo "gem shebang: $(head -1 /ucrt64/bin/gem)"
-          echo "file type: $(file /ucrt64/bin/gem)"
-          /ucrt64/bin/ruby /ucrt64/bin/gem install tebako
+          set -x
+          /ucrt64/bin/ruby.exe --version
+          /ucrt64/bin/ruby.exe -S gem install tebako
 
       - name: Build Tebako binary
         shell: msys2 {0}
