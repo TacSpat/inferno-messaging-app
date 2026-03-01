@@ -184,10 +184,10 @@ jobs:
         run: gem install tebako
 
       - name: Precompile assets
-        shell: bash
         run: |
           bun install --frozen-lockfile
-          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          $env:SECRET_KEY_BASE = "placeholder"
+          bundle exec rails assets:precompile
 
       - name: Build Tebako binary
         shell: bash
@@ -196,19 +196,16 @@ jobs:
           tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
-        shell: bash
         run: |
           git checkout -- .
           bun install --frozen-lockfile
 
       - name: Stage sidecar binary
-        shell: bash
         run: |
-          mkdir -p binaries
-          cp inferno.exe binaries/inferno-server.exe
+          New-Item -ItemType Directory -Force -Path binaries
+          Copy-Item inferno.exe -Destination binaries\inferno-server.exe
 
       - name: Build Electron app
-        shell: bash
         run: bun run electron:build --win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
