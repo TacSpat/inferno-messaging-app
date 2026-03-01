@@ -135,6 +135,7 @@ jobs:
           bun run build:css
           $env:SECRET_KEY_BASE = "placeholder"
           $env:SKIP_JS_BUILD = "true"
+          $env:SKIP_CSS_BUILD = "true"
           bundle exec rails assets:precompile
 
       - name: Build Tebako binary
