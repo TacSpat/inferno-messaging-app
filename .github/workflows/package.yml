@@ -20,19 +20,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsodium-dev libsodium23 libfuse2 \
-            build-essential pkg-config bison flex autoconf binutils-dev \
-            libevent-dev acl-dev libfmt-dev libjemalloc-dev libiberty-dev \
-            libdouble-conversion-dev liblz4-dev liblzma-dev libssl-dev libunwind-dev \
-            libboost-filesystem-dev libboost-program-options-dev libboost-system-dev \
-            libboost-iostreams-dev libboost-date-time-dev libboost-context-dev \
-            libboost-regex-dev libboost-thread-dev libbrotli-dev libdwarf-dev \
-            libelf-dev libgoogle-glog-dev libffi-dev libgdbm-dev libyaml-dev \
-            libncurses-dev libreadline-dev libutfcpp-dev
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
@@ -43,22 +30,25 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Install Tebako
-        run: gem install tebako
-
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
           SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
-      - name: Build Tebako binary
+      - name: Prepare for Tebako
         run: |
           cp package.json package.json.bak
           cp bun.lock bun.lock.bak
           cp -r electron electron.bak
           cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
-          tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Build Tebako binary (Docker)
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:/mnt/w \
+            ghcr.io/tamatebako/tebako-ubuntu-20.04:latest \
+            tebako press --root=/mnt/w --entry-point=bin/rails --output=/mnt/w/inferno --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
@@ -95,25 +85,22 @@ jobs:
             dist/*.deb
             dist/latest-linux.yml
 
-  # ─── macOS (dmg + zip) — disabled until Tebako/folly CMake issue resolved
-  # macos:
-  #   runs-on: macos-14
-
-  # ─── Windows (NSIS installer) ──────────────────────────────
-  windows:
-    runs-on: windows-latest
+  # ─── macOS (dmg + zip) ─────────────────────────────────────
+  macos:
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install libsodium
-        shell: pwsh
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '15.0.1'
+
+      - name: Install system dependencies
         run: |
-          $url = "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip"
-          Invoke-WebRequest -Uri $url -OutFile libsodium.zip
-          Expand-Archive libsodium.zip -DestinationPath libsodium
-          $dll = Get-ChildItem -Path libsodium -Recurse -Filter "libsodium.dll" | Where-Object { $_.FullName -match "x64" -and $_.FullName -match "dynamic" } | Select-Object -First 1
-          if (-not $dll) { throw "libsodium.dll not found in archive" }
-          Copy-Item $dll.FullName -Destination "packaging\windows\libsodium.dll"
+          brew install zlib ncurses libevent libsodium lz4 xz gdbm pkg-config \
+            libyaml curl bison flex binutils libffi double-conversion boost \
+            jemalloc fmt glog gnu-sed bash
+          echo "$(brew --prefix bison)/bin" >> $GITHUB_PATH
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -131,6 +118,84 @@ jobs:
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
+          SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+
+      - name: Prepare for Tebako
+        run: |
+          cp package.json package.json.bak
+          cp bun.lock bun.lock.bak
+          cp -r electron electron.bak
+          cp electron-builder.yml electron-builder.yml.bak
+          rm -rf node_modules .git tmp/cache log
+
+      - name: Build Tebako binary
+        run: tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Re-install node dependencies (for Electron)
+        run: |
+          cp package.json.bak package.json
+          cp bun.lock.bak bun.lock
+          cp -r electron.bak electron
+          cp electron-builder.yml.bak electron-builder.yml
+          bun install --frozen-lockfile
+
+      - name: Stage sidecar binary
+        run: |
+          mkdir -p binaries
+          cp inferno binaries/inferno-server
+
+      - name: Build Electron app
+        run: bun run electron:build --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Inferno-macOS
+          path: |
+            dist/*.dmg
+            dist/*.zip
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
+
+  # ─── Windows (NSIS installer) ──────────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: git tar bison flex
+          pacboy: >-
+            toolchain:p cmake:p ninja:p autotools:p make:p bison:p flex:p
+            boost:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
+            ncurses:p openssl:p libyaml:p libxslt:p ruby:p
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          bundle-without: development:test
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Precompile assets
+        run: |
+          bun install --frozen-lockfile
           bun run build
           bun run build:css
           $env:SECRET_KEY_BASE = "placeholder"
@@ -138,15 +203,22 @@ jobs:
           $env:SKIP_CSS_BUILD = "true"
           bundle exec rails assets:precompile
 
-      - name: Build Tebako binary
-        shell: bash
+      - name: Prepare for Tebako
+        shell: msys2 {0}
         run: |
           cp package.json package.json.bak
           cp bun.lock bun.lock.bak
           cp -r electron electron.bak
           cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
-          tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+
+      - name: Install Tebako
+        shell: msys2 {0}
+        run: gem install tebako
+
+      - name: Build Tebako binary
+        shell: msys2 {0}
+        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
