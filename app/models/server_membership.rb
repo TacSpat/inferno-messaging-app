@@ -68,5 +68,4 @@ class ServerMembership < ApplicationRecord
       member_count: server.members.count
     })
   end
-
 end

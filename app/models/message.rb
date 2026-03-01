@@ -274,9 +274,10 @@ end
         embeds << render_invite_embed_html(server, invite_code, gid || server.nostr_group_id, local: is_local)
       else
         reason = if invite.expired? then :expired
-                 elsif !invite.active? then :revoked
-                 elsif invite.maxed_out? then :maxed_out
-                 else :expired end
+        elsif !invite.active? then :revoked
+        elsif invite.maxed_out? then :maxed_out
+        else :expired
+        end
         embeds << render_expired_invite_embed_html(server.name, reason, gid || server.nostr_group_id, invite_code)
       end
     elsif is_local
@@ -318,9 +319,10 @@ end
         embeds << render_invite_embed_html(server, invite_code, gid || server.nostr_group_id, local: true)
       else
         reason = if invite.expired? then :expired
-                 elsif !invite.active? then :revoked
-                 elsif invite.maxed_out? then :maxed_out
-                 else :expired end
+        elsif !invite.active? then :revoked
+        elsif invite.maxed_out? then :maxed_out
+        else :expired
+        end
         embeds << render_expired_invite_embed_html(server.name, reason, gid, invite_code)
       end
     elsif sync_tenor
@@ -514,10 +516,10 @@ end
     icon_html = %(<div class="w-12 h-12 rounded-xl bg-gray-700 flex items-center justify-center text-lg font-bold text-gray-500 shrink-0">#{ERB::Util.html_escape(initial)}</div>)
 
     reason_text = case reason
-      when :expired then "Invite Expired"
-      when :revoked then "Invite No Longer Valid"
-      when :maxed_out then "Invite Reached Max Uses"
-      else "Invite Unavailable"
+    when :expired then "Invite Expired"
+    when :revoked then "Invite No Longer Valid"
+    when :maxed_out then "Invite Reached Max Uses"
+    else "Invite Unavailable"
     end
 
     %(<div class="mt-2 flex items-center gap-3 max-w-sm rounded-lg border border-gray-700 bg-gray-800/40 px-3 py-3.5 opacity-60" data-invite-embed="true" data-invite-embed-#{invite_code || "expired"}>#{icon_html}<div class="min-w-0"><div class="text-gray-400 font-semibold text-sm truncate">#{ERB::Util.html_escape(server_name)}</div><div class="text-xs text-gray-500">#{reason_text}</div><div class="text-xs text-gray-500 mt-0.5">Inferno</div></div></div>)
