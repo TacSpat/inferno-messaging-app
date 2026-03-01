@@ -3,6 +3,9 @@ productName: Inferno
 directories:
   output: dist
 
+electronLanguages:
+  - en
+
 files:
   - electron/**
   - "!node_modules"
