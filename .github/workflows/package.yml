@@ -155,10 +155,12 @@ jobs:
       - name: Install libsodium
         shell: pwsh
         run: |
-          $url = "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable-msvc.zip"
+          $url = "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-msvc.zip"
           Invoke-WebRequest -Uri $url -OutFile libsodium.zip
           Expand-Archive libsodium.zip -DestinationPath libsodium
-          Copy-Item "libsodium\x64\Release\v143\dynamic\libsodium.dll" -Destination "packaging\windows\libsodium.dll"
+          $dll = Get-ChildItem -Path libsodium -Recurse -Filter "libsodium.dll" | Where-Object { $_.FullName -match "x64" -and $_.FullName -match "dynamic" } | Select-Object -First 1
+          if (-not $dll) { throw "libsodium.dll not found in archive" }
+          Copy-Item $dll.FullName -Destination "packaging\windows\libsodium.dll"
 
       - uses: ruby/setup-ruby@v1
         with:
