@@ -17,7 +17,7 @@ class Nip44Service
   # crypto_scalarmult(q, n, p)
   SCALARMULT = Fiddle::Function.new(
     LIB["crypto_scalarmult"],
-    [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+    [ Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP ],
     Fiddle::TYPE_INT
   )
 
@@ -54,7 +54,7 @@ class Nip44Service
   # NIP-44 uses x-only pubkeys (32 bytes), we prepend 0x02 for curve point
   def self.shared_secret(our_privkey_hex, their_pubkey_hex)
     # Convert x-only pubkey to compressed point (prepend 02)
-    their_point = ["02#{their_pubkey_hex}"].pack("H*")
+    their_point = [ "02#{their_pubkey_hex}" ].pack("H*")
 
     # Our private key as 32 bytes (for X25519, but Nostr uses secp256k1)
     # NIP-44 uses secp256k1 ECDH
@@ -66,7 +66,7 @@ class Nip44Service
     shared_point = their_point_ec.mul(our_priv_bn)
     shared_x = shared_point.to_bn(:compressed).to_s(16)[2..65] # x coordinate only
 
-    [shared_x].pack("H*")
+    [ shared_x ].pack("H*")
   end
 
   # NIP-44 conversation key derivation
@@ -100,7 +100,7 @@ class Nip44Service
     raise EncryptionError, "XChaCha20 encryption failed" unless result == 0
 
     # NIP-44 payload: version(1) + nonce(24) + ciphertext
-    payload = [VERSION].pack("C") + nonce + ciphertext_buf
+    payload = [ VERSION ].pack("C") + nonce + ciphertext_buf
 
     # HMAC-SHA256 for authentication
     mac = OpenSSL::HMAC.digest("SHA256", hmac_key, payload)
@@ -177,10 +177,10 @@ class Nip44Service
     raise EncryptionError, "Message too long" if len > 65535
 
     # Calculate padded length (next power of 2, minimum 32)
-    padded_len = [32, 2**Math.log2([len + 2, 1].max).ceil].max
-    padded_len = [padded_len, 65536].min
+    padded_len = [ 32, 2**Math.log2([ len + 2, 1 ].max).ceil ].max
+    padded_len = [ padded_len, 65536 ].min
 
-    result = [len].pack("n") + utf8 + ("\x00" * (padded_len - 2 - len))
+    result = [ len ].pack("n") + utf8 + ("\x00" * (padded_len - 2 - len))
     result.b
   end
 

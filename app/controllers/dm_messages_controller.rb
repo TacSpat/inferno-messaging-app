@@ -3,8 +3,8 @@ class DmMessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_conversation
-  before_action :set_message, only: [:update, :destroy]
-  before_action :validate_file_types, only: [:create, :update]
+  before_action :set_message, only: [ :update, :destroy ]
+  before_action :validate_file_types, only: [ :create, :update ]
 
   def older_messages
     before_message = @conversation.messages.find_by(public_id: params[:before])
@@ -211,7 +211,7 @@ class DmMessagesController < ApplicationController
       pubkey: user.nostr_public_key,
       content: encrypted_content,
       tags: [
-        ["p", counterparty_pubkey]
+        [ "p", counterparty_pubkey ]
       ]
     )
     signed = signer.sign(event)
@@ -251,7 +251,7 @@ class DmMessagesController < ApplicationController
       kind: 14,
       pubkey: user.nostr_public_key,
       content: encrypted_content,
-      tags: [["p", counterparty_pubkey]]
+      tags: [ [ "p", counterparty_pubkey ] ]
     )
     signed = signer.sign(event)
     signed_hash = signed.to_json
@@ -282,7 +282,7 @@ class DmMessagesController < ApplicationController
       kind: 14,
       pubkey: user.nostr_public_key,
       content: encrypted_content,
-      tags: [["p", counterparty_pubkey]]
+      tags: [ [ "p", counterparty_pubkey ] ]
     )
     signed = signer.sign(event)
     signed_hash = signed.to_json

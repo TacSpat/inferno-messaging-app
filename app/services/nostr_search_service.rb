@@ -48,7 +48,7 @@ class NostrSearchService
 
   # NIP-50 search: query all relays in parallel, return as soon as any has results
   def self.nip50_search(query)
-    filter = { kinds: [KIND_METADATA], search: query, limit: 20 }
+    filter = { kinds: [ KIND_METADATA ], search: query, limit: 20 }
 
     urls = (NIP50_RELAYS + RelayConnection.active.pluck(:url)).uniq
     all_events = {}
@@ -73,7 +73,7 @@ class NostrSearchService
     loop do
       remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
       break if remaining <= 0
-      break if got_results.pop(timeout: [remaining, 0.5].min)
+      break if got_results.pop(timeout: [ remaining, 0.5 ].min)
       break if threads.none?(&:alive?)
     end
 
@@ -105,7 +105,7 @@ class NostrSearchService
     return [] unless pubkey.is_a?(String) && pubkey.match?(/\A[0-9a-f]{64}\z/i)
 
     # Fetch the full profile for this pubkey
-    [resolve_pubkey(pubkey)].compact
+    [ resolve_pubkey(pubkey) ].compact
   rescue => e
     Rails.logger.error("NostrSearchService NIP-05 error for #{identifier}: #{e.message}")
     []
@@ -113,7 +113,7 @@ class NostrSearchService
 
   # Resolve a single pubkey by fetching Kind 0 from relays
   def self.resolve_pubkey(pubkey)
-    filter = { kinds: [KIND_METADATA], authors: [pubkey], limit: 1 }
+    filter = { kinds: [ KIND_METADATA ], authors: [ pubkey ], limit: 1 }
     events = RelayService.fetch_from_all(filter, timeout: 10)
 
     if events.any?

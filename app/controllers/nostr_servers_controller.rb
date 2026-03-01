@@ -1,7 +1,7 @@
 class NostrServersController < ApplicationController
   layout "standalone"
 
-  before_action :set_server_preview, only: [:show]
+  before_action :set_server_preview, only: [ :show ]
 
   def show
     respond_to do |format|

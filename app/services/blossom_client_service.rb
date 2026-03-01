@@ -167,9 +167,9 @@ class BlossomClientService
       pubkey: user.nostr_public_key,
       content: "Upload #{sha256}",
       tags: [
-        ["t", action],
-        ["x", sha256],
-        ["expiration", (Time.now.to_i + 300).to_s]
+        [ "t", action ],
+        [ "x", sha256 ],
+        [ "expiration", (Time.now.to_i + 300).to_s ]
       ]
     )
     signed = signer.sign(event)

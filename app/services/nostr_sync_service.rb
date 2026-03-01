@@ -14,7 +14,7 @@ class NostrSyncService
     pubkeys = Contact.pluck(:pubkey)
     return if pubkeys.empty?
 
-    events = RelayService.fetch_from_all({ kinds: [0], authors: pubkeys })
+    events = RelayService.fetch_from_all({ kinds: [ 0 ], authors: pubkeys })
     # Keep only the latest event per pubkey
     latest = events.group_by { |e| e["pubkey"] }.transform_values { |evts|
       evts.max_by { |e| e["created_at"].to_i }
@@ -36,10 +36,10 @@ class NostrSyncService
     return if pubkey.blank?
 
     inbound = RelayService.fetch_from_all({
-      kinds: [14], "#p": [pubkey], since: since.to_i
+      kinds: [ 14 ], "#p": [ pubkey ], since: since.to_i
     })
     outbound = RelayService.fetch_from_all({
-      kinds: [14], authors: [pubkey], since: since.to_i
+      kinds: [ 14 ], authors: [ pubkey ], since: since.to_i
     })
 
     events = (inbound + outbound).uniq { |e| e["id"] }.sort_by { |e| e["created_at"].to_i }
@@ -61,7 +61,7 @@ class NostrSyncService
 
     channels.find_each do |channel|
       events = RelayService.fetch_from_all({
-        kinds: [9], "#h": [channel.nostr_group_id], since: since.to_i
+        kinds: [ 9 ], "#h": [ channel.nostr_group_id ], since: since.to_i
       })
 
       events.sort_by { |e| e["created_at"].to_i }.each do |event|

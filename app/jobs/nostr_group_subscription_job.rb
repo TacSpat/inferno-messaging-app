@@ -5,7 +5,7 @@ class NostrGroupSubscriptionJob < ApplicationJob
 
   # Subscribe to all channels and process inbound events from relays
   def perform
-    channels = Channel.where.not(nostr_group_id: [nil, ""])
+    channels = Channel.where.not(nostr_group_id: [ nil, "" ])
     return if channels.empty?
 
     channels_by_relay = channels.group_by(&:nostr_relay_url).reject { |url, _| url.blank? }
@@ -29,7 +29,7 @@ class NostrGroupSubscriptionJob < ApplicationJob
     since = oldest_log ? oldest_log.event_created_at.to_i : 1.hour.ago.to_i
 
     filter = {
-      kinds: [NIP29_GROUP_CHAT_MESSAGE],
+      kinds: [ NIP29_GROUP_CHAT_MESSAGE ],
       "#h" => group_ids,
       since: since
     }

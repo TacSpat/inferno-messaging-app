@@ -1,13 +1,13 @@
 module AuditLogHelper
   KIND_LABELS = {
-    31750 => ["updated server settings", "bg-blue-600/20 text-blue-400", "edit"],
-    31751 => ["updated channels", "bg-blue-600/20 text-blue-400", "edit"],
-    31752 => ["updated roles", "bg-purple-600/20 text-purple-400", "edit"],
-    31753 => ["updated a member", "bg-green-600/20 text-green-400", "user"],
-    31754 => ["updated emojis", "bg-yellow-600/20 text-yellow-400", "edit"],
-    31755 => ["updated stickers", "bg-yellow-600/20 text-yellow-400", "edit"],
-    31756 => ["updated bans", "bg-red-600/20 text-red-400", "ban"],
-    31757 => ["updated invites", "bg-cyan-600/20 text-cyan-400", "link"]
+    31750 => [ "updated server settings", "bg-blue-600/20 text-blue-400", "edit" ],
+    31751 => [ "updated channels", "bg-blue-600/20 text-blue-400", "edit" ],
+    31752 => [ "updated roles", "bg-purple-600/20 text-purple-400", "edit" ],
+    31753 => [ "updated a member", "bg-green-600/20 text-green-400", "user" ],
+    31754 => [ "updated emojis", "bg-yellow-600/20 text-yellow-400", "edit" ],
+    31755 => [ "updated stickers", "bg-yellow-600/20 text-yellow-400", "edit" ],
+    31756 => [ "updated bans", "bg-red-600/20 text-red-400", "ban" ],
+    31757 => [ "updated invites", "bg-cyan-600/20 text-cyan-400", "link" ]
   }.freeze
 
   ICONS = {
@@ -18,8 +18,8 @@ module AuditLogHelper
   }.freeze
 
   def audit_event_display(event)
-    label, color, icon_key = KIND_LABELS[event.kind] || ["performed an action", "bg-gray-600/20 text-gray-400", "edit"]
-    [label, color, raw(ICONS[icon_key])]
+    label, color, icon_key = KIND_LABELS[event.kind] || [ "performed an action", "bg-gray-600/20 text-gray-400", "edit" ]
+    [ label, color, raw(ICONS[icon_key]) ]
   end
 
   def audit_event_actor(event)

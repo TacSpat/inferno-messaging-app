@@ -97,36 +97,36 @@ class NostrServerPublishJob < ApplicationJob
   # Kind 31750 — Server Metadata
   def build_metadata_tags(options = {})
     gid = @server.nostr_group_id
-    tags = [["d", "inferno-#{gid}"]]
-    tags << ["name", @server.name]
-    tags << ["about", @server.description || ""]
-    tags << ["owner", @server.owner.nostr_public_key] if @server.owner.nostr_public_key.present?
+    tags = [ [ "d", "inferno-#{gid}" ] ]
+    tags << [ "name", @server.name ]
+    tags << [ "about", @server.description || "" ]
+    tags << [ "owner", @server.owner.nostr_public_key ] if @server.owner.nostr_public_key.present?
 
     if @server.icon.attached?
-      tags << ["picture", blossom_url_for(@server.icon)]
+      tags << [ "picture", blossom_url_for(@server.icon) ]
     end
     if @server.banner.attached?
-      tags << ["banner", blossom_url_for(@server.banner)]
+      tags << [ "banner", blossom_url_for(@server.banner) ]
     end
 
     @server.effective_relay_urls.each do |url|
-      tags << ["relay", url]
+      tags << [ "relay", url ]
     end
 
     if @server.welcome_channel
-      tags << ["welcome_channel", @server.welcome_channel.nostr_group_id || ""]
+      tags << [ "welcome_channel", @server.welcome_channel.nostr_group_id || "" ]
     end
-    tags << ["welcome_message", @server.welcome_message_template || ""]
-    tags << ["welcome_enabled", @server.welcome_message_enabled?.to_s]
-    tags << ["voice_enabled", @server.voice_enabled?.to_s]
+    tags << [ "welcome_message", @server.welcome_message_template || "" ]
+    tags << [ "welcome_enabled", @server.welcome_message_enabled?.to_s ]
+    tags << [ "voice_enabled", @server.voice_enabled?.to_s ]
 
     # Include voice provider pubkeys so other clients can create ServerVoiceProvider records
     @server.server_voice_providers.active.includes(:user).each do |svp|
       next unless svp.user.nostr_public_key.present? && svp.user.livekit_configured?
-      tags << ["voice_provider", svp.user.nostr_public_key]
+      tags << [ "voice_provider", svp.user.nostr_public_key ]
     end
 
-    tags << ["deleted", "true"] if options[:deleted]
+    tags << [ "deleted", "true" ] if options[:deleted]
     tags
   end
 
@@ -134,12 +134,12 @@ class NostrServerPublishJob < ApplicationJob
   def build_structure_tags
     gid = @server.nostr_group_id
     tags = [
-      ["d", "inferno-struct-#{gid}"],
-      ["server", gid]
+      [ "d", "inferno-struct-#{gid}" ],
+      [ "server", gid ]
     ]
 
     @server.categories.ordered.each do |cat|
-      tags << ["cat", cat.public_id, cat.name, cat.position.to_s]
+      tags << [ "cat", cat.public_id, cat.name, cat.position.to_s ]
     end
 
     @server.channels.ordered.includes(:category).each do |ch|
@@ -167,8 +167,8 @@ class NostrServerPublishJob < ApplicationJob
   def build_roles_tags
     gid = @server.nostr_group_id
     tags = [
-      ["d", "inferno-roles-#{gid}"],
-      ["server", gid]
+      [ "d", "inferno-roles-#{gid}" ],
+      [ "server", gid ]
     ]
 
     @server.roles.ordered.each do |role|
@@ -194,13 +194,13 @@ class NostrServerPublishJob < ApplicationJob
 
     d_tag = "inferno-mbr-#{gid}-#{target_pubkey[0..15]}"
     tags = [
-      ["d", d_tag],
-      ["server", gid],
-      ["p", target_pubkey]
+      [ "d", d_tag ],
+      [ "server", gid ],
+      [ "p", target_pubkey ]
     ]
 
     if options[:removed]
-      tags << ["removed", "true"]
+      tags << [ "removed", "true" ]
       return tags
     end
 
@@ -210,22 +210,22 @@ class NostrServerPublishJob < ApplicationJob
       membership = @server.server_memberships.find_by(user: member_user)
       if membership
         role_ids = membership.roles.pluck(:public_id)
-        tags << (["roles"] + role_ids)
-        tags << ["nickname", membership.nickname || ""]
-        tags << ["joined_at", (membership.joined_at || membership.created_at).to_i.to_s]
+        tags << ([ "roles" ] + role_ids)
+        tags << [ "nickname", membership.nickname || "" ]
+        tags << [ "joined_at", (membership.joined_at || membership.created_at).to_i.to_s ]
       end
 
       # Embed profile data so remote instances don't need a separate Kind 0 fetch
-      tags << ["profile_name", member_user.username || ""]
-      tags << ["profile_display_name", member_user.display_name.presence || member_user.username || ""]
-      tags << ["profile_about", member_user.bio || ""]
-      tags << ["profile_color", member_user.profile_color || ""]
-      tags << ["profile_color_2", member_user.profile_color_2 || ""]
-      tags << ["profile_status", member_user.status || ""]
-      tags << ["profile_status_emoji", member_user.status_emoji || ""]
+      tags << [ "profile_name", member_user.username || "" ]
+      tags << [ "profile_display_name", member_user.display_name.presence || member_user.username || "" ]
+      tags << [ "profile_about", member_user.bio || "" ]
+      tags << [ "profile_color", member_user.profile_color || "" ]
+      tags << [ "profile_color_2", member_user.profile_color_2 || "" ]
+      tags << [ "profile_status", member_user.status || "" ]
+      tags << [ "profile_status_emoji", member_user.status_emoji || "" ]
       begin
-        tags << ["profile_picture", blossom_url_for(member_user.avatar)] if member_user.avatar.attached?
-        tags << ["profile_banner", blossom_url_for(member_user.banner)] if member_user.banner.attached?
+        tags << [ "profile_picture", blossom_url_for(member_user.avatar) ] if member_user.avatar.attached?
+        tags << [ "profile_banner", blossom_url_for(member_user.banner) ] if member_user.banner.attached?
       rescue => e
         Rails.logger.warn("[NostrServerPublishJob] Failed to generate blob URL: #{e.message}")
       end
@@ -233,20 +233,20 @@ class NostrServerPublishJob < ApplicationJob
       remote = @server.remote_members.find_by(pubkey: target_pubkey)
       if remote
         role_ids = remote.roles.pluck(:public_id)
-        tags << (["roles"] + role_ids)
-        tags << ["nickname", remote.nickname || ""]
-        tags << ["joined_at", (remote.joined_at || remote.created_at).to_i.to_s]
+        tags << ([ "roles" ] + role_ids)
+        tags << [ "nickname", remote.nickname || "" ]
+        tags << [ "joined_at", (remote.joined_at || remote.created_at).to_i.to_s ]
 
         # Forward remote member's profile data
-        tags << ["profile_name", remote.username || ""]
-        tags << ["profile_display_name", remote.display_name || ""]
-        tags << ["profile_about", remote.bio || ""]
-        tags << ["profile_picture", remote.avatar_url || ""]
-        tags << ["profile_banner", remote.banner_url || ""]
-        tags << ["profile_color", remote.profile_color || ""]
-        tags << ["profile_color_2", remote.profile_color_2 || ""]
-        tags << ["profile_status", remote.status || ""]
-        tags << ["profile_status_emoji", remote.status_emoji || ""]
+        tags << [ "profile_name", remote.username || "" ]
+        tags << [ "profile_display_name", remote.display_name || "" ]
+        tags << [ "profile_about", remote.bio || "" ]
+        tags << [ "profile_picture", remote.avatar_url || "" ]
+        tags << [ "profile_banner", remote.banner_url || "" ]
+        tags << [ "profile_color", remote.profile_color || "" ]
+        tags << [ "profile_color_2", remote.profile_color_2 || "" ]
+        tags << [ "profile_status", remote.status || "" ]
+        tags << [ "profile_status_emoji", remote.status_emoji || "" ]
       end
     end
 
@@ -257,15 +257,15 @@ class NostrServerPublishJob < ApplicationJob
   def build_emojis_tags
     gid = @server.nostr_group_id
     tags = [
-      ["d", "inferno-emojis-#{gid}"],
-      ["server", gid]
+      [ "d", "inferno-emojis-#{gid}" ],
+      [ "server", gid ]
     ]
 
     @server.server_emojis.includes(:creator, image_attachment: :blob).each do |emoji|
       next unless emoji.image.attached?
       url = blossom_url_for(emoji.image)
       creator_pk = emoji.creator&.nostr_public_key || ""
-      tags << ["emoji", emoji.name, url, creator_pk]
+      tags << [ "emoji", emoji.name, url, creator_pk ]
     end
 
     tags
@@ -275,15 +275,15 @@ class NostrServerPublishJob < ApplicationJob
   def build_stickers_tags
     gid = @server.nostr_group_id
     tags = [
-      ["d", "inferno-stickers-#{gid}"],
-      ["server", gid]
+      [ "d", "inferno-stickers-#{gid}" ],
+      [ "server", gid ]
     ]
 
     @server.server_stickers.includes(:creator, image_attachment: :blob).each do |sticker|
       next unless sticker.image.attached?
       url = blossom_url_for(sticker.image)
       creator_pk = sticker.creator&.nostr_public_key || ""
-      tags << ["sticker", sticker.name, sticker.description || "", url, creator_pk]
+      tags << [ "sticker", sticker.name, sticker.description || "", url, creator_pk ]
     end
 
     tags
@@ -296,13 +296,13 @@ class NostrServerPublishJob < ApplicationJob
 
     d_tag = "inferno-ban-#{gid}-#{target_pubkey[0..15]}"
     tags = [
-      ["d", d_tag],
-      ["server", gid],
-      ["p", target_pubkey]
+      [ "d", d_tag ],
+      [ "server", gid ],
+      [ "p", target_pubkey ]
     ]
 
     if options[:unbanned]
-      tags << ["unbanned", "true"]
+      tags << [ "unbanned", "true" ]
       return tags
     end
 
@@ -311,8 +311,8 @@ class NostrServerPublishJob < ApplicationJob
     if ban_user
       ban = @server.bans.find_by(user: ban_user)
       if ban
-        tags << ["reason", ban.reason || ""]
-        tags << ["banned_by", ban.banned_by&.nostr_public_key || ""]
+        tags << [ "reason", ban.reason || "" ]
+        tags << [ "banned_by", ban.banned_by&.nostr_public_key || "" ]
       end
     end
 
@@ -329,20 +329,20 @@ class NostrServerPublishJob < ApplicationJob
 
     d_tag = "inferno-invite-#{gid}-#{invite_code}"
     tags = [
-      ["d", d_tag],
-      ["server", gid],
-      ["code", invite.code]
+      [ "d", d_tag ],
+      [ "server", gid ],
+      [ "code", invite.code ]
     ]
 
     if options[:revoked]
-      tags << ["revoked", "true"]
+      tags << [ "revoked", "true" ]
       return tags
     end
 
-    tags << ["max_uses", (invite.max_uses || 0).to_s]
-    tags << ["expires_at", (invite.expires_at&.to_i || 0).to_s]
-    tags << ["created_by", invite.creator&.nostr_public_key || ""]
-    tags << ["uses", invite.uses_count.to_s]
+    tags << [ "max_uses", (invite.max_uses || 0).to_s ]
+    tags << [ "expires_at", (invite.expires_at&.to_i || 0).to_s ]
+    tags << [ "created_by", invite.creator&.nostr_public_key || "" ]
+    tags << [ "uses", invite.uses_count.to_s ]
 
     tags
   end

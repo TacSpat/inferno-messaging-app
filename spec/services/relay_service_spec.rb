@@ -12,7 +12,7 @@ RSpec.describe RelayService do
 
   describe ".fetch_from_all" do
     it "returns empty array when no relays are active" do
-      results = RelayService.fetch_from_all({ kinds: [0] })
+      results = RelayService.fetch_from_all({ kinds: [ 0 ] })
       expect(results).to eq([])
     end
   end

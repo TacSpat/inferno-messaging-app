@@ -31,7 +31,7 @@ class CreateRemoteMembers < ActiveRecord::Migration[8.1]
       t.timestamps
     end
 
-    add_index :remote_members, [:server_id, :pubkey], unique: true
+    add_index :remote_members, [ :server_id, :pubkey ], unique: true
     add_index :remote_members, :public_id, unique: true
   end
 end

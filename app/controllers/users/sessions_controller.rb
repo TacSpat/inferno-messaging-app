@@ -1,6 +1,6 @@
 class Users::SessionsController < Devise::SessionsController
-  before_action :redirect_to_setup, only: [:new]
-  before_action :redirect_if_authenticated, only: [:new, :create]
+  before_action :redirect_to_setup, only: [ :new ]
+  before_action :redirect_if_authenticated, only: [ :new, :create ]
 
   def create
     session[:pending_invite_code] = params[:invite] if params[:invite].present?

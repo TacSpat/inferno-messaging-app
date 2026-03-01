@@ -64,7 +64,7 @@ class NostrEvent < ApplicationRecord
       end
     end
 
-    limit = [filter["limit"] || 500, 1000].min
+    limit = [ filter["limit"] || 500, 1000 ].min
     scope.order(event_created_at: :desc).limit(limit)
   end
 end

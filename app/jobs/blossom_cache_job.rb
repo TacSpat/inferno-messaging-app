@@ -63,7 +63,7 @@ class BlossomCacheJob < ApplicationJob
   def enforce_cache_limit
     return unless Dir.exist?(BLOSSOM_DIR)
 
-    files = Dir.glob(BLOSSOM_DIR.join("*")).map { |f| [f, File.mtime(f), File.size(f)] }
+    files = Dir.glob(BLOSSOM_DIR.join("*")).map { |f| [ f, File.mtime(f), File.size(f) ] }
     total = files.sum(&:last)
 
     return if total < MAX_CACHE_SIZE

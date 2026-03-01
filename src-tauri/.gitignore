@@ -1,0 +1,5 @@
+# Rust build artifacts
+/target/
+
+# Tebako sidecar binaries (built locally or in CI)
+/binaries/

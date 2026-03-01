@@ -33,9 +33,9 @@ class RelaySubscriptionManager
   KIND_TYPING           = 25050
   KIND_REACTION         = 7
 
-  SERVER_STATE_KINDS = [KIND_SERVER_METADATA, KIND_SERVER_STRUCTURE, KIND_SERVER_ROLES,
-                        KIND_SERVER_EMOJIS, KIND_SERVER_STICKERS].freeze
-  SERVER_PER_ENTITY_KINDS = [KIND_SERVER_MEMBER, KIND_SERVER_BAN, KIND_SERVER_INVITE].freeze
+  SERVER_STATE_KINDS = [ KIND_SERVER_METADATA, KIND_SERVER_STRUCTURE, KIND_SERVER_ROLES,
+                        KIND_SERVER_EMOJIS, KIND_SERVER_STICKERS ].freeze
+  SERVER_PER_ENTITY_KINDS = [ KIND_SERVER_MEMBER, KIND_SERVER_BAN, KIND_SERVER_INVITE ].freeze
 
   RECONNECT_DELAY = 5 # seconds
 
@@ -61,7 +61,7 @@ class RelaySubscriptionManager
 
       existing = server.remote_owner_pubkeys || []
       unless existing.include?(pubkey)
-        server.update_column(:remote_owner_pubkeys, existing + [pubkey])
+        server.update_column(:remote_owner_pubkeys, existing + [ pubkey ])
         Rails.logger.info("[RelaySubscriptionManager] Registered remote owner #{pubkey[0..15]} for server #{server_id}")
       end
     end
@@ -159,7 +159,7 @@ class RelaySubscriptionManager
           next unless conn[:ws]
           # Close existing subscriptions
           conn[:subscriptions].each_key do |sub_id|
-            conn[:ws].send(JSON.generate(["CLOSE", sub_id])) rescue nil
+            conn[:ws].send(JSON.generate([ "CLOSE", sub_id ])) rescue nil
           end
           conn[:subscriptions].clear
           # Re-subscribe with updated data
@@ -235,11 +235,11 @@ class RelaySubscriptionManager
     if group_ids.any?
       sub_id = "groups-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [NIP29_GROUP_CHAT_MESSAGE, NIP29_DELETE_EVENT],
+        kinds: [ NIP29_GROUP_CHAT_MESSAGE, NIP29_DELETE_EVENT ],
         "#h" => group_ids,
         since: 1.hour.ago.to_i
       }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :groups }
     end
 
@@ -247,21 +247,21 @@ class RelaySubscriptionManager
     if owner.nostr_public_key.present?
       sub_id = "dms-in-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM],
-        "#p" => [owner.nostr_public_key],
+        kinds: [ KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM ],
+        "#p" => [ owner.nostr_public_key ],
         since: 1.hour.ago.to_i
       }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms }
 
       # Subscription 2b: DMs authored by us (from other devices)
       sub_id = "dms-out-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM],
-        authors: [owner.nostr_public_key],
+        kinds: [ KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM ],
+        authors: [ owner.nostr_public_key ],
         since: 1.hour.ago.to_i
       }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms_own }
     end
 
@@ -271,15 +271,15 @@ class RelaySubscriptionManager
     conversation_pubkeys = Conversation.where.not(counterparty_pubkey: nil).pluck(:counterparty_pubkey)
     remote_member_pubkeys = RemoteMember.distinct.pluck(:pubkey)
     all_pubkeys = (contact_pubkeys + conversation_pubkeys + remote_member_pubkeys).uniq.compact_blank
-    all_pubkeys -= [owner.nostr_public_key] # Don't subscribe to our own profile/presence
+    all_pubkeys -= [ owner.nostr_public_key ] # Don't subscribe to our own profile/presence
 
     if all_pubkeys.any?
       sub_id = "contacts-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [KIND_METADATA, KIND_USER_STATUS],
+        kinds: [ KIND_METADATA, KIND_USER_STATUS ],
         authors: all_pubkeys
       }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :contacts }
     end
 
@@ -287,39 +287,39 @@ class RelaySubscriptionManager
     server_group_ids = Server.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
     if server_group_ids.any?
       d_tag_filters = server_group_ids.flat_map { |gid|
-        ["inferno-#{gid}", "inferno-struct-#{gid}", "inferno-roles-#{gid}",
-         "inferno-emojis-#{gid}", "inferno-stickers-#{gid}"]
+        [ "inferno-#{gid}", "inferno-struct-#{gid}", "inferno-roles-#{gid}",
+         "inferno-emojis-#{gid}", "inferno-stickers-#{gid}" ]
       }
       sub_id = "server-state-#{SecureRandom.hex(4)}"
       filter = { kinds: SERVER_STATE_KINDS, "#d" => d_tag_filters }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :server_state }
 
       # Subscription 5: Per-member/ban/invite events
       member_d_prefixes = server_group_ids.flat_map { |gid|
-        ["inferno-mbr-#{gid}-", "inferno-ban-#{gid}-", "inferno-invite-#{gid}-"]
+        [ "inferno-mbr-#{gid}-", "inferno-ban-#{gid}-", "inferno-invite-#{gid}-" ]
       }
       # Nostr relays don't support prefix matching on d tags, so we use a broad filter
       # and filter in process_inbound_event. We subscribe to the kinds.
       sub_id = "server-entities-#{SecureRandom.hex(4)}"
       filter = { kinds: SERVER_PER_ENTITY_KINDS, since: 1.hour.ago.to_i }
-      ws.send(JSON.generate(["REQ", sub_id, filter]))
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :server_entities }
 
       # Subscription 6: Ephemeral typing for all channels
       all_channel_group_ids = Channel.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
       if all_channel_group_ids.any?
         sub_id = "typing-#{SecureRandom.hex(4)}"
-        filter = { kinds: [KIND_TYPING], "#h" => all_channel_group_ids }
-        ws.send(JSON.generate(["REQ", sub_id, filter]))
+        filter = { kinds: [ KIND_TYPING ], "#h" => all_channel_group_ids }
+        ws.send(JSON.generate([ "REQ", sub_id, filter ]))
         @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :typing }
       end
 
       # Subscription 7: Reactions for channel messages
       if all_channel_group_ids.any?
         sub_id = "reactions-#{SecureRandom.hex(4)}"
-        filter = { kinds: [KIND_REACTION], "#h" => all_channel_group_ids, since: 1.hour.ago.to_i }
-        ws.send(JSON.generate(["REQ", sub_id, filter]))
+        filter = { kinds: [ KIND_REACTION ], "#h" => all_channel_group_ids, since: 1.hour.ago.to_i }
+        ws.send(JSON.generate([ "REQ", sub_id, filter ]))
         @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :reactions }
       end
     end
@@ -1077,10 +1077,10 @@ class RelaySubscriptionManager
       kind: 14,
       pubkey: responder.nostr_public_key,
       content: encrypted,
-      tags: [["p", sender_pubkey]]
+      tags: [ [ "p", sender_pubkey ] ]
     )
     signed = signer.sign(resp_event)
-    event_message = JSON.generate(["EVENT", signed.to_json])
+    event_message = JSON.generate([ "EVENT", signed.to_json ])
 
     # Send directly on our WebSocket connections (we're already on the EM thread)
     sent_count = 0
@@ -1269,7 +1269,7 @@ class RelaySubscriptionManager
     urls = RelayConnection.active.pluck(:url)
     return nil if urls.empty?
 
-    filter = { kinds: [0], authors: [pubkey], limit: 1 }
+    filter = { kinds: [ 0 ], authors: [ pubkey ], limit: 1 }
     urls.each do |url|
       events = RelayService.fetch_from_relay(url, filter, timeout: 10)
       if events.any?

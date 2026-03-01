@@ -161,15 +161,15 @@ class MessagesController < ApplicationController
     user = message.user
     event_content = message.content || ""
     tags = [
-      ["h", channel.nostr_group_id],
-      ["e", message.nostr_event_id, "", "edit"]
+      [ "h", channel.nostr_group_id ],
+      [ "e", message.nostr_event_id, "", "edit" ]
     ]
 
     if channel.encrypted? && channel.channel_public_key.present?
       conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
       event_content = Nip44Service.encrypt(event_content, conversation_key)
-      tags << ["encrypted", "nip44"]
-      tags << ["channel_pubkey", channel.channel_public_key]
+      tags << [ "encrypted", "nip44" ]
+      tags << [ "channel_pubkey", channel.channel_public_key ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
@@ -188,13 +188,13 @@ class MessagesController < ApplicationController
   def publish_channel_message_to_nostr(message, channel)
     user = message.user
     event_content = resolve_active_storage_urls(message.content || "")
-    tags = [["h", channel.nostr_group_id]]
+    tags = [ [ "h", channel.nostr_group_id ] ]
 
     if channel.encrypted? && channel.channel_public_key.present?
       conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
       event_content = Nip44Service.encrypt(event_content, conversation_key)
-      tags << ["encrypted", "nip44"]
-      tags << ["channel_pubkey", channel.channel_public_key]
+      tags << [ "encrypted", "nip44" ]
+      tags << [ "channel_pubkey", channel.channel_public_key ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)

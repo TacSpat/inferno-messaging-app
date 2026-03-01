@@ -39,7 +39,7 @@ class VoiceTokenRpcService
         kind: 14,
         pubkey: owner.nostr_public_key,
         content: encrypted,
-        tags: [["p", provider_pubkey]]
+        tags: [ [ "p", provider_pubkey ] ]
       )
       signed = signer.sign(event)
       RelayService.publish_to_all(signed.to_json)

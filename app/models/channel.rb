@@ -87,7 +87,7 @@ class Channel < ApplicationRecord
 
   scope :accessible_to, ->(user) {
     # Non-encrypted channels are always accessible
-    non_encrypted = where(encrypted: [false, nil])
+    non_encrypted = where(encrypted: [ false, nil ])
 
     # For encrypted channels, we need to check visibility
     encrypted_ids = where(encrypted: true).select { |ch| ch.visible_to?(user) }.map(&:id)
@@ -97,7 +97,7 @@ class Channel < ApplicationRecord
 
   # Enable sharing on specific relays
   def enable_sharing!(relay_url:, group_id: nil)
-    urls = (nostr_relay_urls || []) | [relay_url]
+    urls = (nostr_relay_urls || []) | [ relay_url ]
     update!(
       shared: true,
       nostr_relay_url: relay_url,
@@ -108,7 +108,7 @@ class Channel < ApplicationRecord
 
   # Bridge to an existing external NIP-29 group
   def bridge_to!(relay_url:, group_id:)
-    urls = (nostr_relay_urls || []) | [relay_url]
+    urls = (nostr_relay_urls || []) | [ relay_url ]
     update!(
       shared: true,
       nostr_relay_url: relay_url,

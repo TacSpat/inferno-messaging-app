@@ -14,8 +14,8 @@ class NostrProfileResolver
     return contact if urls.empty?
 
     filter = {
-      kinds: [KIND_METADATA],
-      authors: [pubkey],
+      kinds: [ KIND_METADATA ],
+      authors: [ pubkey ],
       limit: 1
     }
 

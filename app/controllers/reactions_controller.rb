@@ -59,10 +59,10 @@ class ReactionsController < ApplicationController
       pubkey: current_user.nostr_public_key,
       content: removing ? "-" : emoji,
       tags: [
-        ["e", @message.nostr_event_id],
-        ["p", author_pubkey],
-        ["k", "9"],
-        ["h", @channel.nostr_group_id]
+        [ "e", @message.nostr_event_id ],
+        [ "p", author_pubkey ],
+        [ "k", "9" ],
+        [ "h", @channel.nostr_group_id ]
       ]
     )
     signed = signer.sign(event)

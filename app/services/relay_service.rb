@@ -16,7 +16,7 @@ class RelayService
     urls = RelayConnection.active.pluck(:url)
     return {} if urls.empty?
 
-    event_message = JSON.generate(["EVENT", signed_event])
+    event_message = JSON.generate([ "EVENT", signed_event ])
 
     # Try to use existing SubscriptionManager connections (non-blocking)
     manager = RelaySubscriptionManager.instance
@@ -166,8 +166,8 @@ class RelayService
 
       urls.each do |url|
         sub_id = SecureRandom.hex(8)
-        req_message = JSON.generate(["REQ", sub_id, filter])
-        close_message = JSON.generate(["CLOSE", sub_id])
+        req_message = JSON.generate([ "REQ", sub_id, filter ])
+        close_message = JSON.generate([ "CLOSE", sub_id ])
 
         ws = Faye::WebSocket::Client.new(url)
 

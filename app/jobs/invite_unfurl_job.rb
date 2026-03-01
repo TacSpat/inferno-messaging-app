@@ -26,7 +26,7 @@ class InviteUnfurlJob < ApplicationJob
       full_url = full_url_match[0]
 
       parsed_url = URI.parse(full_url) rescue nil
-      parsed_authority = if parsed_url && parsed_url.port && ![80, 443].include?(parsed_url.port)
+      parsed_authority = if parsed_url && parsed_url.port && ![ 80, 443 ].include?(parsed_url.port)
         "#{parsed_url.host}:#{parsed_url.port}"
       else
         parsed_url&.host

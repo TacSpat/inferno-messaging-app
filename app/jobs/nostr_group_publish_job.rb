@@ -13,7 +13,7 @@ class NostrGroupPublishJob < ApplicationJob
     user = message.user
 
     # Build NIP-29 Kind 9 event
-    tags = [["h", channel.nostr_group_id]]
+    tags = [ [ "h", channel.nostr_group_id ] ]
 
     # NIP-30: Include custom emoji tags so other clients can render them
     if message.content.present? && channel.server
@@ -25,7 +25,7 @@ class NostrGroupPublishJob < ApplicationJob
         server_emojis.each do |emoji|
           next unless emoji.image.attached?
           url = Rails.application.routes.url_helpers.rails_blob_path(emoji.image, only_path: true)
-          tags << ["emoji", emoji.name, url]
+          tags << [ "emoji", emoji.name, url ]
         end
       end
     end
@@ -36,8 +36,8 @@ class NostrGroupPublishJob < ApplicationJob
     if channel.encrypted? && channel.channel_public_key.present?
       conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
       event_content = Nip44Service.encrypt(event_content, conversation_key)
-      tags << ["encrypted", "nip44"]
-      tags << ["channel_pubkey", channel.channel_public_key]
+      tags << [ "encrypted", "nip44" ]
+      tags << [ "channel_pubkey", channel.channel_public_key ]
     end
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)

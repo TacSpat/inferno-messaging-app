@@ -1,7 +1,7 @@
 # BUD-01 Blossom server — serves and accepts content-addressable files by SHA-256 hash.
 # Mount at /blossom in routes.
 class BlossomController < ApplicationController
-  skip_before_action :verify_authenticity_token, only: [:upload]
+  skip_before_action :verify_authenticity_token, only: [ :upload ]
 
   BLOSSOM_DIR = Rails.root.join("storage", "blossom")
 

@@ -169,8 +169,8 @@ class InvitesController < ApplicationController
   def fetch_invite_from_relay(nostr_group_id, code)
     d_tag = "inferno-invite-#{nostr_group_id}-#{code}"
     events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_INVITE],
-      "#d" => [d_tag]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_INVITE ],
+      "#d" => [ d_tag ]
     })
     return nil if events.empty?
 

@@ -42,12 +42,12 @@ class RelayChannel < ApplicationCable::Channel
     filters.each do |filter|
       events = NostrEvent.apply_filter(filter)
       events.each do |event|
-        transmit ["EVENT", sub_id, event.to_nostr_event]
+        transmit [ "EVENT", sub_id, event.to_nostr_event ]
       end
     end
 
     # Send EOSE (End of Stored Events)
-    transmit ["EOSE", sub_id]
+    transmit [ "EOSE", sub_id ]
 
     # Register subscription for live events
     @subscriptions[sub_id] = filters
@@ -56,27 +56,27 @@ class RelayChannel < ApplicationCable::Channel
 
   def handle_event(data)
     event = data[1]
-    return transmit(["NOTICE", "invalid event"]) unless event.is_a?(Hash)
+    return transmit([ "NOTICE", "invalid event" ]) unless event.is_a?(Hash)
 
     event_id = event["id"]
-    return transmit(["OK", "", false, "missing event id"]) unless event_id.present?
+    return transmit([ "OK", "", false, "missing event id" ]) unless event_id.present?
 
     # Validate required fields
     %w[pubkey created_at kind tags content sig].each do |field|
       unless event.key?(field)
-        return transmit(["OK", event_id, false, "missing field: #{field}"])
+        return transmit([ "OK", event_id, false, "missing field: #{field}" ])
       end
     end
 
     # Store the event
     stored = NostrEvent.store_event(event)
     if stored
-      transmit ["OK", event_id, true, ""]
+      transmit [ "OK", event_id, true, "" ]
 
       # Broadcast to other subscribers
-      ActionCable.server.broadcast("relay_broadcast", ["EVENT", nil, stored.to_nostr_event])
+      ActionCable.server.broadcast("relay_broadcast", [ "EVENT", nil, stored.to_nostr_event ])
     else
-      transmit ["OK", event_id, false, "error: could not store event"]
+      transmit [ "OK", event_id, false, "error: could not store event" ]
     end
   end
 
@@ -84,6 +84,6 @@ class RelayChannel < ApplicationCable::Channel
     sub_id = data[1]
     @subscriptions.delete(sub_id) if sub_id
     stop_stream_from "relay_live_#{sub_id}_#{connection.connection_identifier}" if sub_id
-    transmit ["CLOSED", sub_id, ""]
+    transmit [ "CLOSED", sub_id, "" ]
   end
 end

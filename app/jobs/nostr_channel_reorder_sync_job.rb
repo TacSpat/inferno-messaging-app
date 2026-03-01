@@ -49,7 +49,7 @@ class NostrChannelReorderSyncJob < ApplicationJob
       kind: 14,
       pubkey: owner.nostr_public_key,
       content: encrypted,
-      tags: [["p", target_pubkey]]
+      tags: [ [ "p", target_pubkey ] ]
     )
     signed = signer.sign(event)
     RelayService.publish_to_all(signed.to_json)

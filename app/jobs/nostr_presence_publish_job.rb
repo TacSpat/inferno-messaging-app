@@ -15,8 +15,8 @@ class NostrPresencePublishJob < ApplicationJob
   def build_status_event(user, state)
     content = state == "online" ? "" : state
     tags = [
-      ["d", "general"],
-      ["status", state]
+      [ "d", "general" ],
+      [ "status", state ]
     ]
 
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)

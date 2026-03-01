@@ -54,7 +54,7 @@ module MemberInterface
   # Return [self] so `member.server_memberships.find { |sm| sm.server_id == server.id }`
   # works — RemoteMember itself acts as its own "membership" since it belongs_to :server.
   def server_memberships
-    [self]
+    [ self ]
   end
 
   def remote?

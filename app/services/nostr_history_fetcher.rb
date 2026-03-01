@@ -7,8 +7,8 @@ class NostrHistoryFetcher
 
     since = channel.messages.maximum(:created_at)&.to_i || 1.day.ago.to_i
     filter = {
-      kinds: [9],
-      "#h" => [channel.nostr_group_id],
+      kinds: [ 9 ],
+      "#h" => [ channel.nostr_group_id ],
       since: since
     }
 
@@ -28,9 +28,9 @@ class NostrHistoryFetcher
 
     # Fetch events tagged to our pubkey from the counterparty
     filter = {
-      kinds: [14, 1059, 4],
-      "#p" => [owner.nostr_public_key],
-      authors: [conversation.counterparty_pubkey],
+      kinds: [ 14, 1059, 4 ],
+      "#p" => [ owner.nostr_public_key ],
+      authors: [ conversation.counterparty_pubkey ],
       since: since
     }
 

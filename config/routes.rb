@@ -37,8 +37,8 @@ Rails.application.routes.draw do
     get "tenor/search", to: "tenor#search"
     get "tenor/trending", to: "tenor#trending"
     get "tenor/categories", to: "tenor#categories"
-    resources :gif_collections, only: [:index, :create, :update, :destroy]
-    resources :gif_favorites, only: [:index, :create, :update, :destroy] do
+    resources :gif_collections, only: [ :index, :create, :update, :destroy ]
+    resources :gif_favorites, only: [ :index, :create, :update, :destroy ] do
       collection do
         post :toggle
       end
@@ -46,7 +46,7 @@ Rails.application.routes.draw do
   end
 
   # Server folders
-  resources :server_folders, only: [:create, :update, :destroy] do
+  resources :server_folders, only: [ :create, :update, :destroy ] do
     member do
       patch :toggle_collapse
     end
@@ -54,12 +54,12 @@ Rails.application.routes.draw do
 
   # Servers
   patch :reorder_servers, to: "servers#reorder_servers"
-  resources :servers, only: [:show, :new, :create, :edit, :update, :destroy] do
+  resources :servers, only: [ :show, :new, :create, :edit, :update, :destroy ] do
     member do
       post :join
       delete :leave
     end
-    resources :channels, only: [:show, :new, :create, :edit, :update, :destroy] do
+    resources :channels, only: [ :show, :new, :create, :edit, :update, :destroy ] do
       member do
         get :older_messages
         get :newer_messages
@@ -68,20 +68,20 @@ Rails.application.routes.draw do
         delete :unbridge, controller: "shared_channels"
       end
     end
-    resources :categories, only: [:new, :create, :edit, :update, :destroy]
+    resources :categories, only: [ :new, :create, :edit, :update, :destroy ]
     patch :reorder_channels, to: "channel_reorder#update"
     patch :reorder_roles, to: "roles#reorder"
     delete "channels/:id/quick_delete", to: "channel_reorder#destroy_channel", as: :quick_delete_channel
     delete "categories/:id/quick_delete", to: "channel_reorder#destroy_category", as: :quick_delete_category
-    resources :members, only: [:index, :update, :destroy], controller: "server_members" do
+    resources :members, only: [ :index, :update, :destroy ], controller: "server_members" do
       member do
         get :profile_card, controller: "member_cards"
         get :context_menu, controller: "member_cards"
       end
     end
-    resources :roles, except: [:show]
-    resources :emojis, only: [:index, :create, :destroy], controller: "server_emojis"
-    resources :stickers, only: [:index, :create, :destroy], controller: "server_stickers"
+    resources :roles, except: [ :show ]
+    resources :emojis, only: [ :index, :create, :destroy ], controller: "server_emojis"
+    resources :stickers, only: [ :index, :create, :destroy ], controller: "server_stickers"
 
     # Voice channels
     post "voice/join/:channel_id", to: "voice_channels#join", as: :voice_join
@@ -91,7 +91,7 @@ Rails.application.routes.draw do
     post "voice/monitor/:channel_id", to: "voice_channels#monitor", as: :voice_monitor
 
     # Voice showcases
-    resources :voice_showcases, only: [:create, :destroy] do
+    resources :voice_showcases, only: [ :create, :destroy ] do
       member do
         post :approve
         post :deny
@@ -146,7 +146,7 @@ Rails.application.routes.draw do
 
   # Channel messages
   resources :channels, only: [] do
-    resources :messages, only: [:create, :edit, :update, :destroy] do
+    resources :messages, only: [ :create, :edit, :update, :destroy ] do
       member do
         post :toggle_reaction, controller: "reactions", action: "toggle"
         get :reactions_list, controller: "reactions", action: "list"
@@ -169,11 +169,11 @@ Rails.application.routes.draw do
   get "inferno/server/:nostr_group_id/sync_status", to: "nostr_servers#sync_status", as: :nostr_server_sync_status
 
   # Conversations (DMs)
-  resources :conversations, only: [:index, :show, :create, :destroy] do
+  resources :conversations, only: [ :index, :show, :create, :destroy ] do
     member do
       post :accept
     end
-    resources :dm_messages, only: [:create, :update, :destroy] do
+    resources :dm_messages, only: [ :create, :update, :destroy ] do
       collection do
         get :older_messages
         get :newer_messages
@@ -185,7 +185,7 @@ Rails.application.routes.draw do
   end
 
   # Friends
-  resources :friendships, only: [:index, :create, :destroy] do
+  resources :friendships, only: [ :index, :create, :destroy ] do
     member do
       post :accept
       post :decline
@@ -194,7 +194,7 @@ Rails.application.routes.draw do
   end
 
   # Blocks
-  resources :blocks, only: [:create, :destroy]
+  resources :blocks, only: [ :create, :destroy ]
 
   # Notifications
   post "notifications/mark_read", to: "notifications#mark_read"
@@ -216,7 +216,7 @@ Rails.application.routes.draw do
   get "settings/voice", to: "settings#voice", as: :user_settings_voice
   patch "settings/voice", to: "settings#update_voice", as: :settings_update_voice
   post "settings/voice/verify", to: "settings#verify_voice", as: :settings_verify_voice
-  resource :profile, only: [:show, :edit, :update]
+  resource :profile, only: [ :show, :edit, :update ]
 
   # User cards
   resources :users, only: [] do

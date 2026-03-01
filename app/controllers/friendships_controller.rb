@@ -171,7 +171,7 @@ class FriendshipsController < ApplicationController
     encrypted = Nip44Service.encrypt(payload, conversation_key)
 
     event = build_nostr_event(
-      kind: 14, content: encrypted, tags: [["p", pubkey]],
+      kind: 14, content: encrypted, tags: [ [ "p", pubkey ] ],
       privkey: user.nostr_private_key, pubkey: user.nostr_public_key
     )
     RelayService.publish_to_all(event)
@@ -187,7 +187,7 @@ class FriendshipsController < ApplicationController
     encrypted = Nip44Service.encrypt(payload, conversation_key)
 
     event = build_nostr_event(
-      kind: 14, content: encrypted, tags: [["p", pubkey]],
+      kind: 14, content: encrypted, tags: [ [ "p", pubkey ] ],
       privkey: user.nostr_private_key, pubkey: user.nostr_public_key
     )
     RelayService.publish_to_all(event)

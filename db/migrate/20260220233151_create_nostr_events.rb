@@ -15,6 +15,6 @@ class CreateNostrEvents < ActiveRecord::Migration[8.1]
     add_index :nostr_events, :event_id, unique: true
     add_index :nostr_events, :kind
     add_index :nostr_events, :pubkey
-    add_index :nostr_events, [:kind, :pubkey]
+    add_index :nostr_events, [ :kind, :pubkey ]
   end
 end

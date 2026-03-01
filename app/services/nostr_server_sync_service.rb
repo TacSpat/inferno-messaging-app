@@ -14,8 +14,8 @@ class NostrServerSyncService
   # Returns a hash: { name:, about:, picture_url:, owner_pubkey:, member_count: }
   def self.fetch_metadata_preview(nostr_group_id)
     events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_METADATA],
-      "#d" => ["inferno-#{nostr_group_id}"]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_METADATA ],
+      "#d" => [ "inferno-#{nostr_group_id}" ]
     })
     event = events.max_by { |e| e["created_at"].to_i } if events.any?
     return nil unless event
@@ -31,7 +31,7 @@ class NostrServerSyncService
 
     # Optionally count members from Kind 31753 events
     member_events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_MEMBER]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_MEMBER ]
     })
     members = member_events.select { |e|
       d_tag = (e["tags"] || []).find { |t| t[0] == "d" }
@@ -134,7 +134,7 @@ class NostrServerSyncService
   def sync_members
     # Member events are per-member, so we fetch all with prefix matching
     events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_MEMBER]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_MEMBER ]
     })
 
     # Filter to our server's member events
@@ -182,7 +182,7 @@ class NostrServerSyncService
 
   def sync_bans
     events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_BAN]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_BAN ]
     })
 
     ban_events = events.select { |e|
@@ -208,7 +208,7 @@ class NostrServerSyncService
 
   def sync_invites
     events = RelayService.fetch_from_all({
-      kinds: [RelaySubscriptionManager::KIND_SERVER_INVITE]
+      kinds: [ RelaySubscriptionManager::KIND_SERVER_INVITE ]
     })
 
     invite_events = events.select { |e|
@@ -234,7 +234,7 @@ class NostrServerSyncService
 
   # Fetch events for a single replaceable event (one d-tag value)
   def fetch_events(kind, d_tag)
-    RelayService.fetch_from_all({ kinds: [kind], "#d" => [d_tag] })
+    RelayService.fetch_from_all({ kinds: [ kind ], "#d" => [ d_tag ] })
   end
 
   # Pick the latest event by created_at (last-write-wins)
