@@ -216,16 +216,13 @@ jobs:
       - name: Install Tebako
         shell: msys2 {0}
         run: |
-          echo "MSYS2 Ruby: $(which ruby 2>/dev/null || echo 'not found')"
-          echo "MSYS2 gem:  $(which gem 2>/dev/null || echo 'not found')"
-          ls /ucrt64/bin/ruby* /ucrt64/bin/gem* 2>/dev/null || echo "No ruby/gem in /ucrt64/bin"
-          /ucrt64/bin/gem install tebako
+          echo "gem shebang: $(head -1 /ucrt64/bin/gem)"
+          echo "file type: $(file /ucrt64/bin/gem)"
+          /ucrt64/bin/ruby /ucrt64/bin/gem install tebako
 
       - name: Build Tebako binary
         shell: msys2 {0}
-        run: |
-          export PATH="/ucrt64/lib/ruby/gems/3.4.0/bin:$PATH"
-          tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+        run: /ucrt64/bin/ruby -S tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
