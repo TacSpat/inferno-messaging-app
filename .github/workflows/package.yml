@@ -182,8 +182,8 @@ jobs:
           install: git tar bison flex
           pacboy: >-
             toolchain:p cmake:p ninja:p autotools:p make:p
-            boost:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
-            ncurses:p openssl:p libyaml:p libxslt:p ruby:p
+            boost:p diffutils:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
+            gtest:p ncurses:p openssl:p libyaml:p libxslt:p ruby:p
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -217,21 +217,20 @@ jobs:
           cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
 
-      - name: Patch winpthread clock_gettime conflict
+      - name: Install and patch Tebako
         shell: msys2 {0}
         run: |
-          # Ruby's win32.c defines clock_gettime/clock_getres, but MSYS2's
-          # pthread_time.h also defines them as static inlines, causing
-          # a redefinition error. Remove the winpthread versions.
-          grep -n "clock_get" /ucrt64/include/pthread_time.h || true
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/,/^}/d' /ucrt64/include/pthread_time.h
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/,/^}/d' /ucrt64/include/pthread_time.h
-          echo "After patch:"
-          grep -n "clock_get" /ucrt64/include/pthread_time.h || echo "(no matches - patch applied)"
+          gem install tebako
 
-      - name: Install Tebako
-        shell: msys2 {0}
-        run: gem install tebako
+          # Tebako's CMakeLists.txt sets RUBY_C_FLAGS with -DRB_W32=1 on MSYS.
+          # Ruby's win32.c defines clock_gettime/clock_getres but winpthread's
+          # pthread_time.h also provides them as static inlines. Ruby guards its
+          # definitions with #ifndef HAVE_CLOCK_GETTIME — add the flag so Ruby
+          # skips its own definitions and uses winpthread's.
+          TEBAKO_CMAKE=$(gem contents tebako | grep "CMakeLists.txt" | head -1)
+          echo "Patching: $TEBAKO_CMAKE"
+          sed -i 's/-DRB_W32=1"/-DRB_W32=1 -DHAVE_CLOCK_GETTIME -DHAVE_CLOCK_GETRES"/' "$TEBAKO_CMAKE"
+          grep "HAVE_CLOCK_GETTIME" "$TEBAKO_CMAKE" && echo "Patch applied successfully"
 
       - name: Build Tebako binary
         shell: msys2 {0}
