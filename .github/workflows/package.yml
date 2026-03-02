@@ -223,9 +223,7 @@ jobs:
 
       - name: Build Tebako binary
         shell: msys2 {0}
-        run: |
-          export CFLAGS="-DHAVE_CLOCK_GETTIME"
-          tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=3.3.6
 
       - name: Re-install node dependencies (for Electron)
         run: |
