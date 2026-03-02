@@ -186,7 +186,7 @@ jobs:
           pacboy: >-
             toolchain:p cmake:p ninja:p autotools:p make:p
             boost:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
-            ncurses:p openssl:p libyaml:p libxslt:p ruby:p
+            ncurses:p openssl:p libyaml:p libxslt:p ruby:p nodejs:p
 
       - uses: oven-sh/setup-bun@v2
         with:
