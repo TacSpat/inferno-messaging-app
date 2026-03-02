@@ -217,13 +217,25 @@ jobs:
           cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
 
+      - name: Patch winpthread clock_gettime conflict
+        shell: msys2 {0}
+        run: |
+          # Ruby's win32.c defines clock_gettime/clock_getres, but MSYS2's
+          # pthread_time.h also defines them as static inlines, causing
+          # a redefinition error. Remove the winpthread versions.
+          grep -n "clock_get" /ucrt64/include/pthread_time.h || true
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/,/^}/d' /ucrt64/include/pthread_time.h
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/,/^}/d' /ucrt64/include/pthread_time.h
+          echo "After patch:"
+          grep -n "clock_get" /ucrt64/include/pthread_time.h || echo "(no matches - patch applied)"
+
       - name: Install Tebako
         shell: msys2 {0}
         run: gem install tebako
 
       - name: Build Tebako binary
         shell: msys2 {0}
-        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=3.3.6
+        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
