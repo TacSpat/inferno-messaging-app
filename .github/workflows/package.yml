@@ -177,6 +177,7 @@ jobs:
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
+          path-type: minimal
           update: true
           install: git tar bison flex
           pacboy: >-
@@ -215,14 +216,11 @@ jobs:
 
       - name: Install Tebako
         shell: msys2 {0}
-        run: |
-          set -x
-          /ucrt64/bin/ruby.exe --version
-          /ucrt64/bin/ruby.exe -S gem install tebako
+        run: gem install tebako
 
       - name: Build Tebako binary
         shell: msys2 {0}
-        run: /ucrt64/bin/ruby -S tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
