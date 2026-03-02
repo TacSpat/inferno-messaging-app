@@ -171,9 +171,6 @@ jobs:
   # ─── Windows (NSIS installer) ──────────────────────────────
   windows:
     runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
 
@@ -186,35 +183,33 @@ jobs:
           pacboy: >-
             toolchain:p cmake:p ninja:p autotools:p make:p
             boost:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
-            ncurses:p openssl:p libyaml:p libxslt:p ruby:p nodejs:p
+            ncurses:p openssl:p libyaml:p libxslt:p ruby:p
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Configure bun path
+      - name: Build JS and CSS
         run: |
-          BUN_DIR="$(which bun 2>/dev/null || find /c/Users -maxdepth 4 -name 'bun.exe' -print -quit 2>/dev/null | head -1)"
-          BUN_BIN="$(dirname "$BUN_DIR")"
-          echo "BUN_BIN=$BUN_BIN" >> "$GITHUB_ENV"
-          echo "Found bun at: $BUN_BIN"
+          bun install --frozen-lockfile
+          bun run build
+          bun run build:css
 
       - name: Install Ruby dependencies
+        shell: msys2 {0}
         run: |
           gem install bundler
           bundle config set --local without 'development test'
           bundle install
 
       - name: Precompile assets
+        shell: msys2 {0}
         run: |
-          export PATH="$BUN_BIN:$PATH"
-          bun install --frozen-lockfile
-          bun run build
-          bun run build:css
           SKIP_BUN_INSTALL=true SKIP_JS_BUILD=true SKIP_CSS_BUILD=true \
             SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
       - name: Prepare for Tebako
+        shell: msys2 {0}
         run: |
           cp package.json package.json.bak
           cp bun.lock bun.lock.bak
@@ -223,29 +218,28 @@ jobs:
           rm -rf node_modules .git tmp/cache log
 
       - name: Install Tebako
+        shell: msys2 {0}
         run: gem install tebako
 
       - name: Build Tebako binary
+        shell: msys2 {0}
         run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
 
       - name: Re-install node dependencies (for Electron)
         run: |
-          export PATH="$BUN_BIN:$PATH"
-          cp package.json.bak package.json
-          cp bun.lock.bak bun.lock
-          cp -r electron.bak electron
-          cp electron-builder.yml.bak electron-builder.yml
+          Copy-Item package.json.bak package.json
+          Copy-Item bun.lock.bak bun.lock
+          Copy-Item -Recurse -Force electron.bak electron
+          Copy-Item electron-builder.yml.bak electron-builder.yml
           bun install --frozen-lockfile
 
       - name: Stage sidecar binary
         run: |
-          mkdir -p binaries
-          cp inferno.exe binaries/inferno-server.exe
+          New-Item -ItemType Directory -Force -Path binaries
+          Copy-Item inferno.exe -Destination binaries\inferno-server.exe
 
       - name: Build Electron app
-        run: |
-          export PATH="$BUN_BIN:$PATH"
-          bun run electron:build --win
+        run: bun run electron:build --win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
