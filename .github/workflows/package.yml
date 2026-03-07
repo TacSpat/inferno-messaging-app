@@ -224,11 +224,13 @@ jobs:
         run: |
           $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
           $env:PATH = "$rubyBin;$env:PATH"
-          & "$rubyBin\gem.cmd" install bundler --no-document
-          & "$rubyBin\bundle.cmd" config set --local deployment true
-          & "$rubyBin\bundle.cmd" config set --local without "development test"
-          & "$rubyBin\bundle.cmd" config set --local path vendor/bundle
-          & "$rubyBin\bundle.cmd" install
+          Write-Host "Contents of ruby bin dir:"
+          Get-ChildItem "$rubyBin" | Select-Object Name
+          & "$rubyBin\ruby.exe" -S gem install bundler --no-document
+          & "$rubyBin\ruby.exe" -S bundle config set --local deployment true
+          & "$rubyBin\ruby.exe" -S bundle config set --local without "development test"
+          & "$rubyBin\ruby.exe" -S bundle config set --local path vendor/bundle
+          & "$rubyBin\ruby.exe" -S bundle install
 
       - name: Assemble sidecar
         run: |
