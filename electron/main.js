@@ -71,14 +71,21 @@ function spawnServer() {
     args = ['exec', 'rails', 'server', '-p', String(PORT), '-b', '127.0.0.1'];
     opts = { cwd: railsRoot, env: { ...process.env } };
   } else {
-    const binaryName = process.platform === 'win32' ? 'inferno-server.exe' : 'inferno-server';
-    const binaryPath = path.join(process.resourcesPath, 'binaries', binaryName);
+    const sidecarDir = path.join(process.resourcesPath, 'sidecar');
+    const isWin = process.platform === 'win32';
+    const launcherName = isWin ? 'start.bat' : 'start.sh';
+    const launcherPath = path.join(sidecarDir, launcherName);
+
     const data = dataDir();
     ensureDirs(data);
     const secret = getOrCreateSecret(data);
-    cmd = binaryPath;
-    args = ['server', '-p', String(PORT), '-b', '127.0.0.1'];
+
+    cmd = isWin ? launcherPath : '/bin/sh';
+    args = isWin
+      ? ['server', '-p', String(PORT), '-b', '127.0.0.1']
+      : [launcherPath, 'server', '-p', String(PORT), '-b', '127.0.0.1'];
     opts = {
+      cwd: path.join(sidecarDir, 'app'),
       env: {
         ...process.env,
         INFERNO_DATA_DIR: data,

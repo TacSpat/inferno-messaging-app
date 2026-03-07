@@ -54,5 +54,7 @@ doc/.obsidian/
 # Electron builder output.
 /dist/
 
-# Sidecar binaries (staged during CI build).
+# Sidecar (staged during CI build)
 /binaries/
+/sidecar-stage/
+/ruby-sidecar/

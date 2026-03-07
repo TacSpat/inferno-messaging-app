@@ -11,10 +11,10 @@ files:
   - "!node_modules"
 
 extraResources:
-  - from: "binaries/"
-    to: "binaries"
+  - from: "sidecar-stage/"
+    to: "sidecar"
     filter:
-      - "inferno-server*"
+      - "**/*"
 
 linux:
   target:

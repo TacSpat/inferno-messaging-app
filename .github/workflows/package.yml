@@ -24,7 +24,7 @@ jobs:
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          bundle-without: development:test
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -35,36 +35,52 @@ jobs:
           bun install --frozen-lockfile
           SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
-      - name: Prepare for Tebako
+      - name: Download portable Ruby
         run: |
-          cp package.json package.json.bak
-          cp bun.lock bun.lock.bak
-          cp -r electron electron.bak
-          cp electron-builder.yml electron-builder.yml.bak
-          rm -rf node_modules .git tmp/cache log
+          RUBY_MAJOR=$(echo ${{ env.RUBY_VERSION }} | cut -d. -f1-2)
+          RUBY_URL="https://cache.ruby-lang.org/pub/ruby/${RUBY_MAJOR}/ruby-${{ env.RUBY_VERSION }}.tar.gz"
+          # Use ruby-build to compile a self-contained Ruby
+          git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
+          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
-      - name: Build Tebako binary (Docker)
+      - name: Bundle gems for sidecar
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:/mnt/w \
-            ghcr.io/tamatebako/tebako-ubuntu-20.04:latest \
-            tebako press --root=/mnt/w --entry-point=bin/rails --output=/mnt/w/inferno --Ruby=${{ env.RUBY_VERSION }}
+          export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
+          ruby-sidecar/ruby/bin/gem install bundler --no-document
+          ruby-sidecar/ruby/bin/bundle config set --local deployment true
+          ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
+          ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
+          ruby-sidecar/ruby/bin/bundle install
 
-      - name: Re-install node dependencies (for Electron)
+      - name: Assemble sidecar
         run: |
-          cp package.json.bak package.json
-          cp bun.lock.bak bun.lock
-          cp -r electron.bak electron
-          cp electron-builder.yml.bak electron-builder.yml
-          bun install --frozen-lockfile
-
-      - name: Stage sidecar binary
-        run: |
-          mkdir -p binaries
-          cp inferno binaries/inferno-server
+          mkdir -p sidecar-stage
+          # Copy the Rails app (excluding dev/CI files)
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
+            --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
+            --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
+            --exclude='features' --exclude='.env*' --exclude='electron' \
+            --exclude='electron-builder.yml' --exclude='icons' \
+            ./ sidecar-stage/app/
+          # Copy portable Ruby
+          cp -r ruby-sidecar/ruby sidecar-stage/ruby
+          # Create launcher script
+          cat > sidecar-stage/start.sh << 'LAUNCHER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/ruby/bin:$PATH"
+          export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
+          export GEM_PATH="$GEM_HOME"
+          export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          cd "$DIR/app"
+          exec "$DIR/ruby/bin/ruby" bin/rails "$@"
+          LAUNCHER
+          chmod +x sidecar-stage/start.sh
 
       - name: Build Electron app
-        run: bun run electron:build --linux
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --linux
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -91,61 +107,61 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: '15.0.1'
-
-      - name: Install system dependencies
-        run: |
-          brew install zlib ncurses libevent libsodium lz4 xz gdbm pkg-config \
-            libyaml curl bison flex binutils libffi double-conversion boost \
-            jemalloc fmt glog gnu-sed bash
-          echo "$(brew --prefix bison)/bin" >> $GITHUB_PATH
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          bundle-without: development:test
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
-
-      - name: Install Tebako
-        run: gem install tebako
 
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
           SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
-      - name: Prepare for Tebako
+      - name: Download portable Ruby
         run: |
-          cp package.json package.json.bak
-          cp bun.lock bun.lock.bak
-          cp -r electron electron.bak
-          cp electron-builder.yml electron-builder.yml.bak
-          rm -rf node_modules .git tmp/cache log
+          git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
+          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
-      - name: Build Tebako binary
-        run: tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
-
-      - name: Re-install node dependencies (for Electron)
+      - name: Bundle gems for sidecar
         run: |
-          cp package.json.bak package.json
-          cp bun.lock.bak bun.lock
-          cp -r electron.bak electron
-          cp electron-builder.yml.bak electron-builder.yml
-          bun install --frozen-lockfile
+          export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
+          ruby-sidecar/ruby/bin/gem install bundler --no-document
+          ruby-sidecar/ruby/bin/bundle config set --local deployment true
+          ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
+          ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
+          ruby-sidecar/ruby/bin/bundle install
 
-      - name: Stage sidecar binary
+      - name: Assemble sidecar
         run: |
-          mkdir -p binaries
-          cp inferno binaries/inferno-server
+          mkdir -p sidecar-stage
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
+            --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
+            --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
+            --exclude='features' --exclude='.env*' --exclude='electron' \
+            --exclude='electron-builder.yml' --exclude='icons' \
+            ./ sidecar-stage/app/
+          cp -r ruby-sidecar/ruby sidecar-stage/ruby
+          cat > sidecar-stage/start.sh << 'LAUNCHER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/ruby/bin:$PATH"
+          export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
+          export GEM_PATH="$GEM_HOME"
+          export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          cd "$DIR/app"
+          exec "$DIR/ruby/bin/ruby" bin/rails "$@"
+          LAUNCHER
+          chmod +x sidecar-stage/start.sh
 
       - name: Build Electron app
-        run: bun run electron:build --mac
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ secrets.CSC_LINK }}
@@ -174,105 +190,73 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: msys2/setup-msys2@v2
+      - uses: ruby/setup-ruby@v1
         with:
-          msystem: UCRT64
-          path-type: minimal
-          update: true
-          install: git tar bison flex
-          pacboy: >-
-            toolchain:p cmake:p ninja:p autotools:p make:p
-            boost:p diffutils:p libevent:p double-conversion:p fmt:p glog:p dlfcn:p
-            gtest:p ncurses:p openssl:p libyaml:p libxslt:p ruby:p
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Build JS and CSS
+      - name: Precompile assets
         run: |
           bun install --frozen-lockfile
           bun run build
           bun run build:css
+          $env:SECRET_KEY_BASE = "placeholder"
+          $env:SKIP_JS_BUILD = "true"
+          $env:SKIP_CSS_BUILD = "true"
+          bundle exec rails assets:precompile
 
-      - name: Install Ruby dependencies
-        shell: msys2 {0}
+      - name: Download portable Ruby (RubyInstaller)
         run: |
-          gem install bundler
-          bundle config set --local without 'development test'
-          bundle install
+          $rubyVer = "${{ env.RUBY_VERSION }}"
+          $url = "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-${rubyVer}-1/rubyinstaller-${rubyVer}-1-x64.7z"
+          Write-Host "Downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile ruby.7z
+          7z x ruby.7z -oruby-sidecar
+          # Rename the extracted folder to just 'ruby'
+          $extracted = Get-ChildItem ruby-sidecar -Directory | Select-Object -First 1
+          Rename-Item $extracted.FullName "ruby"
 
-      - name: Precompile assets
-        shell: msys2 {0}
+      - name: Bundle gems for sidecar
         run: |
-          SKIP_BUN_INSTALL=true SKIP_JS_BUILD=true SKIP_CSS_BUILD=true \
-            SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
+          $env:PATH = "$rubyBin;$env:PATH"
+          & "$rubyBin\gem.cmd" install bundler --no-document
+          & "$rubyBin\bundle.cmd" config set --local deployment true
+          & "$rubyBin\bundle.cmd" config set --local without "development test"
+          & "$rubyBin\bundle.cmd" config set --local path vendor/bundle
+          & "$rubyBin\bundle.cmd" install
 
-      - name: Prepare for Tebako
-        shell: msys2 {0}
+      - name: Assemble sidecar
         run: |
-          cp package.json package.json.bak
-          cp bun.lock bun.lock.bak
-          cp -r electron electron.bak
-          cp electron-builder.yml electron-builder.yml.bak
-          rm -rf node_modules .git tmp/cache log
-
-      - name: Patch winpthread/Ruby clock_gettime conflict
-        shell: msys2 {0}
-        run: |
-          # Ruby's win32.c unconditionally defines clock_gettime/clock_getres,
-          # conflicting with winpthread's static inline versions in pthread_time.h.
-          # Ruby has NO #ifndef guard, so we must patch the system header instead.
-          #
-          # Strategy: wrap winpthread's definitions with a custom guard, then pass
-          # that guard via RUBY_C_FLAGS. Folly (dwarfs) doesn't get the flag, so it
-          # still detects clock_gettime normally for its own build.
-          HEADER=/ucrt64/include/pthread_time.h
-          echo "=== Before patch ==="
-          grep -n "clock_get" "$HEADER"
-
-          # Add guard around clock_getres definition
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/i #ifndef _SKIP_WINPTHREAD_CLOCK' "$HEADER"
-          # Find the closing brace of clock_getres and add #endif
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/,/^}/{/^}/a #endif' "$HEADER"
-
-          # Add guard around clock_gettime definition
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/i #ifndef _SKIP_WINPTHREAD_CLOCK' "$HEADER"
-          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/,/^}/{/^}/a #endif' "$HEADER"
-
-          echo "=== After patch ==="
-          grep -n -B1 -A1 "SKIP_WINPTHREAD\|clock_get" "$HEADER"
-
-      - name: Install and patch Tebako
-        shell: msys2 {0}
-        run: |
-          gem install tebako
-
-          # Pass the guard flag to Ruby's compilation only (not folly/dwarfs)
-          TEBAKO_CMAKE=$(gem contents tebako | grep "CMakeLists.txt" | head -1)
-          echo "Patching: $TEBAKO_CMAKE"
-          sed -i 's/-DRB_W32=1"/-DRB_W32=1 -D_SKIP_WINPTHREAD_CLOCK"/' "$TEBAKO_CMAKE"
-          grep "_SKIP_WINPTHREAD_CLOCK" "$TEBAKO_CMAKE" && echo "Tebako patch applied"
-
-      - name: Build Tebako binary
-        shell: msys2 {0}
-        run: tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
-
-      - name: Re-install node dependencies (for Electron)
-        run: |
-          Copy-Item package.json.bak package.json
-          Copy-Item bun.lock.bak bun.lock
-          Copy-Item -Recurse -Force electron.bak electron
-          Copy-Item electron-builder.yml.bak electron-builder.yml
-          bun install --frozen-lockfile
-
-      - name: Stage sidecar binary
-        run: |
-          New-Item -ItemType Directory -Force -Path binaries
-          Copy-Item inferno.exe -Destination binaries\inferno-server.exe
+          New-Item -ItemType Directory -Force -Path sidecar-stage\app
+          # Copy Rails app files
+          $exclude = @('.git', 'node_modules', 'tmp', 'log', 'sidecar-stage',
+                       'ruby-sidecar', '.github', 'dist', 'spec', 'test',
+                       'features', 'electron', 'electron-builder.yml', 'icons')
+          Get-ChildItem -Path . -Exclude $exclude | Copy-Item -Destination sidecar-stage\app -Recurse -Force
+          # Copy portable Ruby
+          Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
+          # Create launcher batch file
+          @"
+          @echo off
+          set "DIR=%~dp0"
+          set "PATH=%DIR%ruby\bin;%PATH%"
+          for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "GEM_HOME=%%G"
+          set "GEM_PATH=%GEM_HOME%"
+          set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
+          cd /d "%DIR%app"
+          "%DIR%ruby\bin\ruby.exe" bin/rails %*
+          "@ | Out-File -FilePath sidecar-stage\start.bat -Encoding ASCII
 
       - name: Build Electron app
-        run: bun run electron:build --win
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --win
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
