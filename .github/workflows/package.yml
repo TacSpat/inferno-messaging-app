@@ -51,6 +51,9 @@ jobs:
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
           ruby-sidecar/ruby/bin/bundle install
+          # Remove test gems that may still have cached artifacts
+          rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
+          rm -rf vendor/bundle/ruby/*/gems/capybara-*
 
       - name: Assemble sidecar
         run: |
@@ -135,6 +138,9 @@ jobs:
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
           ruby-sidecar/ruby/bin/bundle install
+          # Remove gems excluded by 'without' that may still have cached artifacts
+          rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
+          rm -rf vendor/bundle/ruby/*/gems/capybara-*
 
       - name: Assemble sidecar
         run: |
