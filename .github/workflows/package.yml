@@ -164,8 +164,7 @@ jobs:
           bun run electron:build --mac
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -216,7 +215,7 @@ jobs:
           $url = "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-${rubyVer}-1/rubyinstaller-${rubyVer}-1-x64.7z"
           Write-Host "Downloading: $url"
           Invoke-WebRequest -Uri $url -OutFile ruby.7z
-          7z x ruby.7z -oruby-sidecar
+          & "C:\Program Files\7-Zip\7z.exe" x ruby.7z -oruby-sidecar
           # Rename the extracted folder to just 'ruby'
           $extracted = Get-ChildItem ruby-sidecar -Directory | Select-Object -First 1
           Rename-Item $extracted.FullName "ruby"
