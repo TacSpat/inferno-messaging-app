@@ -217,20 +217,42 @@ jobs:
           cp electron-builder.yml electron-builder.yml.bak
           rm -rf node_modules .git tmp/cache log
 
+      - name: Patch winpthread/Ruby clock_gettime conflict
+        shell: msys2 {0}
+        run: |
+          # Ruby's win32.c unconditionally defines clock_gettime/clock_getres,
+          # conflicting with winpthread's static inline versions in pthread_time.h.
+          # Ruby has NO #ifndef guard, so we must patch the system header instead.
+          #
+          # Strategy: wrap winpthread's definitions with a custom guard, then pass
+          # that guard via RUBY_C_FLAGS. Folly (dwarfs) doesn't get the flag, so it
+          # still detects clock_gettime normally for its own build.
+          HEADER=/ucrt64/include/pthread_time.h
+          echo "=== Before patch ==="
+          grep -n "clock_get" "$HEADER"
+
+          # Add guard around clock_getres definition
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/i #ifndef _SKIP_WINPTHREAD_CLOCK' "$HEADER"
+          # Find the closing brace of clock_getres and add #endif
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_getres/,/^}/{/^}/a #endif' "$HEADER"
+
+          # Add guard around clock_gettime definition
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/i #ifndef _SKIP_WINPTHREAD_CLOCK' "$HEADER"
+          sed -i '/WINPTHREAD_CLOCK_DECL.*__cdecl clock_gettime/,/^}/{/^}/a #endif' "$HEADER"
+
+          echo "=== After patch ==="
+          grep -n -B1 -A1 "SKIP_WINPTHREAD\|clock_get" "$HEADER"
+
       - name: Install and patch Tebako
         shell: msys2 {0}
         run: |
           gem install tebako
 
-          # Tebako's CMakeLists.txt sets RUBY_C_FLAGS with -DRB_W32=1 on MSYS.
-          # Ruby's win32.c defines clock_gettime/clock_getres but winpthread's
-          # pthread_time.h also provides them as static inlines. Ruby guards its
-          # definitions with #ifndef HAVE_CLOCK_GETTIME — add the flag so Ruby
-          # skips its own definitions and uses winpthread's.
+          # Pass the guard flag to Ruby's compilation only (not folly/dwarfs)
           TEBAKO_CMAKE=$(gem contents tebako | grep "CMakeLists.txt" | head -1)
           echo "Patching: $TEBAKO_CMAKE"
-          sed -i 's/-DRB_W32=1"/-DRB_W32=1 -DHAVE_CLOCK_GETTIME -DHAVE_CLOCK_GETRES"/' "$TEBAKO_CMAKE"
-          grep "HAVE_CLOCK_GETTIME" "$TEBAKO_CMAKE" && echo "Patch applied successfully"
+          sed -i 's/-DRB_W32=1"/-DRB_W32=1 -D_SKIP_WINPTHREAD_CLOCK"/' "$TEBAKO_CMAKE"
+          grep "_SKIP_WINPTHREAD_CLOCK" "$TEBAKO_CMAKE" && echo "Tebako patch applied"
 
       - name: Build Tebako binary
         shell: msys2 {0}
