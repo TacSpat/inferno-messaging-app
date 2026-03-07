@@ -14,160 +14,271 @@ env:
   RAILS_ENV: production
 
 jobs:
-  # ─── Linux AppImage ──────────────────────────────────────────
+  # ─── Linux (AppImage + deb) ─────────────────────────────────
   linux:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsodium-dev libsodium23 libfuse2
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          bundle-without: development:test
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install Tebako
-        run: gem install tebako
-
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
-          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
-      - name: Build Tebako binary
+      - name: Download portable Ruby
         run: |
-          rm -rf node_modules .git tmp/cache log
-          tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+          RUBY_MAJOR=$(echo ${{ env.RUBY_VERSION }} | cut -d. -f1-2)
+          RUBY_URL="https://cache.ruby-lang.org/pub/ruby/${RUBY_MAJOR}/ruby-${{ env.RUBY_VERSION }}.tar.gz"
+          # Use ruby-build to compile a self-contained Ruby
+          git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
+          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
-      - name: Build AppImage
-        run: packaging/linux/build_appimage.sh ./inferno
+      - name: Bundle gems for sidecar
+        run: |
+          export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
+          ruby-sidecar/ruby/bin/gem install bundler --no-document
+          ruby-sidecar/ruby/bin/bundle config set --local deployment true
+          ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
+          ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
+          ruby-sidecar/ruby/bin/bundle install
+          # Remove test gems that may still have cached artifacts
+          rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
+          rm -rf vendor/bundle/ruby/*/gems/capybara-*
+
+      - name: Assemble sidecar
+        run: |
+          mkdir -p sidecar-stage
+          # Copy the Rails app (excluding dev/CI files)
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
+            --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
+            --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
+            --exclude='features' --exclude='.env*' --exclude='electron' \
+            --exclude='electron-builder.yml' --exclude='icons' \
+            ./ sidecar-stage/app/
+          # Copy portable Ruby
+          cp -r ruby-sidecar/ruby sidecar-stage/ruby
+          # Create launcher script
+          cat > sidecar-stage/start.sh << 'LAUNCHER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/ruby/bin:$PATH"
+          export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
+          export GEM_PATH="$GEM_HOME"
+          export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          cd "$DIR/app"
+          exec "$DIR/ruby/bin/ruby" bin/rails "$@"
+          LAUNCHER
+          chmod +x sidecar-stage/start.sh
+
+      - name: Build Electron app
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --linux
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Inferno-Linux-AppImage
-          path: Inferno-x86_64.AppImage
+          name: Inferno-Linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Inferno-x86_64.AppImage
+          files: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/latest-linux.yml
 
-  # ─── macOS .app bundle ──────────────────────────────────────
+  # ─── macOS (dmg + zip) ─────────────────────────────────────
   macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: brew install libsodium
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          bundle-without: development:test
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install Tebako
-        run: gem install tebako
-
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
-          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
-      - name: Build Tebako binary
+      - name: Download portable Ruby
         run: |
-          rm -rf node_modules .git tmp/cache log
-          tebako press --root=. --entry-point=bin/rails --output=inferno --Ruby=${{ env.RUBY_VERSION }}
+          git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
+          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
-      - name: Build macOS .app bundle
-        run: packaging/macos/build_macos.sh ./inferno
+      - name: Bundle gems for sidecar
+        run: |
+          export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
+          ruby-sidecar/ruby/bin/gem install bundler --no-document
+          ruby-sidecar/ruby/bin/bundle config set --local deployment true
+          ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
+          ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
+          ruby-sidecar/ruby/bin/bundle install
+          # Remove gems excluded by 'without' that may still have cached artifacts
+          rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
+          rm -rf vendor/bundle/ruby/*/gems/capybara-*
+
+      - name: Assemble sidecar
+        run: |
+          mkdir -p sidecar-stage
+          rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
+            --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
+            --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
+            --exclude='features' --exclude='.env*' --exclude='electron' \
+            --exclude='electron-builder.yml' --exclude='icons' \
+            ./ sidecar-stage/app/
+          cp -r ruby-sidecar/ruby sidecar-stage/ruby
+          cat > sidecar-stage/start.sh << 'LAUNCHER'
+          #!/bin/sh
+          DIR="$(cd "$(dirname "$0")" && pwd)"
+          export PATH="$DIR/ruby/bin:$PATH"
+          export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
+          export GEM_PATH="$GEM_HOME"
+          export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          cd "$DIR/app"
+          exec "$DIR/ruby/bin/ruby" bin/rails "$@"
+          LAUNCHER
+          chmod +x sidecar-stage/start.sh
+
+      - name: Build Electron app
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: false
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: Inferno-macOS
-          path: Inferno-macos.zip
+          path: |
+            dist/*.dmg
+            dist/*.zip
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Inferno-macos.zip
+          files: |
+            dist/*.dmg
+            dist/*.zip
+            dist/latest-mac.yml
 
-  # ─── Windows installer ──────────────────────────────────────
+  # ─── Windows (NSIS installer) ──────────────────────────────
   windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install libsodium
-        shell: pwsh
-        run: |
-          $url = "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable-msvc.zip"
-          Invoke-WebRequest -Uri $url -OutFile libsodium.zip
-          Expand-Archive libsodium.zip -DestinationPath libsodium
-          Copy-Item "libsodium\x64\Release\v143\dynamic\libsodium.dll" -Destination "packaging\windows\libsodium.dll"
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ env.RUBY_VERSION }}
           bundler-cache: true
-          bundle-without: development:test
+          bundler: latest
 
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
 
-      - name: Install Tebako
-        run: gem install tebako
-
       - name: Precompile assets
-        shell: bash
         run: |
           bun install --frozen-lockfile
-          SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          bun run build
+          bun run build:css
+          $env:SECRET_KEY_BASE = "placeholder"
+          $env:SKIP_JS_BUILD = "true"
+          $env:SKIP_CSS_BUILD = "true"
+          bundle exec rails assets:precompile
 
-      - name: Build Tebako binary
-        shell: bash
+      - name: Download portable Ruby (RubyInstaller)
         run: |
-          rm -rf node_modules .git tmp/cache log
-          tebako press --root=. --entry-point=bin/rails --output=inferno.exe --Ruby=${{ env.RUBY_VERSION }}
+          $rubyVer = "${{ env.RUBY_VERSION }}"
+          $url = "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-${rubyVer}-1/rubyinstaller-${rubyVer}-1-x64.7z"
+          Write-Host "Downloading: $url"
+          Invoke-WebRequest -Uri $url -OutFile ruby.7z
+          & "C:\Program Files\7-Zip\7z.exe" x ruby.7z -oruby-sidecar
+          # Rename the extracted folder to just 'ruby'
+          $extracted = Get-ChildItem ruby-sidecar -Directory | Select-Object -First 1
+          Rename-Item $extracted.FullName "ruby"
 
-      - name: Prepare installer files
-        shell: bash
+      - name: Bundle gems for sidecar
         run: |
-          cp inferno.exe packaging/windows/inferno.exe
+          $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
+          $env:PATH = "$rubyBin;$env:PATH"
+          Write-Host "Contents of ruby bin dir:"
+          Get-ChildItem "$rubyBin" | Select-Object Name
+          & "$rubyBin\ruby.exe" -S gem install bundler --no-document
+          & "$rubyBin\ruby.exe" -S bundle config set --local deployment true
+          & "$rubyBin\ruby.exe" -S bundle config set --local without "development test"
+          & "$rubyBin\ruby.exe" -S bundle config set --local path vendor/bundle
+          & "$rubyBin\ruby.exe" -S bundle install
 
-      - name: Build Windows installer
-        shell: cmd
+      - name: Assemble sidecar
         run: |
-          "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" packaging\windows\inferno.iss
-        # Inno Setup is pre-installed on windows-latest runners
+          New-Item -ItemType Directory -Force -Path sidecar-stage\app
+          # Copy Rails app files
+          $exclude = @('.git', 'node_modules', 'tmp', 'log', 'sidecar-stage',
+                       'ruby-sidecar', '.github', 'dist', 'spec', 'test',
+                       'features', 'electron', 'electron-builder.yml', 'icons')
+          Get-ChildItem -Path . -Exclude $exclude | Copy-Item -Destination sidecar-stage\app -Recurse -Force
+          # Copy portable Ruby
+          Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
+          # Create launcher batch file
+          @"
+          @echo off
+          set "DIR=%~dp0"
+          set "PATH=%DIR%ruby\bin;%PATH%"
+          for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "GEM_HOME=%%G"
+          set "GEM_PATH=%GEM_HOME%"
+          set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
+          cd /d "%DIR%app"
+          "%DIR%ruby\bin\ruby.exe" bin/rails %*
+          "@ | Out-File -FilePath sidecar-stage\start.bat -Encoding ASCII
+
+      - name: Build Electron app
+        run: |
+          bun install --frozen-lockfile
+          bun run electron:build --win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Inferno-Windows-Setup
-          path: packaging/windows/Inferno-Setup.exe
+          name: Inferno-Windows
+          path: dist/*.exe
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/windows/Inferno-Setup.exe
+          files: |
+            dist/*.exe
+            dist/latest.yml

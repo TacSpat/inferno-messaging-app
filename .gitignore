@@ -50,3 +50,11 @@ doc/.obsidian/
 
 # Ignore coverage reports.
 /coverage/
+
+# Electron builder output.
+/dist/
+
+# Sidecar (staged during CI build)
+/binaries/
+/sidecar-stage/
+/ruby-sidecar/
