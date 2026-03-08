@@ -247,7 +247,7 @@ export default class extends Controller {
     // Rebuild every [data-folder-icons] container (collapsed + expanded header)
     folderEl.querySelectorAll("[data-folder-icons]").forEach(container => {
       // Preserve folder color
-      const folderColor = container.dataset.folderColor || "#4f545c"
+      const folderColor = container.dataset.folderColor || "var(--color-gray-600)"
       container.style.backgroundColor = folderColor
       container.innerHTML = ""
 
@@ -373,7 +373,7 @@ export default class extends Controller {
     this.folderMenu.style.left = `${left}px`
     this.folderMenu.style.top = `${top}px`
 
-    const currentColor = folderEl.querySelector("[data-folder-color]")?.dataset.folderColor || "#4f545c"
+    const currentColor = folderEl.querySelector("[data-folder-color]")?.dataset.folderColor || "var(--color-gray-600)"
 
     const tpl = document.getElementById("tpl-folder-menu").content.cloneNode(true)
     this.folderMenu.appendChild(tpl)

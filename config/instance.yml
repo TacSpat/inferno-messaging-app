@@ -1,4 +1,4 @@
-# Instance configuration — CLI/YAML alternative to admin UI settings.
+# App configuration — CLI/YAML alternative to admin UI settings.
 #
 # Values here are applied via: rails instance:configure
 #
@@ -10,12 +10,12 @@ default: &default
   instance_name: "Inferno Chat"
   instance_description: ""
 
-  # --- Federation / Nostr ---
-  # Your canonical relay URL — advertised in instance metadata and NIP-05 hints.
+  # --- Federation ---
+  # Your canonical relay URL — auto-derived from INSTANCE_DOMAIN. Set explicitly only to override.
   instance_relay_url: ""
 
   # Relay connections to publish events to (array of ws:// or wss:// URLs).
-  # These are the working relays your instance actually connects to.
+  # These are the working relays you actually connect to.
   relay_connections:
     # - ws://localhost:7777
 
@@ -45,9 +45,7 @@ default: &default
 
 development:
   <<: *default
-  instance_relay_url: "ws://localhost:7777"
-  relay_connections:
-    - ws://localhost:7777
+  # instance_relay_url auto-derived from INSTANCE_DOMAIN
   voice_enabled: true
 
 test:

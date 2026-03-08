@@ -3,8 +3,9 @@ class MessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_channel
-  before_action :set_message, only: [ :edit, :update, :destroy ]
+  before_action :set_message, only: [ :edit, :update, :destroy, :toggle_pin ]
   before_action :validate_file_types, only: [ :create, :update ]
+  before_action :check_timeout!, only: [ :create ]
 
   def create
     # Block message creation in encrypted channels where user only has read_only access
@@ -94,6 +95,49 @@ class MessagesController < ApplicationController
     end
   end
 
+  def toggle_pin
+    membership = current_user.server_memberships.find_by(server: @channel.server)
+    unless membership&.has_permission?("manage_messages")
+      head :forbidden
+      return
+    end
+
+    @message.update!(pinned: !@message.pinned?)
+
+    # Publish pin/unpin to Nostr relays
+    if @channel.nostr_group_id.present? && @message.nostr_event_id.present?
+      NostrGroupModerationJob.perform_later(
+        :pin_message,
+        channel_id: @channel.id,
+        moderator_id: current_user.id,
+        target_event_id: @message.nostr_event_id,
+        pinned: @message.pinned?
+      )
+    end
+
+    ActiveRecord::Associations::Preloader.new(records: [ @message.user ], associations: { server_memberships: :roles }).call if @message.user
+    html = render_to_string(partial: "messages/message", locals: { message: @message, server: @channel.server })
+    ChannelChatChannel.broadcast_to(@channel, { type: "update_message", message_id: @message.public_id, html: html })
+
+    pin_count = @channel.messages.where(pinned: true).count
+    ChannelChatChannel.broadcast_to(@channel, { type: "pin_update", pin_count: pin_count })
+
+    if @message.pinned?
+      sys = @channel.messages.create!(content: "#{current_user.display_name_for(@channel.server)} pinned a message.", user: current_user, system_message: true)
+      sys_html = render_to_string(partial: "messages/message", locals: { message: sys, server: @channel.server })
+      ChannelChatChannel.broadcast_to(@channel, { type: "new_message", html: sys_html })
+    end
+
+    head :ok
+  end
+
+  def pinned
+    messages = @channel.messages.where(pinned: true)
+      .includes(user: { avatar_attachment: :blob }, files_attachments: :blob)
+      .order(created_at: :desc)
+    render partial: "messages/pinned_list", locals: { messages: messages, server: @channel.server }
+  end
+
   def destroy
     # Authorize: author can delete own messages, admins/manage_messages can delete any
     unless @message.user == current_user
@@ -143,6 +187,14 @@ class MessagesController < ApplicationController
 
   private
 
+  def check_timeout!
+    return unless @channel&.server
+    membership = current_user.server_memberships.find_by(server: @channel.server)
+    if membership&.timed_out?
+      render json: { error: "timed_out", until: membership.timed_out_until.iso8601 }, status: :forbidden
+    end
+  end
+
   def set_channel
     @channel = Channel.find_by!(public_id: params[:channel_id])
   end
@@ -152,7 +204,7 @@ class MessagesController < ApplicationController
   end
 
   def message_params
-    permitted = params.require(:message).permit(:content, :parent_id, files: [])
+    permitted = params.require(:message).permit(:content, :parent_id, :is_sticker, files: [])
     permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
     permitted
   end
@@ -189,6 +241,7 @@ class MessagesController < ApplicationController
     user = message.user
     event_content = resolve_active_storage_urls(message.content || "")
     tags = [ [ "h", channel.nostr_group_id ] ]
+    tags << [ "sticker" ] if message.is_sticker?
 
     if channel.encrypted? && channel.channel_public_key.present?
       conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)

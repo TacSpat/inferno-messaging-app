@@ -37,6 +37,13 @@ export default class extends Controller {
     document.addEventListener("click", this._handleFriendBarClick)
     this._frInitBar()
 
+    // Quick-edit button delegation (hover action bar on messages)
+    this._handleEditBtnClick = (e) => {
+      const btn = e.target.closest("[data-msg-edit-id]")
+      if (btn) this.editMessage(btn.dataset.msgEditId)
+    }
+    document.addEventListener("click", this._handleEditBtnClick)
+
     // Clean up dynamic badges before Turbo caches the page snapshot
     this._beforeCache = () => this._cleanupForCache()
     document.addEventListener("turbo:before-cache", this._beforeCache)
@@ -53,6 +60,7 @@ export default class extends Controller {
     if (this._handleUserCardClick) document.removeEventListener("click", this._handleUserCardClick)
     if (this._handleProfileOverlayEvent) document.removeEventListener("inferno:open-profile-overlay", this._handleProfileOverlayEvent)
     if (this._handleFriendBarClick) document.removeEventListener("click", this._handleFriendBarClick)
+    if (this._handleEditBtnClick) document.removeEventListener("click", this._handleEditBtnClick)
     this.closeMenu()
     this._closeUserCard()
     this._closeProfileOverlay()
@@ -149,7 +157,22 @@ export default class extends Controller {
       if (data.user_id && String(data.user_id) === String(selfId)) return
       const currentChannelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId
       if (currentChannelId && String(data.channel_id) === String(currentChannelId)) return
+
+      // Check if we're viewing a voice channel whose sidechat is this channel
+      const currentVoiceItem = currentChannelId && document.querySelector(`[data-channel-id="${currentChannelId}"][data-sidechat-channel-id="${data.channel_id}"]`)
+      if (currentVoiceItem) return
+
       this.showChannelUnread(data.channel_id)
+      // Also mark voice channels that use this channel as their sidechat
+      const voiceLink = document.querySelector(`[data-sidechat-channel-id="${data.channel_id}"]`)
+      if (voiceLink && voiceLink.dataset.channelId !== currentChannelId) {
+        this.showChannelUnread(voiceLink.dataset.channelId)
+      }
+      // Also mark linked text channels when a built-in sidechat message arrives
+      const textLink = document.querySelector(`[data-linked-voice-channel-id="${data.channel_id}"]`)
+      if (textLink && textLink.dataset.channelId !== currentChannelId) {
+        this.showChannelUnread(textLink.dataset.channelId)
+      }
       this.showServerUnread(data.server_id)
     } else if (data.type === "channel_typing") {
       this._handleChannelTyping(data)
@@ -167,6 +190,20 @@ export default class extends Controller {
     if (channelId) {
       this.removeBadge("channel", channelId)
       this.removeChannelUnread(channelId)
+      // Viewing a voice channel: clear its linked text channel too
+      const voiceItem = document.querySelector(`[data-channel-id="${channelId}"][data-sidechat-channel-id]`)
+      if (voiceItem) {
+        const scId = voiceItem.dataset.sidechatChannelId
+        this.removeBadge("channel", scId)
+        this.removeChannelUnread(scId)
+      }
+      // Viewing a text channel: clear the voice channel that links to it
+      const textItem = document.querySelector(`[data-channel-id="${channelId}"][data-linked-voice-channel-id]`)
+      if (textItem) {
+        const vcId = textItem.dataset.linkedVoiceChannelId
+        this.removeBadge("channel", vcId)
+        this.removeChannelUnread(vcId)
+      }
     }
     if (serverId) {
       this.recountServerBadge(serverId)
@@ -693,9 +730,9 @@ export default class extends Controller {
     visible.forEach((u, i) => {
       const offset = i > 0 ? 'margin-left: -4px;' : ''
       if (u.avatar_url) {
-        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`
+        html += `<img src="${u.avatar_url}" class="rounded-full object-cover shrink-0" style="width: 16px; height: 16px; ${offset} border: 1.5px solid var(--color-gray-800); position: relative; z-index: ${maxVisible - i};" alt="${u.username}">`
       } else {
-        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid #1e1c1b; position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || '#b45309'};">${u.avatar_initial || '?'}</div>`
+        html += `<div class="rounded-full shrink-0 flex items-center justify-center text-white" style="width: 16px; height: 16px; font-size: 8px; ${offset} border: 1.5px solid var(--color-gray-800); position: relative; z-index: ${maxVisible - i}; background-color: ${u.avatar_color || '#b45309'};">${u.avatar_initial || '?'}</div>`
       }
     })
     if (extra > 0) {
@@ -703,7 +740,7 @@ export default class extends Controller {
     }
     html += '</div>'
     // Animated dots
-    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: #878583;"><span>.</span><span>.</span><span>.</span></span>'
+    html += '<span class="typing-dots" style="margin-left: 3px; font-size: 10px; color: var(--color-gray-400);"><span>.</span><span>.</span><span>.</span></span>'
     html += '</div>'
 
     let indicator = existingIndicator
@@ -754,7 +791,7 @@ export default class extends Controller {
     if (convEl) {
       event.preventDefault()
       this.closeMenu()
-      this.showConversationContextMenu(event.clientX, event.clientY, convEl.dataset.conversationId)
+      this.showConversationContextMenu(event.clientX, event.clientY, convEl)
       return
     }
 
@@ -827,7 +864,15 @@ export default class extends Controller {
     this.renderContextMenu(x, y, items)
   }
 
-  showConversationContextMenu(x, y, conversationId) {
+  showConversationContextMenu(x, y, convEl) {
+    const conversationId = convEl.dataset.conversationId
+    const convType = convEl.dataset.convType
+    const convName = convEl.dataset.convName
+    const contactId = convEl.dataset.contactId
+    const contactStatus = convEl.dataset.contactStatus
+    const otherUserId = convEl.dataset.otherUserId
+    const csrf = () => document.querySelector("meta[name=csrf-token]")?.content
+
     const items = [
       {
         icon: this.icons.check,
@@ -835,6 +880,150 @@ export default class extends Controller {
         action: () => this.markDmsAsRead(conversationId)
       }
     ]
+
+    if (convType === "group") {
+      // Group chat actions
+      items.push({ separator: true })
+      items.push({
+        icon: this.icons.edit,
+        label: "Edit Group",
+        action: () => {
+          // Check if we're already viewing this conversation
+          const currentPath = window.location.pathname
+          const convPath = convEl.getAttribute("href")
+          if (currentPath === convPath) {
+            // Already here — just open the panel
+            const p = document.getElementById("dm-profile-panel")
+            if (p) p.classList.remove("hidden")
+            return
+          }
+          // Navigate to the conversation via sidebar link, then open panel
+          const onLoad = (e) => {
+            if (e.target.id !== "main-content") return
+            document.removeEventListener("turbo:frame-load", onLoad)
+            // Small delay to let Stimulus controllers connect
+            requestAnimationFrame(() => {
+              const p = document.getElementById("dm-profile-panel")
+              if (p) p.classList.remove("hidden")
+            })
+          }
+          document.addEventListener("turbo:frame-load", onLoad)
+          setTimeout(() => document.removeEventListener("turbo:frame-load", onLoad), 5000)
+          convEl.click()
+        }
+      })
+      items.push({ separator: true })
+      items.push({
+        icon: this.icons.leave,
+        label: "Leave Group",
+        danger: true,
+        action: async () => {
+          const ok = await this.showConfirm("Leave Group", `Leave "${convName || "this group chat"}"? You won't be able to rejoin unless invited.`, "Leave", "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light")
+          if (!ok) return
+          const currentUserId = document.body.dataset.currentUserId
+          await fetch(`/conversations/${conversationId}/remove_member`, {
+            method: "DELETE",
+            headers: { "X-CSRF-Token": csrf(), "Content-Type": "application/x-www-form-urlencoded" },
+            body: `member_id=${currentUserId}`
+          })
+          window.Turbo.visit("/conversations")
+        }
+      })
+    } else {
+      // Direct DM actions
+      if (contactId) {
+        items.push({ separator: true })
+        if (contactStatus === "accepted") {
+          items.push({
+            icon: this.icons.userMinus,
+            label: "Remove Friend",
+            danger: true,
+            action: async () => {
+              const ok = await this.showConfirm("Remove Friend", `Remove ${convName} from your friends?`, "Remove", "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light")
+              if (!ok) return
+              await fetch(`/friendships/${contactId}`, {
+                method: "DELETE",
+                headers: { "X-CSRF-Token": csrf() }
+              })
+              window.Turbo.visit("/conversations")
+            }
+          })
+        } else if (contactStatus === "pending_incoming") {
+          items.push({
+            icon: this.icons.check,
+            label: "Accept Friend Request",
+            action: async () => {
+              await fetch(`/friendships/${contactId}/accept`, {
+                method: "POST",
+                headers: { "X-CSRF-Token": csrf() }
+              })
+              window.Turbo.visit(window.location.pathname)
+            }
+          })
+          items.push({
+            icon: this.icons.decline,
+            label: "Decline Friend Request",
+            danger: true,
+            action: async () => {
+              await fetch(`/friendships/${contactId}/decline`, {
+                method: "POST",
+                headers: { "X-CSRF-Token": csrf() }
+              })
+              window.Turbo.visit(window.location.pathname)
+            }
+          })
+        } else if (contactStatus === "pending_outgoing") {
+          items.push({
+            icon: this.icons.decline,
+            label: "Cancel Friend Request",
+            danger: true,
+            action: async () => {
+              await fetch(`/friendships/${contactId}`, {
+                method: "DELETE",
+                headers: { "X-CSRF-Token": csrf() }
+              })
+              window.Turbo.visit(window.location.pathname)
+            }
+          })
+        }
+      }
+
+      // Block user (for DMs with a known contact)
+      if (contactId) {
+        items.push({
+          icon: this.icons.block,
+          label: "Block User",
+          danger: true,
+          action: async () => {
+            const ok = await this.showConfirm("Block User", `Block ${convName}? They won't be able to message you, and will be removed from your friends.`, "Block", "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light")
+            if (!ok) return
+            await fetch("/blocks", {
+              method: "POST",
+              headers: { "X-CSRF-Token": csrf(), "Content-Type": "application/x-www-form-urlencoded" },
+              body: `contact_id=${contactId}`
+            })
+            window.Turbo.visit("/conversations")
+          }
+        })
+      }
+
+      items.push({ separator: true })
+      items.push({
+        icon: this.icons.trash,
+        label: "Close Conversation",
+        danger: true,
+        action: async () => {
+          const ok = await this.showConfirm("Close Conversation", `Close your conversation with ${convName}? The conversation will be removed from your sidebar.`, "Close", "bg-gradient-to-r from-danger-dark to-danger hover:from-danger hover:to-danger-light")
+          if (!ok) return
+          await fetch(`/conversations/${conversationId}`, {
+            method: "DELETE",
+            headers: { "X-CSRF-Token": csrf() }
+          })
+          window.Turbo.visit("/conversations")
+        }
+      })
+    }
+
     this.renderContextMenu(x, y, items)
   }
 
@@ -1163,16 +1352,17 @@ export default class extends Controller {
         label: "Copy Message Link",
         action: () => {
           const el = document.querySelector("[data-current-server-id]")
-          const sId = el ? el.dataset.currentServerId : ""
-          const cId = el ? el.dataset.currentChannelId : ""
-          const link = `${window.location.origin}/servers/${sId}/channels/${cId}#message-${messageId}`
-          navigator.clipboard.writeText(link)
+          if (el) {
+            const sId = el.dataset.currentServerId
+            const cId = el.dataset.currentChannelId
+            const link = `${window.location.origin}/servers/${sId}/channels/${cId}#message-${messageId}`
+            navigator.clipboard.writeText(link)
+          } else {
+            // DM context — use current URL with message anchor
+            const link = `${window.location.origin}${window.location.pathname}#message-${messageId}`
+            navigator.clipboard.writeText(link)
+          }
         }
-      },
-      {
-        icon: this.icons.copy,
-        label: "Copy Message ID",
-        action: () => navigator.clipboard.writeText(messageId)
       },
     ]
 
@@ -1234,13 +1424,33 @@ export default class extends Controller {
       )
     }
 
+    // Pin/Unpin — available to manage_messages permission holders (server) or any DM participant
+    const canPin = this.canManageMessages || messageEl.closest("[data-controller~='dm-message-form']")
+    if (canPin && !messageEl.dataset.systemMessage) {
+      const isPinned = messageEl.dataset.pinned === "true"
+      const pinUrl = messageEl.dataset.pinUrl
+      if (pinUrl) {
+        items.push({
+          icon: this.icons.pin,
+          label: isPinned ? "Unpin Message" : "Pin Message",
+          action: () => {
+            const token = document.querySelector("meta[name=csrf-token]")?.content
+            fetch(pinUrl, { method: "POST", headers: { "X-CSRF-Token": token } })
+          }
+        })
+      }
+    }
+
     if (isAuthor) {
+      const isSticker = messageEl.dataset.isSticker === "true"
       items.push({ separator: true })
-      items.push({
-        icon: this.icons.edit,
-        label: "Edit Message",
-        action: () => this.editMessage(messageId)
-      })
+      if (!isSticker) {
+        items.push({
+          icon: this.icons.edit,
+          label: "Edit Message",
+          action: () => this.editMessage(messageId)
+        })
+      }
       items.push({
         icon: this.icons.trash,
         label: "Delete Message",
@@ -1300,108 +1510,17 @@ export default class extends Controller {
   editMessage(messageId) {
     const messageEl = document.querySelector(`[data-message-id="${messageId}"]`)
     if (!messageEl) return
+    if (messageEl.dataset.isSticker === "true") return
     const contentEl = messageEl.querySelector(".message-content")
     if (!contentEl) return
 
     const currentText = contentEl.dataset.rawContent || contentEl.textContent.trim()
-    const channelId = document.querySelector("[data-current-channel-id]")?.dataset?.currentChannelId
+    const preview = currentText.substring(0, 80) + (currentText.length > 80 ? "..." : "")
 
-    contentEl.dataset.originalHtml = contentEl.innerHTML
-
-    // Build edit form from template - only replaces text content, keeps attachments visible
-    const editClone = document.getElementById("tpl-edit-form").content.cloneNode(true)
-    const form = editClone.querySelector("form")
-    form.dataset.editMessageId = messageId
-    const input = editClone.querySelector("input")
-    input.value = currentText
-    input.setAttribute("autofocus", "")
-    contentEl.innerHTML = ""
-    contentEl.appendChild(editClone)
-
-    // Add remove buttons to image attachments (not video/audio)
-    const fileContainer = messageEl.querySelector(".flex.flex-wrap.gap-2.mt-2")
-    const removeFileIds = []
-    if (fileContainer) {
-      fileContainer.querySelectorAll("img").forEach(img => {
-        const wrapper = img.parentElement
-        // Skip if already has a remove button
-        if (wrapper.querySelector(".remove-attachment-btn")) return
-        wrapper.style.position = "relative"
-        const removeBtn = document.createElement("button")
-        removeBtn.type = "button"
-        removeBtn.className = "remove-attachment-btn absolute top-1 right-1 bg-danger hover:bg-danger-light text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold z-10"
-        removeBtn.innerHTML = "\u00d7"
-        removeBtn.addEventListener("click", () => {
-          // Find the file ID from the image src (Active Storage blob URL)
-          const src = img.dataset.previewSrc || img.src
-          const blobMatch = src.match(/\/blobs\/([^\/]+)/)
-          if (blobMatch) {
-            // Store blob signed_id to remove
-            removeBtn.dataset.blobId = blobMatch[1]
-          }
-          // Also try to get attachment ID from data attribute
-          const attachId = img.closest("[data-attachment-id]")?.dataset?.attachmentId
-          if (attachId) removeFileIds.push(attachId)
-          wrapper.style.opacity = "0.3"
-          wrapper.style.pointerEvents = "none"
-          removeBtn.remove()
-        })
-        wrapper.appendChild(removeBtn)
-      })
-    }
-
-    const cancelBtn = contentEl.querySelector(".cancel-edit-btn")
-    cancelBtn.addEventListener("click", () => {
-      contentEl.innerHTML = contentEl.dataset.originalHtml
-      // Restore any hidden attachments
-      if (fileContainer) {
-        fileContainer.querySelectorAll(".remove-attachment-btn").forEach(b => b.remove())
-        fileContainer.querySelectorAll("[style]").forEach(el => {
-          el.style.opacity = ""
-          el.style.pointerEvents = ""
-          el.style.position = ""
-        })
-      }
-    })
-
-    const editInput = contentEl.querySelector("input")
-    editInput.focus()
-    editInput.setSelectionRange(editInput.value.length, editInput.value.length)
-
-    const editForm = contentEl.querySelector("form")
-    editForm.addEventListener("submit", async (e) => {
-      e.preventDefault()
-      const newContent = editInput.value.trim()
-      if (!newContent && removeFileIds.length === 0) {
-        if (await this.showConfirm("Delete Message", "Message is empty. Delete this message?")) {
-          contentEl.innerHTML = contentEl.dataset.originalHtml
-          this.deleteMessage(messageId, true)
-        }
-        return
-      }
-      const csrf = document.querySelector("meta[name=csrf-token]")?.content
-      const payload = { message: { content: newContent } }
-      if (removeFileIds.length > 0) {
-        payload.message.remove_file_ids = removeFileIds
-      }
-      // Also collect blob-based removals
-      const blobBtns = fileContainer?.querySelectorAll("[style*=\"opacity: 0.3\"]")
-      const res = await fetch(`/channels/${channelId}/messages/${messageId}`, {
-        method: "PATCH",
-        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json", "Accept": "text/html" },
-        body: JSON.stringify(payload)
-      })
-      if (res.ok) {
-        // ActionCable will broadcast the update
-      }
-    })
-
-    // ESC to cancel
-    editInput.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") {
-        cancelBtn.click()
-      }
-    })
+    document.dispatchEvent(new CustomEvent("inferno:edit", {
+      detail: { messageId, content: currentText, preview },
+      bubbles: true
+    }))
   }
 
   async deleteMessage(messageId, skipConfirm = false) {
@@ -1756,21 +1875,13 @@ export default class extends Controller {
 
         // Status dot
         const statusDot = overlay.querySelector('[data-slot="status-dot"]')
-        const statusColors = { online: "bg-green-500", idle: "bg-yellow-500", dnd: "bg-red-500" }
+        const statusColors = { online: "bg-green-500", idle: "bg-warning", dnd: "bg-red-500" }
         statusDot.className = `absolute bottom-[3px] left-[63px] w-[22px] h-[22px] rounded-full border-[4px] ${statusColors[data.online_state] || "bg-gray-500"}`
         statusDot.style.borderColor = c2
 
         // Name, tag
         overlay.querySelector('[data-slot="display-name"]').textContent = data.display_name
         overlay.querySelector('[data-slot="tag"]').textContent = data.tag
-
-        // Remote badge
-        if (data.remote) {
-          const remoteBadge = overlay.querySelector('[data-slot="remote-badge"]')
-          remoteBadge.classList.remove("hidden")
-          remoteBadge.classList.add("flex")
-          overlay.querySelector('[data-slot="remote-domain"]').textContent = data.home_instance_domain
-        }
 
         // Status
         if (data.status) {
@@ -1901,9 +2012,9 @@ export default class extends Controller {
   }
 
   _updateUserPresence(data) {
-    const colorMap = { online: "bg-green-500", idle: "bg-yellow-500", dnd: "bg-red-500", offline: "bg-gray-500" }
+    const colorMap = { online: "bg-green-500", idle: "bg-warning", dnd: "bg-red-500", offline: "bg-gray-500" }
     const cls = colorMap[data.state] || "bg-gray-500"
-    const allColors = ["bg-green-500", "bg-yellow-500", "bg-red-500", "bg-gray-500"]
+    const allColors = ["bg-green-500", "bg-warning", "bg-red-500", "bg-gray-500"]
 
     // Update sidebar/friends list presence dots
     document.querySelectorAll(`[data-user-presence="${data.user_id}"]`).forEach(dot => {
@@ -1993,7 +2104,12 @@ export default class extends Controller {
       trash: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>',
       reply: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>',
       react: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
-      plus: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>'
+      plus: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>',
+      pin: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>',
+      leave: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>',
+      userMinus: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7a4 4 0 11-8 0 4 4 0 018 0zM9 14a6 6 0 00-6 6v1h12v-1a6 6 0 00-6-6zM21 12h-6"/></svg>',
+      decline: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>',
+      block: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>'
     }
   }
 

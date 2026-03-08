@@ -60,7 +60,7 @@ export default class extends Controller {
         const color = r.color || "#99aab5"
         icon = `<div class="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style="background:${color}30;border:2px solid ${color}"><span class="text-xs" style="color:${color}">R</span></div>`
       } else {
-        icon = `<div class="w-6 h-6 rounded-full bg-yellow-600 flex items-center justify-center text-xs font-bold text-white shrink-0">@</div>`
+        icon = `<div class="w-6 h-6 rounded-full bg-warning-dark flex items-center justify-center text-xs font-bold text-white shrink-0">@</div>`
         detail = `<span class="text-xs text-gray-500">${r.description || ""}</span>`
       }
       return `<div class="flex items-center gap-2 px-3 py-1.5 cursor-pointer hover:bg-gray-600 rounded ${selected}" data-index="${i}" data-action="click->mention-autocomplete#selectResult mouseenter->mention-autocomplete#hoverResult">

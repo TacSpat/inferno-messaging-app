@@ -33,4 +33,15 @@ class LocalConfig < ApplicationRecord
   def role_limit_reached_for?(server)
     server.roles.count >= max_roles_per_server
   end
+
+  # Auto-derive the instance relay URL from INSTANCE_DOMAIN when not explicitly set.
+  def effective_instance_relay_url
+    return instance_relay_url if instance_relay_url.present?
+    domain = Rails.application.config.x.instance_domain
+    if domain.present? && !domain.start_with?("localhost") && !domain.start_with?("127.")
+      "wss://#{domain}/relay"
+    else
+      "ws://localhost:7777"
+    end
+  end
 end

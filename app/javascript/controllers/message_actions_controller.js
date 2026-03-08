@@ -43,6 +43,10 @@ export default class extends Controller {
     this._removeSheet()
 
     const messageId = msgEl.dataset.messageId
+    const authorId = msgEl.dataset.authorId
+    const currentUserId = document.body.dataset.currentUserId
+    const isOwner = authorId && currentUserId && authorId === currentUserId
+
     const authorEl = msgEl.querySelector("[style*='color:']")
     const authorName = authorEl?.textContent?.trim() || "Unknown"
     const contentEl = msgEl.querySelector(".message-content")
@@ -60,6 +64,29 @@ export default class extends Controller {
     const tpl = document.getElementById("tpl-action-sheet")
     const clone = tpl.content.cloneNode(true)
     clone.querySelector('[data-slot="preview"]').textContent = preview
+
+    // Show edit/delete buttons if the current user authored this message
+    const isSticker = msgEl.dataset.isSticker === "true"
+    if (isOwner) {
+      clone.querySelectorAll("[data-owner-only]").forEach(btn => {
+        if (isSticker && btn.dataset.sheetAction === "edit") return
+        btn.classList.remove("hidden")
+      })
+    }
+
+    // Show pin button if user has permission (server context) or in DM context
+    const pinBtn = clone.querySelector('[data-sheet-action="pin"]')
+    if (pinBtn) {
+      const canPin = msgEl.closest("[data-can-pin='true']") || msgEl.closest("[data-controller~='dm-message-form']")
+      if (canPin) {
+        pinBtn.classList.remove("hidden")
+        const pinLabel = pinBtn.querySelector("[data-pin-label]")
+        if (pinLabel) {
+          pinLabel.textContent = msgEl.dataset.pinned === "true" ? "Unpin Message" : "Pin Message"
+        }
+      }
+    }
+
     sheet.appendChild(clone)
 
     sheet.addEventListener("click", (e) => {
@@ -79,6 +106,40 @@ export default class extends Controller {
         }))
       } else if (action === "copy") {
         navigator.clipboard?.writeText(rawContent).catch(() => {})
+      } else if (action === "copy-link") {
+        const el = document.querySelector("[data-current-server-id]")
+        const sId = el ? el.dataset.currentServerId : ""
+        const cId = el ? el.dataset.currentChannelId : ""
+        if (sId && cId) {
+          const link = `${window.location.origin}/servers/${sId}/channels/${cId}#message-${messageId}`
+          navigator.clipboard?.writeText(link).catch(() => {})
+        } else {
+          // DM context — use conversation URL
+          const convEl = msgEl.closest("[data-conversation-id]")
+          const convId = convEl?.dataset?.conversationId || ""
+          const link = `${window.location.origin}/conversations/${convId}#message-${messageId}`
+          navigator.clipboard?.writeText(link).catch(() => {})
+        }
+      } else if (action === "edit") {
+        const contentEl = msgEl.querySelector(".message-content")
+        const editContent = contentEl?.dataset?.rawContent || contentEl?.textContent?.trim() || ""
+        const editPreview = editContent.substring(0, 80) + (editContent.length > 80 ? "..." : "")
+        document.dispatchEvent(new CustomEvent("inferno:edit", {
+          detail: { messageId, content: editContent, preview: editPreview },
+          bubbles: true
+        }))
+      } else if (action === "pin") {
+        const pinUrl = msgEl.dataset.pinUrl
+        if (pinUrl) {
+          const token = document.querySelector("meta[name=csrf-token]")?.content
+          fetch(pinUrl, { method: "POST", headers: { "X-CSRF-Token": token } })
+        }
+      } else if (action === "delete") {
+        const ctrl = this.application.getControllerForElementAndIdentifier(
+          document.querySelector("[data-controller~='notification-badge']"),
+          "notification-badge"
+        )
+        if (ctrl) ctrl.deleteMessage(messageId)
       }
 
       this._dismiss()

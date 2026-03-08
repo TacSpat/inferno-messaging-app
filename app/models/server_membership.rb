@@ -3,6 +3,7 @@ class ServerMembership < ApplicationRecord
   belongs_to :user
   belongs_to :server
   belongs_to :server_folder, optional: true
+  belongs_to :timed_out_by, class_name: "User", optional: true
   has_many :membership_roles, dependent: :destroy
   has_many :roles, through: :membership_roles
 
@@ -33,8 +34,27 @@ class ServerMembership < ApplicationRecord
     roles.ordered.first
   end
 
+  def display_color
+    # Walk roles top-down by position; skip Owner role and default gray
+    sorted = roles.loaded? ? roles.sort_by { |r| -r.position } : roles.ordered.to_a
+    sorted.each do |role|
+      next if role.owner?
+      return role.color if role.color.present? && role.color != "#99aab5"
+    end
+    "#ffffff"
+  end
+
+  def timed_out?
+    timed_out_until.present? && timed_out_until > Time.current
+  end
+
+  def timeout_remaining
+    return nil unless timed_out?
+    timed_out_until - Time.current
+  end
+
   def top_hoisted_role
-    roles.select { |r| r.hoist? && r.name != "New Role" && !r.owner? }.max_by(&:position)
+    roles.select { |r| r.hoist? && !r.owner? && !r.everyone? }.max_by(&:position)
   end
 
   private

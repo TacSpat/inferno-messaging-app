@@ -119,6 +119,7 @@ class NostrServerPublishJob < ApplicationJob
     tags << [ "welcome_message", @server.welcome_message_template || "" ]
     tags << [ "welcome_enabled", @server.welcome_message_enabled?.to_s ]
     tags << [ "voice_enabled", @server.voice_enabled?.to_s ]
+    tags << [ "discoverable", @server.discoverable?.to_s ]
 
     # Include voice provider pubkeys so other clients can create ServerVoiceProvider records
     @server.server_voice_providers.active.includes(:user).each do |svp|
@@ -156,7 +157,8 @@ class NostrServerPublishJob < ApplicationJob
         ch.nostr_group_id || "",
         perm_overrides,
         ch.encrypted?.to_s,
-        ch.channel_public_key || ""
+        ch.channel_public_key || "",
+        ch.sidechat_channel&.public_id || ""
       ]
     end
 
@@ -180,7 +182,8 @@ class NostrServerPublishJob < ApplicationJob
         role.position.to_s,
         (role.hoist? rescue false).to_s,
         (role.respond_to?(:mentionable?) ? role.mentionable?.to_s : "false"),
-        (role.permissions || {}).to_json
+        (role.permissions || {}).to_json,
+        role.role_type.to_s
       ]
     end
 

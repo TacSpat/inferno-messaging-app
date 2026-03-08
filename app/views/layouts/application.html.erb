@@ -73,10 +73,10 @@
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
     <% if user_signed_in? && current_user.instance_admin? && !request.ssl? && !request.host.in?(%w[localhost 127.0.0.1]) %>
-      <div class="bg-yellow-800 text-yellow-100 text-xs text-center px-3 py-1.5 font-medium z-50 relative">
+      <div class="bg-warning-dark text-warning-light text-xs text-center px-3 py-1.5 font-medium z-50 relative">
         <svg class="w-3.5 h-3.5 inline -mt-0.5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
         Insecure connection — HTTPS is required for voice chat, federation stability, and security.
-        <%= link_to "Configure", admin_instance_config_path, class: "underline text-yellow-200 hover:text-white ml-1" %>
+        <%= link_to "Configure", admin_instance_config_path, class: "underline text-warning-light hover:text-white ml-1" %>
       </div>
     <% end %>
 
@@ -165,7 +165,7 @@
           </div>
 
           <!-- Voice controls bar -->
-          <div id="voice-controls-bar" data-turbo-permanent class="hidden voice-controls-inferno" style="background-color: #141312;"
+          <div id="voice-controls-bar" data-turbo-permanent class="hidden voice-controls-inferno" style="background-color: var(--color-gray-900);"
                data-controller="voice-channel"
                data-voice-channel-target="controlsBar">
             <!-- Header: status + disconnect -->
@@ -224,7 +224,7 @@
           </div>
 
           <!-- User panel (bottom) -->
-          <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: #0a0a09;">
+          <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: var(--color-gray-950);">
             <div class="relative">
               <% if current_user.effective_avatar_url.present? %>
                 <%= image_tag current_user.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
@@ -261,7 +261,7 @@
             <%
               online_members = @members.reject { |m| m.offline? || m.invisible? }
               offline_members = @members.select { |m| m.offline? || m.invisible? }
-              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("json_extract(permissions, '$.owner') = ?", true).ordered.to_a
+              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where("json_extract(permissions, '$.owner') IS NOT TRUE").ordered.to_a
               everyone_role = @server.roles.find_by(name: "@everyone")
               everyone_position = everyone_role&.position || 0
               role_groups = {}

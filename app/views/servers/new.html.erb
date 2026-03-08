@@ -1,83 +1,154 @@
-<div class="flex items-center justify-center min-h-screen" style="background: #0e0d0c;">
-  <div class="w-full max-w-lg mx-4">
-    <!-- Header -->
-    <div class="text-center mb-8">
-      <h1 class="text-2xl font-bold text-white">Create a Server</h1>
-      <p class="text-gray-500 text-sm mt-1">Give your server a name and personality</p>
-    </div>
+<div class="flex items-center justify-center min-h-screen px-4" style="background: var(--color-gray-950);">
+  <div class="w-full max-w-md space-y-6">
 
-    <!-- Form card -->
-    <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden">
-      <%= form_with model: @server, url: servers_path, html: { multipart: true }, class: "divide-y divide-gray-700/50", data: { controller: "server-icon-preview" } do |f| %>
-        <% if current_user.nostr_public_key.present? %>
-          <div class="p-6">
-            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Instance</label>
-            <select name="instance_url" class="w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3.5 py-2.5 text-white text-sm focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition">
-              <option value="local">This instance (<%= Rails.application.config.x.instance_domain %>)</option>
-              <% RelayConnection.active.each do |relay| %>
-                <% begin %>
-                  <% relay_host = URI.parse(relay.url.gsub(/^wss?:\/\//, "https://")).host %>
-                  <option value="https://<%= relay_host %>"><%= relay_host %></option>
-                <% rescue URI::InvalidURIError %>
-                <% end %>
-              <% end %>
-            </select>
-            <p class="text-[11px] text-gray-600 mt-1.5">Choose which instance will host this server</p>
-          </div>
-        <% end %>
+    <!-- Join a Server -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700/50 p-5">
+      <h2 class="text-lg font-bold text-white mb-1">Join a Server</h2>
+      <p class="text-sm text-gray-500 mb-4">Enter an invite link or server ID</p>
 
-        <!-- Identity: Icon + Name -->
-        <div class="p-6 space-y-5">
-          <div class="flex gap-5">
-            <div class="shrink-0">
-              <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Icon</label>
-              <label class="block w-20 h-20 rounded-2xl bg-gray-900 border-2 border-dashed border-gray-700 hover:border-gray-500 flex items-center justify-center cursor-pointer overflow-hidden transition group" data-server-icon-preview-target="iconLabel">
-                <div class="flex flex-col items-center" data-server-icon-preview-target="iconPlaceholder">
-                  <svg class="w-6 h-6 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                </div>
-                <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="iconPreview">
-                <%= f.file_field :icon, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewIcon", server_icon_preview_target: "iconInput" } %>
-              </label>
-            </div>
-            <div class="flex-1 min-w-0">
-              <div data-controller="emoji-input">
-                <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Server Name</label>
-                <div class="flex items-center bg-gray-900 border border-gray-700/50 rounded-lg px-3.5 py-2.5 focus-within:border-accent/50 focus-within:ring-1 focus-within:ring-accent/20 transition">
-                  <div class="flex-1 relative">
-                    <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
-                    <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-600 focus:outline-none text-sm relative z-10", placeholder: "My Awesome Server", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+      <div data-controller="server-invite-preview" class="space-y-3">
+        <input type="text"
+               data-server-invite-preview-target="input"
+               data-action="input->server-invite-preview#onInput keydown->server-invite-preview#onKeydown"
+               placeholder="Paste invite link or server ID..."
+               class="w-full bg-gray-900 text-white text-sm rounded-lg px-3 py-2.5 outline-none border border-gray-700/50 focus:border-accent/50 placeholder-gray-500 transition"
+               autocomplete="off">
+
+        <!-- Discoverable servers from connected relays -->
+        <div data-server-invite-preview-target="discoverable">
+          <% discoverable_servers = Server.where(discoverable: true).where.not(nostr_group_id: nil).where.not(id: current_user.servers.select(:id)).limit(5) %>
+          <% if discoverable_servers.any? %>
+            <p class="text-[11px] text-gray-500 uppercase tracking-wide font-semibold mb-2 mt-1">Servers on your relays</p>
+            <div class="space-y-1">
+              <% discoverable_servers.each do |server| %>
+                <% icon_ok = server.icon.attached? && (server.icon.blob rescue nil)&.persisted? %>
+                <div class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-700/50 transition cursor-pointer group"
+                     data-action="click->server-invite-preview#joinDirect"
+                     data-nostr-group-id="<%= server.nostr_group_id %>">
+                  <% if icon_ok %>
+                    <%= image_tag server.icon, class: "w-9 h-9 rounded-lg object-cover shrink-0" %>
+                  <% else %>
+                    <div class="w-9 h-9 rounded-lg bg-gray-700 flex items-center justify-center text-sm font-bold text-white shrink-0">
+                      <%= server.name[0].upcase %>
+                    </div>
+                  <% end %>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-sm text-white font-medium truncate"><%= server.name %></p>
+                    <p class="text-[11px] text-gray-500"><%= server.members.count %> members</p>
                   </div>
-                  <button type="button" class="text-gray-500 hover:text-gray-300 ml-1.5 shrink-0 cursor-pointer transition" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
-                    <svg class="w-4.5 h-4.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                  </button>
+                  <svg class="w-4 h-4 text-gray-600 group-hover:text-accent-light transition shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+
+        <!-- Server preview card (hidden until resolved) -->
+        <div data-server-invite-preview-target="preview" class="hidden">
+          <div class="bg-gray-900 rounded-xl overflow-hidden border border-gray-700/50">
+            <div class="h-20 bg-gradient-to-br from-accent-dark/30 to-gray-900">
+              <img data-server-invite-preview-target="banner" class="w-full h-full object-cover hidden">
+            </div>
+            <div class="relative px-4 pb-4">
+              <div class="-mt-8 mb-2">
+                <div data-server-invite-preview-target="iconFallback" class="w-14 h-14 rounded-xl bg-gray-700 border-3 border-gray-800 flex items-center justify-center text-xl font-bold text-white">
+                  <span data-server-invite-preview-target="iconLetter">?</span>
+                </div>
+                <img data-server-invite-preview-target="icon" class="hidden w-14 h-14 rounded-xl object-cover border-3 border-gray-800">
+              </div>
+              <h3 data-server-invite-preview-target="name" class="text-sm font-bold text-white"></h3>
+              <p data-server-invite-preview-target="description" class="text-xs text-gray-400 mt-0.5 line-clamp-2 hidden"></p>
+              <div class="flex items-center gap-3 mt-2 text-xs text-gray-500">
+                <div class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                  <span data-server-invite-preview-target="online">0</span> Online
+                </div>
+                <div class="flex items-center gap-1">
+                  <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+                  <span data-server-invite-preview-target="members">0</span> Members
                 </div>
               </div>
+              <button type="button"
+                      data-server-invite-preview-target="joinBtn"
+                      data-action="click->server-invite-preview#join"
+                      class="w-full mt-3 bg-accent hover:bg-accent-light text-white font-semibold py-2 rounded-lg transition cursor-pointer text-sm">
+                Join Server
+              </button>
             </div>
           </div>
+        </div>
 
-          <div>
-            <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Description <span class="text-gray-600 normal-case tracking-normal font-normal">— optional</span></label>
-            <%= f.text_area :description, rows: 3, class: "w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3.5 py-2.5 text-white placeholder-gray-600 focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm resize-none transition", placeholder: "What's this server about?" %>
+        <!-- Loading state -->
+        <div data-server-invite-preview-target="loading" class="hidden text-center py-4">
+          <svg class="w-5 h-5 text-gray-400 animate-spin mx-auto" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </div>
+
+        <!-- Error state -->
+        <p data-server-invite-preview-target="error" class="hidden text-xs text-danger-light px-1"></p>
+      </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="flex items-center gap-3 px-2">
+      <div class="flex-1 border-t border-gray-700/50"></div>
+      <span class="text-xs text-gray-600 uppercase tracking-wide font-semibold">or create your own</span>
+      <div class="flex-1 border-t border-gray-700/50"></div>
+    </div>
+
+    <!-- Create a Server -->
+    <div class="bg-gray-800 rounded-xl border border-gray-700/50 p-5">
+      <h2 class="text-lg font-bold text-white mb-1">Create a Server</h2>
+      <p class="text-sm text-gray-500 mb-4">Give your server a name and personality</p>
+
+      <%= form_with model: @server, url: servers_path, html: { multipart: true }, class: "space-y-3", data: { controller: "server-icon-preview" } do |f| %>
+        <!-- Icon + Name -->
+        <div class="flex items-start gap-3">
+          <label class="w-16 h-16 shrink-0 rounded-xl bg-gray-900 border border-dashed border-gray-600 flex items-center justify-center cursor-pointer hover:border-accent/60 transition overflow-hidden group" data-server-icon-preview-target="iconLabel">
+            <div class="flex flex-col items-center" data-server-icon-preview-target="iconPlaceholder">
+              <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+            </div>
+            <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="iconPreview">
+            <%= f.file_field :icon, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewIcon", server_icon_preview_target: "iconInput" } %>
+          </label>
+          <div class="flex-1 min-w-0 space-y-2" data-controller="emoji-input">
+            <div class="flex items-center bg-gray-900 rounded-lg px-3 py-2.5 border border-gray-700/50 focus-within:border-accent/50 transition">
+              <div class="flex-1 relative">
+                <div data-emoji-input-target="highlight" class="absolute inset-0 text-sm text-white whitespace-pre break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
+                <%= f.text_field :name, class: "w-full bg-transparent text-transparent caret-white placeholder-gray-500 focus:outline-none text-sm relative z-10", placeholder: "Server name", data: { emoji_input_target: "input", action: "input->emoji-input#handleInput keydown->emoji-input#handleKeydown" } %>
+              </div>
+              <button type="button" class="text-gray-500 hover:text-gray-300 ml-1.5 shrink-0 cursor-pointer transition" data-action="click->emoji-input#toggle" data-emoji-input-target="button" title="Add emoji">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+              </button>
+            </div>
+            <%= f.text_area :description, rows: 2, class: "w-full bg-gray-900 text-white text-sm rounded-lg px-3 py-2.5 outline-none border border-gray-700/50 focus:border-accent/50 placeholder-gray-500 resize-none transition", placeholder: "Description (optional)" %>
           </div>
         </div>
 
         <!-- Banner -->
-        <div class="p-6">
-          <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Banner <span class="text-gray-600 normal-case tracking-normal font-normal">— optional</span></label>
-          <label class="block w-full h-28 rounded-lg bg-gray-900 border-2 border-dashed border-gray-700 hover:border-gray-500 flex items-center justify-center cursor-pointer overflow-hidden transition group" data-server-icon-preview-target="bannerLabel">
-            <div class="flex flex-col items-center gap-1.5" data-server-icon-preview-target="bannerPlaceholder">
-              <svg class="w-6 h-6 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-              <span class="text-xs text-gray-500 group-hover:text-gray-400 transition">Click to upload a banner</span>
-            </div>
-            <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="bannerPreview">
-            <%= f.file_field :banner, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewBanner", server_icon_preview_target: "bannerInput" } %>
-          </label>
-        </div>
+        <label class="block w-full h-24 rounded-lg bg-gray-900 border border-dashed border-gray-600 hover:border-accent/60 flex items-center justify-center cursor-pointer overflow-hidden transition group" data-server-icon-preview-target="bannerLabel">
+          <div class="flex flex-col items-center gap-1" data-server-icon-preview-target="bannerPlaceholder">
+            <svg class="w-5 h-5 text-gray-500 group-hover:text-gray-400 transition" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <span class="text-[11px] text-gray-500 group-hover:text-gray-400 transition">Upload banner</span>
+          </div>
+          <img class="w-full h-full object-cover hidden" data-server-icon-preview-target="bannerPreview">
+          <%= f.file_field :banner, accept: "image/*", class: "hidden", data: { action: "change->server-icon-preview#previewBanner", server_icon_preview_target: "bannerInput" } %>
+        </label>
 
-        <div class="p-6 bg-gray-800/50">
-          <%= f.submit "Create Server", class: "w-full bg-confirm hover:bg-confirm-light text-white font-semibold py-2.5 rounded-lg transition cursor-pointer text-sm" %>
-        </div>
+        <!-- Visibility -->
+        <label class="flex items-center gap-2.5 px-1 py-1 cursor-pointer group">
+          <%= f.check_box :discoverable, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer" %>
+          <div>
+            <span class="text-sm text-gray-300 group-hover:text-white transition">Public server</span>
+            <p class="text-[11px] text-gray-500">Discoverable on relays — anyone can find and join</p>
+          </div>
+        </label>
+
+        <%= f.submit "Create Server", class: "w-full bg-accent hover:bg-accent-light text-white font-semibold py-2.5 rounded-lg transition cursor-pointer text-sm" %>
       <% end %>
     </div>
+
   </div>
 </div>

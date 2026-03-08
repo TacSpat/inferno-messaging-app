@@ -1,10 +1,10 @@
 class ChannelsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
-  before_action :set_channel, only: [ :show, :edit, :update, :destroy, :older_messages, :newer_messages, :around_messages ]
+  before_action :set_channel, only: [ :show, :edit, :update, :destroy, :older_messages, :newer_messages, :around_messages, :eligible_sidechat_channels ]
   before_action :ensure_member!
   before_action :ensure_channel_access!, only: [ :show, :older_messages, :newer_messages, :around_messages ]
-  before_action :ensure_manage_channels!, only: [ :new, :create, :edit, :update, :destroy ]
+  before_action :ensure_manage_channels!, only: [ :new, :create, :edit, :update, :destroy, :eligible_sidechat_channels ]
 
   def show
     # Ensure current user appears online (WebSocket reconnects after page render)
@@ -17,6 +17,23 @@ class ChannelsController < ApplicationController
       @voice_states = @channel.voice_states.includes(:user)
       @remote_voice_states = RelaySubscriptionManager.remote_voice_states(@channel.public_id).values
       @voice_configured = @server.voice_ready?
+      @is_afk_channel = @channel.afk?
+
+      unless @is_afk_channel
+        @sidechat_channel = @channel.sidechat_target
+        @sidechat_messages = @sidechat_channel.messages
+          .includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
+          .ordered.last(50)
+        @sidechat_has_older = @sidechat_messages.any? && @sidechat_channel.messages.where("created_at < ?", @sidechat_messages.first.created_at).exists?
+        @message = Message.new
+
+        current_user.notifications.unread.for_channel(@sidechat_channel.id).update_all(read: true)
+        ChannelRead.upsert(
+          { user_id: current_user.id, channel_id: @sidechat_channel.id, last_read_at: Time.current },
+          unique_by: [ :user_id, :channel_id ]
+        )
+      end
+
       render "channels/show_voice"
       return
     end
@@ -30,6 +47,14 @@ class ChannelsController < ApplicationController
       { user_id: current_user.id, channel_id: @channel.id, last_read_at: Time.current },
       unique_by: [ :user_id, :channel_id ]
     )
+
+    # If this text channel is linked as a voice channel's sidechat, mark the voice channel read too
+    @channel.voice_channels_using_as_sidechat.each do |vc|
+      ChannelRead.upsert(
+        { user_id: current_user.id, channel_id: vc.id, last_read_at: Time.current },
+        unique_by: [ :user_id, :channel_id ]
+      )
+    end
 
     # Fetch any missed messages from relays in background
     channel = @channel
@@ -154,6 +179,9 @@ class ChannelsController < ApplicationController
   end
 
   def edit
+    if @channel.voice?
+      @eligible_sidechat_channels = eligible_sidechat_channels_for(@channel)
+    end
   end
 
   def update
@@ -165,6 +193,10 @@ class ChannelsController < ApplicationController
       @channel.parent_channel = pid.present? ? @server.channels.voice.find_by(public_id: pid) : nil
     end
     @channel.assign_attributes(channel_params)
+    if params[:channel]&.key?(:sidechat_channel_id)
+      scid = params[:channel].delete(:sidechat_channel_id)
+      @channel.sidechat_channel = scid.present? ? @server.channels.text.find_by(public_id: scid) : nil
+    end
     encryption_changed = @channel.encrypted_changed?
     if @channel.save
       if encryption_changed
@@ -180,11 +212,29 @@ class ChannelsController < ApplicationController
           channel_type: @channel.channel_type
         })
       end
+      # Auto-disconnect sidechat links that no longer match after permission changes
+      if @channel.voice? && @channel.sidechat_channel_id.present?
+        @channel.reload
+        unless @channel.valid?
+          @channel.update_column(:sidechat_channel_id, nil)
+          flash[:notice] = "Sidechat link was disconnected because permissions no longer match."
+        end
+      end
+      @channel.voice_channels_using_as_sidechat.each do |vc|
+        vc.update_column(:sidechat_channel_id, nil) unless vc.valid?
+      end
+
       publish_server_structure
       redirect_to server_channel_path(@server, @channel)
     else
+      @eligible_sidechat_channels = eligible_sidechat_channels_for(@channel) if @channel.voice?
       render :edit, status: :unprocessable_entity
     end
+  end
+
+  def eligible_sidechat_channels
+    channels = eligible_sidechat_channels_for(@channel)
+    render json: channels.map { |c| { id: c.public_id, name: c.name } }
   end
 
   def destroy
@@ -228,6 +278,19 @@ class ChannelsController < ApplicationController
     unless membership&.has_permission?("manage_channels")
       redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission to manage channels."
     end
+  end
+
+  def eligible_sidechat_channels_for(channel)
+    channels = @server.channels.text.where.not(id: channel.id).ordered
+    if channel.encrypted?
+      my_roles = channel.permissions_overrides&.dig("allowed_role_ids") || []
+      channels = channels.where(encrypted: true).select { |c|
+        (c.permissions_overrides&.dig("allowed_role_ids") || []).sort == my_roles.sort
+      }
+    else
+      channels = channels.where(encrypted: [false, nil])
+    end
+    channels
   end
 
   def channel_params

@@ -12,6 +12,7 @@ class ServerStickersController < ApplicationController
         name: sticker.name,
         description: sticker.description,
         image_url: sticker.image_url,
+        blossom_url: sticker.blossom_url,
         creator: sticker.creator.username
       }
     end

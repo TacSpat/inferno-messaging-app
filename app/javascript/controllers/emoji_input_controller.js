@@ -50,7 +50,7 @@ export default class extends Controller {
 
   async _open() {
     const panel = document.createElement("div")
-    panel.className = "fixed z-[60] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col context-pop"
+    panel.className = "fixed z-[260] bg-gray-900 border border-gray-700 rounded-xl shadow-2xl flex flex-col context-pop"
     panel.style.cssText = "width: 320px; max-height: 380px;"
     panel.innerHTML = `
       <div class="px-2 pt-2 pb-1">
@@ -108,8 +108,9 @@ export default class extends Controller {
 
     positionPopup(panel, this.buttonTarget.getBoundingClientRect(), {
       preferredSide: "below",
-      horizontalAlign: "left",
-      gap: 6
+      horizontalAlign: "right",
+      gap: 6,
+      viewportPadding: 12
     })
     panel.style.visibility = ""
 

@@ -70,7 +70,8 @@ class VoiceChannelsController < ApplicationController
     voice_state = VoiceState.create!(
       user: current_user,
       channel: @channel,
-      server: @server
+      server: @server,
+      self_mute: @channel.afk?
     )
 
     # Generate subscribe-only tokens for ancestor rooms (audio cascades down)
@@ -103,7 +104,8 @@ class VoiceChannelsController < ApplicationController
       channel_name: @channel.name,
       provider_id: provider_id,
       ancestor_rooms: ancestor_rooms,
-      child_channels: child_channels
+      child_channels: child_channels,
+      afk: @channel.afk?
     }
   rescue LivekitTokenService::ConfigurationError => e
     render json: { error: e.message }, status: :service_unavailable

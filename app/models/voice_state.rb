@@ -22,7 +22,9 @@ class VoiceState < ApplicationRecord
       voice_state_id: public_id,
       username: user.display_name.presence || user.username,
       avatar_url: user.effective_avatar_url,
-      profile_color: user.profile_color
+      profile_color: user.profile_color,
+      self_mute: self_mute,
+      self_deaf: self_deaf
     })
   rescue => e
     Rails.logger.error "[VoiceState] broadcast_join failed: #{e.message}"

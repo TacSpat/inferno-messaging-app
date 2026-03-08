@@ -35,8 +35,12 @@ export default class extends Controller {
       case "member_update":
         this.updateMember(data)
         break
+      case "member_timeout":
+        this.handleMemberTimeout(data)
+        break
       case "roles_updated":
         this.refreshMemberList()
+        if (data.color_map) this.applyRoleColors(data.color_map)
         break
     }
   }
@@ -89,8 +93,8 @@ export default class extends Controller {
     // Update status dot color
     const dot = el.querySelector('.rounded-full.border-2')
     if (dot) {
-      dot.classList.remove('bg-green-500', 'bg-yellow-500', 'bg-red-500', 'bg-gray-500')
-      const colorMap = { online: 'bg-green-500', idle: 'bg-yellow-500', dnd: 'bg-red-500', offline: 'bg-gray-500' }
+      dot.classList.remove('bg-green-500', 'bg-warning', 'bg-red-500', 'bg-gray-500')
+      const colorMap = { online: 'bg-green-500', idle: 'bg-warning', dnd: 'bg-red-500', offline: 'bg-gray-500' }
       dot.classList.add(colorMap[data.state] || 'bg-gray-500')
     }
 
@@ -160,6 +164,16 @@ export default class extends Controller {
     }
   }
 
+  handleMemberTimeout(data) {
+    // Dispatch custom event for message form controller to pick up
+    document.dispatchEvent(new CustomEvent("inferno:member-timeout", {
+      detail: {
+        user_id: data.user_id,
+        timed_out_until: data.timed_out_until
+      }
+    }))
+  }
+
   // Fetch a fresh member list from the server and replace the current one
   async refreshMemberList() {
     if (!this.hasListTarget) return
@@ -222,7 +236,7 @@ export default class extends Controller {
       h3.textContent = "Offline — 0"
     } else {
       // Role group: "role:<public_id>"
-      h3.style.color = "#878583"
+      h3.style.color = "var(--color-gray-400)"
       h3.textContent = "Role — 0"
     }
 
@@ -320,6 +334,15 @@ export default class extends Controller {
       sibling = sibling.nextElementSibling
     }
     return null
+  }
+
+  // Update message author name colors when roles change
+  applyRoleColors(colorMap) {
+    for (const [userId, color] of Object.entries(colorMap)) {
+      document.querySelectorAll(`[data-msg-user-id="${userId}"]`).forEach(el => {
+        el.style.color = color
+      })
+    }
   }
 
   // Recount all groups and remove empty ones

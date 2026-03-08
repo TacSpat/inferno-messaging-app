@@ -8,7 +8,25 @@ class RemoteMember < ApplicationRecord
 
   enum :online_state, { offline: 0, online: 1, idle: 2, dnd: 3, invisible: 4 }
 
+  PRESENCE_STALE_AFTER = 5.minutes
+
   validates :pubkey, presence: true, uniqueness: { scope: :server_id }
+
+  # A remote member is effectively offline if their last_seen_at is stale,
+  # regardless of stored online_state (their instance may have crashed
+  # without sending an offline event).
+  def presence_stale?
+    last_seen_at.nil? || last_seen_at < PRESENCE_STALE_AFTER.ago
+  end
+
+  def effectively_offline?
+    offline? || invisible? || presence_stale?
+  end
+
+  def effective_online_state
+    return "offline" if presence_stale?
+    online_state
+  end
 
   def top_role
     roles.ordered.first

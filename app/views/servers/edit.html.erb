@@ -1,4 +1,4 @@
-<div class="flex items-center justify-center min-h-screen" style="background: #0e0d0c;">
+<div class="flex items-center justify-center min-h-screen" style="background: var(--color-gray-950);">
   <div class="w-full max-w-2xl mx-4 py-8">
     <!-- Header -->
     <div class="flex items-center justify-between mb-6">
@@ -123,7 +123,7 @@
               <% assigned = membership.roles.sort_by { |r| -r.position } %>
               <% if assigned.any? %>
                 <% assigned.each do |role| %>
-                  <span class="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-md <%= role.owner? ? 'bg-yellow-500/10 text-yellow-400' : role.admin? ? 'bg-red-500/10 text-red-400' : 'bg-gray-700/50 text-gray-400' %>">
+                  <span class="inline-flex items-center text-[11px] px-1.5 py-0.5 rounded-md <%= role.owner? ? 'bg-warning/10 text-warning-light' : role.admin? ? 'bg-red-500/10 text-red-400' : 'bg-gray-700/50 text-gray-400' %>">
                     <span class="w-1.5 h-1.5 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
                     <%= role.name %>
                   </span>

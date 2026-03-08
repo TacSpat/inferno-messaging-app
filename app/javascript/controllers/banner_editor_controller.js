@@ -6,7 +6,6 @@ export default class extends Controller {
                     "previewBanner", "previewAvatar", "previewAvatarInitial", "previewGradient", "previewRing", "previewCard", "gradientPreviewStrip"]
 
   connect() {
-    console.log("[banner-editor] connected")
     this.dragging = false
     this.startY = 0
     this.startOffset = 0
@@ -30,7 +29,6 @@ export default class extends Controller {
     this.cropOffsetX = 0
     this.cropOffsetY = 0
 
-    // Remove old modal if exists
     if (this.modal) this.modal.remove()
 
     const reader = new FileReader()
@@ -42,7 +40,7 @@ export default class extends Controller {
   }
 
   buildAndShowModal(mode, src) {
-    const vpHeight = mode === "avatar" ? 300 : 180
+    const vpHeight = mode === "avatar" ? 300 : 200
     const title = mode === "avatar" ? "Edit Avatar" : "Edit Banner"
 
     this.modal = document.createElement("div")
@@ -59,6 +57,17 @@ export default class extends Controller {
 
     if (mode === "avatar") {
       tpl.querySelector('[data-slot="avatar-overlay"]').classList.remove("hidden")
+    } else {
+      // Show the banner profile overlay
+      const bannerOverlay = tpl.querySelector('[data-slot="banner-overlay"]')
+      if (bannerOverlay) {
+        bannerOverlay.classList.remove("hidden")
+        // Fill avatar preview if available
+        const miniAvatar = bannerOverlay.querySelector('[data-slot="banner-avatar-preview"]')
+        if (miniAvatar && this.hasAvatarPreviewTarget && this.avatarPreviewTarget.src && !this.avatarPreviewTarget.classList.contains("hidden")) {
+          miniAvatar.innerHTML = `<img src="${this.avatarPreviewTarget.src}" class="w-full h-full object-cover">`
+        }
+      }
     }
 
     this.modal.appendChild(tpl)
@@ -66,31 +75,41 @@ export default class extends Controller {
 
     this.cropImg = this.modal.querySelector("[data-crop-img]")
     this.cropViewport = this.modal.querySelector("[data-crop-vp]")
+    this.snapLineX = this.modal.querySelector('[data-crop-snap-line="x"]')
+    this.snapLineY = this.modal.querySelector('[data-crop-snap-line="y"]')
     const zoomInput = this.modal.querySelector("[data-crop-zoom]")
     const zoomLabel = this.modal.querySelector("[data-crop-zoom-label]")
 
-    // Wait for image to load to get dimensions
+    // Wait for image to load
     this.cropImg.onload = () => {
       const vw = this.cropViewport.offsetWidth
       const vh = this.cropViewport.offsetHeight
       const nw = this.cropImg.naturalWidth
       const nh = this.cropImg.naturalHeight
 
-      // Fit: cover the viewport
-      const scale = Math.min(vw / nw, vh / nh)
-      this.baseW = nw * scale
-      this.baseH = nh * scale
-      this.cropImg.style.width = this.baseW + "px"
-      this.cropImg.style.height = this.baseH + "px"
-      // Center
-      this.cropOffsetX = (vw - this.baseW) / 2
-      this.cropOffsetY = (vh - this.baseH) / 2
+      if (mode === "banner") {
+        // Cover: image fills viewport completely (no empty space)
+        const coverScale = Math.max(vw / nw, vh / nh)
+        this.baseW = nw * coverScale
+        this.baseH = nh * coverScale
+        // Center
+        this.cropOffsetX = (vw - this.baseW) / 2
+        this.cropOffsetY = (vh - this.baseH) / 2
+      } else {
+        // Avatar: fit inside
+        const fitScale = Math.min(vw / nw, vh / nh)
+        this.baseW = nw * fitScale
+        this.baseH = nh * fitScale
+        this.cropOffsetX = (vw - this.baseW) / 2
+        this.cropOffsetY = (vh - this.baseH) / 2
+      }
       this.updateCropPosition()
-      console.log("[banner-editor] image loaded", nw, "x", nh, "-> base", this.baseW, "x", this.baseH)
     }
 
     // Drag
     let dragStartX, dragStartY, dragStartOX, dragStartOY
+    const SNAP_THRESHOLD = 8
+
     const onDown = (e) => {
       e.preventDefault()
       this.cropDragging = true
@@ -101,17 +120,33 @@ export default class extends Controller {
       dragStartOY = this.cropOffsetY
       this.cropViewport.style.cursor = "grabbing"
     }
+
     const onMove = (e) => {
       if (!this.cropDragging) return
       const pt = e.touches ? e.touches[0] : e
-      this.cropOffsetX = dragStartOX + (pt.clientX - dragStartX)
-      this.cropOffsetY = dragStartOY + (pt.clientY - dragStartY)
+      let newX = dragStartOX + (pt.clientX - dragStartX)
+      let newY = dragStartOY + (pt.clientY - dragStartY)
+
+      // Constrain + snap
+      const constrained = this._constrainAndSnap(newX, newY, SNAP_THRESHOLD)
+      this.cropOffsetX = constrained.x
+      this.cropOffsetY = constrained.y
+
+      // Show snap lines
+      if (this.snapLineX) this.snapLineX.style.opacity = constrained.snappedX ? "1" : "0"
+      if (this.snapLineY) this.snapLineY.style.opacity = constrained.snappedY ? "1" : "0"
+
       this.updateCropPosition()
     }
+
     const onUp = () => {
       this.cropDragging = false
       if (this.cropViewport) this.cropViewport.style.cursor = "grab"
+      // Hide snap lines
+      if (this.snapLineX) this.snapLineX.style.opacity = "0"
+      if (this.snapLineY) this.snapLineY.style.opacity = "0"
     }
+
     this.cropViewport.addEventListener("mousedown", onDown)
     this.cropViewport.addEventListener("touchstart", onDown, { passive: false })
     document.addEventListener("mousemove", onMove)
@@ -119,7 +154,6 @@ export default class extends Controller {
     document.addEventListener("touchmove", onMove, { passive: false })
     document.addEventListener("touchend", onUp)
 
-    // Store cleanup
     this._cropCleanup = () => {
       document.removeEventListener("mousemove", onMove)
       document.removeEventListener("mouseup", onUp)
@@ -139,7 +173,20 @@ export default class extends Controller {
       const cy = vh / 2
       this.cropOffsetX = cx - (cx - this.cropOffsetX) * (this.cropScale / oldScale)
       this.cropOffsetY = cy - (cy - this.cropOffsetY) * (this.cropScale / oldScale)
+
+      // Constrain after zoom
+      if (this.cropMode === "banner") {
+        const c = this._constrainAndSnap(this.cropOffsetX, this.cropOffsetY, 0)
+        this.cropOffsetX = c.x
+        this.cropOffsetY = c.y
+      }
+
       this.updateCropPosition()
+    })
+
+    // Backdrop close
+    this.modal.addEventListener("click", (e) => {
+      if (e.target === this.modal) this.cropCancel()
     })
 
     // Buttons
@@ -147,9 +194,41 @@ export default class extends Controller {
     this.modal.querySelector("[data-crop-apply]").addEventListener("click", () => this.cropApply())
   }
 
+  _constrainAndSnap(x, y, snapThreshold) {
+    const vw = this.cropViewport.offsetWidth
+    const vh = this.cropViewport.offsetHeight
+    const imgW = this.baseW * this.cropScale
+    const imgH = this.baseH * this.cropScale
+
+    let snappedX = false
+    let snappedY = false
+
+    if (this.cropMode === "banner") {
+      // Constrain: image must cover viewport (no empty edges)
+      const minX = vw - imgW
+      const maxX = 0
+      const minY = vh - imgH
+      const maxY = 0
+
+      x = Math.max(minX, Math.min(maxX, x))
+      y = Math.max(minY, Math.min(maxY, y))
+
+      // Snap points for X: center, left edge, right edge
+      const centerX = (vw - imgW) / 2
+      if (Math.abs(x - centerX) < snapThreshold) { x = centerX; snappedX = true }
+
+      // Snap points for Y: center, top edge, bottom edge
+      const centerY = (vh - imgH) / 2
+      if (Math.abs(y - centerY) < snapThreshold) { y = centerY; snappedY = true }
+      if (Math.abs(y - maxY) < snapThreshold) { y = maxY; snappedY = true } // snap to top
+      if (Math.abs(y - minY) < snapThreshold) { y = minY; snappedY = true } // snap to bottom
+    }
+
+    return { x, y, snappedX, snappedY }
+  }
+
   updateCropPosition() {
     if (!this.cropImg) return
-    // Keep image at base size, use transform for zoom + position
     this.cropImg.style.width = this.baseW + "px"
     this.cropImg.style.height = this.baseH + "px"
     this.cropImg.style.left = "0px"
@@ -173,17 +252,14 @@ export default class extends Controller {
       const size = 512
       canvas.width = size
       canvas.height = size
-      // Map viewport center circle (r=110) to canvas
       const vpCx = vw / 2
       const vpCy = vh / 2
       const r = 110
-      // Source rect in natural coords
       const natPerPx = nw / imgW
       const sx = (vpCx - r - this.cropOffsetX) * natPerPx
       const sy = (vpCy - r - this.cropOffsetY) * natPerPx
       const sw = r * 2 * natPerPx
       const sh = r * 2 * natPerPx
-      // Clip to circle
       ctx.beginPath()
       ctx.arc(size/2, size/2, size/2, 0, Math.PI * 2)
       ctx.closePath()
@@ -220,7 +296,6 @@ export default class extends Controller {
   }
 
   cropCancel() {
-    // Clear file input
     if (this.cropMode === "avatar" && this.hasAvatarInputTarget) {
       this.avatarInputTarget.value = ""
     } else if (this.hasInputTarget) {
@@ -234,6 +309,8 @@ export default class extends Controller {
     if (this.modal) { this.modal.remove(); this.modal = null }
     this.cropImg = null
     this.cropViewport = null
+    this.snapLineX = null
+    this.snapLineY = null
     this.cropMode = null
   }
 
@@ -279,7 +356,7 @@ export default class extends Controller {
     this.openCropModal("avatar", file)
   }
 
-  // ========== BANNER DRAG (settings page) ==========
+  // ========== BANNER DRAG (settings page — inline reposition) ==========
   startDrag(e) {
     if (!this.hasImageTarget) return
     e.preventDefault()
@@ -311,7 +388,7 @@ export default class extends Controller {
     document.removeEventListener("mousemove", this._onMouseMove)
     document.removeEventListener("mouseup", this._onMouseUp)
   }
-  
+
   // --- Live color picker updates ---
   updateColors() {
     const c1Input = this.element.querySelector('input[name="user[profile_color]"]')
@@ -320,11 +397,8 @@ export default class extends Controller {
     const c1 = c1Input.value
     const c2 = c2Input.value
     const grad = `linear-gradient(135deg, ${c1}, ${c2})`
-    // Update preview card gradient body
     if (this.hasPreviewGradientTarget) this.previewGradientTarget.style.background = grad
-    // Update avatar ring
     if (this.hasPreviewRingTarget) this.previewRingTarget.style.background = c2
-    // Update gradient preview strip
     if (this.hasGradientPreviewStripTarget) this.gradientPreviewStripTarget.style.background = grad
   }
 

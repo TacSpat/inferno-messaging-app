@@ -15,6 +15,7 @@ class RelaySubscriptionManager
 
   NIP29_GROUP_CHAT_MESSAGE = 9
   NIP29_DELETE_EVENT = 9005
+  NIP29_PIN_MESSAGE = 9006
   KIND_METADATA = 0
   KIND_ENCRYPTED_DM = 4
   KIND_GIFT_WRAP = 1059
@@ -30,6 +31,8 @@ class RelaySubscriptionManager
   KIND_SERVER_STICKERS  = 31755
   KIND_SERVER_BAN       = 31756
   KIND_SERVER_INVITE    = 31757
+  KIND_CONTACTS         = 3
+  KIND_MUTE_LIST        = 10000
   KIND_TYPING           = 25050
   KIND_REACTION         = 7
 
@@ -209,6 +212,7 @@ class RelaySubscriptionManager
 
     ws.on :open do |_event|
       Rails.logger.info("[RelaySubscriptionManager] Connected to #{url}")
+      RelayConnection.find_by(url: url)&.mark_connected!
       subscribe_all(url, ws)
     end
 
@@ -218,6 +222,7 @@ class RelaySubscriptionManager
 
     ws.on :close do |_event|
       Rails.logger.warn("[RelaySubscriptionManager] Disconnected from #{url}")
+      RelayConnection.find_by(url: url)&.mark_error!("WebSocket closed")
       schedule_reconnect(url) if @running
     end
 
@@ -230,14 +235,22 @@ class RelaySubscriptionManager
     owner = User.owner
     return unless owner
 
+    # Determine catch-up window based on last successful connection time
+    relay_record = RelayConnection.find_by(url: url)
+    catchup_since = if relay_record&.last_connected_at.present?
+      [relay_record.last_connected_at.to_i, 24.hours.ago.to_i].max  # cap at 24h
+    else
+      1.hour.ago.to_i
+    end
+
     # Subscription 1: NIP-29 group messages for all channels
     group_ids = Channel.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
     if group_ids.any?
       sub_id = "groups-#{SecureRandom.hex(4)}"
       filter = {
-        kinds: [ NIP29_GROUP_CHAT_MESSAGE, NIP29_DELETE_EVENT ],
+        kinds: [ NIP29_GROUP_CHAT_MESSAGE, NIP29_DELETE_EVENT, NIP29_PIN_MESSAGE ],
         "#h" => group_ids,
-        since: 1.hour.ago.to_i
+        since: catchup_since
       }
       ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :groups }
@@ -249,7 +262,7 @@ class RelaySubscriptionManager
       filter = {
         kinds: [ KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM ],
         "#p" => [ owner.nostr_public_key ],
-        since: 1.hour.ago.to_i
+        since: catchup_since
       }
       ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms }
@@ -259,7 +272,7 @@ class RelaySubscriptionManager
       filter = {
         kinds: [ KIND_GIFT_WRAP, KIND_DM, KIND_ENCRYPTED_DM ],
         authors: [ owner.nostr_public_key ],
-        since: 1.hour.ago.to_i
+        since: catchup_since
       }
       ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :dms_own }
@@ -281,6 +294,26 @@ class RelaySubscriptionManager
       }
       ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :contacts }
+
+      # Subscription 3b: Kind 3 (follow lists) from known contacts
+      sub_id = "follow-lists-#{SecureRandom.hex(4)}"
+      filter = {
+        kinds: [ KIND_CONTACTS ],
+        authors: all_pubkeys
+      }
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :follow_lists }
+    end
+
+    # Subscription 3c: Our own Kind 10000 (mute list) for cross-device sync
+    if owner.nostr_public_key.present?
+      sub_id = "mute-list-#{SecureRandom.hex(4)}"
+      filter = {
+        kinds: [ KIND_MUTE_LIST ],
+        authors: [ owner.nostr_public_key ]
+      }
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :mute_list }
     end
 
     # Subscription 4: Server state events (metadata, structure, roles, emojis, stickers)
@@ -302,7 +335,7 @@ class RelaySubscriptionManager
       # Nostr relays don't support prefix matching on d tags, so we use a broad filter
       # and filter in process_inbound_event. We subscribe to the kinds.
       sub_id = "server-entities-#{SecureRandom.hex(4)}"
-      filter = { kinds: SERVER_PER_ENTITY_KINDS, since: 1.hour.ago.to_i }
+      filter = { kinds: SERVER_PER_ENTITY_KINDS, since: catchup_since }
       ws.send(JSON.generate([ "REQ", sub_id, filter ]))
       @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :server_entities }
 
@@ -318,7 +351,7 @@ class RelaySubscriptionManager
       # Subscription 7: Reactions for channel messages
       if all_channel_group_ids.any?
         sub_id = "reactions-#{SecureRandom.hex(4)}"
-        filter = { kinds: [ KIND_REACTION ], "#h" => all_channel_group_ids, since: 1.hour.ago.to_i }
+        filter = { kinds: [ KIND_REACTION ], "#h" => all_channel_group_ids, since: catchup_since }
         ws.send(JSON.generate([ "REQ", sub_id, filter ]))
         @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :reactions }
       end
@@ -403,10 +436,16 @@ class RelaySubscriptionManager
       process_group_message(event)
     when NIP29_DELETE_EVENT
       process_group_delete(event)
+    when NIP29_PIN_MESSAGE
+      process_group_pin(event)
     when KIND_DM, KIND_GIFT_WRAP, KIND_ENCRYPTED_DM
       process_dm_event(event)
     when KIND_METADATA
       process_profile_update(event)
+    when KIND_CONTACTS
+      process_follow_list(event)
+    when KIND_MUTE_LIST
+      process_mute_list(event)
     when KIND_USER_STATUS
       process_presence_event(event)
     when KIND_SERVER_METADATA
@@ -480,12 +519,15 @@ class RelaySubscriptionManager
       end
     end
 
+    is_sticker = (event["tags"] || []).any? { |t| t[0] == "sticker" }
+
     message = channel.messages.create!(
       content: event["content"],
       user: (owner if own_event),
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
       nostr_author_pubkey: sender_pubkey,
+      is_sticker: is_sticker,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -578,12 +620,65 @@ class RelaySubscriptionManager
     end
   end
 
+  def process_group_pin(event)
+    group_tag = (event["tags"] || []).find { |t| t[0] == "h" }
+    return unless group_tag
+
+    channel = Channel.find_by(nostr_group_id: group_tag[1])
+    return unless channel
+
+    event_tag = (event["tags"] || []).find { |t| t[0] == "e" }
+    return unless event_tag
+
+    pinned_tag = (event["tags"] || []).find { |t| t[0] == "pinned" }
+    pinned = pinned_tag && pinned_tag[1] == "true"
+
+    target_event_id = event_tag[1]
+    message = Message.find_by(nostr_event_id: target_event_id, channel: channel)
+
+    if message
+      message.update!(pinned: pinned)
+
+      html = ApplicationController.render(
+        partial: "messages/message",
+        locals: { message: message, server: channel.server }
+      )
+      ChannelChatChannel.broadcast_to(channel, {
+        type: "update_message",
+        message_id: message.public_id,
+        html: html
+      })
+
+      pin_count = channel.messages.where(pinned: true).count
+      ChannelChatChannel.broadcast_to(channel, { type: "pin_update", pin_count: pin_count })
+
+      Rails.logger.info("[RelaySubscriptionManager] #{pinned ? 'Pinned' : 'Unpinned'} channel message #{target_event_id}")
+    end
+
+    # Log the pin event to prevent reprocessing
+    NostrEventLog.find_or_create_by(event_id: event["id"]) do |log|
+      log.kind = event["kind"]
+      log.pubkey = event["pubkey"]
+      log.channel = channel
+      log.direction = "inbound"
+      log.event_created_at = event["created_at"] ? Time.at(event["created_at"]) : Time.current
+    end
+  end
+
   def process_dm_event(event)
     owner = User.owner
     return unless owner&.nostr_private_key.present?
 
     sender_pubkey = event["pubkey"]
     own_event = (sender_pubkey == owner.nostr_public_key)
+
+    # Drop DMs from blocked contacts
+    unless own_event
+      if Contact.blocked_contacts.exists?(pubkey: sender_pubkey)
+        Rails.logger.debug("[RelaySubscriptionManager] Dropping DM from blocked pubkey #{sender_pubkey.first(12)}")
+        return
+      end
+    end
 
     Rails.logger.debug("[RelaySubscriptionManager] process_dm_event kind=#{event["kind"]} from=#{sender_pubkey[0..15]} own=#{own_event}")
 
@@ -648,8 +743,8 @@ class RelaySubscriptionManager
   def process_friend_request(sender_pubkey, event)
     contact = Contact.find_or_initialize_by(pubkey: sender_pubkey)
 
-    # Don't overwrite an existing accepted friendship
-    return if contact.accepted?
+    # Don't overwrite an existing accepted friendship or blocked status
+    return if contact.accepted? || contact.blocked?
 
     # Resolve their profile from the event or relays
     contact.friendship_status = :pending_incoming
@@ -717,6 +812,110 @@ class RelaySubscriptionManager
     RelaySubscriptionManager.instance.refresh_subscriptions
   end
 
+  # Kind 3: Inbound follow list from a contact
+  # Detects when someone follows/unfollows us via standard Nostr follow list
+  def process_follow_list(event)
+    sender_pubkey = event["pubkey"]
+    owner = User.owner
+    return unless owner&.nostr_public_key.present?
+
+    # Don't process our own follow list events (handled by mute_list for sync)
+    return if sender_pubkey == owner.nostr_public_key
+
+    tags = event["tags"] || []
+    followed_pubkeys = tags.select { |t| t[0] == "p" }.map { |t| t[1] }
+    follows_us = followed_pubkeys.include?(owner.nostr_public_key)
+
+    contact = Contact.find_by(pubkey: sender_pubkey)
+    return unless contact
+    return if contact.blocked?
+
+    if follows_us
+      # They follow us — if we had a pending outgoing request, auto-accept
+      if contact.pending_outgoing?
+        contact.update!(friendship_status: :accepted)
+        NostrPublishJob.perform_later(owner.id, :contacts)
+
+        ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+          type: "friend_update",
+          pending_count: Contact.pending_incoming.count
+        })
+
+        Rails.logger.info("[RelaySubscriptionManager] Auto-accepted friend via Kind 3 follow from #{sender_pubkey.first(12)}")
+      elsif contact.not_friend? || contact.declined?
+        # They followed us without a friend request — treat as incoming request
+        contact.update!(friendship_status: :pending_incoming)
+        NostrProfileResolver.resolve(sender_pubkey)
+
+        ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+          type: "friend_request",
+          friendship_id: contact.id,
+          from_user: contact.effective_display_name,
+          from_user_initial: contact.effective_display_name[0]&.upcase || "?",
+          avatar_url: contact.avatar_url.presence || "",
+          profile_color: "#b45309"
+        })
+        ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+          type: "friend_update",
+          pending_count: Contact.pending_incoming.count
+        })
+
+        Rails.logger.info("[RelaySubscriptionManager] Incoming follow (Kind 3) from #{sender_pubkey.first(12)}")
+      end
+    else
+      # They unfollowed us — if we were friends, mark as removed
+      if contact.accepted?
+        contact.update!(friendship_status: :not_friend)
+        NostrPublishJob.perform_later(owner.id, :contacts)
+
+        ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+          type: "friend_update",
+          pending_count: Contact.pending_incoming.count
+        })
+
+        Rails.logger.info("[RelaySubscriptionManager] Unfollowed (Kind 3) by #{sender_pubkey.first(12)}")
+      end
+    end
+  end
+
+  # Kind 10000: Inbound mute list (our own, from another device)
+  # Syncs blocked contacts across devices
+  def process_mute_list(event)
+    sender_pubkey = event["pubkey"]
+    owner = User.owner
+    return unless owner&.nostr_public_key.present?
+
+    # Only process our own mute list (cross-device sync)
+    return unless sender_pubkey == owner.nostr_public_key
+
+    tags = event["tags"] || []
+    muted_pubkeys = tags.select { |t| t[0] == "p" }.map { |t| t[1] }.uniq
+
+    # Sync: block pubkeys in the list, unblock pubkeys not in the list
+    currently_blocked = Contact.blocked_contacts.pluck(:pubkey)
+    to_block = muted_pubkeys - currently_blocked
+    to_unblock = currently_blocked - muted_pubkeys
+
+    to_block.each do |pk|
+      contact = Contact.find_or_initialize_by(pubkey: pk)
+      contact.update!(friendship_status: :blocked)
+      Rails.logger.info("[RelaySubscriptionManager] Synced block for #{pk.first(12)} from Kind 10000")
+    end
+
+    to_unblock.each do |pk|
+      Contact.where(pubkey: pk, friendship_status: :blocked).update_all(friendship_status: 0)
+      Rails.logger.info("[RelaySubscriptionManager] Synced unblock for #{pk.first(12)} from Kind 10000")
+    end
+
+    # Notify UI
+    if to_block.any? || to_unblock.any?
+      ActionCable.server.broadcast("user_notifications_#{owner.id}", {
+        type: "friend_update",
+        pending_count: Contact.pending_incoming.count
+      })
+    end
+  end
+
   def process_dm_message(sender_pubkey, plaintext, event)
     owner = User.owner
     return unless owner
@@ -724,6 +923,7 @@ class RelaySubscriptionManager
     # Extract content from structured payloads (type: "message" with files/emojis)
     content = plaintext
     emoji_urls = nil
+    dm_is_sticker = false
     begin
       parsed = JSON.parse(plaintext)
       if parsed.is_a?(Hash)
@@ -735,6 +935,7 @@ class RelaySubscriptionManager
             content += files.join("\n")
           end
           emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
+          dm_is_sticker = parsed["is_sticker"] == true
         elsif parsed.key?("type")
           # Unknown structured payload — log but don't display as a message
           Rails.logger.info("[RelaySubscriptionManager] Ignoring DM payload type=#{parsed["type"]}")
@@ -779,6 +980,7 @@ class RelaySubscriptionManager
       content: content,
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
+      is_sticker: dm_is_sticker,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -810,6 +1012,7 @@ class RelaySubscriptionManager
     content = plaintext
     emoji_urls = nil
     files = nil
+    own_dm_is_sticker = false
     begin
       parsed = JSON.parse(plaintext)
       if parsed.is_a?(Hash)
@@ -821,6 +1024,7 @@ class RelaySubscriptionManager
             content += files.join("\n")
           end
           emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
+          own_dm_is_sticker = parsed["is_sticker"] == true
         elsif parsed.key?("type")
           return
         end
@@ -853,6 +1057,7 @@ class RelaySubscriptionManager
       user: owner,
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
+      is_sticker: own_dm_is_sticker,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -949,11 +1154,20 @@ class RelaySubscriptionManager
     state = status_tag&.dig(1) || event["content"]
     return if state.blank?
 
+    # Use the event's created_at timestamp, not local time.
+    # Relays store events, so we may receive a stale "online" event
+    # from an instance that has since crashed. Ignore events older
+    # than the staleness window.
+    event_at = event["created_at"] ? Time.at(event["created_at"].to_i) : Time.current
+    if state != "offline" && event_at < RemoteMember::PRESENCE_STALE_AFTER.ago
+      return # Stale presence event — don't mark as online
+    end
+
     if contact
       if state == "offline"
         contact.update_columns(last_seen_at: nil)
       else
-        contact.update_columns(last_seen_at: Time.current)
+        contact.update_columns(last_seen_at: event_at)
       end
 
       # Broadcast presence change to owner's UI
@@ -977,7 +1191,7 @@ class RelaySubscriptionManager
     remote_members.find_each do |rm|
       rm.update_columns(
         online_state: RemoteMember.online_states[online_state],
-        last_seen_at: state == "offline" ? nil : Time.current
+        last_seen_at: state == "offline" ? nil : event_at
       )
       ServerChannel.broadcast_to(rm.server, {
         type: "member_update",
@@ -1412,6 +1626,7 @@ class RelaySubscriptionManager
     welcome_enabled_tag = tags.find { |t| t[0] == "welcome_enabled" }
     welcome_message_tag = tags.find { |t| t[0] == "welcome_message" }
     voice_enabled_tag = tags.find { |t| t[0] == "voice_enabled" }
+    discoverable_tag = tags.find { |t| t[0] == "discoverable" }
 
     attrs = {}
     attrs[:name] = name_tag[1] if name_tag&.dig(1).present?
@@ -1419,6 +1634,7 @@ class RelaySubscriptionManager
     attrs[:welcome_message_enabled] = welcome_enabled_tag[1] == "true" if welcome_enabled_tag
     attrs[:welcome_message_template] = welcome_message_tag[1] if welcome_message_tag
     attrs[:voice_enabled] = voice_enabled_tag[1] == "true" if voice_enabled_tag
+    attrs[:discoverable] = discoverable_tag[1] == "true" if discoverable_tag
 
     # Download icon/banner and attach via ActiveStorage
     picture_tag = tags.find { |t| t[0] == "picture" }
@@ -1495,6 +1711,13 @@ class RelaySubscriptionManager
           ch.encrypted = t[10] == "true"
           ch.channel_public_key = t[11] if t[11].present?
         end
+        # Sync sidechat link
+        if t[12].present?
+          sidechat = server.channels.find_by(public_id: t[12])
+          ch.sidechat_channel = sidechat
+        else
+          ch.sidechat_channel = nil
+        end
         ch.save! if ch.changed? || ch.new_record?
       end
       # Remove channels not in the event
@@ -1522,21 +1745,24 @@ class RelaySubscriptionManager
       remote_role_ids = role_tags.map { |t| t[1] }
 
       role_tags.each do |t|
-        # ["role", public_id, name, color, position, hoist, mentionable, permissions_json]
+        # ["role", public_id, name, color, position, hoist, mentionable, permissions_json, role_type]
         role = server.roles.find_or_initialize_by(public_id: t[1])
         perms = JSON.parse(t[7]) rescue {}
-        role.assign_attributes(
+        attrs = {
           name: t[2],
           color: t[3],
           position: t[4].to_i,
           hoist: t[5] == "true",
           permissions: perms
-        )
+        }
+        attrs[:role_type] = t[8] if t[8].present?
+        role.assign_attributes(attrs)
         role.save! if role.changed? || role.new_record?
       end
 
-      # Remove roles not in the event (except system roles we might still need)
+      # Remove roles not in the event (except undeletable roles)
       server.roles.where.not(public_id: remote_role_ids).each do |role|
+        next if role.undeletable?
         role.membership_roles.destroy_all
         role.destroy
       end

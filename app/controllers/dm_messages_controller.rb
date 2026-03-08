@@ -3,7 +3,7 @@ class DmMessagesController < ApplicationController
 
   before_action :authenticate_user!
   before_action :set_conversation
-  before_action :set_message, only: [ :update, :destroy ]
+  before_action :set_message, only: [ :update, :destroy, :toggle_pin ]
   before_action :validate_file_types, only: [ :create, :update ]
 
   def older_messages
@@ -32,6 +32,31 @@ class DmMessagesController < ApplicationController
 
     response.headers["X-Has-Newer"] = @has_newer.to_s
     render partial: "dm_messages/newer_messages", locals: { messages: @messages, has_newer: @has_newer }
+  end
+
+  def toggle_pin
+    @message.update!(pinned: !@message.pinned?)
+
+    html = render_to_string(partial: "messages/dm_message", locals: { message: @message })
+    ConversationChannel.broadcast_to(@conversation, { type: "update_message", message_id: @message.public_id, html: html })
+
+    pin_count = @conversation.messages.where(pinned: true).count
+    ConversationChannel.broadcast_to(@conversation, { type: "pin_update", pin_count: pin_count })
+
+    if @message.pinned?
+      sys = @conversation.messages.create!(content: "#{current_user.display_name.presence || current_user.username} pinned a message.", user: current_user, system_message: true)
+      sys_html = render_to_string(partial: "messages/dm_message", locals: { message: sys })
+      ConversationChannel.broadcast_to(@conversation, { type: "new_message", html: sys_html })
+    end
+
+    head :ok
+  end
+
+  def pinned
+    messages = @conversation.messages.where(pinned: true)
+      .includes(user: { avatar_attachment: :blob }, files_attachments: :blob)
+      .order(created_at: :desc)
+    render partial: "messages/pinned_list", locals: { messages: messages, server: nil }
   end
 
   def create
@@ -165,7 +190,7 @@ class DmMessagesController < ApplicationController
   end
 
   def message_params
-    permitted = params.require(:message).permit(:content, :parent_id, files: [])
+    permitted = params.require(:message).permit(:content, :parent_id, :is_sticker, files: [])
     permitted[:files] = permitted[:files].reject(&:blank?) if permitted[:files].is_a?(Array)
     permitted
   end
@@ -178,6 +203,11 @@ class DmMessagesController < ApplicationController
     plaintext = message.content || ""
     payload_needed = false
     payload = { type: "message", content: plaintext }
+
+    if message.is_sticker?
+      payload[:is_sticker] = true
+      payload_needed = true
+    end
 
     # Include file attachment URLs
     if message.files.attached? && base_url.present?

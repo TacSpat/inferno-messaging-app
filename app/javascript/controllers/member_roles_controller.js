@@ -67,7 +67,8 @@ export default class extends Controller {
     if (!badgesEl) return
 
     if (roles.length === 0) {
-      badgesEl.innerHTML = '<span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>'
+      badgesEl.innerHTML = `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
+        <span class="w-2 h-2 rounded-full mr-1 shrink-0" style="background-color: var(--color-gray-400)"></span>@everyone</span>`
       return
     }
 
@@ -75,8 +76,6 @@ export default class extends Controller {
     const tpl = document.getElementById("tpl-role-badge")
     roles.forEach(role => {
       const clone = tpl.content.cloneNode(true)
-      const badge = clone.querySelector("span")
-      badge.className = `inline-flex items-center text-xs px-2 py-0.5 rounded-full ${role.name === "Admin" ? "bg-accent/20 text-accent-light" : "bg-gray-700 text-gray-400"}`
       clone.querySelector('[data-slot="color-dot"]').style.backgroundColor = role.color || "#ffffff"
       clone.querySelector('[data-slot="name"]').textContent = role.name
       badgesEl.appendChild(clone)

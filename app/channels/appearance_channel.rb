@@ -26,6 +26,15 @@ class AppearanceChannel < ApplicationCable::Channel
       state = data["state"] == "idle" ? :idle : :online
       current_user.update_columns(online_state: User.online_states[state], online_at: Time.current)
     end
+
+    # Republish Nostr presence every ~2 minutes so remote instances
+    # can detect staleness if we stop publishing (crash/shutdown).
+    last_publish = @_last_nostr_presence_at || 0
+    if Time.current.to_f - last_publish > 120
+      @_last_nostr_presence_at = Time.current.to_f
+      broadcast_state = current_user.invisible? ? "offline" : current_user.online_state
+      publish_nostr_status(broadcast_state)
+    end
   end
 
   def away

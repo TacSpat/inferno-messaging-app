@@ -1,12 +1,12 @@
 class ConversationsController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_conversation, only: [ :show, :accept, :destroy ]
+  before_action :set_conversation, only: [ :show, :accept, :update, :destroy, :add_member, :remove_member ]
   before_action :set_dm_layout
 
   def index
     @tab = params[:tab] || "online"
     @conversations = current_user.conversations
-      .includes(participants: { avatar_attachment: :blob }, messages: :user)
+      .includes(conversation_participants: [:user, :contact], participants: { avatar_attachment: :blob }, messages: :user)
       .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
 
@@ -29,7 +29,7 @@ class ConversationsController < ApplicationController
       @incoming = Contact.pending_incoming
       @outgoing = Contact.pending_outgoing
     when "blocked"
-      @blocked = current_user.blocked_users.includes(avatar_attachment: :blob)
+      @blocked_contacts = Contact.blocked_contacts.order(:display_name)
     when "search"
       # Search results are loaded via Stimulus controller (GET /nostr/search?q=)
     end
@@ -41,7 +41,7 @@ class ConversationsController < ApplicationController
       return
     end
     @conversations = current_user.conversations
-      .includes(participants: { avatar_attachment: :blob }, messages: :user)
+      .includes(conversation_participants: [:user, :contact], participants: { avatar_attachment: :blob }, messages: :user)
       .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
     @messages = @conversation.messages.includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)
@@ -73,6 +73,10 @@ class ConversationsController < ApplicationController
   def create
     if params[:pubkey].present?
       # P2P DM with a contact identified by pubkey
+      if current_user.blocked_pubkey?(params[:pubkey])
+        redirect_to conversations_path, alert: "Cannot message this user"
+        return
+      end
       conversation = Conversation.find_or_create_by_pubkey(current_user, params[:pubkey])
       redirect_to conversation_path(conversation)
     elsif params[:user_id].present?
@@ -83,14 +87,83 @@ class ConversationsController < ApplicationController
       end
       conversation = Conversation.find_or_create_direct(current_user, target_user)
       redirect_to conversation_path(conversation)
+    elsif params[:group_chat].present?
+      # Group chat creation
+      conversation = Conversation.create!(kind: :group_chat, name: params[:group_chat][:name].presence)
+      conversation.conversation_participants.create!(user: current_user, accepted: true)
+      member_ids = Array(params[:group_chat][:member_ids]).reject(&:blank?)
+      member_ids.each do |member_id|
+        if member_id.start_with?("contact:")
+          contact = Contact.find_by(id: member_id.delete_prefix("contact:"))
+          next unless contact
+          conversation.conversation_participants.create!(contact: contact, accepted: true)
+        else
+          uid = member_id.delete_prefix("user:")
+          user = User.find_by(public_id: uid)
+          next unless user
+          conversation.conversation_participants.create!(user: user, accepted: true)
+        end
+      end
+      redirect_to conversation_path(conversation)
     else
       redirect_to conversations_path, alert: "No recipient specified"
+    end
+  end
+
+  def update
+    unless @conversation.participants.include?(current_user)
+      head :forbidden
+      return
+    end
+    if @conversation.update(conversation_params)
+      # Upload icon to Blossom in background if changed
+      if conversation_params[:icon].present?
+        conv = @conversation
+        Thread.new { BlossomClientService.upload_attachment(conv.icon) }
+      end
+      redirect_to conversation_path(@conversation)
+    else
+      redirect_to conversation_path(@conversation), alert: @conversation.errors.full_messages.join(", ")
     end
   end
 
   def accept
     participant = @conversation.conversation_participants.find_by(user: current_user)
     participant&.update!(accepted: true)
+    redirect_to conversation_path(@conversation)
+  end
+
+  def add_member
+    unless @conversation.group_chat? && @conversation.participants.include?(current_user)
+      head :forbidden
+      return
+    end
+    mid = params[:member_id].to_s
+    if mid.start_with?("contact:")
+      contact = Contact.find_by(id: mid.delete_prefix("contact:"))
+      @conversation.conversation_participants.find_or_create_by!(contact: contact) { |cp| cp.accepted = true } if contact
+    else
+      uid = mid.delete_prefix("user:")
+      user = User.find_by(public_id: uid)
+      @conversation.conversation_participants.find_or_create_by!(user: user) { |cp| cp.accepted = true } if user
+    end
+    redirect_to conversation_path(@conversation)
+  end
+
+  def remove_member
+    unless @conversation.group_chat? && @conversation.participants.include?(current_user)
+      head :forbidden
+      return
+    end
+    if params[:contact_id].present?
+      @conversation.conversation_participants.find_by(contact_id: params[:contact_id])&.destroy
+    elsif params[:member_id].present?
+      user = User.find_by!(public_id: params[:member_id])
+      @conversation.conversation_participants.find_by(user: user)&.destroy
+      if user == current_user
+        redirect_to conversations_path and return
+      end
+    end
     redirect_to conversation_path(@conversation)
   end
 
@@ -108,5 +181,9 @@ class ConversationsController < ApplicationController
 
   def set_conversation
     @conversation = Conversation.find_by!(public_id: params[:id])
+  end
+
+  def conversation_params
+    params.require(:conversation).permit(:name, :icon)
   end
 end

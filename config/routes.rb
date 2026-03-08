@@ -54,6 +54,7 @@ Rails.application.routes.draw do
 
   # Servers
   patch :reorder_servers, to: "servers#reorder_servers"
+  post :resolve_server_preview, to: "servers#resolve_preview"
   resources :servers, only: [ :show, :new, :create, :edit, :update, :destroy ] do
     member do
       post :join
@@ -64,6 +65,7 @@ Rails.application.routes.draw do
         get :older_messages
         get :newer_messages
         get :around_messages
+        get :eligible_sidechat_channels
         post :bridge, controller: "shared_channels"
         delete :unbridge, controller: "shared_channels"
       end
@@ -79,7 +81,12 @@ Rails.application.routes.draw do
         get :context_menu, controller: "member_cards"
       end
     end
-    resources :roles, except: [ :show ]
+    resources :roles, except: [ :show ] do
+      member do
+        get :members
+        post :toggle_member
+      end
+    end
     resources :emojis, only: [ :index, :create, :destroy ], controller: "server_emojis"
     resources :stickers, only: [ :index, :create, :destroy ], controller: "server_stickers"
 
@@ -139,6 +146,23 @@ Rails.application.routes.draw do
     patch "voice", to: "server_settings#update_voice", as: :update_voice
     post "voice/opt_in", to: "server_settings#opt_in_voice", as: :voice_opt_in
     delete "voice/opt_out", to: "server_settings#opt_out_voice", as: :voice_opt_out
+
+    # Member management
+    post "members/:id/timeout", to: "server_settings#timeout_member", as: :timeout_member
+    post "members/:id/remove_timeout", to: "server_settings#remove_timeout", as: :remove_timeout
+    get  "members/:id/history", to: "server_settings#member_history", as: :member_history
+
+    get    "prune_preview", to: "server_settings#prune_preview", as: :prune_preview
+    delete "prune",         to: "server_settings#prune_members",  as: :prune_members
+
+    post   "batch_kick",    to: "server_settings#batch_kick",    as: :batch_kick
+    post   "batch_ban",     to: "server_settings#batch_ban",     as: :batch_ban
+    post   "batch_timeout", to: "server_settings#batch_timeout", as: :batch_timeout
+
+    # Relays
+    get "relays", to: "server_settings#relays", as: :relays
+    post "relays", to: "server_settings#add_relay", as: :add_relay
+    delete "relays", to: "server_settings#remove_relay", as: :remove_relay
   end
 
   # Mentions autocomplete
@@ -147,9 +171,13 @@ Rails.application.routes.draw do
   # Channel messages
   resources :channels, only: [] do
     resources :messages, only: [ :create, :edit, :update, :destroy ] do
+      collection do
+        get :pinned
+      end
       member do
         post :toggle_reaction, controller: "reactions", action: "toggle"
         get :reactions_list, controller: "reactions", action: "list"
+        post :toggle_pin
       end
     end
   end
@@ -168,18 +196,30 @@ Rails.application.routes.draw do
   post "inferno/server/:nostr_group_id/join", to: "nostr_servers#join", as: :join_nostr_server
   get "inferno/server/:nostr_group_id/sync_status", to: "nostr_servers#sync_status", as: :nostr_server_sync_status
 
-  # Conversations (DMs)
-  resources :conversations, only: [ :index, :show, :create, :destroy ] do
+  # Conversations (DMs & group chats)
+  resources :conversations, only: [ :index, :show, :create, :update, :destroy ] do
     member do
       post :accept
+      post :add_member
+      delete :remove_member
     end
     resources :dm_messages, only: [ :create, :update, :destroy ] do
       collection do
         get :older_messages
         get :newer_messages
+        get :pinned
       end
       member do
         post :toggle_reaction, controller: "dm_reactions", action: "toggle"
+        post :toggle_pin
+      end
+    end
+    resources :calls, only: [ :create ] do
+      member do
+        post :accept
+        post :decline
+        post :join
+        post :hangup
       end
     end
   end
@@ -216,6 +256,11 @@ Rails.application.routes.draw do
   get "settings/voice", to: "settings#voice", as: :user_settings_voice
   patch "settings/voice", to: "settings#update_voice", as: :settings_update_voice
   post "settings/voice/verify", to: "settings#verify_voice", as: :settings_verify_voice
+  get "settings/relays", to: "settings#relays", as: :user_settings_relays
+  post "settings/relays", to: "settings#add_relay", as: :settings_add_relay
+  delete "settings/relays", to: "settings#remove_relay", as: :settings_remove_relay
+  post "settings/relays/toggle", to: "settings#toggle_relay", as: :settings_toggle_relay
+  post "settings/relays/check", to: "settings#check_relay", as: :settings_check_relay
   resource :profile, only: [ :show, :edit, :update ]
 
   # User cards

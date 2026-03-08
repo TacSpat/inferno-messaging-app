@@ -13,7 +13,7 @@ export default class extends Controller {
       }
     )
 
-    this._channelCache = new Map()
+    this._channelCache = new Map()  // channelId → DocumentFragment (live DOM nodes)
     this._activeChannelId = this._getCurrentChannelId(document.getElementById("main-content"))
 
     // Use capture phase so we fire before Turbo's bubble-phase handler
@@ -26,8 +26,7 @@ export default class extends Controller {
       const frame = e.target
       const currentId = this._getCurrentChannelId(frame)
       if (currentId && !this._channelCache.has(currentId)) {
-        this._channelCache.set(currentId, frame.innerHTML)
-        this._enforceCacheLimit()
+        this._cacheFrame(currentId, frame)
       }
     }
     document.addEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
@@ -70,7 +69,71 @@ export default class extends Controller {
     }
   }
 
+  // Snapshot live DOM nodes from the frame into a DocumentFragment
+  _cacheFrame(channelId, frame) {
+    // Save scroll positions of scrollable containers before detaching
+    const scrollData = []
+    frame.querySelectorAll("#messages, #sidechat-messages").forEach(el => {
+      if (el.scrollTop !== 0) scrollData.push({ id: el.id, top: el.scrollTop })
+    })
+
+    const fragment = document.createDocumentFragment()
+    while (frame.firstChild) {
+      fragment.appendChild(frame.firstChild)
+    }
+    this._channelCache.set(channelId, { fragment, scrollData })
+    this._enforceCacheLimit()
+  }
+
+  // Restore cached DOM nodes back into the frame
+  _restoreFrame(channelId, frame) {
+    const cached = this._channelCache.get(channelId)
+    if (!cached) return
+    this._channelCache.delete(channelId)
+    const { fragment, scrollData } = cached
+
+    // Clear current contents
+    while (frame.firstChild) {
+      frame.removeChild(frame.firstChild)
+    }
+    // Move cached nodes back (images/videos already decoded — no pop-in)
+    frame.appendChild(fragment)
+
+    // Restore scroll positions
+    requestAnimationFrame(() => {
+      for (const { id, top } of scrollData) {
+        const el = frame.querySelector(`#${id}`)
+        if (el) el.scrollTop = top
+      }
+    })
+  }
+
   _handleChannelClick(e) {
+    // Chat button on voice channels: navigate without joining voice
+    const chatBtn = e.target.closest("[data-channel-chat-btn]")
+    if (chatBtn) {
+      e.preventDefault()
+      e.stopPropagation()
+      const link = chatBtn.closest("a[data-channel-id]")
+      if (link) {
+        this._updateActiveChannel(link)
+        const memberSidebar = document.getElementById("member-sidebar")
+        if (memberSidebar) memberSidebar.classList.add("!hidden")
+      }
+      // Ensure sidechat opens when the view loads
+      localStorage.setItem("sidechat-visible", "true")
+      const frame = document.getElementById("main-content")
+      if (frame) {
+        const currentId = this._activeChannelId
+        if (currentId) {
+          this._cacheFrame(currentId, frame)
+        }
+        this._activeChannelId = chatBtn.dataset.channelChatBtn
+        frame.src = chatBtn.dataset.href
+      }
+      return
+    }
+
     const link = e.target.closest("a[data-channel-id]")
     if (!link) return
 
@@ -97,14 +160,12 @@ export default class extends Controller {
         e.stopPropagation()
 
         // Cache current channel first
-        if (currentId && frame) {
-          this._channelCache.set(currentId, frame.innerHTML)
-          this._enforceCacheLimit()
+        if (currentId) {
+          this._cacheFrame(currentId, frame)
         }
 
-        // Restore cached channel
-        frame.innerHTML = this._channelCache.get(targetId)
-        this._channelCache.delete(targetId)
+        // Restore cached channel — move live DOM nodes back
+        this._restoreFrame(targetId, frame)
 
         // Update URL
         history.pushState({}, "", link.getAttribute("href"))
@@ -508,6 +569,7 @@ export default class extends Controller {
       }
     }
 
+    this._updateLinkedVoiceBanner(data.channel_id, 1)
     this._initVoiceSortables()
   }
 
@@ -556,6 +618,7 @@ export default class extends Controller {
       if (bar) bar.classList.add("hidden")
     }
 
+    this._updateLinkedVoiceBanner(data.channel_id, -1)
     this._initVoiceSortables()
   }
 
@@ -654,6 +717,9 @@ export default class extends Controller {
     const currentUserId = document.body.dataset.currentUserId
     if (data.user_id === currentUserId) {
       window.dispatchEvent(new CustomEvent("voice:force-disconnect"))
+      if (data.reason === "afk") {
+        this._showToast("You were disconnected for being AFK")
+      }
     }
   }
 
@@ -721,9 +787,13 @@ export default class extends Controller {
         detail: {
           toChannelId: data.to_channel_id,
           toChannelName: data.to_channel_name,
-          voiceStateId: data.voice_state_id
+          voiceStateId: data.voice_state_id,
+          afk: data.afk
         }
       }))
+      if (data.afk) {
+        this._showToast("You were moved to AFK")
+      }
       // Navigate to the new channel's view
       const newChannelLink = this.element.querySelector(`a[data-channel-id="${data.to_channel_id}"]`)
       if (newChannelLink) newChannelLink.click()
@@ -768,6 +838,41 @@ export default class extends Controller {
     return card
   }
 
+  _updateLinkedVoiceBanner(voiceChannelId, delta) {
+    const banner = document.querySelector(`[data-linked-voice-banner="${voiceChannelId}"]`)
+    if (!banner) return
+
+    const oldCount = parseInt(banner.dataset.linkedVoiceCount || "0", 10)
+    const newCount = Math.max(0, oldCount + delta)
+    banner.dataset.linkedVoiceCount = newCount
+
+    const name = banner.dataset.linkedVoiceName
+    const href = banner.dataset.linkedVoiceHref
+
+    if (newCount > 0) {
+      banner.querySelector("[data-linked-voice-inner]").outerHTML = `
+        <div class="bg-accent/10 border-b border-accent/20 px-4 py-2 flex items-center gap-2 shrink-0" data-linked-voice-inner>
+          <svg class="w-4 h-4 text-accent-light shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
+          <span class="text-sm text-accent-light">
+            <strong>${name}</strong> is live &mdash; <span data-linked-voice-count-text>${newCount}</span> in voice
+          </span>
+          <a href="${href}"
+             class="text-xs text-accent hover:underline ml-auto"
+             onclick="event.preventDefault(); const sl = document.querySelector('a[data-channel-id=&quot;${voiceChannelId}&quot;]'); if (sl) { sl.click(); } else { Turbo.visit(this.href); }">Join</a>
+        </div>`
+    } else {
+      banner.querySelector("[data-linked-voice-inner]").outerHTML = `
+        <div class="border-b border-gray-800 px-4 py-1.5 flex items-center gap-1.5 shrink-0" data-linked-voice-inner>
+          <svg class="w-3.5 h-3.5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+          <span class="text-xs text-gray-500">
+            Linked to <a href="${href}"
+                         class="text-gray-400 hover:text-gray-300 hover:underline"
+                         onclick="event.preventDefault(); const sl = document.querySelector('a[data-channel-id=&quot;${voiceChannelId}&quot;]'); if (sl) { sl.click(); } else { Turbo.visit(this.href); }">${name}</a>
+          </span>
+        </div>`
+    }
+  }
+
   _buildSidebarParticipant(data) {
     const row = document.createElement("div")
     row.className = "flex items-center py-0.5 pl-6 pr-2 rounded hover:bg-gray-700/50 group"
@@ -801,6 +906,13 @@ export default class extends Controller {
     name.className = "ml-1.5 text-xs text-gray-300 truncate flex-1"
     name.textContent = data.username || "Unknown"
     row.appendChild(name)
+
+    if (data.self_mute) {
+      name.insertAdjacentHTML("afterend", '<svg class="voice-mute-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>')
+    }
+    if (data.self_deaf) {
+      name.insertAdjacentHTML("afterend", '<svg class="voice-deaf-icon w-3 h-3 text-gray-500 ml-1 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636"/></svg>')
+    }
 
     return row
   }
@@ -918,5 +1030,16 @@ export default class extends Controller {
       }
       this._initVoiceSortables()
     }
+  }
+
+  _showToast(message) {
+    const toast = document.createElement("div")
+    toast.className = "fixed bottom-6 left-1/2 -translate-x-1/2 bg-gray-800 border border-gray-600 text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300"
+    toast.textContent = message
+    document.body.appendChild(toast)
+    setTimeout(() => {
+      toast.style.opacity = "0"
+      setTimeout(() => toast.remove(), 300)
+    }, 3000)
   }
 }

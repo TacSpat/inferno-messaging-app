@@ -1,11 +1,12 @@
 <%
-  status_color = case member.online_state
+  effective_state = member.respond_to?(:effective_online_state) ? member.effective_online_state : member.online_state
+  status_color = case effective_state
                  when "online" then "bg-green-500"
-                 when "idle" then "bg-yellow-500"
+                 when "idle" then "bg-warning"
                  when "dnd" then "bg-red-500"
                  else "bg-gray-500"
                  end
-  is_offline = member.offline? || member.invisible?
+  is_offline = member.respond_to?(:effectively_offline?) ? member.effectively_offline? : (member.offline? || member.invisible?)
   membership = member.server_memberships.find { |sm| sm.server_id == server.id }
   hoisted = membership&.top_hoisted_role
   top_position = membership&.top_role&.position || 0

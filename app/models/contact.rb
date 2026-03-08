@@ -1,5 +1,5 @@
 class Contact < ApplicationRecord
-  FRIENDSHIP_STATUSES = { not_friend: 0, pending_outgoing: 1, pending_incoming: 2, accepted: 3, declined: 4 }.freeze
+  FRIENDSHIP_STATUSES = { not_friend: 0, pending_outgoing: 1, pending_incoming: 2, accepted: 3, declined: 4, blocked: 5 }.freeze
 
   enum :friendship_status, FRIENDSHIP_STATUSES
 
@@ -9,6 +9,7 @@ class Contact < ApplicationRecord
   scope :friends, -> { where(friendship_status: :accepted) }
   scope :pending_outgoing, -> { where(friendship_status: :pending_outgoing) }
   scope :pending_incoming, -> { where(friendship_status: :pending_incoming) }
+  scope :blocked_contacts, -> { where(friendship_status: :blocked) }
 
   def npub
     Nostr::Bech32.encode_npub(pubkey)

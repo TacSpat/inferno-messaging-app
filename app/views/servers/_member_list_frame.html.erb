@@ -1,11 +1,20 @@
 <turbo-frame id="member-list">
   <%
-    # Separate online vs offline (invisible counts as offline visually)
-    online_members = members.reject { |m| m.offline? || m.invisible? }
-    offline_members = members.select { |m| m.offline? || m.invisible? }
+    # Separate online vs offline (invisible counts as offline visually).
+    # For remote members, also check staleness — their client may have
+    # crashed without sending an offline event.
+    is_offline = ->(m) {
+      if m.respond_to?(:effectively_offline?)
+        m.effectively_offline?
+      else
+        m.offline? || m.invisible?
+      end
+    }
+    online_members = members.reject(&is_offline)
+    offline_members = members.select(&is_offline)
 
-    # Hoisted roles for this server, highest position first (skip default-named roles)
-    hoisted_roles = server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where.not("json_extract(permissions, '$.owner') = ?", true).ordered.to_a
+    # Hoisted roles for this server, highest position first (skip @everyone and owner)
+    hoisted_roles = server.roles.where(hoist: true).where.not(name: "@everyone").where("json_extract(permissions, '$.owner') IS NOT TRUE").ordered.to_a
 
     # @everyone's position determines where the "Online" group sits in the hierarchy
     everyone_role = server.roles.find_by(name: "@everyone")

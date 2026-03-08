@@ -40,7 +40,11 @@ module MemberInterface
   end
 
   def role_color_for(_server = nil)
-    top_role&.color || "#ffffff"
+    sorted = roles.loaded? ? roles.sort_by { |r| -r.position } : roles.ordered.to_a
+    sorted.each do |role|
+      return role.color if role.color.present? && role.color != "#99aab5"
+    end
+    "#ffffff"
   end
 
   def tag

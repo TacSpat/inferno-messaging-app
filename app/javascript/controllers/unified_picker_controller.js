@@ -505,7 +505,7 @@ export default class extends Controller {
       html += this.collapsibleSection(`sticker_${server.id}`, this.escapeHtml(server.name), collapsed, () => {
         if (filtered.length === 0) return `<div class="text-gray-500 text-xs px-2 py-1">No stickers yet</div>`
         return `<div class="grid grid-cols-3 gap-1">${filtered.map(s =>
-          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-accent transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}" data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
+          `<div class="cursor-pointer rounded-lg overflow-hidden hover:ring-2 hover:ring-accent transition p-1 bg-gray-700" data-action="click->unified-picker#selectSticker" data-sticker-url="${this.escapeAttr(s.image_url)}"${s.blossom_url ? ` data-sticker-blossom-url="${this.escapeAttr(s.blossom_url)}"` : ""} data-sticker-name="${this.escapeAttr(s.name)}" title="${this.escapeAttr(s.name)}"><img src="${this.escapeAttr(s.image_url)}" alt="${this.escapeAttr(s.name)}" class="w-full h-auto" loading="lazy"></div>`
         ).join("")}</div>`
       })
     }
@@ -519,7 +519,7 @@ export default class extends Controller {
 
   selectSticker(event) {
     const el = event.currentTarget
-    const url = el.dataset.stickerUrl
+    const url = el.dataset.stickerBlossomUrl || el.dataset.stickerUrl
     if (!url) return
 
     const input = this.inputTarget
@@ -527,7 +527,19 @@ export default class extends Controller {
     input.dispatchEvent(new Event("input", { bubbles: true }))
 
     const form = input.closest("form")
-    if (form) form.requestSubmit()
+    if (form) {
+      let stickerField = form.querySelector("input[name='message[is_sticker]']")
+      if (!stickerField) {
+        stickerField = document.createElement("input")
+        stickerField.type = "hidden"
+        stickerField.name = "message[is_sticker]"
+        form.appendChild(stickerField)
+      }
+      stickerField.value = "1"
+      form.requestSubmit()
+      // Remove the field after submit so normal messages aren't marked as stickers
+      setTimeout(() => stickerField.remove(), 0)
+    }
 
     this.close()
   }
@@ -580,9 +592,12 @@ export default class extends Controller {
       buttons.forEach(btn => { btn.dataset.action = "click->unified-picker#selectEmoji" })
 
       if (this.searchQuery) {
+        const q = this.searchQuery.toLowerCase()
         let visibleCount = 0
         buttons.forEach(btn => {
-          if (btn.dataset.emoji.includes(this.searchQuery)) { visibleCount++ } else { btn.remove() }
+          const matches = btn.dataset.emoji.includes(this.searchQuery) ||
+            (btn.title || "").toLowerCase().includes(q)
+          if (matches) { visibleCount++ } else { btn.remove() }
         })
         if (visibleCount === 0) return
       }
@@ -1195,9 +1210,12 @@ export default class extends Controller {
       })
 
       if (this.searchQuery) {
+        const q = this.searchQuery.toLowerCase()
         let visibleCount = 0
         buttons.forEach(btn => {
-          if (btn.dataset.reactionEmoji.includes(this.searchQuery)) { visibleCount++ } else { btn.remove() }
+          const matches = btn.dataset.reactionEmoji.includes(this.searchQuery) ||
+            (btn.title || "").toLowerCase().includes(q)
+          if (matches) { visibleCount++ } else { btn.remove() }
         })
         if (visibleCount === 0) return
       }

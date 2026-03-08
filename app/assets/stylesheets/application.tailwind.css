@@ -40,6 +40,7 @@
   --accent-light: 248 113 113;
   --accent-medium: 239 68 68;
   --accent-dark: 185 28 28;
+  --settings-overlay-bg: rgba(20, 19, 18, 0.92);
 }
 
 /* ── Frostfire: cool blue-grays + blue accent ── */
@@ -75,6 +76,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #2563eb;
+  --settings-overlay-bg: rgba(15, 27, 45, 0.92);
 }
 
 /* ── Boron: olive-tinted grays + emerald accent ── */
@@ -110,6 +112,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #059669;
+  --settings-overlay-bg: rgba(15, 31, 21, 0.92);
 }
 
 /* ── Brimstone: purple-tinted grays + purple accent ── */
@@ -145,6 +148,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #7c3aed;
+  --settings-overlay-bg: rgba(26, 16, 37, 0.92);
 }
 
 /* ── Plasma: rose-tinted grays + pink accent ── */
@@ -180,6 +184,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #db2777;
+  --settings-overlay-bg: rgba(28, 15, 28, 0.92);
 }
 
 /* ── Pulsar: soft pink-tinted grays + pastel pink accent ── */
@@ -215,6 +220,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #f472b6;
+  --settings-overlay-bg: rgba(30, 20, 30, 0.92);
 }
 
 /* ── Obsidian: pure neutral grays + slate accent, clean minimal ── */
@@ -250,6 +256,7 @@
   --color-warning-light: #facc15;
   --color-warning-dark: #ca8a04;
   --color-toggle-on: #3b82f6;
+  --settings-overlay-bg: rgba(17, 24, 39, 0.92);
 }
 
 .turbo-progress-bar {
@@ -266,13 +273,81 @@
 @keyframes vt-fade-out { to { opacity: 0; } }
 @keyframes vt-fade-in { from { opacity: 0; } }
 
+/* Checkboxes — rounded, theme-aware (exclude .toggle switches) */
+input[type="checkbox"]:not(.toggle) {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid var(--color-gray-500);
+  border-radius: 0.375rem;
+  background-color: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+input[type="checkbox"]:not(.toggle):hover {
+  border-color: rgb(var(--accent-light));
+}
+input[type="checkbox"]:not(.toggle)::after {
+  content: "";
+  width: 0.65rem;
+  height: 0.65rem;
+  transform: scale(0);
+  transition: transform 0.1s ease-in-out;
+  background-color: white;
+  clip-path: polygon(14% 44%, 0% 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+input[type="checkbox"]:not(.toggle):checked {
+  background-color: rgb(var(--accent));
+  border-color: rgb(var(--accent));
+}
+input[type="checkbox"]:not(.toggle):checked::after {
+  transform: scale(1);
+}
+
+/* Radio buttons — circular, theme-aware */
+input[type="radio"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 1.125rem;
+  height: 1.125rem;
+  border: 2px solid var(--color-gray-500);
+  border-radius: 50%;
+  background-color: transparent;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  transition: border-color 0.15s, background-color 0.15s;
+}
+input[type="radio"]:hover {
+  border-color: rgb(var(--accent-light));
+}
+input[type="radio"]::after {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  transform: scale(0);
+  transition: transform 0.1s ease-in-out;
+  background-color: white;
+}
+input[type="radio"]:checked {
+  background-color: rgb(var(--accent));
+  border-color: rgb(var(--accent));
+}
+input[type="radio"]:checked::after {
+  transform: scale(1);
+}
+
 @layer base {
   /* Broken image fallback — replaces the ugly browser icon with a subtle placeholder */
   img.img-broken {
     display: inline-block;
     overflow: hidden;
     color: transparent;
-    background: rgb(44 42 41);
+    background: var(--color-gray-700);
     border-radius: 0.25rem;
   }
   img.img-broken[class*="rounded-full"] {
@@ -284,12 +359,12 @@
   .message-content .emoji-only { font-size: 3.5rem; line-height: 1.2; }
   .message-content p:last-child { margin-bottom: 0; }
   .message-content code {
-    background-color: rgb(18 17 16);
+    background-color: var(--color-gray-950);
     padding: 0.125rem 0.375rem;
     border-radius: 0.25rem;
     font-size: 0.85em;
     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    color: #cccbca;
+    color: var(--color-gray-200);
   }
   .message-content pre {
     background-color: rgb(18 17 16) !important;
@@ -297,17 +372,17 @@
     border-radius: 0.5rem;
     overflow-x: auto;
     margin: 0.5rem 0;
-    border: 1px solid rgb(44 42 41);
+    border: 1px solid var(--color-gray-700);
   }
   .message-content pre code {
     background: none !important;
     padding: 0;
     border-radius: 0;
     font-size: 0.875rem;
-    color: #cccbca;
+    color: var(--color-gray-200);
   }
   .message-content a {
-    color: rgb(96 165 250);
+    color: var(--color-accent-light);
     text-decoration: none;
     word-break: break-all;
   }
@@ -316,21 +391,21 @@
   .message-content em { font-style: italic; }
   .message-content del { text-decoration: line-through; color: rgb(135 133 131); }
   .message-content blockquote {
-    border-left: 4px solid rgb(56 54 52);
+    border-left: 4px solid var(--color-gray-600);
     padding-left: 0.75rem;
     margin: 0.5rem 0;
-    color: rgb(135 133 131);
+    color: var(--color-gray-400);
   }
   .message-content ul { list-style: disc; padding-left: 1.5rem; margin: 0.25rem 0; }
   .message-content ol { list-style: decimal; padding-left: 1.5rem; margin: 0.25rem 0; }
   .message-content li { margin-bottom: 0.125rem; }
   .message-content table { border-collapse: collapse; margin: 0.5rem 0; }
   .message-content th, .message-content td {
-    border: 1px solid rgb(56 54 52);
+    border: 1px solid var(--color-gray-600);
     padding: 0.375rem 0.75rem;
     font-size: 0.875rem;
   }
-  .message-content th { background-color: rgb(44 42 41); font-weight: 600; }
+  .message-content th { background-color: var(--color-gray-700); font-weight: 600; }
   .mention {
     background-color: rgb(var(--accent) / 0.15);
     color: rgb(var(--accent));
@@ -340,15 +415,15 @@
     cursor: pointer;
   }
   .mention:hover { background-color: rgb(var(--accent) / 0.3); text-decoration: underline; }
-  .mention-everyone, .mention-here { background-color: rgba(250, 204, 21, 0.15); color: #facc15; }
-  .mention-everyone:hover, .mention-here:hover { background-color: rgba(250, 204, 21, 0.3); }
+  .mention-everyone, .mention-here { background-color: rgb(from var(--color-warning) r g b / 0.15); color: var(--color-warning-light); }
+  .mention-everyone:hover, .mention-here:hover { background-color: rgb(from var(--color-warning) r g b / 0.3); }
   .code-block-wrapper { position: relative; margin: 0.5rem 0; }
   .code-block-wrapper .code-lang {
     position: absolute; top: 0; right: 0;
     padding: 0.125rem 0.5rem;
     font-size: 0.7rem;
-    color: rgb(135 133 131);
-    background: rgba(0,0,0,0.3);
+    color: var(--color-gray-400);
+    background: rgb(0 0 0 / 0.3);
     border-radius: 0 0.5rem 0 0.25rem;
     text-transform: uppercase;
     font-family: sans-serif;
@@ -358,7 +433,7 @@
     padding: 0.75rem;
     border-radius: 0.5rem;
     overflow-x: auto;
-    border: 1px solid rgb(44 42 41);
+    border: 1px solid var(--color-gray-700);
     margin: 0;
   }
   .code-block-wrapper pre.highlight code {
@@ -711,10 +786,6 @@
     scrollbar-color: rgb(var(--accent) / 0.25) transparent;
   }
 
-  /* Checkboxes */
-  input[type="checkbox"] {
-    accent-color: rgb(var(--accent));
-  }
 
   /* Number input — themed inline chevron spinners */
   .number-input-wrap {
@@ -828,7 +899,7 @@
   .custom-select-btn .cs-chevron {
     width: 12px;
     height: 12px;
-    color: #9ca3af;
+    color: var(--color-gray-400);
     transition: transform 0.15s;
     flex-shrink: 0;
     margin-left: 0.5rem;
@@ -842,16 +913,28 @@
     min-width: 100%;
     max-height: 240px;
     overflow-y: auto;
-    background: #1a1918;
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--color-gray-900);
+    border: 1px solid rgb(255 255 255 / 0.08);
     border-radius: 0.5rem;
     padding: 0.25rem;
     box-shadow: 0 8px 24px rgba(0,0,0,0.5);
     scrollbar-width: thin;
     scrollbar-color: rgb(var(--accent) / 0.25) transparent;
+    transform-origin: top center;
+    animation: cs-dropdown-in 0.15s ease-out;
   }
   .custom-select-list[hidden] {
     display: none;
+  }
+  @keyframes cs-dropdown-in {
+    from {
+      opacity: 0;
+      transform: scaleY(0.9) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: scaleY(1) translateY(0);
+    }
   }
   .custom-select-option {
     display: block;
@@ -859,7 +942,7 @@
     padding: 0.4rem 0.625rem;
     border-radius: 0.375rem;
     font-size: 0.875rem;
-    color: #d1d5db;
+    color: var(--color-gray-200);
     cursor: pointer;
     text-align: left;
     background: transparent;
@@ -893,7 +976,7 @@
   /* Animated lava border for server header */
   .border-b.border-gray-900.shadow-sm {
     border-bottom-color: transparent;
-    background-image: linear-gradient(var(--tw-gradient-stops, #282625, #282625)),
+    background-image: linear-gradient(var(--tw-gradient-stops, var(--color-gray-700), var(--color-gray-700))),
                       linear-gradient(90deg, rgb(var(--accent) / 0), rgb(var(--accent) / 0.3), rgb(var(--accent-dark) / 0.1));
     background-clip: padding-box, border-box;
     background-origin: padding-box, border-box;
@@ -1059,12 +1142,12 @@
     height: 1.5rem;
     border-radius: 9999px;
     background: rgba(0, 0, 0, 0.8);
-    border: 1px solid rgba(248, 113, 113, 0.3);
+    border: 1px solid rgb(from var(--color-danger-light) r g b / 0.3);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #f87171;
-    box-shadow: 0 0 6px rgba(248, 113, 113, 0.2);
+    color: var(--color-danger-light);
+    box-shadow: 0 0 6px rgb(from var(--color-danger-light) r g b / 0.2);
   }
   .voice-username-pill {
     position: absolute;
@@ -1160,15 +1243,15 @@
     padding: 0.35rem 0.75rem;
     font-size: 0.8rem;
     font-weight: 600;
-    color: #d1d5db;
-    background: #2a2827;
+    color: var(--color-gray-200);
+    background: var(--color-gray-700);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 9999px;
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
     user-select: none;
   }
-  .ss-pill:hover { background: #333231; color: white; }
+  .ss-pill:hover { background: var(--color-gray-600); color: white; }
   .ss-pill-active {
     background: linear-gradient(to right, var(--color-accent-dark), var(--color-accent-light)) !important;
     color: white !important;
@@ -1259,7 +1342,7 @@
     z-index: 15;
   }
   .voice-screen-preview:hover .voice-screen-close-btn { opacity: 1; }
-  .voice-screen-close-btn:hover { background: rgba(220, 38, 38, 0.8); }
+  .voice-screen-close-btn:hover { background: rgb(from var(--color-danger) r g b / 0.8); }
 
   /* Paused stream overlay for local preview */
   .voice-screen-paused-overlay {
@@ -1437,12 +1520,12 @@
   width: 12px;
   height: 12px;
   border-radius: 9999px;
-  background: #22c55e;
-  border: 1.5px solid var(--color-gray-800, #1e1c1b);
+  background: var(--color-success);
+  border: 1.5px solid var(--color-gray-800);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 0 4px rgba(34, 197, 94, 0.5);
+  box-shadow: 0 0 4px rgb(from var(--color-success) r g b / 0.5);
 }
 
 /* ─── Channel drag-and-drop ─────────────────────────────────── */
@@ -1467,7 +1550,7 @@
   transform: scale(1.02);
   border-radius: 4px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-  background: rgb(55 65 81); /* gray-700 */
+  background: var(--color-gray-700);
   max-width: 220px;
   padding: 6px 8px;
   display: flex;

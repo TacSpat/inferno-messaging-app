@@ -1,111 +1,86 @@
-<%
-  # Build a unified list: each entry is a hash with common fields
-  all_members = @memberships.map { |m|
-    {
-      type: :local,
-      obj: m,
-      display_name: m.user.display_name_for(@server),
-      tag: m.user.tag,
-      joined_at: m.joined_at,
-      roles: m.roles.sort_by { |r| -r.position },
-      avatar_url: m.user.effective_avatar_url,
-      profile_color: m.user.try(:profile_color) || '#1e1c1b',
-      initial: m.user.username[0]&.upcase,
-      public_id: m.public_id,
-      owner: m.owner?,
-      kick_path: server_settings_kick_member_path(@server, m),
-      ban_user_id: m.user.public_id,
-      confirm_name: m.user.username,
-      role_ids: m.roles.reject(&:owner?).map(&:public_id)
-    }
-  } + @remote_members.map { |r|
-    {
-      type: :remote,
-      obj: r,
-      display_name: r.display_name_for(@server),
-      tag: r.tag,
-      joined_at: r.joined_at,
-      roles: r.roles.sort_by { |rr| -rr.position },
-      avatar_url: r.effective_avatar_url,
-      profile_color: r.try(:profile_color) || '#1e1c1b',
-      initial: (r.username.presence || r.pubkey[0..1]).to_s[0]&.upcase,
-      public_id: r.public_id,
-      owner: false,
-      kick_path: server_settings_kick_remote_member_path(@server, r),
-      ban_user_id: r.public_id,
-      confirm_name: r.display_name_for(@server),
-      role_ids: r.roles.map(&:public_id)
-    }
-  }
+<div data-controller="member-management" data-member-management-server-id-value="<%= @server.public_id %>">
 
-  all_members.sort_by! { |m| m[:joined_at] || Time.at(0) }.reverse!
-%>
-
-<h1 class="text-xl font-bold text-white mb-6">Members (<%= all_members.size %>)</h1>
-
-<div class="space-y-2">
-  <% all_members.each do |member| %>
-    <div class="flex items-center justify-between bg-gray-800 rounded-lg px-4 py-3">
-      <div class="flex items-center">
-        <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white overflow-hidden"
-             style="background-color: <%= member[:avatar_url].present? ? 'transparent' : member[:profile_color] %>">
-          <% if member[:avatar_url].present? %>
-            <%= image_tag member[:avatar_url], class: "w-full h-full object-cover" %>
-          <% else %>
-            <%= member[:initial] %>
-          <% end %>
-        </div>
-        <div class="ml-3">
-          <p class="text-sm text-white font-medium"><%= member[:display_name] %></p>
-          <p class="text-xs text-gray-500"><%= member[:tag] %> • Joined <%= member[:joined_at]&.strftime("%b %d, %Y") %></p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2">
-        <div class="flex flex-wrap gap-1" data-member-roles-target="badges" data-membership-id="<%= member[:public_id] %>">
-          <% if member[:roles].any? %>
-            <% member[:roles].each do |role| %>
-              <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full <%= role.owner? ? 'bg-yellow-600/20 text-yellow-400' : role.admin? ? 'bg-red-600/20 text-red-400' : 'bg-gray-700 text-gray-400' %>">
-                <span class="w-2 h-2 rounded-full mr-1" style="background-color: <%= role.color || '#ffffff' %>"></span>
-                <%= role.name %>
-              </span>
-            <% end %>
-          <% else %>
-            <span class="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">@everyone</span>
-          <% end %>
-        </div>
-        <% if @current_membership&.admin? %>
-          <% if member[:type] == :local %>
-            <div class="relative" data-controller="member-roles"
-                 data-member-roles-server-id-value="<%= @server.public_id %>"
-                 data-member-roles-membership-id-value="<%= member[:public_id] %>"
-                 data-member-roles-all-roles-value="<%= @all_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
-                 data-member-roles-current-role-ids-value="<%= member[:role_ids].to_json %>">
-              <button class="text-xs text-accent-light hover:text-accent cursor-pointer"
-                      data-action="click->member-roles#toggle">
-                Manage Roles
-              </button>
-              <div class="absolute right-0 top-8 w-56 bg-gray-900 border border-gray-700 rounded-lg shadow-2xl py-2 z-50 hidden"
-                   data-member-roles-target="dropdown">
-                <p class="px-3 pb-1.5 text-[10px] font-semibold text-gray-500 uppercase">Assign Roles</p>
-                <% @all_roles.reject(&:everyone?).each do |role| %>
-                  <label class="flex items-center px-3 py-1.5 hover:bg-gray-800 cursor-pointer">
-                    <input type="checkbox" value="<%= role.public_id %>"
-                           class="mr-2 accent-accent"
-                           data-action="change->member-roles#toggleRole"
-                           <%= 'checked' if member[:role_ids].include?(role.public_id) %>>
-                    <span class="w-2.5 h-2.5 rounded-full mr-1.5 flex-shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
-                    <span class="text-sm text-gray-300"><%= role.name %></span>
-                  </label>
-                <% end %>
-              </div>
-            </div>
-          <% end %>
-          <% unless member[:owner] %>
-            <%= button_to "Kick", member[:kick_path], method: :delete, data: { turbo_confirm: "Kick #{member[:confirm_name]}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
-            <%= button_to "Ban", server_settings_create_ban_path(@server), params: { user_id: member[:ban_user_id] }, method: :post, data: { turbo_confirm: "Ban #{member[:confirm_name]}?" }, class: "text-xs text-danger-light hover:text-danger cursor-pointer" %>
-          <% end %>
-        <% end %>
-      </div>
+<!-- Top bar: search + prune -->
+<div class="flex items-center justify-between mb-6">
+  <h1 class="text-xl font-bold text-white">Members (<%= @all_members.size %>)</h1>
+  <div class="flex items-center gap-3">
+    <div class="relative">
+      <input type="text" placeholder="Search members..."
+             class="bg-gray-700 text-gray-200 text-sm rounded-lg pl-8 pr-3 py-1.5 outline-none placeholder-gray-500 focus:ring-1 focus:ring-accent w-48"
+             data-member-management-target="searchInput"
+             data-action="input->member-management#search">
+      <svg class="w-4 h-4 text-gray-500 absolute left-2 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
     </div>
-  <% end %>
+    <% if @current_membership&.has_permission?("kick_members") || @current_membership&.admin? %>
+      <button type="button" class="text-sm text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg cursor-pointer transition"
+              data-action="click->member-management#togglePrune">
+        Prune
+      </button>
+    <% end %>
+  </div>
+</div>
+
+<!-- Prune panel -->
+<div data-member-management-target="prunePanel" class="hidden mb-6 bg-gray-800 border border-gray-700 rounded-lg p-4">
+  <h3 class="text-sm font-semibold text-white mb-3">Prune Inactive Members</h3>
+  <div class="flex items-center gap-3 mb-3">
+    <label class="text-sm text-gray-400">Inactive for</label>
+    <select data-member-management-target="pruneDays" class="bg-gray-700 text-gray-200 text-sm rounded px-3 py-1.5 outline-none">
+      <option value="7">7 days</option>
+      <option value="14">14 days</option>
+      <option value="30" selected>30 days</option>
+      <option value="60">60 days</option>
+      <option value="90">90 days</option>
+    </select>
+    <button type="button" class="text-sm text-accent-light hover:text-accent cursor-pointer"
+            data-action="click->member-management#previewPrune">Preview</button>
+  </div>
+  <div data-member-management-target="pruneList" class="space-y-1 max-h-48 overflow-y-auto"></div>
+  <div data-member-management-target="pruneFooter" class="hidden mt-3 flex items-center justify-between">
+    <span data-member-management-target="pruneCount" class="text-sm text-gray-400"></span>
+    <button type="button" class="text-sm bg-danger hover:bg-danger-light text-white px-3 py-1.5 rounded cursor-pointer transition"
+            data-action="click->member-management#confirmPrune">Confirm Prune</button>
+  </div>
+</div>
+
+<!-- Batch toolbar -->
+<div data-member-management-target="toolbar" class="hidden mb-4 bg-accent/10 border border-accent/20 rounded-lg px-4 py-2.5 flex items-center gap-3">
+  <span class="text-sm text-accent-light"><span data-member-management-target="selectedCount">0</span> selected</span>
+  <div class="flex-1"></div>
+  <!-- Batch timeout dropdown -->
+  <div class="relative" data-member-management-target="batchTimeoutWrapper">
+    <button type="button" class="text-xs text-warning-light hover:text-warning bg-warning-dark/20 hover:bg-warning-dark/30 px-2.5 py-1 rounded cursor-pointer transition"
+            data-action="click->member-management#toggleBatchTimeout">
+      Timeout
+    </button>
+    <div data-member-management-target="batchTimeoutDropdown" class="hidden absolute bottom-full left-0 mb-1 w-36 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50">
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="60">60 seconds</button>
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="300">5 minutes</button>
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="600">10 minutes</button>
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="3600">1 hour</button>
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="86400">1 day</button>
+      <button type="button" class="w-full text-left text-sm text-gray-300 hover:bg-gray-800 px-3 py-1.5 cursor-pointer" data-action="click->member-management#batchTimeout" data-duration="604800">1 week</button>
+    </div>
+  </div>
+  <button type="button" class="text-xs text-danger-light hover:text-danger bg-danger/20 hover:bg-danger/30 px-2.5 py-1 rounded cursor-pointer transition"
+          data-action="click->member-management#batchKick">Kick</button>
+  <button type="button" class="text-xs text-danger-light hover:text-danger bg-danger/20 hover:bg-danger/30 px-2.5 py-1 rounded cursor-pointer transition"
+          data-action="click->member-management#batchBan">Ban</button>
+</div>
+
+<!-- Select all -->
+<% if @current_membership&.admin? %>
+<div class="flex items-center mb-2 px-4">
+  <label class="flex items-center cursor-pointer text-xs text-gray-500 hover:text-gray-400">
+    <input type="checkbox" class="mr-2" data-action="change->member-management#selectAll" data-member-management-target="selectAllCheckbox">
+    Select all
+  </label>
+</div>
+<% end %>
+
+<!-- Member list -->
+<div data-member-management-target="memberList" class="space-y-2">
+  <%= render partial: "server_settings/members_list", locals: { all_members: @all_members } %>
+</div>
+
 </div>

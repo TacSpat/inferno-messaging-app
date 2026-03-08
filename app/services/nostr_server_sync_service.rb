@@ -26,7 +26,8 @@ class NostrServerSyncService
       about: tag_value(tags, "about"),
       picture_url: tag_value(tags, "picture"),
       banner_url: tag_value(tags, "banner"),
-      owner_pubkey: tag_value(tags, "owner")
+      owner_pubkey: tag_value(tags, "owner"),
+      discoverable: tag_value(tags, "discoverable") == "true"
     }
 
     # Optionally count members from Kind 31753 events

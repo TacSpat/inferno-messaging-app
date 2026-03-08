@@ -106,7 +106,12 @@ class User < ApplicationRecord
   end
 
   def blocked?(user)
-    blocks.exists?(blocked_id: user.id)
+    blocks.exists?(blocked_id: user.id) ||
+      (user.nostr_public_key.present? && Contact.blocked_contacts.exists?(pubkey: user.nostr_public_key))
+  end
+
+  def blocked_pubkey?(pubkey)
+    Contact.blocked_contacts.exists?(pubkey: pubkey)
   end
 
   # Returns Blossom URL if uploaded, otherwise falls back to Active Storage path
@@ -163,7 +168,7 @@ class User < ApplicationRecord
       server_memberships.find_by(server: server)
     end
     return "#ffffff" unless membership
-    membership.top_role&.color || "#ffffff"
+    membership.display_color
   end
 
   def ordered_rail_items

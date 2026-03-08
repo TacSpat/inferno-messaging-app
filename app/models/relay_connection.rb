@@ -17,6 +17,13 @@ class RelayConnection < ApplicationRecord
 
   scope :active, -> { where(status: "active") }
   scope :connectable, -> { active }
+  scope :externally_reachable, -> {
+    active.where.not("url LIKE 'ws://localhost%'")
+          .where.not("url LIKE 'ws://127.%'")
+          .where.not("url LIKE 'ws://10.%'")
+          .where.not("url LIKE 'ws://192.168.%'")
+  }
+  scope :healthy, -> { active.where("last_error_at IS NULL OR last_error_at < ?", 1.hour.ago) }
 
   def active?
     status == "active"
@@ -31,7 +38,7 @@ class RelayConnection < ApplicationRecord
   end
 
   def mark_connected!
-    update!(last_connected_at: Time.current, status: "active", last_error_message: nil)
+    update!(last_connected_at: Time.current, status: "active", last_error_message: nil, retry_count: 0)
   end
 
   def mark_error!(message)

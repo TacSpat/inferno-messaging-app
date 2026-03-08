@@ -12,6 +12,7 @@
   <body class="h-full overflow-hidden text-gray-100">
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
+    <%= render "shared/js_templates" %>
 
     <div class="flex h-full" data-controller="settings-sidebar">
       <!-- Mobile sidebar backdrop -->
@@ -36,6 +37,10 @@
           <div class="space-y-0.5 mb-4">
             <%= link_to "Voice", server_settings_voice_path(@server),
                 class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[voice update_voice opt_in_voice opt_out_voice]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% if @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
+              <%= link_to "Relays", server_settings_relays_path(@server),
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[relays add_relay remove_relay]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <% end %>
           </div>
 
           <% show_emoji_link = @current_membership&.has_permission?("create_emojis") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin? %>
@@ -62,7 +67,7 @@
           <div class="space-y-0.5 mb-4">
             <% if show_members %>
               <%= link_to "Members", server_settings_members_path(@server),
-                  class: "block px-2 py-1.5 rounded text-sm #{action_name == 'members' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+                  class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[members member_history]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
             <% end %>
             <% if show_roles %>
               <%= link_to "Roles", server_settings_roles_path(@server),

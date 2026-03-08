@@ -2,7 +2,8 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers, :voice, :opt_in_voice, :opt_out_voice ]
+  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers, :voice, :opt_in_voice, :opt_out_voice, :timeout_member, :remove_timeout, :member_history, :prune_preview, :prune_members, :batch_kick, :batch_ban, :batch_timeout, :relays, :add_relay, :remove_relay ]
+  before_action :ensure_relay_permission!, only: [ :relays, :add_relay, :remove_relay ]
   before_action :ensure_invite_permission!, only: [ :invites, :create_invite, :destroy_invite ]
   before_action :ensure_emoji_permission!, only: [ :emojis ]
   before_action :ensure_sticker_permission!, only: [ :stickers ]
@@ -25,18 +26,19 @@ class ServerSettingsController < ApplicationController
   end
 
   def members
-    @memberships = @server.server_memberships.includes(:membership_roles, :roles, user: { avatar_attachment: :blob }).order(joined_at: :desc)
-    @remote_members = @server.remote_members.includes(:remote_membership_roles, :roles).order(joined_at: :desc)
-    @all_roles = @server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).ordered
+    @all_roles = @server.roles.where("json_extract(permissions, '$.owner') IS NOT TRUE").ordered
+    @all_members = build_members_list
   end
 
   def update_member
-    membership = @server.server_memberships.find_by!(public_id: params[:id])
-    is_self = membership.user == current_user
+    membership = @server.server_memberships.find_by(public_id: params[:id])
+    remote_member = @server.remote_members.find_by(public_id: params[:id]) unless membership
+    raise ActiveRecord::RecordNotFound unless membership || remote_member
 
-    # Handle nickname update
-    if params.key?(:nickname)
-      # Self can change own nickname, admins/manage_roles can change anyone's
+    is_self = membership&.user == current_user
+
+    # Handle nickname update (local members only)
+    if params.key?(:nickname) && membership
       unless is_self || @current_membership&.admin? || @current_membership&.has_permission?("manage_roles")
         return respond_to do |format|
           format.json { render json: { error: "Permission denied" }, status: :forbidden }
@@ -61,26 +63,29 @@ class ServerSettingsController < ApplicationController
       end
     end
 
+    target = membership || remote_member
     role_ids = Array(params[:role_ids])
     roles = @server.roles.where(public_id: role_ids).reject(&:owner?)
 
     # Owner role cannot be removed from the server owner
-    owner_role = membership.roles.find(&:owner?)
+    owner_role = target.roles.find(&:owner?)
     roles << owner_role if owner_role
 
-    membership.roles = roles
-    broadcast_member_update(membership)
-    publish_server_state(:member, pubkey: membership.user.nostr_public_key)
+    target.roles = roles
+    pubkey = membership&.user&.nostr_public_key || remote_member&.pubkey
+    broadcast_member_update(membership) if membership
+    publish_server_state(:member, pubkey: pubkey) if pubkey.present?
 
     respond_to do |format|
       format.json do
         render json: {
           success: true,
-          roles: membership.roles.ordered.map { |r| { id: r.public_id, name: r.name, color: r.color, position: r.position } }
+          roles: target.roles.ordered.map { |r| { id: r.public_id, name: r.name, color: r.color, position: r.position } }
         }
       end
       format.html do
-        redirect_to server_settings_members_path(@server), notice: "Roles updated for #{membership.user.username}."
+        name = membership&.user&.username || remote_member&.username
+        redirect_to server_settings_members_path(@server), notice: "Roles updated for #{name}."
       end
     end
   end
@@ -178,6 +183,19 @@ class ServerSettingsController < ApplicationController
     # Update voice_enabled toggle
     @server.update!(voice_enabled: params[:voice_enabled] == "1") if params.key?(:voice_enabled)
 
+    # Update AFK settings
+    if params.key?(:afk_channel_id)
+      if params[:afk_channel_id].present?
+        afk_ch = @server.channels.voice.find_by(public_id: params[:afk_channel_id])
+        @server.afk_channel = afk_ch
+      else
+        @server.afk_channel = nil
+      end
+    end
+    @server.afk_timeout = params[:afk_timeout].to_i if params.key?(:afk_timeout)
+    @server.afk_action = params[:afk_action] if params.key?(:afk_action)
+    @server.save! if @server.changed?
+
     voice_channels = @server.channels.where(channel_type: :voice)
 
     # Update each voice channel's settings from params
@@ -223,6 +241,173 @@ class ServerSettingsController < ApplicationController
     end
   end
 
+  def timeout_member
+    ensure_kick_permission!
+    membership = @server.server_memberships.find_by!(public_id: params[:id])
+    return head :forbidden if membership.owner?
+
+    duration = params[:duration].to_i
+    membership.update!(timed_out_until: Time.current + duration.seconds, timed_out_by: current_user)
+
+    ServerChannel.broadcast_to(@server, {
+      type: "member_timeout",
+      user_id: membership.user.public_id,
+      timed_out_until: membership.timed_out_until.iso8601
+    })
+    publish_server_state(:member, pubkey: membership.user.nostr_public_key)
+
+    respond_to do |format|
+      format.json { render json: { success: true, timed_out_until: membership.timed_out_until.iso8601 } }
+      format.html { redirect_to server_settings_members_path(@server), notice: "Member timed out." }
+    end
+  end
+
+  def remove_timeout
+    ensure_kick_permission!
+    membership = @server.server_memberships.find_by!(public_id: params[:id])
+    membership.update!(timed_out_until: nil, timed_out_by: nil)
+
+    ServerChannel.broadcast_to(@server, {
+      type: "member_timeout",
+      user_id: membership.user.public_id,
+      timed_out_until: nil
+    })
+    render json: { success: true }
+  end
+
+  def member_history
+    ensure_mod_permission!
+
+    # Try local membership first, fall back to remote
+    membership = @server.server_memberships.find_by(public_id: params[:id])
+    remote_member = @server.remote_members.find_by(public_id: params[:id]) unless membership
+    raise ActiveRecord::RecordNotFound unless membership || remote_member
+
+    @membership = membership
+    @remote_member = remote_member
+    @member_user = membership&.user
+    @display_name = membership ? membership.user.display_name_for(@server) : remote_member.display_name_for(@server)
+    @avatar_url = membership ? membership.user.effective_avatar_url : remote_member.effective_avatar_url
+    @profile_color = (membership ? membership.user.profile_color : remote_member.try(:profile_color)) || "#1e1c1b"
+    @username_initial = (membership ? membership.user.username : remote_member.username).to_s[0]&.upcase
+    @member_tag = membership ? membership.user.tag : remote_member.tag
+    @joined_at = membership&.joined_at || remote_member&.joined_at
+    @last_online = membership&.user&.online_at
+    @member_roles = membership ? membership.roles.sort_by { |r| -r.position } : remote_member.roles.sort_by { |r| -r.position }
+    @is_owner = membership&.owner? || false
+
+    channel_ids = @server.channels.pluck(:id)
+
+    # Build scope that matches messages by local user_id OR nostr pubkey
+    pubkey = @member_user&.nostr_public_key || remote_member&.pubkey
+    if @member_user && pubkey.present?
+      base_scope = Message.where(channel_id: channel_ids)
+                          .where("user_id = :uid OR nostr_author_pubkey = :pk", uid: @member_user.id, pk: pubkey)
+    elsif @member_user
+      base_scope = Message.where(channel_id: channel_ids, user_id: @member_user.id)
+    elsif pubkey.present?
+      base_scope = Message.where(channel_id: channel_ids, nostr_author_pubkey: pubkey)
+    else
+      base_scope = Message.none
+    end
+
+    @total_messages = base_scope.count
+    @image_count = base_scope.joins(files_attachments: :blob)
+                             .where("active_storage_blobs.content_type LIKE 'image/%'")
+                             .distinct.count
+    @link_count = base_scope.where("content LIKE '%http%'").count
+    @sticker_count = base_scope.where(is_sticker: true).count
+
+    messages_scope = base_scope.includes(:channel, :user, files_attachments: :blob).order(created_at: :desc)
+
+    if params[:channel_id].present?
+      ch = @server.channels.find_by(public_id: params[:channel_id])
+      messages_scope = messages_scope.where(channel_id: ch.id) if ch
+    end
+
+    page = [ params[:page].to_i, 1 ].max
+    per_page = 25
+    @messages = messages_scope.limit(per_page + 1).offset((page - 1) * per_page).to_a
+    @has_more = @messages.size > per_page
+    @messages = @messages.first(per_page)
+    @page = page
+
+    @channels = @server.channels.ordered
+  end
+
+  def prune_preview
+    ensure_kick_permission!
+    days = params[:days].to_i
+    days = 7 if days < 1
+    prunable = @server.prunable_memberships(days: days)
+                      .includes(user: { avatar_attachment: :blob })
+    render json: prunable.map { |m|
+      { id: m.public_id, username: m.user.username, display_name: m.user.display_name_for(@server),
+        avatar_url: m.user.effective_avatar_url, profile_color: m.user.profile_color || "#1e1c1b",
+        last_online: m.user.online_at&.iso8601 }
+    }
+  end
+
+  def prune_members
+    ensure_kick_permission!
+    days = params[:days].to_i
+    days = 7 if days < 1
+    prunable = @server.prunable_memberships(days: days)
+    count = prunable.count
+    prunable.find_each do |m|
+      pubkey = m.user.nostr_public_key
+      m.destroy
+      publish_server_state(:member, pubkey: pubkey, removed: true) if pubkey.present?
+    end
+    render json: { success: true, pruned: count }
+  end
+
+  def batch_kick
+    ensure_kick_permission!
+    ids = Array(params[:member_ids])
+    memberships = @server.server_memberships.where(public_id: ids).where.not(user: @server.owner)
+    count = memberships.count
+    memberships.find_each do |m|
+      pubkey = m.user.nostr_public_key
+      m.destroy
+      publish_server_state(:member, pubkey: pubkey, removed: true) if pubkey.present?
+    end
+    render json: { success: true, kicked: count }
+  end
+
+  def batch_ban
+    ensure_ban_permission!
+    ids = Array(params[:member_ids])
+    reason = params[:reason].presence
+    memberships = @server.server_memberships.where(public_id: ids).where.not(user: @server.owner).includes(:user)
+    count = 0
+    memberships.find_each do |m|
+      ban = @server.bans.new(user: m.user, banned_by: current_user, reason: reason)
+      if ban.save
+        publish_server_state(:ban, pubkey: m.user.nostr_public_key) if m.user.nostr_public_key.present?
+        count += 1
+      end
+    end
+    render json: { success: true, banned: count }
+  end
+
+  def batch_timeout
+    ensure_kick_permission!
+    ids = Array(params[:member_ids])
+    duration = params[:duration].to_i
+    memberships = @server.server_memberships.where(public_id: ids).where.not(user: @server.owner)
+    until_time = Time.current + duration.seconds
+    memberships.update_all(timed_out_until: until_time, timed_out_by_id: current_user.id)
+    memberships.includes(:user).find_each do |m|
+      ServerChannel.broadcast_to(@server, {
+        type: "member_timeout",
+        user_id: m.user.public_id,
+        timed_out_until: until_time.iso8601
+      })
+    end
+    render json: { success: true, timed_out: memberships.count }
+  end
+
   def bans
     @bans = @server.bans.includes(user: { avatar_attachment: :blob }, banned_by: { avatar_attachment: :blob }).order(created_at: :desc)
   end
@@ -259,6 +444,34 @@ class ServerSettingsController < ApplicationController
     redirect_to server_settings_bans_path(@server), notice: "Ban removed."
   end
 
+  def relays
+    @server_relays = @server.relay_urls || []
+    @global_relays = RelayConnection.order(:url)
+  end
+
+  def add_relay
+    url = params[:relay_url].to_s.strip
+    if url.blank? || !url.match?(/\Awss?:\/\/.+/i)
+      redirect_to server_settings_relays_path(@server), alert: "Invalid relay URL. Must start with wss:// or ws://"
+      return
+    end
+
+    current_urls = @server.relay_urls || []
+    unless current_urls.include?(url)
+      @server.update!(relay_urls: current_urls + [url])
+      # Also ensure it exists in the global relay pool
+      RelayConnection.find_or_create_for_relay(url)
+    end
+    redirect_to server_settings_relays_path(@server), notice: "Relay added to server."
+  end
+
+  def remove_relay
+    url = params[:relay_url].to_s.strip
+    current_urls = @server.relay_urls || []
+    @server.update!(relay_urls: current_urls - [url])
+    redirect_to server_settings_relays_path(@server), notice: "Relay removed from server."
+  end
+
   private
 
   def set_server
@@ -287,9 +500,85 @@ class ServerSettingsController < ApplicationController
     end
   end
 
+  def ensure_relay_permission!
+    unless @current_membership&.has_permission?("manage_server") || @current_membership&.admin?
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
+    end
+  end
+
   def ensure_sticker_permission!
     unless @current_membership&.has_permission?("create_stickers") || @current_membership&.has_permission?("manage_emojis") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin?
       redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have permission."
+    end
+  end
+
+  def build_members_list
+    memberships = @server.server_memberships.includes(:membership_roles, :roles, user: { avatar_attachment: :blob }).order(joined_at: :desc)
+    remote_members = @server.remote_members.includes(:remote_membership_roles, :roles).order(joined_at: :desc)
+
+    # Index local memberships by pubkey so we can skip duplicate remotes
+    local_pubkeys = memberships.filter_map { |m| m.user.nostr_public_key }
+
+    members = memberships.map { |m|
+      {
+        display_name: m.user.display_name_for(@server),
+        tag: m.user.tag,
+        joined_at: m.joined_at,
+        roles: m.roles.sort_by { |r| -r.position },
+        avatar_url: m.user.effective_avatar_url,
+        profile_color: m.user.try(:profile_color) || "#1e1c1b",
+        initial: m.user.username[0]&.upcase,
+        public_id: m.public_id,
+        owner: m.owner?,
+        kick_path: server_settings_kick_member_path(@server, m),
+        ban_user_id: m.user.public_id,
+        confirm_name: m.user.username,
+        role_ids: m.roles.reject(&:owner?).map(&:public_id),
+        timed_out: m.timed_out?,
+        timed_out_until: m.timed_out_until&.iso8601
+      }
+    }
+
+    remote_members.each do |r|
+      next if local_pubkeys.include?(r.pubkey)
+      members << {
+        display_name: r.display_name_for(@server),
+        tag: r.tag,
+        joined_at: r.joined_at,
+        roles: r.roles.sort_by { |rr| -rr.position },
+        avatar_url: r.effective_avatar_url,
+        profile_color: r.try(:profile_color) || "#1e1c1b",
+        initial: (r.username.presence || r.pubkey[0..1]).to_s[0]&.upcase,
+        public_id: r.public_id,
+        owner: false,
+        kick_path: server_settings_kick_remote_member_path(@server, r),
+        ban_user_id: r.public_id,
+        confirm_name: r.display_name_for(@server),
+        role_ids: r.roles.map(&:public_id),
+        timed_out: false,
+        timed_out_until: nil
+      }
+    end
+
+    members.sort_by! { |m| m[:joined_at] || Time.at(0) }.reverse!
+    members
+  end
+
+  def ensure_kick_permission!
+    unless @current_membership&.has_permission?("kick_members") || @current_membership&.admin?
+      render json: { error: "Permission denied" }, status: :forbidden
+    end
+  end
+
+  def ensure_ban_permission!
+    unless @current_membership&.has_permission?("ban_members") || @current_membership&.admin?
+      render json: { error: "Permission denied" }, status: :forbidden
+    end
+  end
+
+  def ensure_mod_permission!
+    unless @current_membership&.has_permission?("kick_members") || @current_membership&.has_permission?("ban_members") || @current_membership&.has_permission?("manage_server") || @current_membership&.admin?
+      redirect_to server_settings_members_path(@server), alert: "Permission denied."
     end
   end
 
@@ -313,7 +602,7 @@ class ServerSettingsController < ApplicationController
   end
 
   def server_params
-    params.require(:server).permit(:name, :description, :icon, :banner, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
+    params.require(:server).permit(:name, :description, :icon, :banner, :discoverable, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
   end
 
   def publish_server_state(event_type, **options)

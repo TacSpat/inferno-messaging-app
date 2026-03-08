@@ -1,0 +1,176 @@
+<% member_public_id = @membership&.public_id || @remote_member.public_id %>
+<div data-controller="member-management" data-member-management-server-id-value="<%= @server.public_id %>">
+
+<!-- Back link -->
+<div class="mb-6">
+  <%= link_to server_settings_members_path(@server), class: "inline-flex items-center text-sm text-gray-400 hover:text-white transition" do %>
+    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+    Back to Members
+  <% end %>
+</div>
+
+<!-- Member header -->
+<div class="bg-gray-800/60 rounded-xl p-5 mb-5">
+  <div class="flex items-start gap-4">
+    <div class="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold text-white overflow-hidden shrink-0"
+         style="background-color: <%= @avatar_url.present? ? 'transparent' : @profile_color %>">
+      <% if @avatar_url.present? %>
+        <%= image_tag @avatar_url, class: "w-full h-full object-cover" %>
+      <% else %>
+        <%= @username_initial %>
+      <% end %>
+    </div>
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 flex-wrap">
+        <h1 class="text-lg font-semibold text-white"><%= @display_name %></h1>
+        <% if @remote_member %>
+          <span class="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-400">Remote</span>
+        <% end %>
+      </div>
+      <p class="text-sm text-gray-500"><%= @member_tag %></p>
+
+      <!-- Roles inline -->
+      <% if @member_roles.any? %>
+        <div class="flex flex-wrap gap-1 mt-2">
+          <% @member_roles.each do |role| %>
+            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-black/30 text-white/80 border border-white/10">
+              <span class="w-2 h-2 rounded-full mr-1 shrink-0" style="background-color: <%= role.color || '#ffffff' %>"></span>
+              <%= role.name %>
+            </span>
+          <% end %>
+        </div>
+      <% end %>
+
+      <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
+        <span>Joined <%= @joined_at&.strftime("%b %d, %Y") || "Unknown" %></span>
+        <span>&middot;</span>
+        <span>Last online <%= @last_online&.strftime("%b %d, %Y %H:%M") || "Never" %></span>
+      </div>
+
+      <% if @membership&.timed_out? %>
+        <div class="mt-2 inline-flex items-center text-[11px] px-2 py-0.5 rounded-md bg-warning-dark/15 text-warning-light">
+          <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Timed out until <%= @membership.timed_out_until.strftime("%b %d, %Y %H:%M") %>
+        </div>
+      <% end %>
+    </div>
+
+    <!-- Quick actions -->
+    <% unless @is_owner %>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <% if @membership&.timed_out? %>
+          <button type="button" class="text-xs text-green-400 hover:text-green-300 px-2 py-1 rounded hover:bg-green-600/10 cursor-pointer transition"
+                  data-action="click->member-management#removeTimeout"
+                  data-member-id="<%= member_public_id %>">
+            Remove Timeout
+          </button>
+        <% elsif @membership %>
+          <button type="button" class="text-xs text-warning-light hover:text-warning px-2 py-1 rounded hover:bg-warning-dark/10 cursor-pointer transition"
+                  data-action="click->member-management#showTimeoutDropdown"
+                  data-member-id="<%= member_public_id %>">
+            Timeout
+          </button>
+        <% end %>
+        <% kick_path = @membership ? server_settings_kick_member_path(@server, @membership) : server_settings_kick_remote_member_path(@server, @remote_member) %>
+        <% ban_user_id = @member_user&.public_id || @remote_member.public_id %>
+        <% confirm_name = @member_user&.username || @remote_member.username %>
+        <%= button_to "Kick", kick_path,
+            method: :delete,
+            data: { turbo_confirm: "Kick #{confirm_name}?" },
+            class: "text-xs text-danger-light hover:text-danger px-2 py-1 rounded hover:bg-danger/10 cursor-pointer transition" %>
+        <%= button_to "Ban", server_settings_create_ban_path(@server),
+            params: { user_id: ban_user_id },
+            method: :post,
+            data: { turbo_confirm: "Ban #{confirm_name}?" },
+            class: "text-xs text-danger-light hover:text-danger px-2 py-1 rounded hover:bg-danger/10 cursor-pointer transition" %>
+      </div>
+    <% end %>
+  </div>
+</div>
+
+<!-- Stats cards -->
+<div class="grid grid-cols-4 gap-3 mb-5">
+  <% [
+    [@total_messages, "Messages", "text-white"],
+    [@image_count, "Images", "text-white"],
+    [@sticker_count, "Stickers", "text-white"],
+    [@link_count, "Links", "text-white"]
+  ].each do |count, label, color| %>
+    <div class="bg-gray-800/40 rounded-lg px-3 py-3 text-center">
+      <p class="text-xl font-bold <%= color %>"><%= count %></p>
+      <p class="text-[11px] text-gray-500 mt-0.5"><%= label %></p>
+    </div>
+  <% end %>
+</div>
+
+<!-- Message history -->
+<div class="bg-gray-800/40 rounded-xl p-4">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-sm font-semibold text-gray-300">Message History</h2>
+    <select onchange="window.location.href = this.value"
+            class="bg-gray-700/80 text-gray-300 text-xs rounded-lg px-2.5 py-1.5 outline-none border border-gray-600/50 cursor-pointer">
+      <option value="<%= server_settings_member_history_path(@server, member_public_id) %>"
+              <%= 'selected' unless params[:channel_id].present? %>>All Channels</option>
+      <% @channels.each do |ch| %>
+        <option value="<%= server_settings_member_history_path(@server, member_public_id, channel_id: ch.public_id) %>"
+                <%= 'selected' if params[:channel_id] == ch.public_id %>>#<%= ch.name %></option>
+      <% end %>
+    </select>
+  </div>
+
+  <% if @messages.empty? %>
+    <p class="text-sm text-gray-600 text-center py-10">No messages found.</p>
+  <% else %>
+    <div class="space-y-1">
+      <% @messages.each do |message| %>
+        <div class="rounded-lg px-3 py-2 hover:bg-gray-700/30 transition-colors">
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-[11px] text-gray-500 font-medium">#<%= message.channel.name %></span>
+            <span class="text-[11px] text-gray-600">&middot;</span>
+            <span class="text-[11px] text-gray-600"><%= message.created_at.strftime("%b %d, %Y %l:%M %p") %></span>
+            <% if message.is_sticker? %>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/10 text-purple-400">Sticker</span>
+            <% end %>
+            <% if message.edited? %>
+              <span class="text-[10px] text-gray-600">(edited)</span>
+            <% end %>
+            <% if message.files.any? %>
+              <span class="text-[11px] text-accent-light/70">
+                <%= message.files.count %> file<%= message.files.count > 1 ? 's' : '' %>
+              </span>
+            <% end %>
+          </div>
+          <% if message.is_sticker? %>
+            <div class="text-sm text-gray-300 max-w-[128px]"><%= message.rendered_content %></div>
+          <% elsif message.content.present? %>
+            <div class="text-sm text-gray-300 line-clamp-3 message-content"><%= message.rendered_content %></div>
+          <% else %>
+            <p class="text-sm text-gray-600 italic">[attachment only]</p>
+          <% end %>
+          <% if message.files.attached? %>
+            <div class="flex flex-wrap gap-1.5 mt-1.5">
+              <% message.files.each do |file| %>
+                <% if file.content_type&.start_with?("image/") %>
+                  <%= image_tag url_for(file), class: "h-14 w-14 object-cover rounded cursor-pointer", data: { preview_src: url_for(file) } %>
+                <% else %>
+                  <span class="text-[11px] text-accent-light/70 bg-gray-700/50 rounded px-2 py-0.5"><%= file.filename %></span>
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      <% end %>
+    </div>
+
+    <% if @has_more %>
+      <div class="mt-4 text-center">
+        <a href="<%= server_settings_member_history_path(@server, member_public_id, page: @page + 1, channel_id: params[:channel_id]) %>"
+           class="text-sm text-accent-light hover:text-accent cursor-pointer">
+          Load more
+        </a>
+      </div>
+    <% end %>
+  <% end %>
+</div>
+
+</div>

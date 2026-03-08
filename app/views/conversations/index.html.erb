@@ -44,7 +44,7 @@
     <!-- Search tab -->
     <div class="p-4 border-b border-gray-600" data-controller="nostr-search">
       <h3 class="text-white font-semibold mb-1">Find People</h3>
-      <p class="text-sm text-gray-400 mb-3">Search by name, npub, or NIP-05 identifier (user@domain).</p>
+      <p class="text-sm text-gray-400 mb-3">Search by name, public key, or address (user@domain).</p>
       <div class="relative">
         <div class="flex items-center gap-2 bg-gray-900 rounded-lg px-3 sm:px-4 py-2.5 border border-gray-700 focus-within:border-accent">
           <svg class="w-5 h-5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -53,7 +53,7 @@
           <input type="text"
                  data-nostr-search-target="input"
                  data-action="input->nostr-search#onInput keydown->nostr-search#onKeydown focus->nostr-search#onFocus"
-                 placeholder="Search by name, npub, or user@domain..."
+                 placeholder="Search by name, public key, or user@domain..."
                  class="flex-1 bg-transparent text-white text-base sm:text-sm placeholder-gray-500 focus:outline-none py-1"
                  autocomplete="off"
                  autofocus>
@@ -70,7 +70,7 @@
              class="hidden absolute z-50 left-0 right-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl max-h-80 overflow-y-auto">
         </div>
       </div>
-      <p class="text-xs text-gray-500 px-1 mt-2">Searches Nostr relays for matching profiles. Try a name, npub1..., or alice@example.com</p>
+      <p class="text-xs text-gray-500 px-1 mt-2">Searches relays for matching profiles. Try a name, public key, or alice@example.com</p>
     </div>
 
   <% elsif @tab == 'pending' %>
@@ -146,31 +146,28 @@
   <% elsif @tab == 'blocked' %>
     <!-- Blocked tab -->
     <div class="px-2 sm:px-4 pt-3">
-      <% if @blocked&.any? %>
+      <% if @blocked_contacts&.any? %>
         <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-2">
-          Blocked — <%= @blocked.count %>
+          Blocked — <%= @blocked_contacts.count %>
         </h3>
-        <% @blocked.each do |user| %>
+        <% @blocked_contacts.each do |contact| %>
           <div class="flex items-center px-2 py-2.5 rounded hover:bg-gray-600/30 group border-b border-gray-700/50 last:border-b-0">
             <div class="relative shrink-0">
-              <% if user.effective_avatar_url.present? %>
-                <%= image_tag user.effective_avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
+              <% if contact.avatar_url.present? %>
+                <%= image_tag contact.avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
               <% else %>
-                <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= user.profile_color || '#1e1c1b' %>">
-                  <%= user.username[0].upcase %>
+                <div class="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold bg-gray-600">
+                  <%= contact.effective_display_name[0]&.upcase || '?' %>
                 </div>
               <% end %>
             </div>
             <div class="ml-3 flex-1 min-w-0">
-              <p class="text-sm font-medium text-white truncate"><%= user.display_name.presence || user.username %></p>
+              <p class="text-sm font-medium text-white truncate"><%= contact.effective_display_name %></p>
               <p class="text-xs text-gray-400">Blocked</p>
             </div>
             <div class="flex items-center gap-2">
-              <% block = current_user.blocks.find_by(blocked_id: user.id) %>
-              <% if block %>
-                <%= button_to block_path(block), method: :delete, class: "px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-sm text-gray-300 hover:text-white rounded cursor-pointer" do %>
-                  Unblock
-                <% end %>
+              <%= button_to block_path(contact), params: { pubkey: contact.pubkey }, method: :delete, class: "px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-sm text-gray-300 hover:text-white rounded cursor-pointer" do %>
+                Unblock
               <% end %>
             </div>
           </div>

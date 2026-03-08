@@ -131,7 +131,7 @@ export default class extends Controller {
       return '<span class="px-2.5 py-1 text-xs font-medium text-green-400 bg-green-900/30 rounded">Added</span>'
     }
     if (r.contact_status === "pending_outgoing") {
-      return '<span class="px-2.5 py-1 text-xs font-medium text-yellow-400 bg-yellow-900/30 rounded">Pending</span>'
+      return '<span class="px-2.5 py-1 text-xs font-medium text-warning-light bg-warning-dark/20 rounded">Pending</span>'
     }
     if (r.contact_status === "pending_incoming") {
       return '<span class="px-2.5 py-1 text-xs font-medium text-blue-400 bg-blue-900/30 rounded">Respond</span>'
@@ -160,7 +160,7 @@ export default class extends Controller {
     }).then(function(response) {
       if (response.ok || response.redirected) {
         button.textContent = "Sent"
-        button.className = "px-2.5 py-1 text-xs font-medium text-yellow-400 bg-yellow-900/30 rounded"
+        button.className = "px-2.5 py-1 text-xs font-medium text-warning-light bg-warning-dark/20 rounded"
       } else {
         button.textContent = "Fail"
         button.disabled = false

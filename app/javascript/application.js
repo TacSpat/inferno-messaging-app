@@ -357,6 +357,13 @@ import VoiceSettingsController from "./controllers/voice_settings_controller"
 import VoiceDeviceSelectController from "./controllers/voice_device_select_controller"
 import ChannelTypeController from "./controllers/channel_type_controller"
 import ServerIconPreviewController from "./controllers/server_icon_preview_controller"
+import SidechatController from "./controllers/sidechat_controller"
+import MemberManagementController from "./controllers/member_management_controller"
+import CallController from "./controllers/call_controller"
+import GroupChatModalController from "./controllers/group_chat_modal_controller"
+import AddServerModalController from "./controllers/add_server_modal_controller"
+import ServerInvitePreviewController from "./controllers/server_invite_preview_controller"
+import StatusEmojiController from "./controllers/status_emoji_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -400,4 +407,11 @@ application.register("voice-settings", VoiceSettingsController)
 application.register("voice-device-select", VoiceDeviceSelectController)
 application.register("channel-type", ChannelTypeController)
 application.register("server-icon-preview", ServerIconPreviewController)
+application.register("sidechat", SidechatController)
+application.register("member-management", MemberManagementController)
+application.register("call", CallController)
+application.register("group-chat-modal", GroupChatModalController)
+application.register("add-server-modal", AddServerModalController)
+application.register("server-invite-preview", ServerInvitePreviewController)
+application.register("status-emoji", StatusEmojiController)
 // rebuild trigger

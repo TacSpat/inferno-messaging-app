@@ -43,7 +43,7 @@
               <input type="checkbox" checked
                      data-voice-device-select-target="sensitivityAuto"
                      data-action="change->voice-device-select#toggleSensitivityMode"
-                     class="w-8 h-4 rounded-full bg-gray-700 appearance-none cursor-pointer relative
+                     class="toggle w-8 h-4 rounded-full bg-gray-700 appearance-none cursor-pointer relative
                             before:content-[''] before:absolute before:top-0.5 before:left-0.5 before:w-3 before:h-3 before:rounded-full before:bg-gray-400 before:transition-all
                             checked:bg-accent/60 checked:before:translate-x-4 checked:before:bg-white">
             </label>
@@ -216,7 +216,7 @@
               <% end %>
             </div>
           <% elsif @user.livekit_configured? %>
-            <div class="flex items-center gap-1.5 text-yellow-400 text-sm">
+            <div class="flex items-center gap-1.5 text-warning-light text-sm">
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
               Not verified
             </div>

@@ -1,7 +1,7 @@
 class NostrPublishJob < ApplicationJob
   queue_as :default
 
-  # event_type: :profile, :contacts, or :relay_list
+  # event_type: :profile, :contacts, :relay_list, or :mute_list
   def perform(user_id, event_type)
     user = User.find(user_id)
     return if user.nostr_public_key.blank?
@@ -13,6 +13,8 @@ class NostrPublishJob < ApplicationJob
       build_contacts_event(user)
     when :relay_list
       build_relay_list_event(user)
+    when :mute_list
+      build_mute_list_event(user)
     else
       Rails.logger.warn("NostrPublishJob: Unknown event type '#{event_type}'")
       return
@@ -44,8 +46,7 @@ class NostrPublishJob < ApplicationJob
     profile_data = {
       name: user.username,
       display_name: user.display_name.presence || user.username,
-      about: user.bio.presence || "",
-      nip05: user.nip05_identifier
+      about: user.bio.presence || ""
     }
 
     # Upload avatar/banner to Blossom and include URLs
@@ -73,7 +74,7 @@ class NostrPublishJob < ApplicationJob
   # Kind 3: Contacts list
   def build_contacts_event(user)
     tags = Contact.friends.map do |contact|
-      relay_url = contact.relay_url.presence || LocalConfig.current.instance_relay_url.presence || ""
+      relay_url = contact.relay_url.presence || LocalConfig.current.effective_instance_relay_url.presence || ""
       [ "p", contact.pubkey, relay_url, contact.petname.presence || contact.effective_display_name ]
     end
 
@@ -90,13 +91,13 @@ class NostrPublishJob < ApplicationJob
 
   # Kind 10002: Relay list metadata
   def build_relay_list_event(user)
-    tags = RelayConnection.active.pluck(:url).flat_map do |url|
+    tags = RelayConnection.externally_reachable.pluck(:url).flat_map do |url|
       [ [ "r", url, "read" ], [ "r", url, "write" ] ]
     end
 
-    # Also include the instance relay if configured
-    instance_relay = LocalConfig.current.instance_relay_url
-    if instance_relay.present? && tags.none? { |t| t[1] == instance_relay }
+    # Always include the effective instance relay URL
+    instance_relay = LocalConfig.current.effective_instance_relay_url
+    if instance_relay.present? && instance_relay.start_with?("wss://") && tags.none? { |t| t[1] == instance_relay }
       tags << [ "r", instance_relay, "read" ]
       tags << [ "r", instance_relay, "write" ]
     end
@@ -104,6 +105,21 @@ class NostrPublishJob < ApplicationJob
     signer = Nostr::Signer.new(private_key: user.nostr_private_key)
     event = Nostr::Event.new(
       kind: 10002, # RELAY_LIST_METADATA
+      pubkey: user.nostr_public_key,
+      content: "",
+      tags: tags
+    )
+    signer.sign(event)
+    event.to_json
+  end
+
+  # Kind 10000: NIP-51 Mute list (public)
+  def build_mute_list_event(user)
+    tags = Contact.blocked_contacts.pluck(:pubkey).map { |pk| [ "p", pk ] }
+
+    signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+    event = Nostr::Event.new(
+      kind: 10000, # MUTE_LIST
       pubkey: user.nostr_public_key,
       content: "",
       tags: tags

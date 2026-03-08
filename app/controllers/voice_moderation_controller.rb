@@ -89,6 +89,10 @@ class VoiceModerationController < ApplicationController
     from_channel_id = target.channel.public_id
     target.update!(channel: new_channel)
 
+    if new_channel.afk?
+      target.update_columns(self_mute: true)
+    end
+
     ServerChannel.broadcast_to(@server, {
       type: "voice_state_moved",
       user_id: target.user.public_id,
@@ -98,7 +102,9 @@ class VoiceModerationController < ApplicationController
       voice_state_id: target.public_id,
       username: target.user.display_name.presence || target.user.username,
       avatar_url: target.user.effective_avatar_url,
-      profile_color: target.user.profile_color
+      profile_color: target.user.profile_color,
+      self_mute: target.self_mute,
+      afk: new_channel.afk?
     })
 
     render json: { success: true }

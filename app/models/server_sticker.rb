@@ -19,6 +19,11 @@ class ServerSticker < ApplicationRecord
     Rails.application.routes.url_helpers.rails_blob_path(image, only_path: true)
   end
 
+  def blossom_url
+    return nil unless image.attached?
+    image.blob.metadata&.dig("blossom_url")
+  end
+
   private
 
   def acceptable_image

@@ -1,4 +1,4 @@
-<div class="flex items-center justify-center min-h-screen" style="background: #0e0d0c;">
+<div class="flex items-start justify-center min-h-screen overflow-y-auto" style="background: var(--color-gray-950);">
   <div class="w-full max-w-lg mx-4 py-8">
     <!-- Header -->
     <div class="mb-6">
@@ -17,6 +17,10 @@
 
       <!-- Basics -->
       <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
+        <div class="px-5 py-3 border-b border-gray-700/50 flex items-center gap-2">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+          <span class="text-sm font-semibold text-gray-300">General</span>
+        </div>
         <div class="p-5 space-y-4">
           <div data-controller="emoji-input" data-emoji-input-server-id-value="<%= @server.public_id %>">
             <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Channel Name</label>
@@ -80,30 +84,71 @@
                 <span class="text-sm text-gray-300">Enable video</span>
               </label>
             </div>
+
+            <% if @eligible_sidechat_channels %>
+              <div class="pt-3 border-t border-gray-700/50">
+                <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Text Chat</label>
+                <select name="channel[sidechat_channel_id]" class="w-full bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 text-sm transition">
+                  <option value="">Built-in chat</option>
+                  <% @eligible_sidechat_channels.each do |ch| %>
+                    <option value="<%= ch.public_id %>" <%= 'selected' if @channel.sidechat_channel_id == ch.id %>>#<%= ch.name %></option>
+                  <% end %>
+                </select>
+                <p class="text-[11px] text-gray-600 mt-1.5">
+                  Use the built-in chat or link an existing text channel.
+                  Only channels with matching permissions can be linked.
+                </p>
+              </div>
+            <% end %>
           </div>
         </div>
       </div>
 
-      <!-- Encrypted channel -->
+      <!-- Security & Encryption -->
+      <% has_sidechat_link = (@channel.voice? && @channel.sidechat_channel_id.present?) ||
+                             @channel.voice_channels_using_as_sidechat.any? %>
       <% current_role_ids = @channel.permissions_overrides&.dig("allowed_role_ids") || [] %>
       <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
-        <div class="p-5 space-y-3">
-          <label class="flex items-center gap-3 cursor-pointer">
-            <%= f.check_box :encrypted, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer", data: { action: "change->encrypted-channel#toggle", encrypted_channel_target: "checkbox" } %>
-            <div>
-              <span class="text-sm font-medium text-white">Encrypted Channel</span>
-              <p class="text-xs text-gray-500">Messages are encrypted on relays. Only allowed roles can access.</p>
+        <div class="px-5 py-3 border-b border-gray-700/50 flex items-center gap-2">
+          <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+          <span class="text-sm font-semibold text-gray-300">Security</span>
+        </div>
+        <div class="p-5 space-y-4">
+          <div>
+            <label class="flex items-center gap-3 cursor-pointer">
+              <%= f.check_box :encrypted, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer", data: { action: "change->encrypted-channel#toggle", encrypted_channel_target: "checkbox" } %>
+              <div>
+                <span class="text-sm font-medium text-white">End-to-End Encryption</span>
+              </div>
+            </label>
+            <div class="mt-2 ml-7 space-y-1.5">
+              <p class="text-xs text-gray-500 leading-relaxed">
+                Messages are scrambled before leaving your server, so only members with the right role can read them.
+                Anyone else &mdash; including the servers that pass messages along &mdash; will only see unreadable data.
+              </p>
+              <% if @channel.encrypted? %>
+                <div class="flex items-center gap-1.5 mt-1">
+                  <svg class="w-3.5 h-3.5 text-green-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                  <span class="text-xs text-green-400 font-medium">Encryption is active</span>
+                </div>
+              <% end %>
             </div>
-          </label>
+          </div>
 
-          <div data-encrypted-channel-target="purgeWarning" class="hidden bg-danger/10 border border-danger/30 rounded-lg px-3.5 py-2.5 mt-2">
-            <p class="text-xs text-danger-light font-medium">All message history will be permanently deleted. The encryption key will be destroyed.</p>
+          <div data-encrypted-channel-target="purgeWarning" class="hidden bg-danger/10 border border-danger/30 rounded-lg px-3.5 py-2.5">
+            <div class="flex items-start gap-2">
+              <svg class="w-4 h-4 text-danger-light shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+              <div>
+                <p class="text-xs text-danger-light font-semibold">Warning: Irreversible action</p>
+                <p class="text-xs text-danger-light/80 mt-0.5">Turning off encryption will permanently delete all messages in this channel. They cannot be recovered.</p>
+              </div>
+            </div>
           </div>
 
           <div data-encrypted-channel-target="roleSelector" class="<%= @channel.encrypted? ? '' : 'hidden' %> space-y-2 pt-3 border-t border-gray-700/50">
             <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider">Allowed Roles</label>
-            <p class="text-[11px] text-gray-600 mb-2">Admins and owners always have access.</p>
-            <div class="space-y-0.5">
+            <p class="text-xs text-gray-500 leading-relaxed">Pick which roles can see and send messages here. Owners and admins always have access.</p>
+            <div class="space-y-0.5 mt-1">
               <% @server.roles.where.not(name: "@everyone").ordered.reject(&:owner?).each do |role| %>
                 <label class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-700/50 cursor-pointer transition">
                   <input type="checkbox" name="channel[allowed_role_ids][]" value="<%= role.public_id %>"
@@ -114,7 +159,19 @@
                 </label>
               <% end %>
             </div>
+            <% if @server.roles.where.not(name: "@everyone").reject(&:owner?).empty? %>
+              <p class="text-xs text-gray-600 italic">No roles configured. Create roles in server settings to restrict access.</p>
+            <% end %>
           </div>
+
+          <% if has_sidechat_link %>
+            <div class="bg-warning-dark/20 border border-warning-dark/30 rounded-lg px-3.5 py-2.5 mt-3">
+              <p class="text-xs text-warning-light font-medium">This channel is linked to a voice channel sidechat.</p>
+              <p class="text-xs text-warning-light/70 mt-0.5">
+                Changing encryption or role permissions may disconnect the link if the channels no longer match.
+              </p>
+            </div>
+          <% end %>
         </div>
       </div>
 
@@ -125,28 +182,53 @@
       </div>
     <% end %>
 
-    <!-- Nostr Group Info -->
+    <!-- Cross-Server Sync -->
     <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-4">
       <div class="px-5 py-3 border-b border-gray-700/50 flex items-center gap-2">
-        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101M10.172 13.828a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-        <span class="text-sm font-semibold text-gray-300">Nostr Group</span>
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="text-sm font-semibold text-gray-300">Cross-Server Sync</span>
       </div>
-      <div class="p-5">
-        <div class="space-y-2.5">
+      <div class="p-5 space-y-4">
+        <p class="text-xs text-gray-500 leading-relaxed">
+          Messages in this channel are synced across servers through relay connections.
+          Members on other devices can see and participate in this channel automatically.
+          Share the details below to let people connect from other apps.
+        </p>
+
+        <div class="bg-gray-900/50 rounded-lg p-3.5 space-y-3">
           <div>
-            <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Group ID</span>
-            <p class="text-xs text-gray-300 font-mono select-all mt-0.5 break-all"><%= @channel.nostr_group_id %></p>
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Channel ID</span>
+              <button type="button" class="text-[10px] text-gray-500 hover:text-gray-300 transition cursor-pointer"
+                      onclick="navigator.clipboard.writeText(this.dataset.value); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 1500)"
+                      data-value="<%= @channel.nostr_group_id %>">Copy</button>
+            </div>
+            <p class="text-xs text-gray-300 font-mono select-all mt-1 break-all"><%= @channel.nostr_group_id %></p>
           </div>
-          <div>
-            <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Relays</span>
-            <% @channel.effective_relay_urls.each do |url| %>
-              <p class="text-xs text-gray-300 font-mono select-all mt-0.5"><%= url %></p>
-            <% end %>
+
+          <div class="border-t border-gray-700/50 pt-3">
+            <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Connected Relays</span>
+            <p class="text-[10px] text-gray-600 mt-0.5 mb-1.5">Relays that sync messages across devices. More relays means better availability.</p>
+            <div class="space-y-1">
+              <% @channel.effective_relay_urls.each do |url| %>
+                <div class="flex items-center justify-between group/relay">
+                  <p class="text-xs text-gray-300 font-mono select-all"><%= url %></p>
+                  <button type="button" class="text-[10px] text-gray-500 hover:text-gray-300 opacity-0 group-hover/relay:opacity-100 transition cursor-pointer"
+                          onclick="navigator.clipboard.writeText(this.dataset.value); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy', 1500)"
+                          data-value="<%= url %>">Copy</button>
+                </div>
+              <% end %>
+            </div>
           </div>
+
           <% if @channel.encrypted? && @channel.channel_public_key.present? %>
-            <div>
-              <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Public Key</span>
-              <p class="text-xs text-gray-300 font-mono select-all mt-0.5 break-all"><%= @channel.channel_public_key %></p>
+            <div class="border-t border-gray-700/50 pt-3">
+              <div class="flex items-center gap-1.5 mb-1">
+                <span class="text-[11px] text-gray-500 uppercase tracking-wider font-semibold">Encryption Key</span>
+                <svg class="w-3 h-3 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+              </div>
+              <p class="text-[10px] text-gray-600 mb-1">Used to lock and unlock messages. Only members with this key can read the channel.</p>
+              <p class="text-xs text-gray-300 font-mono select-all break-all"><%= @channel.channel_public_key %></p>
             </div>
           <% end %>
         </div>
@@ -155,12 +237,16 @@
 
     <!-- Danger zone -->
     <div class="bg-gray-800 rounded-xl border border-danger/20 overflow-hidden">
+      <div class="px-5 py-3 border-b border-danger/10 flex items-center gap-2">
+        <svg class="w-4 h-4 text-danger-light/60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        <span class="text-sm font-semibold text-danger-light/80">Danger Zone</span>
+      </div>
       <div class="p-5 flex items-center justify-between">
         <div>
           <p class="text-sm font-medium text-gray-300">Delete Channel</p>
-          <p class="text-xs text-gray-500 mt-0.5">This action cannot be undone.</p>
+          <p class="text-xs text-gray-500 mt-0.5">Permanently removes the channel and all its messages. This cannot be undone.</p>
         </div>
-        <%= button_to "Delete", server_channel_path(@server, @channel), method: :delete, data: { turbo_confirm: "Delete ##{@channel.name}?" }, class: "text-sm text-danger-light hover:text-danger font-medium cursor-pointer transition" %>
+        <%= button_to "Delete", server_channel_path(@server, @channel), method: :delete, data: { turbo_confirm: "Delete ##{@channel.name}? All messages will be permanently lost." }, class: "text-sm text-danger-light hover:text-danger font-medium cursor-pointer transition shrink-0 ml-4" %>
       </div>
     </div>
   </div>

@@ -30,7 +30,13 @@ class FriendshipsController < ApplicationController
 
     # Check existing contact
     existing = Contact.find_by(pubkey: pubkey)
-    if existing && !existing.not_friend?
+    if existing&.blocked?
+      respond_to do |format|
+        format.html { redirect_to conversations_path(tab: "search"), alert: "This user is blocked. Unblock them first." }
+        format.json { render json: { error: "User is blocked" }, status: :unprocessable_entity }
+      end
+      return
+    elsif existing && !existing.not_friend?
       respond_to do |format|
         format.html { redirect_to conversations_path(tab: "search"), alert: "You already have a #{existing.friendship_status} contact for this pubkey." }
         format.json { render json: { error: "Already a contact", status: existing.friendship_status }, status: :unprocessable_entity }

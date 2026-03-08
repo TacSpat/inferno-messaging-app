@@ -19,7 +19,10 @@ module MessagingApp
     # Use Solid Queue for background jobs
     config.active_job.queue_adapter = :solid_queue
 
-    # Instance domain used for NIP-05 identifiers and cross-instance auth.
+    # Serve attachments via proxy (inline) instead of redirect so browsers can cache them
+    config.active_storage.resolve_model_to_route = :rails_storage_proxy
+
+    # Domain used for federation addresses and relay URL derivation.
     # Load from ENV (set by foreman via .env), or fall back to reading .env directly.
     config.x.instance_domain = ENV.fetch("INSTANCE_DOMAIN") {
       env_file = File.expand_path("../../.env", __FILE__)

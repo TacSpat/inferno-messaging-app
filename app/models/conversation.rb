@@ -4,9 +4,18 @@ class Conversation < ApplicationRecord
 
   has_many :conversation_participants, dependent: :destroy
   has_many :participants, through: :conversation_participants, source: :user
+  has_many :contact_participants, -> { where.not(contact_id: nil) }, class_name: "ConversationParticipant"
   has_many :messages, dependent: :destroy
+  has_many :calls, dependent: :destroy
+  has_one_attached :icon
 
   validates :name, length: { maximum: 100 }
+
+  def effective_icon_url
+    return nil unless icon.attached?
+    icon.blob.metadata&.dig("blossom_url") ||
+      Rails.application.routes.url_helpers.rails_blob_path(icon, only_path: true)
+  end
 
   # Find or create a direct conversation with a counterparty identified by pubkey
   def self.find_or_create_by_pubkey(owner, counterparty_pubkey)
@@ -41,12 +50,21 @@ class Conversation < ApplicationRecord
     participants.where.not(id: current_user.id).first
   end
 
+  # Returns the ConversationParticipant for the other side (works for both User and Contact participants)
+  def other_participant(current_user)
+    conversation_participants.detect { |cp| cp.user_id != current_user.id }
+  end
+
   def display_name(current_user)
     if direct?
       other = other_user(current_user)
       other&.display_name.presence || other&.username || counterparty_display_name || "Unknown"
     else
-      name.presence || participants.where.not(id: current_user.id).map { |u| u.display_name.presence || u.username }.join(", ")
+      name.presence || conversation_participants
+        .reject { |cp| cp.user_id == current_user.id }
+        .map(&:display_name)
+        .compact
+        .join(", ")
     end
   end
 

@@ -14,6 +14,11 @@ Rails.application.config.after_initialize do
       rescue => e
         Rails.logger.error("[RelaySubscriptions] Failed to start: #{e.message}")
       end
+
+      # Periodic health checks and cleanup jobs
+      RelayHealthCheckJob.perform_later
+      StalePresenceCleanupJob.perform_later
+      AfkVoiceCheckJob.perform_later
     end
   end
 end

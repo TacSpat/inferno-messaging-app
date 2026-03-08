@@ -183,14 +183,14 @@ export default class extends Controller {
   updateUserPanelDot(state) {
     const colorMap = {
       online: "bg-green-500",
-      idle: "bg-yellow-500",
+      idle: "bg-warning",
       dnd: "bg-red-500",
       invisible: "bg-gray-500",
       offline: "bg-gray-500"
     }
     const dots = document.querySelectorAll("[data-user-status-dot]")
     dots.forEach(dot => {
-      dot.classList.remove("bg-green-500", "bg-yellow-500", "bg-red-500", "bg-gray-500")
+      dot.classList.remove("bg-green-500", "bg-warning", "bg-red-500", "bg-gray-500")
       dot.classList.add(colorMap[state] || "bg-gray-500")
     })
   }

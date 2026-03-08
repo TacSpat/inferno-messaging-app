@@ -40,7 +40,7 @@
           <% end %>
         </div>
 
-        <p class="text-xs text-gray-400 mb-0.5">Join server via Nostr</p>
+        <p class="text-xs text-gray-400 mb-0.5">Join server via federation</p>
         <h1 class="text-xl font-bold text-white mb-1"><%= @server_name %></h1>
 
         <% if @server_description.present? %>
@@ -61,7 +61,7 @@
           </div>
         </div>
 
-        <p class="text-xs text-gray-500 mb-5">Inferno · <%= @instance_domain %></p>
+        <p class="text-xs text-gray-500 mb-5">Inferno</p>
 
         <% if @already_member %>
           <%= link_to "Open #{@server_name}",

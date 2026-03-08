@@ -1,0 +1,53 @@
+<% if messages.empty? %>
+  <div class="py-8 text-center">
+    <svg class="w-8 h-8 text-gray-600 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+    <p class="text-sm text-gray-500">No pinned messages</p>
+  </div>
+<% else %>
+  <div class="divide-y divide-gray-700/50">
+    <% messages.each do |msg| %>
+      <div class="px-3 py-2.5 hover:bg-gray-800/60 cursor-pointer transition" data-jump-to-message="<%= msg.public_id %>">
+        <div class="flex items-center gap-1.5 mb-1">
+          <% if msg.user&.effective_avatar_url.present? %>
+            <%= image_tag msg.user.effective_avatar_url, class: "w-4 h-4 rounded-full object-cover" %>
+          <% end %>
+          <span class="text-xs font-medium text-white"><%= msg.user ? (server ? msg.user.display_name_for(server) : (msg.user.display_name.presence || msg.user.username)) : "Unknown" %></span>
+          <span class="text-[10px] text-gray-600"><%= msg.created_at.strftime("%b %d, %Y") %></span>
+        </div>
+
+        <% if msg.is_sticker? %>
+          <div class="max-w-[80px]"><%= msg.rendered_content %></div>
+        <% elsif msg.content.present? %>
+          <div class="text-sm text-gray-300 line-clamp-3 message-content pinned-preview"><%= msg.rendered_content %></div>
+        <% end %>
+
+        <% if msg.files.attached? %>
+          <div class="flex flex-wrap gap-1.5 mt-1.5">
+            <% msg.files.each do |file| %>
+              <% if file.content_type&.start_with?("image/") %>
+                <%= image_tag url_for(file), class: "w-16 h-16 rounded object-cover" %>
+              <% elsif file.content_type&.start_with?("video/") %>
+                <div class="w-16 h-16 rounded bg-gray-800 flex items-center justify-center relative overflow-hidden">
+                  <video src="<%= url_for(file) %>" preload="metadata" class="w-full h-full object-cover"></video>
+                  <div class="absolute inset-0 flex items-center justify-center bg-black/30">
+                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                  </div>
+                </div>
+              <% elsif file.content_type&.start_with?("audio/") %>
+                <div class="flex items-center gap-1 bg-gray-800 rounded px-2 py-1">
+                  <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
+                  <span class="text-xs text-gray-400 truncate max-w-[100px]"><%= file.filename %></span>
+                </div>
+              <% else %>
+                <div class="flex items-center gap-1 bg-gray-800 rounded px-2 py-1">
+                  <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                  <span class="text-xs text-accent-light truncate max-w-[100px]"><%= file.filename %></span>
+                </div>
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    <% end %>
+  </div>
+<% end %>

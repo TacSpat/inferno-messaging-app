@@ -1,4 +1,11 @@
-<% membership = server.server_memberships.find_by(user: member) %>
+<% if member.is_a?(RemoteMember) %>
+  <% membership = nil %>
+  <% remote_member = member %>
+<% else %>
+  <% membership = server.server_memberships.find_by(user: member) %>
+  <% remote_member = server.remote_members.find_by(pubkey: member.nostr_public_key) if member.nostr_public_key.present? %>
+<% end %>
+<% target_membership = membership || remote_member %>
 <% my_membership = server.server_memberships.find_by(user: current_user) %>
 <% can_manage = my_membership&.has_permission?("manage_roles") || my_membership&.owner? %>
 <% can_kick = my_membership&.has_permission?("kick_members") || my_membership&.owner? %>
@@ -56,14 +63,14 @@
     <div class="border-t border-gray-700 my-1"></div>
 
     <% if can_manage %>
-      <% non_system_roles = server.roles.where.not("json_extract(permissions, '$.owner') = ?", true).where.not(name: "@everyone").ordered %>
+      <% non_system_roles = server.roles.where("json_extract(permissions, '$.owner') IS NOT TRUE").where.not(name: "@everyone").ordered %>
       <div class="relative context-roles-wrapper">
         <button class="flex items-center justify-between w-full px-2.5 py-1.5 text-gray-300 hover:bg-gray-700 hover:text-white rounded"
                 data-context-action="showRoles"
-                data-member-id="<%= membership&.public_id %>"
+                data-member-id="<%= target_membership&.public_id %>"
                 data-server-id="<%= server.public_id %>"
                 data-roles="<%= non_system_roles.map { |r| { id: r.public_id, name: r.name, color: r.color } }.to_json %>"
-                data-member-roles="<%= membership&.roles&.reject(&:owner?)&.map(&:public_id)&.to_json %>">
+                data-member-roles="<%= (target_membership&.roles&.reject(&:owner?)&.map(&:public_id) || []).to_json %>">
           <span>Roles</span>
           <svg class="w-3 h-3 ml-1 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </button>

@@ -29,9 +29,10 @@ class ServerVoiceProvider < ApplicationRecord
   end
 
   def assign_voice_provider_role
-    role = server.roles.find_by(name: "Voice Provider")
+    role = server.roles.find_by(role_type: "voice_provider")
     role ||= server.roles.create!(
       name: "Voice Provider",
+      role_type: "voice_provider",
       position: 1,
       color: "#2dd4bf",
       hoist: false,
@@ -44,13 +45,10 @@ class ServerVoiceProvider < ApplicationRecord
   end
 
   def remove_voice_provider_role
-    role = server.roles.find_by(name: "Voice Provider")
+    role = server.roles.find_by(role_type: "voice_provider")
     return unless role
 
     membership = user.server_memberships.find_by(server: server)
     membership&.roles&.delete(role)
-
-    # Delete the role entirely if no providers left
-    role.destroy if server.server_voice_providers.none?
   end
 end

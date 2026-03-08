@@ -184,12 +184,23 @@ export default class extends Controller {
     }
   }
 
+  _applyAfkMute() {
+    if (!this.room) return
+    this._muted = true
+    this.room.localParticipant.setMicrophoneEnabled(false)
+    this._cleanupLocalLevelMeter()
+    this._updateMuteIcon()
+    this._updateSelfVoiceIndicators()
+    this._patchState("self_mute", { muted: true })
+    this._saveSession()
+  }
+
   _handleForceDisconnect() {
     this._disconnectRoom()
   }
 
   async _handleForceMove(e) {
-    const { toChannelId, toChannelName, voiceStateId } = e.detail
+    const { toChannelId, toChannelName, voiceStateId, afk } = e.detail
     // Prevent the old room's Disconnected event from triggering failover
     this._userInitiatedDisconnect = true
 
@@ -244,6 +255,9 @@ export default class extends Controller {
     try {
       this._userInitiatedDisconnect = false
       await this._joinChannel(toChannelId, this.currentServerId)
+      if (afk) {
+        this._applyAfkMute()
+      }
     } catch (err) {
       console.error("[VoiceChannel] Force-move reconnect failed:", err)
       this._userInitiatedDisconnect = false
@@ -486,6 +500,11 @@ export default class extends Controller {
     this._showControlsBar(data.channel_name || "Voice")
     this._updateVoicePanelStatus("connected")
     this._updateHierarchyButtons()
+
+    // Auto-mute in AFK channels
+    if (data.afk) {
+      this._applyAfkMute()
+    }
   }
 
   async _disconnectRoom() {
@@ -1018,8 +1037,8 @@ export default class extends Controller {
                     <p class="text-green-400 text-sm font-medium">Voice Connected</p>
                   </div>`,
       reconnecting: `<div class="flex items-center gap-2" data-voice-status="reconnecting">
-                       <div class="animate-spin w-3.5 h-3.5 border-2 border-yellow-400 border-t-transparent rounded-full"></div>
-                       <p class="text-yellow-400 text-sm font-medium">Reconnecting...</p>
+                       <div class="animate-spin w-3.5 h-3.5 border-2 border-warning-light border-t-transparent rounded-full"></div>
+                       <p class="text-warning-light text-sm font-medium">Reconnecting...</p>
                      </div>`
     }
 
@@ -1596,10 +1615,10 @@ export default class extends Controller {
     if (state === "reconnecting") {
       el.textContent = "Reconnecting..."
       el.classList.remove("text-green-500")
-      el.classList.add("text-yellow-400")
+      el.classList.add("text-warning-light")
     } else {
       el.textContent = "Voice Connected"
-      el.classList.remove("text-yellow-400")
+      el.classList.remove("text-warning-light")
       el.classList.add("text-green-500")
     }
   }

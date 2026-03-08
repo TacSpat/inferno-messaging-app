@@ -86,8 +86,16 @@ class Role < ApplicationRecord
     name == "@everyone"
   end
 
+  def voice_provider?
+    role_type == "voice_provider"
+  end
+
   def system_role?
     owner? || everyone?
+  end
+
+  def undeletable?
+    system_role? || voice_provider?
   end
 
   private

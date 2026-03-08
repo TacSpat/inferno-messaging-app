@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -62,6 +62,35 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.index ["blocker_id"], name: "index_blocks_on_blocker_id"
   end
 
+  create_table "call_participants", force: :cascade do |t|
+    t.integer "call_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "duration_seconds"
+    t.datetime "joined_at"
+    t.datetime "left_at"
+    t.datetime "updated_at", null: false
+    t.integer "user_id", null: false
+    t.index ["call_id", "user_id"], name: "index_call_participants_on_call_id_and_user_id", unique: true
+    t.index ["call_id"], name: "index_call_participants_on_call_id"
+    t.index ["user_id"], name: "index_call_participants_on_user_id"
+  end
+
+  create_table "calls", force: :cascade do |t|
+    t.integer "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "ended_at"
+    t.integer "initiated_by_id", null: false
+    t.string "livekit_room_name"
+    t.string "public_id", limit: 12, null: false
+    t.datetime "started_at"
+    t.string "status", default: "ringing"
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "status"], name: "index_calls_on_conversation_id_and_status"
+    t.index ["conversation_id"], name: "index_calls_on_conversation_id"
+    t.index ["initiated_by_id"], name: "index_calls_on_initiated_by_id"
+    t.index ["public_id"], name: "index_calls_on_public_id", unique: true
+  end
+
   create_table "categories", force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "name"
@@ -103,6 +132,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.string "public_id", limit: 12, null: false
     t.bigint "server_id", null: false
     t.boolean "shared", default: false
+    t.integer "sidechat_channel_id"
     t.text "topic"
     t.datetime "updated_at", null: false
     t.boolean "video_enabled", default: false
@@ -114,6 +144,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.index ["parent_channel_id"], name: "index_channels_on_parent_channel_id"
     t.index ["public_id"], name: "index_channels_on_public_id", unique: true
     t.index ["server_id"], name: "index_channels_on_server_id"
+    t.index ["sidechat_channel_id"], name: "index_channels_on_sidechat_channel_id"
   end
 
   create_table "contacts", force: :cascade do |t|
@@ -137,13 +168,16 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
 
   create_table "conversation_participants", force: :cascade do |t|
     t.boolean "accepted", default: false, null: false
+    t.integer "contact_id"
     t.bigint "conversation_id", null: false
     t.datetime "created_at", null: false
     t.datetime "last_read_at"
     t.boolean "muted", default: false, null: false
     t.datetime "updated_at", null: false
-    t.bigint "user_id", null: false
-    t.index ["conversation_id", "user_id"], name: "index_conversation_participants_on_conversation_id_and_user_id", unique: true
+    t.bigint "user_id"
+    t.index ["contact_id"], name: "index_conversation_participants_on_contact_id"
+    t.index ["conversation_id", "contact_id"], name: "idx_conv_participants_on_conv_and_contact", unique: true, where: "contact_id IS NOT NULL"
+    t.index ["conversation_id", "user_id"], name: "idx_conv_participants_on_conv_and_user", unique: true, where: "user_id IS NOT NULL"
     t.index ["conversation_id"], name: "index_conversation_participants_on_conversation_id"
     t.index ["user_id"], name: "index_conversation_participants_on_user_id"
   end
@@ -331,6 +365,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.datetime "edited_at"
+    t.boolean "is_sticker", default: false, null: false
     t.string "nostr_author_pubkey"
     t.string "nostr_event_id"
     t.text "nostr_event_json"
@@ -455,6 +490,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.datetime "last_connected_at"
     t.datetime "last_error_at"
     t.text "last_error_message"
+    t.integer "retry_count", default: 0
     t.string "status", default: "active"
     t.datetime "updated_at", null: false
     t.string "url", null: false
@@ -580,6 +616,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.json "permissions"
     t.integer "position"
     t.string "public_id", limit: 12, null: false
+    t.string "role_type"
     t.bigint "server_id", null: false
     t.datetime "updated_at", null: false
     t.index ["public_id"], name: "index_roles_on_public_id", unique: true
@@ -621,6 +658,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.string "public_id", limit: 12, null: false
     t.bigint "server_folder_id"
     t.bigint "server_id", null: false
+    t.bigint "timed_out_by_id"
+    t.datetime "timed_out_until"
     t.datetime "updated_at", null: false
     t.bigint "user_id", null: false
     t.index ["public_id"], name: "index_server_memberships_on_public_id", unique: true
@@ -659,8 +698,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
   end
 
   create_table "servers", force: :cascade do |t|
+    t.string "afk_action", default: "move", null: false
+    t.integer "afk_channel_id"
+    t.integer "afk_timeout", default: 5, null: false
     t.datetime "created_at", null: false
     t.text "description"
+    t.boolean "discoverable", default: false, null: false
     t.string "invite_code"
     t.string "name"
     t.string "nostr_group_id"
@@ -673,6 +716,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
     t.bigint "welcome_channel_id"
     t.boolean "welcome_message_enabled", default: true
     t.text "welcome_message_template", default: "Welcome to the server, {user}! 🎉"
+    t.index ["afk_channel_id"], name: "index_servers_on_afk_channel_id"
     t.index ["invite_code"], name: "index_servers_on_invite_code", unique: true
     t.index ["owner_id"], name: "index_servers_on_owner_id"
     t.index ["public_id"], name: "index_servers_on_public_id", unique: true
@@ -816,13 +860,19 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
   add_foreign_key "bans", "users", column: "banned_by_id"
   add_foreign_key "blocks", "users", column: "blocked_id"
   add_foreign_key "blocks", "users", column: "blocker_id"
+  add_foreign_key "call_participants", "calls"
+  add_foreign_key "call_participants", "users"
+  add_foreign_key "calls", "conversations"
+  add_foreign_key "calls", "users", column: "initiated_by_id"
   add_foreign_key "categories", "servers"
   add_foreign_key "channel_reads", "channels"
   add_foreign_key "channel_reads", "users"
   add_foreign_key "channels", "categories"
   add_foreign_key "channels", "channels", column: "parent_channel_id", on_delete: :cascade
+  add_foreign_key "channels", "channels", column: "sidechat_channel_id"
   add_foreign_key "channels", "servers"
   add_foreign_key "channels", "users", column: "current_voice_provider_id"
+  add_foreign_key "conversation_participants", "contacts"
   add_foreign_key "conversation_participants", "conversations"
   add_foreign_key "conversation_participants", "users"
   add_foreign_key "data_exports", "users"
@@ -872,6 +922,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_02_26_100000) do
   add_foreign_key "server_stickers", "users", column: "creator_id"
   add_foreign_key "server_voice_providers", "servers"
   add_foreign_key "server_voice_providers", "users", on_delete: :nullify
+  add_foreign_key "servers", "channels", column: "afk_channel_id", on_delete: :nullify
   add_foreign_key "servers", "channels", column: "welcome_channel_id", on_delete: :nullify
   add_foreign_key "servers", "users", column: "owner_id"
   add_foreign_key "user_suspensions", "users"

@@ -64,6 +64,21 @@
 
       <div class="border-t border-gray-700 pt-6"></div>
 
+      <!-- Visibility -->
+      <div>
+        <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Visibility</h3>
+        <p class="text-xs text-gray-500 mb-3">Control whether your server appears in relay discovery listings.</p>
+        <label class="flex items-center gap-2.5 cursor-pointer group">
+          <%= f.check_box :discoverable, class: "w-4 h-4 rounded bg-gray-900 border-gray-700 text-accent focus:ring-accent cursor-pointer" %>
+          <div>
+            <span class="text-sm text-gray-300 group-hover:text-white transition">Public server</span>
+            <p class="text-[11px] text-gray-500">When enabled, anyone can discover and join this server through connected relays. When disabled, users need an invite link.</p>
+          </div>
+        </label>
+      </div>
+
+      <div class="border-t border-gray-700 pt-6"></div>
+
       <!-- Welcome Message Settings -->
       <div>
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4">Welcome Message</h2>

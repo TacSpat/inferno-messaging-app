@@ -5,6 +5,8 @@ class Channel < ApplicationRecord
   belongs_to :category, optional: true
   belongs_to :parent_channel, class_name: "Channel", optional: true
   has_many :child_channels, class_name: "Channel", foreign_key: :parent_channel_id, dependent: :destroy
+  belongs_to :sidechat_channel, class_name: "Channel", optional: true
+  has_many :voice_channels_using_as_sidechat, class_name: "Channel", foreign_key: :sidechat_channel_id
   has_many :messages, dependent: :destroy
   has_many :channel_reads, dependent: :destroy
   has_many :nostr_event_logs, dependent: :destroy
@@ -29,6 +31,7 @@ class Channel < ApplicationRecord
   validates :channel_type, presence: true
   validate :within_channel_limit, on: :create
   validate :parent_channel_valid, if: -> { parent_channel_id.present? }
+  validate :sidechat_channel_permissions_match, if: -> { sidechat_channel_id.present? }
 
   scope :ordered, -> { order(position: :asc, created_at: :asc) }
   scope :uncategorized, -> { where(category_id: nil) }
@@ -42,6 +45,14 @@ class Channel < ApplicationRecord
       current = current.parent_channel
     end
     ancestors
+  end
+
+  def sidechat_target
+    sidechat_channel || self
+  end
+
+  def afk?
+    server.afk_channel_id == id
   end
 
   # All channels are Nostr-backed
@@ -136,6 +147,28 @@ class Channel < ApplicationRecord
       urls << url unless urls.include?(url)
     end
     urls
+  end
+
+  def sidechat_channel_permissions_match
+    sc = sidechat_channel
+    return errors.add(:sidechat_channel, "must be a text channel") unless sc&.text?
+    return errors.add(:sidechat_channel, "must be in the same server") unless sc.server_id == server_id
+    return errors.add(:sidechat_channel, "cannot link to itself") if sidechat_channel_id == id
+
+    if encrypted?
+      unless sc.encrypted?
+        return errors.add(:sidechat_channel, "must also be encrypted")
+      end
+      my_roles = permissions_overrides&.dig("allowed_role_ids") || []
+      their_roles = sc.permissions_overrides&.dig("allowed_role_ids") || []
+      unless my_roles.sort == their_roles.sort
+        errors.add(:sidechat_channel, "must have the same allowed roles")
+      end
+    else
+      if sc.encrypted?
+        errors.add(:sidechat_channel, "cannot link to an encrypted channel")
+      end
+    end
   end
 
   private

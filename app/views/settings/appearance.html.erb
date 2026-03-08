@@ -1,5 +1,3 @@
-<h2 class="text-xl font-bold text-white mb-6">Appearance</h2>
-
 <%
   theme_swatches = {
     "inferno"  => "linear-gradient(135deg, #1e1c1b 0%, #2c2a29 40%, #dc2626 100%)",
@@ -12,28 +10,32 @@
   }
 %>
 
-<div class="max-w-lg" data-controller="theme-picker" data-theme-picker-current-value="<%= @user.theme %>">
-  <%= form_tag settings_update_appearance_path, method: :patch do %>
-    <h3 class="text-sm font-semibold text-white/80 uppercase tracking-wide mb-4">Theme</h3>
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
-      <% User::THEMES.each do |theme_name| %>
-        <label class="cursor-pointer">
-          <input type="radio" name="theme" value="<%= theme_name %>"
-                 <%= 'checked' if @user.theme == theme_name %>
-                 class="sr-only peer"
-                 data-action="change->theme-picker#preview">
-          <div class="border-2 border-gray-600 peer-checked:border-white/60 rounded-lg p-3 transition
-                      peer-checked:ring-2 peer-checked:ring-white/20 hover:border-gray-500">
-            <div class="h-8 rounded mb-2" style="background: <%= theme_swatches[theme_name] %>"></div>
-            <span class="text-sm text-gray-300 capitalize"><%= theme_name %></span>
-          </div>
-        </label>
-      <% end %>
-    </div>
-    <button type="submit" class="w-full bg-gradient-to-r from-confirm-dark to-confirm
-           hover:from-confirm hover:to-confirm-light text-white font-semibold
-           py-2.5 rounded transition cursor-pointer text-sm">
-      Save Changes
-    </button>
-  <% end %>
+<div class="fixed bottom-0 left-0 right-0 z-[90] pointer-events-none" data-controller="theme-picker" data-theme-picker-current-value="<%= @user.theme %>">
+  <div class="pointer-events-auto bg-gradient-to-t from-black/80 via-black/60 to-transparent pt-10 pb-5 px-6 sm:px-10">
+    <%= form_tag settings_update_appearance_path, method: :patch do %>
+      <div class="max-w-3xl mx-auto">
+        <h3 class="text-xs font-semibold text-white/70 uppercase tracking-wide mb-3">Theme</h3>
+        <div class="flex flex-wrap gap-2 mb-4">
+          <% User::THEMES.each do |theme_name| %>
+            <label class="cursor-pointer">
+              <input type="radio" name="theme" value="<%= theme_name %>"
+                     <%= 'checked' if @user.theme == theme_name %>
+                     class="sr-only peer"
+                     data-action="change->theme-picker#preview">
+              <div class="border-2 border-white/10 peer-checked:border-white/60 rounded-lg p-2 transition
+                          peer-checked:ring-2 peer-checked:ring-white/20 hover:border-white/30 bg-black/40 backdrop-blur-sm">
+                <div class="h-6 w-20 rounded" style="background: <%= theme_swatches[theme_name] %>"></div>
+                <span class="text-[11px] text-gray-300 capitalize mt-1 block"><%= theme_name %></span>
+              </div>
+            </label>
+          <% end %>
+        </div>
+        <button type="submit" class="w-full bg-gradient-to-r from-confirm-dark to-confirm
+               hover:from-confirm hover:to-confirm-light text-white font-semibold
+               py-2.5 rounded transition cursor-pointer text-sm">
+          Save Changes
+        </button>
+      </div>
+    <% end %>
+  </div>
 </div>

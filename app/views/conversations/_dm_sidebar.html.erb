@@ -3,6 +3,9 @@
   <div class="flex items-center justify-between px-3 h-12 border-b border-gray-900 shadow-sm">
     <h2 class="font-semibold text-white text-sm">Direct Messages</h2>
     <div class="flex items-center gap-1">
+      <button type="button" class="w-8 h-8 flex items-center justify-center rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors cursor-pointer" title="New Group Chat" onclick="document.getElementById('new-group-chat-modal')?.classList.remove('hidden')">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      </button>
       <button class="w-8 h-8 flex items-center justify-center rounded text-gray-400 hover:text-white hover:bg-gray-700 transition-colors" title="Find or start a conversation">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
       </button>
@@ -26,35 +29,64 @@
     <!-- Conversation list -->
     <% @conversations&.each do |conversation| %>
       <% other = conversation.direct? ? conversation.other_user(current_user) : nil %>
-      <% contact = other ? nil : conversation.counterparty_contact %>
+      <% contact = other ? nil : (conversation.direct? ? conversation.counterparty_contact : nil) %>
       <% cp = conversation.conversation_participants.find_by(user: current_user) %>
       <% unread = cp&.unread_count || 0 %>
-      <%= link_to conversation_path(conversation), data: { conversation_id: conversation.public_id, turbo_frame: "main-content" }, class: "flex items-center px-2.5 py-1.5 rounded group #{defined?(@conversation) && @conversation == conversation ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" do %>
+      <%
+        conv_data = {
+          conversation_id: conversation.public_id,
+          turbo_frame: "main-content",
+          conv_type: conversation.group_chat? ? "group" : "direct",
+          conv_name: conversation.display_name(current_user)
+        }
+        if conversation.direct?
+          dm_pubkey = other&.nostr_public_key || conversation.counterparty_pubkey
+          dm_contact = Contact.find_by(pubkey: dm_pubkey) if dm_pubkey.present?
+          conv_data[:contact_id] = dm_contact.id if dm_contact
+          conv_data[:contact_status] = dm_contact.friendship_status if dm_contact
+          conv_data[:other_user_id] = other.public_id if other
+        end
+      %>
+      <%= link_to conversation_path(conversation), data: conv_data, class: "flex items-center px-2.5 py-1.5 rounded group #{defined?(@conversation) && @conversation == conversation ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" do %>
         <div class="relative shrink-0">
-          <% sidebar_avatar = other&.effective_avatar_url || contact&.avatar_url %>
-          <% if sidebar_avatar.present? %>
-            <%= image_tag sidebar_avatar, class: "w-8 h-8 rounded-full object-cover" %>
+          <% if conversation.group_chat? %>
+            <% group_icon = conversation.effective_icon_url %>
+            <% if group_icon %>
+              <%= image_tag group_icon, class: "w-8 h-8 rounded-full object-cover" %>
+            <% else %>
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold bg-accent/30 text-accent-light">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+              </div>
+            <% end %>
           <% else %>
-            <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= other&.profile_color || '#1e1c1b' %>">
-              <%= other&.username&.first&.upcase || conversation.counterparty_display_name&.first&.upcase || '?' %>
-            </div>
-          <% end %>
-          <% if other %>
-            <% dm_status = case other.online_state
-                           when "online" then "bg-green-500"
-                           when "idle" then "bg-yellow-500"
-                           when "dnd" then "bg-red-500"
-                           else "bg-gray-500"
-                           end %>
-            <div data-user-presence="<%= other.public_id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= dm_status %>"></div>
-          <% elsif contact %>
-            <div data-user-presence="contact-<%= contact.id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
+            <% sidebar_avatar = other&.effective_avatar_url || contact&.avatar_url %>
+            <% if sidebar_avatar.present? %>
+              <%= image_tag sidebar_avatar, class: "w-8 h-8 rounded-full object-cover" %>
+            <% else %>
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style="background-color: <%= other&.profile_color || '#1e1c1b' %>">
+                <%= other&.username&.first&.upcase || conversation.counterparty_display_name&.first&.upcase || '?' %>
+              </div>
+            <% end %>
+            <% if other %>
+              <% dm_status = case other.online_state
+                             when "online" then "bg-green-500"
+                             when "idle" then "bg-warning"
+                             when "dnd" then "bg-red-500"
+                             else "bg-gray-500"
+                             end %>
+              <div data-user-presence="<%= other.public_id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= dm_status %>"></div>
+            <% elsif contact %>
+              <div data-user-presence="contact-<%= contact.id %>" class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-gray-800 <%= contact.online? ? 'bg-green-500' : 'bg-gray-500' %>"></div>
+            <% end %>
           <% end %>
         </div>
         <div class="ml-2.5 min-w-0 flex-1">
           <p class="text-sm font-medium truncate">
             <%= conversation.display_name(current_user) %>
           </p>
+          <% if conversation.group_chat? %>
+            <p class="text-xs text-gray-500 truncate"><%= conversation.conversation_participants.count %> members</p>
+          <% end %>
         </div>
         <% if unread > 0 %>
           <div class="mention-badge ml-auto min-w-[18px] h-[18px] bg-accent rounded-full flex items-center justify-center text-white text-xs font-bold px-1 shrink-0">
@@ -107,8 +139,10 @@
     })()
   </script>
 
+  <%= render "conversations/new_group_chat" %>
+
   <!-- User panel (bottom) -->
-  <div class="flex items-center px-2 py-2 border-t border-gray-900" style="background-color: #0a0a09;">
+  <div class="flex items-center px-2 py-2 border-t border-gray-900" style="background-color: var(--color-gray-950);">
     <div class="relative">
       <% if current_user.effective_avatar_url.present? %>
         <%= image_tag current_user.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>

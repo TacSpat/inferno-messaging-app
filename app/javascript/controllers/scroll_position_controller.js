@@ -51,6 +51,11 @@ export default class extends Controller {
         if (el) {
           el.scrollIntoView({ behavior: "smooth", block: "center" })
           this.highlightMessage(el, true)
+        } else {
+          this.loadAroundMessage(mId).then(() => {
+            const msgEl = document.getElementById(`message_${mId}`)
+            if (msgEl) this.highlightMessage(msgEl, true)
+          })
         }
       } else {
         const url = `/servers/${sId}/channels/${cId}`
@@ -204,11 +209,10 @@ export default class extends Controller {
       this.highlightMessage(el, true)
       this._finishInit()
     } else {
-      this.waitForMessage(messageId, (msgEl) => {
-        msgEl.scrollIntoView({ behavior: "smooth", block: "center" })
-        this._lastScrollTop = this.element.scrollTop
-        this.highlightMessage(msgEl, true)
-        this._finishInit()
+      // Message not in DOM — load surrounding messages from server
+      this.loadAroundMessage(messageId).then(() => {
+        const msgEl = document.getElementById(`message_${messageId}`)
+        if (msgEl) this.highlightMessage(msgEl, true)
       })
     }
   }

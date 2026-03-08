@@ -155,6 +155,66 @@ class SettingsController < ApplicationController
     render json: { error: "Encryption failed: #{e.message}" }, status: :internal_server_error, layout: false
   end
 
+  def relays
+    @relays = RelayConnection.order(:url)
+  end
+
+  def add_relay
+    url = params[:relay_url].to_s.strip
+    if url.blank? || !url.match?(/\Awss?:\/\/.+/i)
+      redirect_to user_settings_relays_path, alert: "Invalid relay URL. Must start with wss:// or ws://"
+      return
+    end
+
+    relay = RelayConnection.find_or_create_for_relay(url)
+    if relay
+      relay.enable! if relay.disabled?
+      RelaySubscriptionManager.instance.refresh_connections if RelaySubscriptionManager.instance.running
+      redirect_to user_settings_relays_path, notice: "Relay added."
+    else
+      redirect_to user_settings_relays_path, alert: "Failed to add relay."
+    end
+  end
+
+  def remove_relay
+    relay = RelayConnection.find_by(id: params[:relay_id])
+    if relay
+      relay.destroy
+      RelaySubscriptionManager.instance.refresh_connections if RelaySubscriptionManager.instance.running
+      redirect_to user_settings_relays_path, notice: "Relay removed."
+    else
+      redirect_to user_settings_relays_path, alert: "Relay not found."
+    end
+  end
+
+  def toggle_relay
+    relay = RelayConnection.find_by(id: params[:relay_id])
+    if relay
+      relay.active? ? relay.disable! : relay.enable!
+      RelaySubscriptionManager.instance.refresh_connections if RelaySubscriptionManager.instance.running
+      redirect_to user_settings_relays_path, notice: "Relay #{relay.active? ? 'enabled' : 'disabled'}."
+    else
+      redirect_to user_settings_relays_path, alert: "Relay not found."
+    end
+  end
+
+  def check_relay
+    relay = RelayConnection.find_by(id: params[:relay_id])
+    unless relay
+      render json: { error: "Relay not found" }, status: :not_found
+      return
+    end
+
+    begin
+      result = RelayService.fetch_from_relay(relay.url, { kinds: [0], limit: 1 })
+      relay.mark_connected!
+      render json: { status: "ok", message: "Connected successfully" }
+    rescue => e
+      relay.mark_error!(e.message)
+      render json: { status: "error", message: e.message }
+    end
+  end
+
   private
 
   def profile_params

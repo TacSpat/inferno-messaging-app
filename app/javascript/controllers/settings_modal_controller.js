@@ -42,7 +42,7 @@ export default class extends Controller {
 
   showNav() {
     if (!this.hasSidebarTarget) return
-    this.sidebarTarget.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;justify-content:flex-start;background-color:#141312;"
+    this.sidebarTarget.style.cssText = "display:flex !important;position:fixed;inset:0;z-index:95;width:100%;min-width:100%;justify-content:flex-start;background-color:var(--color-gray-900);"
   }
 
   async navigate(e) {

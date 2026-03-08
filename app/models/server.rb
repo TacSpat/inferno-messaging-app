@@ -2,6 +2,7 @@ class Server < ApplicationRecord
   include HasPublicId
   belongs_to :owner, class_name: "User"
   belongs_to :welcome_channel, class_name: "Channel", optional: true
+  belongs_to :afk_channel, class_name: "Channel", optional: true
   has_many :channels, dependent: :destroy
   has_many :categories, dependent: :destroy
   has_many :server_memberships, dependent: :destroy
@@ -12,6 +13,7 @@ class Server < ApplicationRecord
   has_many :server_emojis, dependent: :destroy
   has_many :server_stickers, dependent: :destroy
   has_many :remote_members, dependent: :destroy
+  has_many :voice_states, dependent: :destroy
   has_many :server_voice_providers, dependent: :destroy
   has_one_attached :icon
   has_one_attached :banner
@@ -67,6 +69,14 @@ class Server < ApplicationRecord
         )
       }
     )
+  end
+
+  def prunable_memberships(days:)
+    cutoff = days.days.ago
+    server_memberships
+      .joins(:user)
+      .where("users.online_at < ? OR users.online_at IS NULL", cutoff)
+      .where.not(user: owner)
   end
 
   def voice_ready?

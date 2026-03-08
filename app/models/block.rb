@@ -5,8 +5,8 @@ class Block < ApplicationRecord
   validates :blocked_id, uniqueness: { scope: :blocker_id }
   validate :not_self
 
-  # Blocking removes any existing contact relationship
-  after_create :remove_contact
+  after_create :sync_contact_blocked
+  after_destroy :sync_contact_unblocked
 
   private
 
@@ -14,8 +14,24 @@ class Block < ApplicationRecord
     errors.add(:blocked, "can't block yourself") if blocker_id == blocked_id
   end
 
-  def remove_contact
+  def sync_contact_blocked
     pubkey = blocked.nostr_public_key
-    Contact.where(pubkey: pubkey).destroy_all if pubkey.present?
+    if pubkey.present?
+      contact = Contact.find_or_initialize_by(pubkey: pubkey)
+      contact.update!(friendship_status: :blocked)
+    end
+    publish_mute_list
+  end
+
+  def sync_contact_unblocked
+    pubkey = blocked.nostr_public_key
+    if pubkey.present?
+      Contact.where(pubkey: pubkey, friendship_status: :blocked).update_all(friendship_status: :not_friend)
+    end
+    publish_mute_list
+  end
+
+  def publish_mute_list
+    NostrPublishJob.perform_later(blocker.id, :mute_list)
   end
 end

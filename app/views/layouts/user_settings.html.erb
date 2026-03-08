@@ -53,12 +53,15 @@
             <%= link_to "Keybinds", user_settings_keybinds_path,
                 data: { turbo_frame: "settings-frame" },
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'keybinds' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <%= link_to "Relays", user_settings_relays_path,
+                data: { turbo_frame: "settings-frame" },
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[relays add_relay remove_relay toggle_relay]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
 
           <% if current_user.instance_admin? %>
             <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Administration</h3>
             <div class="space-y-0.5 mb-4">
-              <%= link_to "Instance Settings", admin_instance_config_path,
+              <%= link_to "Admin Settings", admin_instance_config_path,
                   class: "block px-2 py-1.5 rounded text-sm text-gray-400 hover:bg-gray-700 hover:text-gray-200", data: { turbo_frame: "_top" } %>
             </div>
           <% end %>

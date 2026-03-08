@@ -1,8 +1,19 @@
 <% can_manage = @current_membership&.has_permission?("manage_roles") || @current_membership&.admin? %>
+<%
+  preview_user = current_user
+  preview_avatar = preview_user.effective_avatar_url
+  preview_name = preview_user.display_name_for(@server)
+  preview_initial = preview_user.username[0]&.upcase
+  preview_color = preview_user.profile_color || '#1e1c1b'
+%>
 
 <div data-controller="role-editor"
      data-role-editor-server-id-value="<%= @server.public_id %>"
-     data-role-editor-can-manage-value="<%= can_manage %>">
+     data-role-editor-can-manage-value="<%= can_manage %>"
+     data-role-editor-preview-name-value="<%= preview_name %>"
+     data-role-editor-preview-avatar-value="<%= preview_avatar %>"
+     data-role-editor-preview-initial-value="<%= preview_initial %>"
+     data-role-editor-preview-color-value="<%= preview_color %>">
 
   <script type="application/json" data-role-editor-target="rolesData">
     <%= raw @roles.reject(&:owner?).map { |role|
@@ -14,7 +25,9 @@
         hoist: role.hoist?,
         permissions: role.permissions,
         member_count: role.membership_roles.count,
-        is_everyone: role.everyone?
+        is_everyone: role.everyone?,
+        is_voice_provider: role.voice_provider?,
+        undeletable: role.undeletable?
       }
     }.to_json %>
   </script>
@@ -77,53 +90,198 @@
           </button>
         </div>
 
-        <!-- Display section -->
-        <div class="bg-gray-800 rounded-lg p-4 mb-6">
-          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">Display</h3>
+        <!-- Tabs -->
+        <div class="flex gap-1 mb-6 border-b border-gray-700">
+          <button type="button"
+                  class="px-4 py-2 text-sm font-medium transition-colors border-b-2 border-white text-white"
+                  data-role-editor-target="tabDisplay"
+                  data-action="click->role-editor#switchTab"
+                  data-tab="display">
+            Display
+          </button>
+          <button type="button"
+                  class="px-4 py-2 text-sm font-medium transition-colors border-b-2 border-transparent text-gray-400 hover:text-gray-200"
+                  data-role-editor-target="tabPermissions"
+                  data-action="click->role-editor#switchTab"
+                  data-tab="permissions">
+            Permissions
+          </button>
+          <button type="button"
+                  class="px-4 py-2 text-sm font-medium transition-colors border-b-2 border-transparent text-gray-400 hover:text-gray-200"
+                  data-role-editor-target="tabMembers"
+                  data-action="click->role-editor#switchTab"
+                  data-tab="members">
+            Members
+          </button>
+        </div>
 
-          <div class="space-y-4">
-            <div>
-              <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Role Name</label>
-              <input type="text"
-                     data-role-editor-target="nameInput"
-                     data-action="input->role-editor#updateName"
-                     class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm"
-                     maxlength="50">
-            </div>
+        <!-- Display tab -->
+        <div data-role-editor-target="panelDisplay">
+          <div class="bg-gray-800 rounded-lg p-4 mb-6">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">Display</h3>
 
-            <div>
-              <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Role Color</label>
-              <div class="flex items-center gap-3">
-                <input type="color"
-                       data-role-editor-target="colorInput"
-                       data-action="input->role-editor#previewColor"
-                       class="w-10 h-10 rounded cursor-pointer border-2 border-gray-600 bg-transparent p-0">
-                <div class="flex items-center gap-2">
-                  <span class="w-6 h-6 rounded-full border border-gray-600" data-role-editor-target="roleName"
-                        style="display:none"></span>
-                  <code class="text-sm text-gray-400 font-mono" data-role-editor-target="colorHex"></code>
+            <div class="space-y-4">
+              <div>
+                <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Role Name</label>
+                <input type="text"
+                       data-role-editor-target="nameInput"
+                       data-action="input->role-editor#updateName"
+                       class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm"
+                       maxlength="50"
+                       placeholder="Role name">
+              </div>
+
+              <!-- Color picker -->
+              <div data-role-editor-target="colorSection">
+                <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-2">Role Color</label>
+
+                <!-- Preset swatches (2 rows of 10) -->
+                <div class="flex flex-wrap gap-1 mb-3" data-role-editor-target="swatchGrid">
+                  <% swatches = %w[#1abc9c #2ecc71 #3498db #9b59b6 #e91e63 #f1c40f #e67e22 #e74c3c #95a5a6 #607d8b
+                                   #11806a #1f8b4c #206694 #71368a #ad1457 #c27c0e #a84300 #992d22 #ffffff #99aab5] %>
+                  <% swatches.each do |hex| %>
+                    <button type="button" data-swatch="<%= hex %>" data-action="click->role-editor#pickSwatch"
+                            class="w-7 h-7 rounded border-2 border-transparent hover:scale-110 hover:z-10 transition-all cursor-pointer"
+                            style="background-color: <%= hex %>"></button>
+                  <% end %>
+                </div>
+
+                <!-- Current color swatch + hex input -->
+                <div class="flex items-center gap-2.5">
+                  <button type="button" data-action="click->role-editor#toggleCustomPicker"
+                          class="w-9 h-9 rounded-lg border-2 border-gray-600 hover:border-gray-400 cursor-pointer transition-colors shrink-0"
+                          data-role-editor-target="colorPreviewSwatch" title="Pick custom color"></button>
+                  <div class="flex items-center bg-gray-900 border border-gray-600 rounded-lg px-3 py-1.5">
+                    <span class="text-gray-500 text-sm font-mono mr-1">#</span>
+                    <input type="text"
+                           data-role-editor-target="colorHexInput"
+                           data-action="input->role-editor#hexInput keydown.enter->role-editor#hexCommit blur->role-editor#hexCommit"
+                           class="bg-transparent text-white text-sm font-mono w-16 outline-none uppercase tracking-wider"
+                           maxlength="6"
+                           spellcheck="false">
+                  </div>
+                </div>
+
+                <!-- Collapsible custom color picker -->
+                <div data-role-editor-target="pickerCollapse"
+                     class="grid transition-[grid-template-rows] duration-300 ease-in-out"
+                     style="grid-template-rows: 0fr;">
+                  <div class="overflow-hidden">
+                    <div class="pt-3">
+                      <!-- SV gradient field -->
+                      <div class="relative rounded-lg overflow-hidden cursor-crosshair select-none mb-3" style="height: 160px;"
+                           data-role-editor-target="svField"
+                           data-action="pointerdown->role-editor#svDown">
+                        <canvas data-role-editor-target="svCanvas" class="w-full h-full block"></canvas>
+                        <div data-role-editor-target="svCursor"
+                             class="absolute w-4 h-4 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)] pointer-events-none -translate-x-1/2 -translate-y-1/2"
+                             style="top: 0; left: 100%;"></div>
+                      </div>
+                      <!-- Hue slider -->
+                      <div class="relative h-3 rounded-full cursor-pointer select-none"
+                           style="background: linear-gradient(to right, #ff0000, #ffff00, #00ff00, #00ffff, #0000ff, #ff00ff, #ff0000);"
+                           data-role-editor-target="hueTrack"
+                           data-action="pointerdown->role-editor#hueDown">
+                        <div data-role-editor-target="hueCursor"
+                             class="absolute top-1/2 rounded-full border-2 border-white shadow-[0_0_0_1px_rgba(0,0,0,0.3)] pointer-events-none -translate-x-1/2 -translate-y-1/2"
+                             style="left: 0; width: 16px; height: 16px;"></div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div class="flex items-center justify-between py-2 border-t border-gray-700/50 mt-4 pt-4" data-hoist-row>
-              <div>
-                <p class="text-sm text-white">Display separately</p>
-                <p class="text-xs text-gray-500">Show members with this role in their own group in the member list</p>
+
+              <!-- Hoist toggle -->
+              <div class="flex items-center justify-between py-2 border-t border-gray-700/50 mt-4 pt-4" data-hoist-row>
+                <div>
+                  <p class="text-sm text-white">Display separately</p>
+                  <p class="text-xs text-gray-500">Show members with this role in their own group in the member list</p>
+                </div>
+                <button type="button"
+                        class="relative w-11 h-6 rounded-full transition-colors focus:outline-none bg-gray-600"
+                        data-hoist-toggle
+                        data-action="click->role-editor#toggleHoist">
+                  <span class="block w-5 h-5 bg-white rounded-full shadow transform transition-transform translate-x-0.5"></span>
+                </button>
               </div>
-              <button type="button"
-                      class="relative w-11 h-6 rounded-full transition-colors focus:outline-none bg-gray-600"
-                      data-hoist-toggle
-                      data-action="click->role-editor#toggleHoist">
-                <span class="block w-5 h-5 bg-white rounded-full shadow transform transition-transform translate-x-0.5"></span>
-              </button>
+
+              <!-- Live preview -->
+              <div class="border-t border-gray-700/50 pt-4">
+                <p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Preview</p>
+                <div class="bg-gray-900 rounded-lg p-3">
+                  <!-- Member list style preview -->
+                  <div class="flex items-center gap-2.5 mb-3 pb-3 border-b border-gray-700/50">
+                    <div class="text-[10px] font-semibold uppercase tracking-wide" data-role-editor-target="previewGroupLabel" style="color: #99aab5">Role Name — 1</div>
+                  </div>
+                  <div class="flex items-center">
+                    <div class="relative shrink-0">
+                      <% if preview_avatar.present? %>
+                        <img src="<%= preview_avatar %>" class="w-8 h-8 rounded-full object-cover">
+                      <% else %>
+                        <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= preview_color %>">
+                          <%= preview_initial %>
+                        </div>
+                      <% end %>
+                      <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-900 bg-green-500"></div>
+                    </div>
+                    <div class="ml-2 min-w-0">
+                      <span class="text-sm font-medium truncate block" data-role-editor-target="previewName"><%= preview_name %></span>
+                    </div>
+                  </div>
+                  <!-- Message style preview -->
+                  <div class="flex items-start mt-3 pt-3 border-t border-gray-700/50">
+                    <div class="relative shrink-0 mr-3">
+                      <% if preview_avatar.present? %>
+                        <img src="<%= preview_avatar %>" class="w-10 h-10 rounded-full object-cover">
+                      <% else %>
+                        <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style="background-color: <%= preview_color %>">
+                          <%= preview_initial %>
+                        </div>
+                      <% end %>
+                    </div>
+                    <div class="min-w-0">
+                      <div class="flex items-baseline gap-2">
+                        <span class="text-sm font-medium" data-role-editor-target="previewMsgName"><%= preview_name %></span>
+                        <span class="text-xs text-gray-500">Today at <%= Time.current.strftime("%l:%M %p").strip %></span>
+                      </div>
+                      <p class="text-sm text-gray-300 mt-0.5">This is a preview of how the role color looks in chat.</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Permissions section -->
-        <div class="bg-gray-800 rounded-lg p-4 mb-20">
-          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">Permissions</h3>
-          <div data-role-editor-target="permissionsSection"></div>
+        <!-- Permissions tab -->
+        <div data-role-editor-target="panelPermissions" class="hidden">
+          <div class="bg-gray-800 rounded-lg p-4 mb-20">
+            <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">Permissions</h3>
+            <div data-role-editor-target="permissionsSection"></div>
+          </div>
+        </div>
+
+        <!-- Members tab -->
+        <div data-role-editor-target="panelMembers" class="hidden">
+          <div class="bg-gray-800 rounded-lg p-4 mb-20">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide">Members</h3>
+              <span class="text-xs text-gray-500" data-role-editor-target="memberCountLabel"></span>
+            </div>
+
+            <div class="relative mb-4">
+              <input type="text"
+                     data-role-editor-target="memberSearchInput"
+                     data-action="input->role-editor#searchMembers"
+                     class="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm pl-9"
+                     placeholder="Search members...">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+            </div>
+
+            <div data-role-editor-target="memberList" class="space-y-0.5 max-h-[500px] overflow-y-auto"></div>
+          </div>
         </div>
 
         <!-- Sticky save bar -->
