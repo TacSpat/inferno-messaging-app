@@ -28,6 +28,13 @@ export default class extends Controller {
     this.setupPaste()
     this.setupFileIntercept()
 
+    // Listen for pin toggle from persistent header (outside this controller's scope)
+    this._onTogglePinned = (e) => {
+      const url = e.detail?.url
+      if (url) this._togglePinnedFromHeader(url)
+    }
+    document.addEventListener("toggle-pinned-panel", this._onTogglePinned)
+
     // Listen for context menu reply/react events
     this._replyHandler = (e) => {
       const { messageId, authorName, preview } = e.detail
@@ -42,12 +49,15 @@ export default class extends Controller {
       this.openReactionPickerForMessage(messageId, clientX, clientY)
     }
     this._editHandler = (e) => {
-      const { messageId, content, preview } = e.detail
+      const { messageId, content, preview, attachments } = e.detail
       this._editMessageId = messageId
       this._editOriginalContent = this.inputTarget.value
+      this._editRemoveFileIds = []
+      this._editAttachments = attachments || []
       this.inputTarget.value = content
       if (this.hasEditPreviewTarget) this.editPreviewTarget.textContent = preview
       if (this.hasEditBarTarget) this.editBarTarget.classList.remove("hidden")
+      this._renderEditAttachments()
       this.autoResize()
       this.inputTarget.focus()
       this.inputTarget.setSelectionRange(this.inputTarget.value.length, this.inputTarget.value.length)
@@ -85,11 +95,12 @@ export default class extends Controller {
     }
     document.addEventListener("inferno:emoji-map-ready", this._emojiMapReady)
 
-    // Show pin badge only if there are unseen pins
-    if (this.hasPinBadgeTarget) {
-      const currentCount = parseInt(this.pinBadgeTarget.textContent) || 0
+    // Show pin badge only if there are unseen pins (badge is in persistent header)
+    const pinBadge = document.getElementById("ph-pin-badge")
+    if (pinBadge) {
+      const currentCount = parseInt(pinBadge.textContent) || 0
       const seen = parseInt(localStorage.getItem(`seenPins_${this.channelIdValue}`)) || 0
-      if (currentCount > 0 && currentCount > seen) this.pinBadgeTarget.classList.remove("hidden")
+      if (currentCount > 0 && currentCount > seen) pinBadge.classList.remove("hidden")
     }
 
     // Timeout awareness
@@ -115,6 +126,7 @@ export default class extends Controller {
     if (this._reactHandler) document.removeEventListener("inferno:react", this._reactHandler)
     if (this._editHandler) document.removeEventListener("inferno:edit", this._editHandler)
     if (this._timeoutHandler) document.removeEventListener("inferno:member-timeout", this._timeoutHandler)
+    if (this._onTogglePinned) document.removeEventListener("toggle-pinned-panel", this._onTogglePinned)
     if (this._timeoutTimer) clearTimeout(this._timeoutTimer)
     if (this.typingUsers) {
       this.typingUsers.forEach(u => clearTimeout(u.timeout))
@@ -251,7 +263,17 @@ export default class extends Controller {
 
     const content = this.inputTarget.value.trim()
     const hasFiles = this.pendingFiles.length > 0
-    if (!content && !hasFiles) return
+
+    // Edit mode: empty content + all attachments removed → delete the message
+    if (this._editMessageId) {
+      const remainingAttachments = (this._editAttachments || []).length
+      if (!content && !remainingAttachments) {
+        this._deleteEditedMessage()
+        return
+      }
+    } else if (!content && !hasFiles) {
+      return
+    }
 
     // Convert emoji placeholders back to :name: before sending
     let msgContent = content
@@ -275,11 +297,13 @@ export default class extends Controller {
         const response = await fetch(url, {
           method: "PATCH",
           headers: { "X-CSRF-Token": token, "Content-Type": "application/json", "Accept": "text/html" },
-          body: JSON.stringify({ message: { content: msgContent } })
+          body: JSON.stringify({ message: { content: msgContent, remove_file_ids: this._editRemoveFileIds || [] } })
         })
         if (response.ok) {
           this._editOriginalContent = null
           this._editMessageId = null
+          this._editRemoveFileIds = []
+          this._editAttachments = []
           this.inputTarget.value = ""
           this.updateHighlight()
           this.inputTarget.style.height = "auto"
@@ -287,6 +311,8 @@ export default class extends Controller {
           this.inputTarget.style.fontSize = ""
           if (this.inputTarget.parentElement) this.inputTarget.parentElement.style.backgroundColor = ""
           if (this.hasEditBarTarget) this.editBarTarget.classList.add("hidden")
+          this.filePreviewTarget.innerHTML = ""
+          this.filePreviewTarget.classList.add("hidden")
         }
       } catch(e) {
         console.error("Message edit failed:", e)
@@ -438,6 +464,63 @@ export default class extends Controller {
     })
   }
 
+  _renderEditAttachments() {
+    const container = this.filePreviewTarget
+    container.innerHTML = ""
+    if (!this._editAttachments || this._editAttachments.length === 0) {
+      container.classList.add("hidden")
+      return
+    }
+    container.classList.remove("hidden")
+    this._editAttachments.forEach((att, i) => {
+      const wrapper = document.createElement("div")
+      wrapper.className = "relative inline-flex items-center bg-gray-700 rounded-lg p-2 mr-2 mb-2"
+
+      if (att.type === "image" && att.url) {
+        const img = document.createElement("img")
+        img.className = "w-16 h-16 object-cover rounded"
+        img.src = att.url
+        wrapper.appendChild(img)
+      } else {
+        const icon = att.type === "video" ? "\u{1F3AC}" : att.type === "audio" ? "\u{1F3B5}" : "\u{1F4CE}"
+        const name = document.createElement("span")
+        name.className = "text-xs text-gray-200 max-w-[100px] truncate"
+        name.textContent = `${icon} ${att.name}`
+        wrapper.appendChild(name)
+      }
+
+      const btn = document.createElement("button")
+      btn.type = "button"
+      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger hover:bg-danger-light rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
+      btn.innerHTML = "&times;"
+      btn.addEventListener("click", () => this._removeEditAttachment(i))
+      wrapper.appendChild(btn)
+
+      container.appendChild(wrapper)
+    })
+  }
+
+  _removeEditAttachment(index) {
+    const removed = this._editAttachments.splice(index, 1)[0]
+    if (removed) this._editRemoveFileIds.push(removed.id)
+    this._renderEditAttachments()
+  }
+
+  async _deleteEditedMessage() {
+    const channelId = this.channelIdValue
+    const messageId = this._editMessageId
+    const token = document.querySelector("meta[name=csrf-token]")?.content
+    try {
+      await fetch(`/channels/${channelId}/messages/${messageId}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": token }
+      })
+    } catch (e) {
+      console.error("Delete edited message failed:", e)
+    }
+    this.clearEdit()
+  }
+
   // --- Replies ---
 
   setReply(event) {
@@ -459,9 +542,13 @@ export default class extends Controller {
 
   clearEdit() {
     this._editMessageId = null
+    this._editRemoveFileIds = []
+    this._editAttachments = []
     if (this.hasEditBarTarget) this.editBarTarget.classList.add("hidden")
     this.inputTarget.value = this._editOriginalContent || ""
     this._editOriginalContent = null
+    this.filePreviewTarget.innerHTML = ""
+    this.filePreviewTarget.classList.add("hidden")
     this.autoResize()
   }
 
@@ -494,7 +581,7 @@ export default class extends Controller {
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     `
-    header.querySelector("button").addEventListener("click", () => panel.remove())
+    header.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); panel.remove() })
     panel.appendChild(header)
 
     // Content
@@ -525,9 +612,10 @@ export default class extends Controller {
     btn.closest(".relative").appendChild(panel)
 
     // Hide the badge — user has seen the pins, persist in localStorage
-    if (this.hasPinBadgeTarget) {
-      this.pinBadgeTarget.classList.add("hidden")
-      const count = parseInt(this.pinBadgeTarget.textContent) || 0
+    const phBadge = document.getElementById("ph-pin-badge")
+    if (phBadge) {
+      phBadge.classList.add("hidden")
+      const count = parseInt(phBadge.textContent) || 0
       try { localStorage.setItem(`seenPins_${this.channelIdValue}`, count) } catch {}
     }
 
@@ -539,6 +627,18 @@ export default class extends Controller {
       }
     }
     setTimeout(() => document.addEventListener("click", dismiss), 0)
+  }
+
+  async _togglePinnedFromHeader(url) {
+    // Reuse togglePinnedPanel logic but with the persistent header pin button
+    const existing = this.element.querySelector(".pinned-panel") || document.querySelector("#ph-pin-wrap .pinned-panel")
+    if (existing) { existing.remove(); return }
+    const btn = document.getElementById("ph-pin-btn")
+    if (!btn || !url) return
+    // Synthesize a fake event for togglePinnedPanel
+    const fakeEvent = { currentTarget: btn }
+    btn.dataset.pinnedUrl = url
+    this.togglePinnedPanel(fakeEvent)
   }
 
   async _refreshPinnedPanel() {
@@ -740,14 +840,15 @@ export default class extends Controller {
         }
         break
       case "pin_update":
-        if (this.hasPinBadgeTarget) {
-          const count = data.pin_count || 0
-          const seen = parseInt(localStorage.getItem(`seenPins_${this.channelIdValue}`)) || 0
-          const hasNew = count > seen
-          this.pinBadgeTargets.forEach(badge => {
-            badge.textContent = count
-            badge.classList.toggle("hidden", !hasNew)
-          })
+        {
+          const pinBadge = document.getElementById("ph-pin-badge")
+          if (pinBadge) {
+            const count = data.pin_count || 0
+            const seen = parseInt(localStorage.getItem(`seenPins_${this.channelIdValue}`)) || 0
+            const hasNew = count > seen
+            pinBadge.textContent = count
+            pinBadge.classList.toggle("hidden", !hasNew)
+          }
         }
         this._refreshPinnedPanel()
         break

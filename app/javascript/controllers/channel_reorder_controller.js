@@ -1,10 +1,11 @@
 import { Controller } from "@hotwired/stimulus"
 
-const NEST_HOVER_MS = 350
+const NEST_HOVER_MS = 600
 const MAX_DEPTH = 3
 const DRAG_THRESHOLD = 5
 const SCROLL_EDGE = 40
 const SCROLL_SPEED = 8
+const CATEGORY_EDGE_PX = 6 // px from top of category header to trigger before vs into
 
 export default class extends Controller {
   static values = { serverId: String, canManage: Boolean }
@@ -30,6 +31,7 @@ export default class extends Controller {
     // Drop target tracking
     this._currentDropTarget = null
     this._currentDropBefore = true
+    this._currentDropMode = null // null | 'before-category' | 'after-category' | 'into-category'
 
     // Original position for cancel
     this._originalContainer = null
@@ -49,13 +51,15 @@ export default class extends Controller {
   disconnect() {
     this.element.removeEventListener("pointerdown", this._onPointerDown)
     this._cancelDrag()
+    if (this._saveTimer) {
+      clearTimeout(this._saveTimer)
+      this._flushSaveOrder()
+    }
   }
 
   // ─── Drag units ──────────────────────────────────────────────
 
   // Returns an array of DOM elements that constitute a single draggable unit.
-  // Uses data-attribute lookups so the result is correct even if siblings are
-  // out of order (e.g. after a previous drag or Turbo Stream update).
   _getDragUnit(el) {
     if (el.hasAttribute("data-category-id")) return [el]
 
@@ -70,7 +74,6 @@ export default class extends Controller {
         `.voice-child-channels[data-parent-channel="${channelId}"]`
       )
 
-      // Canonical order: <a> → participants → child-container
       if (participants) unit.push(participants)
       if (childContainer) unit.push(childContainer)
     }
@@ -188,7 +191,6 @@ export default class extends Controller {
 
     const clone = sourceEl.cloneNode(true)
     clone.className = "channel-drag-ghost"
-    // Copy the inner content styling
     clone.innerHTML = sourceEl.innerHTML
     clone.style.width = `${sourceEl.offsetWidth}px`
     clone.style.left = `${x + 8}px`
@@ -201,11 +203,17 @@ export default class extends Controller {
   _performDrop() {
     const isDraggingCategory = this._draggedEl.hasAttribute("data-category-id")
 
+    // Snapshot original position to detect no-op
+    const origContainer = this._originalContainer
+    const origNextSibling = this._originalNextSibling
+
+    // Snapshot positions for FLIP animation
+    const snapshots = this._snapshotPositions()
+    const dragUnitCopy = [...this._dragUnit]
+
     if (this._nestActivated && this._nestTarget) {
-      // ── Nest drop ──
       this._commitNest()
     } else if (this._currentDropTarget) {
-      // ── Normal reorder drop ──
       const target = this._currentDropTarget
       const before = this._currentDropBefore
 
@@ -215,10 +223,8 @@ export default class extends Controller {
         this._dropChannel(target, before)
       }
     }
-    // else: dropped nowhere valid — elements stay in original position (no-op)
 
-    // Repair all voice channel structures: ensure each voice channel's
-    // participants + child-container are contiguous siblings right after the <a>
+    // Repair voice structure
     this._repairVoiceStructure()
 
     // Fix indent class based on final position
@@ -241,29 +247,62 @@ export default class extends Controller {
       }
     })
 
+    // Detect no-op: element ended up in the same spot
+    const mainEl = dragUnitCopy[0]
+    const lastEl = dragUnitCopy[dragUnitCopy.length - 1]
+    const samePosition = mainEl.parentElement === origContainer &&
+      lastEl.nextElementSibling === origNextSibling
+
     this._cleanupDrag()
+
+    if (samePosition) return // No change — skip save, broadcast, and animation
+
+    // FLIP animate moved elements
+    this._animateFLIP(snapshots, dragUnitCopy)
+
     this.saveOrder()
 
-    // Tell the sidebar controller (same element) to reinit voice sortables
+    // Tell the sidebar controller to reinit voice sortables
     this.element.dispatchEvent(new CustomEvent("channel-reorder:done", { bubbles: false }))
   }
 
   _dropCategory(target, before) {
-    // Categories can only live at root level
+    // Categories always live at root level
+    this._detachDragUnit()
+
     if (target.hasAttribute("data-category-id")) {
-      this._detachDragUnit()
+      // Category-to-category or around a category
       const ref = before ? target : target.nextElementSibling
       this.element.insertBefore(this._dragUnit[0], ref)
+    } else if (target.hasAttribute("data-channel-id")) {
+      // Category dropped relative to a root-level channel
+      if (before) {
+        this.element.insertBefore(this._dragUnit[0], target)
+      } else {
+        const targetUnit = this._getDragUnit(target)
+        const lastEl = targetUnit[targetUnit.length - 1]
+        this.element.insertBefore(this._dragUnit[0], lastEl.nextElementSibling)
+      }
     }
   }
 
   _dropChannel(target, before) {
     if (target.hasAttribute("data-category-id")) {
-      // Dropping onto a category → append into its channels container
-      const channelsDiv = target.querySelector("[data-category-collapse-target='channels']")
-      if (channelsDiv) {
+      if (this._currentDropMode === "before-category") {
+        // Drop at root level, above the category
         this._detachDragUnit()
-        this._insertDragUnit(channelsDiv, null) // append
+        this._insertDragUnit(this.element, target)
+      } else if (this._currentDropMode === "after-category") {
+        // Drop at root level, below the category
+        this._detachDragUnit()
+        this._insertDragUnit(this.element, target.nextElementSibling)
+      } else {
+        // Drop INTO category (append at bottom)
+        const channelsDiv = target.querySelector("[data-category-collapse-target='channels']")
+        if (channelsDiv) {
+          this._detachDragUnit()
+          this._insertDragUnit(channelsDiv, null)
+        }
       }
     } else if (target.hasAttribute("data-channel-id")) {
       const container = target.parentElement
@@ -274,7 +313,6 @@ export default class extends Controller {
         return
       }
 
-      // Detach first so nextElementSibling isn't a drag-unit element
       this._detachDragUnit()
 
       if (before) {
@@ -287,7 +325,6 @@ export default class extends Controller {
     }
   }
 
-  // Remove drag unit from the DOM without destroying references
   _detachDragUnit() {
     this._dragUnit.forEach(el => el.remove())
   }
@@ -305,8 +342,6 @@ export default class extends Controller {
       this._draggedEl = null
       return
     }
-    // Elements haven't been moved yet (or we restore them)
-    // No DOM changes needed — just clean up visuals
     this._cleanupDrag()
   }
 
@@ -345,6 +380,7 @@ export default class extends Controller {
     this._dragUnit = []
     this._currentDropTarget = null
     this._currentDropBefore = true
+    this._currentDropMode = null
     this._originalContainer = null
     this._originalNextSibling = null
   }
@@ -355,19 +391,91 @@ export default class extends Controller {
     document.removeEventListener("keydown", this._onKeyDown)
   }
 
+  // ─── FLIP animation ──────────────────────────────────────────
+
+  _snapshotPositions() {
+    const map = new Map()
+    const els = this.element.querySelectorAll(
+      "[data-channel-id], [data-category-id], .voice-participants, .voice-child-channels"
+    )
+    els.forEach(el => {
+      map.set(el, el.getBoundingClientRect())
+    })
+    return map
+  }
+
+  _animateFLIP(snapshots, dragUnitEls) {
+    snapshots.forEach((oldRect, el) => {
+      // Skip elements no longer in DOM
+      if (!el.isConnected) return
+      // Skip the dragged elements (they were just restored to position)
+      if (dragUnitEls && dragUnitEls.includes(el)) return
+
+      const newRect = el.getBoundingClientRect()
+      const deltaY = oldRect.top - newRect.top
+      const deltaX = oldRect.left - newRect.left
+
+      if (Math.abs(deltaY) < 1 && Math.abs(deltaX) < 1) return
+
+      el.style.transform = `translate(${deltaX}px, ${deltaY}px)`
+      el.style.transition = "none"
+
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          el.style.transition = "transform 200ms ease"
+          el.style.transform = ""
+          const cleanup = () => {
+            el.style.transition = ""
+            el.style.transform = ""
+          }
+          el.addEventListener("transitionend", cleanup, { once: true })
+          // Safety timeout in case transitionend doesn't fire
+          setTimeout(cleanup, 250)
+        })
+      })
+    })
+  }
+
   // ─── Drop target detection ──────────────────────────────────
 
   _updateDropTarget(x, y) {
+    // If cursor overlaps any drag unit element's rect (with padding), clear target —
+    // we're over our own faded item. Padding covers gaps between sidebar items.
+    const PAD = 4
+    for (const u of this._dragUnit) {
+      const r = u.getBoundingClientRect()
+      if (x >= r.left && x <= r.right && y >= r.top - PAD && y <= r.bottom + PAD) {
+        this._hideDropLine()
+        this._clearDropTargetHighlight()
+        this._handleNestCandidate(null, x, y)
+        this._currentDropTarget = null
+        this._currentDropMode = null
+        return
+      }
+    }
+
     // Hide ghost so elementFromPoint sees through it
     this._ghost.style.display = "none"
     const el = document.elementFromPoint(x, y)
     this._ghost.style.display = ""
 
     if (!el || !this.element.contains(el)) {
+      // Cursor might be below all items but within the sidebar's visible area
+      const sidebarRect = this.element.getBoundingClientRect()
+      if (x >= sidebarRect.left && x <= sidebarRect.right &&
+          y >= sidebarRect.top && y <= sidebarRect.bottom) {
+        const nearest = this._findNearestRootItem(y)
+        if (nearest) {
+          const { item, before } = nearest
+          this._applyNearestRootDrop(item, before, x, y)
+          return
+        }
+      }
       this._hideDropLine()
       this._clearDropTargetHighlight()
       this._handleNestCandidate(null, x, y)
       this._currentDropTarget = null
+      this._currentDropMode = null
       return
     }
 
@@ -392,8 +500,7 @@ export default class extends Controller {
     if (!target) {
       const vcc = el.closest(".voice-child-channels")
       if (vcc && this._nestActivated) {
-        // Inside the active nest container — keep nest active
-        return
+        return // Inside the active nest container
       }
     }
 
@@ -403,33 +510,71 @@ export default class extends Controller {
       if (channelsDiv && !isDraggingCategory) {
         const catEl = channelsDiv.closest("[data-category-id]")
         if (catEl && catEl !== this._draggedEl) {
-          this._clearDropTargetHighlight()
-          catEl.classList.add("channel-drop-target")
-          this._highlightedCategory = catEl
+          this._highlightCategory(catEl)
           this._currentDropTarget = catEl
-          this._currentDropBefore = false // append into category
-          this._hideDropLine()
+          this._currentDropBefore = false
+          this._currentDropMode = "into-category"
+          this._positionDropLineInsideContainer(channelsDiv)
           this._handleNestCandidate(null, x, y)
           return
         }
       }
     }
 
-    if (!target || target === this._draggedEl) {
-      // Check if we're in empty space at root level
-      if (el === this.element || el.parentElement === this.element) {
+    if (!target) {
+      // Cursor is on empty sidebar space — find nearest root item and place relative to it
+      const nearest = this._findNearestRootItem(y)
+      if (nearest) {
+        const { item, before } = nearest
+        this._applyNearestRootDrop(item, before, x, y)
+      } else {
         this._hideDropLine()
         this._clearDropTargetHighlight()
         this._handleNestCandidate(null, x, y)
         this._currentDropTarget = null
+        this._currentDropMode = null
       }
       return
     }
 
-    // Skip if target is part of our own drag unit
-    if (this._dragUnit.includes(target)) return
-    // Skip if target is inside our drag unit
-    if (this._dragUnit.some(u => u.contains(target))) return
+    // Skip if target is the dragged element itself or part of the drag unit
+    if (target === this._draggedEl || this._dragUnit.includes(target) ||
+        this._dragUnit.some(u => u.contains(target))) {
+      return
+    }
+
+    // ── Category dragging ──
+    if (isDraggingCategory) {
+      // If hovering over a channel inside a category, redirect to the category
+      if (target.hasAttribute("data-channel-id")) {
+        const parentCat = target.closest("[data-category-id]")
+        if (parentCat && parentCat !== this._draggedEl) {
+          target = parentCat
+        } else if (parentCat) {
+          return // Inside our own category
+        }
+        // else: root-level channel, allow
+      }
+
+      // Must be at root level
+      if (target.parentElement !== this.element &&
+          !target.closest("[data-category-id]")?.parentElement === this.element) return
+
+      // For root-level targets, determine before/after
+      const rect = target.getBoundingClientRect()
+      const midY = rect.top + rect.height / 2
+      const before = y < midY
+
+      this._currentDropTarget = target
+      this._currentDropBefore = before
+      this._currentDropMode = null
+      this._clearDropTargetHighlight()
+      this._positionDropLine(target, before)
+      this._handleNestCandidate(null, x, y)
+      return
+    }
+
+    // ── Channel dragging ──
 
     // Non-voice channels cannot drop inside voice nests — redirect to root parent
     if (!isDraggingVoice && !isDraggingCategory &&
@@ -443,24 +588,50 @@ export default class extends Controller {
       }
     }
 
-    // Category dragging: only reorder among root-level categories
-    if (isDraggingCategory) {
-      if (!target.hasAttribute("data-category-id")) return
-      if (target.parentElement !== this.element) return
-    }
-
-    // Channel dragging: skip if hovering over a category header and we want to
-    // drop INTO it (handled separately above via category highlight)
-    if (!isDraggingCategory && target.hasAttribute("data-category-id")) {
-      // Show category drop target highlight
-      this._clearDropTargetHighlight()
-      target.classList.add("channel-drop-target")
-      this._highlightedCategory = target
-      this._currentDropTarget = target
-      this._currentDropBefore = false
-      this._hideDropLine()
-      this._handleNestCandidate(null, x, y)
-      return
+    // Hovering over a category header
+    if (target.hasAttribute("data-category-id")) {
+      const header = target.querySelector(":scope > div:first-child")
+      if (header) {
+        if (isDraggingCategory) {
+          // Category-to-category: two-zone (before / after)
+          const headerRect = header.getBoundingClientRect()
+          const midY = headerRect.top + headerRect.height / 2
+          const catBefore = y < midY
+          this._clearDropTargetHighlight()
+          this._currentDropTarget = target
+          this._currentDropBefore = catBefore
+          this._currentDropMode = catBefore ? "before-category" : "after-category"
+          this._positionDropLineAtCategoryEdge(target, catBefore)
+          this._handleNestCandidate(null, x, y)
+          return
+        } else {
+          // Channel dragging: top edge of header → place at root before category
+          const headerRect = header.getBoundingClientRect()
+          const topZone = headerRect.top + CATEGORY_EDGE_PX
+          if (y < topZone) {
+            this._clearDropTargetHighlight()
+            this._currentDropTarget = target
+            this._currentDropBefore = true
+            this._currentDropMode = "before-category"
+            this._positionDropLineAtCategoryEdge(target, true)
+            this._handleNestCandidate(null, x, y)
+            return
+          }
+          // Rest of header → drop INTO category at bottom
+          this._highlightCategory(target)
+          this._currentDropTarget = target
+          this._currentDropBefore = false
+          this._currentDropMode = "into-category"
+          const channelsDiv = target.querySelector("[data-category-collapse-target='channels']")
+          if (channelsDiv) {
+            this._positionDropLineInsideContainer(channelsDiv)
+          } else {
+            this._positionDropLineAtCategoryEdge(target, false)
+          }
+          this._handleNestCandidate(null, x, y)
+          return
+        }
+      }
     }
 
     // Determine before/after based on cursor Y vs midpoint
@@ -468,19 +639,55 @@ export default class extends Controller {
     const midY = rect.top + rect.height / 2
     const before = y < midY
 
+    // If dragging a channel over a channel inside a category, check if we're at
+    // the category boundary — allow escaping to root level
+    if (!isDraggingCategory && target.hasAttribute("data-channel-id")) {
+      const catChannelsDiv = target.closest("[data-category-collapse-target='channels']")
+      if (catChannelsDiv) {
+        const catEl = catChannelsDiv.closest("[data-category-id]")
+        if (catEl) {
+          // Get visible (non-drag-unit) channels in this category
+          const siblingChannels = [...catChannelsDiv.querySelectorAll(":scope > [data-channel-id]")]
+            .filter(el => !this._dragUnit.includes(el))
+          const isFirst = siblingChannels[0] === target
+          const isLast = siblingChannels[siblingChannels.length - 1] === target
+
+          // After the last channel → escape below category
+          if (!before && isLast) {
+            this._clearDropTargetHighlight()
+            this._currentDropTarget = catEl
+            this._currentDropBefore = false
+            this._currentDropMode = "after-category"
+            this._positionDropLineAtCategoryEdge(catEl, false)
+            this._handleNestCandidate(null, x, y)
+            return
+          }
+        }
+      }
+    }
+
     this._currentDropTarget = target
     this._currentDropBefore = before
+    this._currentDropMode = null
 
-    // Clear category highlight if showing a line
-    this._clearDropTargetHighlight()
+    // Show category bounding box if target is inside a category
+    const targetCatDiv = target.closest?.("[data-category-id]")
+    if (targetCatDiv && !isDraggingCategory) {
+      this._highlightCategory(targetCatDiv)
+    } else {
+      this._clearDropTargetHighlight()
+    }
 
     // Position the drop indicator line
     this._positionDropLine(target, before)
 
-    // Handle nest candidate (voice-to-voice)
+    // Handle nest candidate (voice-to-voice) — only in center zone of target
     if (isDraggingVoice && target.hasAttribute("data-voice-channel") &&
         target.hasAttribute("data-channel-id")) {
-      this._handleNestCandidate(target, x, y)
+      const tRect = target.getBoundingClientRect()
+      const edgeZone = Math.max(tRect.height * 0.3, 8)
+      const inCenter = y > tRect.top + edgeZone && y < tRect.bottom - edgeZone
+      this._handleNestCandidate(inCenter ? target : null, x, y)
     } else {
       this._handleNestCandidate(null, x, y)
     }
@@ -502,17 +709,117 @@ export default class extends Controller {
     const lineY = before ? edgeRect.top : edgeRect.bottom
     const top = lineY - containerRect.top + this.element.scrollTop
 
-    this._dropLine.style.display = ""
-    this._dropLine.style.top = `${top - 1}px`
+    // If line was hidden, jump to position instantly and play spawn animation
+    const wasHidden = this._dropLine.style.display === "none"
+    if (wasHidden) {
+      this._dropLine.style.transition = "none"
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.display = ""
+      this._dropLine.classList.remove("spawn")
+      this._dropLine.offsetHeight
+      this._dropLine.classList.add("spawn")
+      this._dropLine.style.transition = ""
+    } else {
+      this._dropLine.style.top = `${top - 1}px`
+    }
 
-    // Indent the line if target is inside a category or nested container
-    const inCategory = targetEl.closest("[data-category-collapse-target='channels']")
+    // Indent the line if target is inside a nested container
     const inNest = targetEl.closest(".voice-child-channels")
     if (inNest) {
       this._dropLine.style.left = "34px"
-    } else if (inCategory) {
-      this._dropLine.style.left = "8px"
     } else {
+      this._dropLine.style.left = "8px"
+    }
+  }
+
+  _positionDropLineAtCategoryEdge(catEl, before) {
+    if (!this._dropLine) return
+
+    const containerRect = this.element.getBoundingClientRect()
+    const catRect = catEl.getBoundingClientRect()
+    const lineY = before ? catRect.top : catRect.bottom
+    const top = lineY - containerRect.top + this.element.scrollTop
+
+    const wasHidden = this._dropLine.style.display === "none"
+    if (wasHidden) {
+      this._dropLine.style.transition = "none"
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.left = "8px"
+      this._dropLine.style.display = ""
+      this._dropLine.classList.remove("spawn")
+      this._dropLine.offsetHeight
+      this._dropLine.classList.add("spawn")
+      this._dropLine.style.transition = ""
+    } else {
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.left = "8px"
+    }
+  }
+
+  _positionDropLineInsideContainer(containerEl) {
+    if (!this._dropLine) return
+
+    const scrollRect = this.element.getBoundingClientRect()
+    const containerRect = containerEl.getBoundingClientRect()
+
+    // Position at the bottom of the container's content
+    const lastChild = containerEl.lastElementChild
+    let lineY
+    if (lastChild) {
+      // After the last visible child (skip drag unit elements)
+      const children = [...containerEl.children].filter(el => !this._dragUnit.includes(el))
+      const last = children[children.length - 1]
+      if (last) {
+        const lastUnit = this._getDragUnit(last)
+        const lastUnitEl = lastUnit[lastUnit.length - 1]
+        lineY = lastUnitEl.getBoundingClientRect().bottom
+      } else {
+        lineY = containerRect.top
+      }
+    } else {
+      lineY = containerRect.top
+    }
+
+    const top = lineY - scrollRect.top + this.element.scrollTop
+
+    const wasHidden = this._dropLine.style.display === "none"
+    if (wasHidden) {
+      this._dropLine.style.transition = "none"
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.left = "8px"
+      this._dropLine.style.display = ""
+      this._dropLine.classList.remove("spawn")
+      this._dropLine.offsetHeight
+      this._dropLine.classList.add("spawn")
+      this._dropLine.style.transition = ""
+    } else {
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.left = "8px"
+    }
+  }
+
+  _positionDropLineAtContainerTop(containerEl) {
+    if (!this._dropLine) return
+
+    const scrollRect = this.element.getBoundingClientRect()
+    const children = [...containerEl.children].filter(el => !this._dragUnit.includes(el))
+    const first = children[0]
+    const lineY = first ? first.getBoundingClientRect().top : containerEl.getBoundingClientRect().top
+
+    const top = lineY - scrollRect.top + this.element.scrollTop
+
+    const wasHidden = this._dropLine.style.display === "none"
+    if (wasHidden) {
+      this._dropLine.style.transition = "none"
+      this._dropLine.style.top = `${top - 1}px`
+      this._dropLine.style.left = "8px"
+      this._dropLine.style.display = ""
+      this._dropLine.classList.remove("spawn")
+      this._dropLine.offsetHeight
+      this._dropLine.classList.add("spawn")
+      this._dropLine.style.transition = ""
+    } else {
+      this._dropLine.style.top = `${top - 1}px`
       this._dropLine.style.left = "8px"
     }
   }
@@ -528,26 +835,91 @@ export default class extends Controller {
     }
   }
 
+  _highlightCategory(catEl) {
+    if (this._highlightedCategory === catEl) return
+    this._clearDropTargetHighlight()
+    catEl.classList.add("channel-drop-target")
+    this._highlightedCategory = catEl
+  }
+
+  _findLastRootItem() {
+    const children = [...this.element.children].filter(el =>
+      (el.hasAttribute("data-channel-id") || el.hasAttribute("data-category-id")) &&
+      !this._dragUnit.includes(el)
+    )
+    return children[children.length - 1] || null
+  }
+
+  _findNearestRootItem(cursorY) {
+    const children = [...this.element.children].filter(el =>
+      (el.hasAttribute("data-channel-id") || el.hasAttribute("data-category-id")) &&
+      !this._dragUnit.includes(el)
+    )
+    if (!children.length) return null
+
+    // Find the item whose edge is closest to the cursor
+    let bestItem = null
+    let bestDist = Infinity
+    let bestBefore = false
+
+    for (const child of children) {
+      const rect = child.getBoundingClientRect()
+      const distTop = Math.abs(cursorY - rect.top)
+      const distBottom = Math.abs(cursorY - rect.bottom)
+
+      if (distTop < bestDist) {
+        bestDist = distTop
+        bestItem = child
+        bestBefore = true
+      }
+      if (distBottom < bestDist) {
+        bestDist = distBottom
+        bestItem = child
+        bestBefore = false
+      }
+    }
+
+    return bestItem ? { item: bestItem, before: bestBefore } : null
+  }
+
+  _applyNearestRootDrop(item, before, x, y) {
+    const isDraggingCategory = this._draggedEl.hasAttribute("data-category-id")
+
+    // When dragging a channel and nearest is a category with before=true,
+    // redirect to "into-category" (append at bottom) — channels belong inside categories
+    // Channel in empty space above a category → place at root level before it
+    // (not into-category, since the cursor is clearly in the gap above)
+
+    this._currentDropTarget = item
+    this._currentDropBefore = before
+    this._clearDropTargetHighlight()
+    if (item.hasAttribute("data-category-id")) {
+      this._currentDropMode = before ? "before-category" : "after-category"
+      this._positionDropLineAtCategoryEdge(item, before)
+    } else {
+      this._currentDropMode = null
+      this._positionDropLine(item, before)
+    }
+    this._handleNestCandidate(null, x, y)
+  }
+
   // ─── Nest logic (hold-to-nest voice channels) ───────────────
 
   _handleNestCandidate(target, x, y) {
     // If nest is already activated and we're still near the target, keep it
     if (this._nestActivated && this._nestTarget) {
       if (target === this._nestTarget) return
-      // Check if cursor is inside the nest target's child container
       const childContainer = this._findChildContainer(this._nestTarget)
       if (childContainer) {
         const ccRect = childContainer.getBoundingClientRect()
         if (x >= ccRect.left && x <= ccRect.right && y >= ccRect.top && y <= ccRect.bottom) {
-          return // Still inside nest zone
+          return
         }
       }
-      // Moved away from nest — cancel
       this._clearNest()
       return
     }
 
-    // Clear timer if target changed
     if (this._nestTarget !== target) {
       this._clearNestTimer()
     }
@@ -557,15 +929,12 @@ export default class extends Controller {
       return
     }
 
-    // Already timing this target
     if (this._nestTarget === target && this._nestTimer) return
 
-    // Validate: target must be a voice channel, not self, not own descendant
     if (!target.hasAttribute("data-voice-channel")) return
     if (target === this._draggedEl) return
     if (this._isDescendantOf(target, this._draggedEl.dataset.channelId)) return
 
-    // Validate depth
     const targetDepth = this._getChannelDepth(target)
     const draggedSubtreeDepth = this._getSubtreeDepth(this._draggedEl)
     if (targetDepth + draggedSubtreeDepth >= MAX_DEPTH) return
@@ -578,13 +947,10 @@ export default class extends Controller {
     if (!this._nestTarget) return
     this._nestActivated = true
 
-    // Hide the regular drop line
     this._hideDropLine()
 
-    // Highlight the target channel
     this._nestTarget.classList.add("channel-nest-target")
 
-    // Find or create the voice-child-channels container
     let childContainer = this._findChildContainer(this._nestTarget)
 
     if (!childContainer) {
@@ -592,7 +958,6 @@ export default class extends Controller {
       childContainer.className = "voice-child-channels"
       const nestId = this._nestTarget.dataset.channelId
       childContainer.dataset.parentChannel = nestId
-      // Insert after the target link and its voice-participants (if any)
       const participants = this.element.querySelector(
         `.voice-participants[data-voice-channel-participants="${nestId}"]`
       )
@@ -600,7 +965,6 @@ export default class extends Controller {
       insertAfter.after(childContainer)
     }
 
-    // Add the drop zone indicator inside the child container
     this._nestDropZone = document.createElement("div")
     this._nestDropZone.className = "channel-nest-dropzone"
     this._nestDropZone.innerHTML = `
@@ -618,13 +982,11 @@ export default class extends Controller {
     const childContainer = this._findChildContainer(this._nestTarget)
     if (!childContainer) return
 
-    // Remove the dropzone indicator first
     if (this._nestDropZone) {
       this._nestDropZone.remove()
       this._nestDropZone = null
     }
 
-    // Detach then re-insert to avoid sibling reference issues
     this._detachDragUnit()
     this._dragUnit.forEach(el => {
       childContainer.appendChild(el)
@@ -670,7 +1032,6 @@ export default class extends Controller {
   }
 
   _startAutoScroll(speed) {
-    // Already scrolling — just update speed
     this._autoScrollSpeed = speed
     if (this._scrollRAF) return
 
@@ -690,10 +1051,6 @@ export default class extends Controller {
 
   // ─── Voice structure repair ─────────────────────────────────
 
-  // After any drop, ensure every voice channel's structural siblings
-  // (voice-participants, voice-child-channels) sit directly after its <a> tag.
-  // Uses data-attribute lookups so it works even if a prior operation left the
-  // DOM out of order.
   _repairVoiceStructure() {
     this.element.querySelectorAll("[data-voice-channel][data-channel-id]").forEach(channelEl => {
       const channelId = channelEl.dataset.channelId
@@ -752,7 +1109,6 @@ export default class extends Controller {
     )
   }
 
-  // Walk up from a nested channel to find the topmost voice channel in the chain
   _findNestRoot(el) {
     let vcc = el.closest(".voice-child-channels")
     if (!vcc) return null
@@ -780,27 +1136,53 @@ export default class extends Controller {
     return false
   }
 
-  // ─── Save order ────────────────────────────────────────────
+  // ─── Save order (debounced) ─────────────────────────────────
 
-  async saveOrder() {
-    // Flag so the sidebar controller ignores its own broadcast
+  saveOrder() {
+    // Debounce: if multiple reorders happen quickly, only send the final state
+    if (this._saveTimer) clearTimeout(this._saveTimer)
+
+    // Keep the skip flag fresh so broadcasts during the debounce window are ignored
+    window._skipNextSidebarReorder = Date.now()
+
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null
+      this._flushSaveOrder()
+    }, 800)
+  }
+
+  async _flushSaveOrder() {
     window._skipNextSidebarReorder = Date.now()
 
     const channels = []
     const categories = []
 
-    let catPos = 0
-    this.element.querySelectorAll(":scope > [data-category-id]").forEach(catEl => {
-      const catId = catEl.dataset.categoryId
-      categories.push({ id: catId, position: catPos++ })
+    // Walk root children in DOM order to assign unified root_position
+    let rootPos = 0
+    for (const child of this.element.children) {
+      if (child.hasAttribute("data-category-id")) {
+        const catId = child.dataset.categoryId
+        categories.push({ id: catId, position: rootPos++ })
 
-      const channelsDiv = catEl.querySelector("[data-category-collapse-target='channels']")
-      if (channelsDiv) {
-        this._collectChannels(channelsDiv, catId, null, channels)
+        const channelsDiv = child.querySelector("[data-category-collapse-target='channels']")
+        if (channelsDiv) {
+          this._collectChannels(channelsDiv, catId, null, channels)
+        }
+      } else if (child.hasAttribute("data-channel-id")) {
+        const channelId = child.dataset.channelId
+        channels.push({
+          id: channelId,
+          position: rootPos++,
+          category_id: null,
+          parent_channel_id: null
+        })
+
+        const nested = this._findChildContainer(child)
+        if (nested) {
+          this._collectChannels(nested, null, channelId, channels)
+        }
       }
-    })
-
-    this._collectTopLevel(channels)
+    }
 
     const csrf = document.querySelector("meta[name=csrf-token]")?.content
     await fetch(`/servers/${this.serverIdValue}/reorder_channels`, {
@@ -826,26 +1208,6 @@ export default class extends Controller {
       const nested = this._findChildContainer(child)
       if (nested) {
         this._collectChannels(nested, categoryId, channelId, result)
-      }
-    }
-  }
-
-  _collectTopLevel(result) {
-    let pos = 0
-    for (const child of this.element.children) {
-      if (!child.hasAttribute("data-channel-id")) continue
-
-      const channelId = child.dataset.channelId
-      result.push({
-        id: channelId,
-        position: pos++,
-        category_id: null,
-        parent_channel_id: null
-      })
-
-      const nested = this._findChildContainer(child)
-      if (nested) {
-        this._collectChannels(nested, null, channelId, result)
       }
     }
   }

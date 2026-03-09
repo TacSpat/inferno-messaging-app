@@ -21,7 +21,7 @@ class Channel < ApplicationRecord
     read.last_read_at < last_message_at
   end
 
-  enum :channel_type, { text: 0, voice: 1, announcement: 2 }
+  enum :channel_type, { text: 0, voice: 1 }
 
   before_validation { self.name = name.downcase if name.present? }
   before_create :set_position_to_end
@@ -181,7 +181,13 @@ class Channel < ApplicationRecord
     else
       server.channels.where(category_id: nil, parent_channel_id: nil)
     end
-    self.position = (siblings.maximum(:position) || -1) + 1
+
+    if position.present?
+      # Insert at specified position — shift siblings at or after this position down
+      siblings.where("position >= ?", position).update_all("position = position + 1")
+    else
+      self.position = (siblings.maximum(:position) || -1) + 1
+    end
   end
 
   def generate_channel_keypair_on_encrypt!

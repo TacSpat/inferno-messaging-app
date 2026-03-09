@@ -59,6 +59,7 @@ Rails.application.routes.draw do
     member do
       post :join
       delete :leave
+      get :search
     end
     resources :channels, only: [ :show, :new, :create, :edit, :update, :destroy ] do
       member do
@@ -167,6 +168,7 @@ Rails.application.routes.draw do
 
   # Mentions autocomplete
   get "servers/:server_id/mentions", to: "mentions#search", as: :server_mentions
+  get "servers/:server_id/search_autocomplete", to: "mentions#search_autocomplete", as: :server_search_autocomplete
 
   # Channel messages
   resources :channels, only: [] do
@@ -208,6 +210,7 @@ Rails.application.routes.draw do
         get :older_messages
         get :newer_messages
         get :pinned
+        get :search
       end
       member do
         post :toggle_reaction, controller: "dm_reactions", action: "toggle"

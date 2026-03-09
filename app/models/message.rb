@@ -92,7 +92,7 @@ class Message < ApplicationRecord
       url = url.sub(/(?:%22%5[dD]|%22|%5[dD]|["\]\[,})+>])+\z/, "")
       if image_url?(url)
         fname = begin; File.basename(URI.parse(url).path); rescue; "image"; end
-        %(<div class="mt-2"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" loading="lazy" data-preview-src="#{url}" data-preview-filename="#{fname}"></div>)
+        %(<div class="mt-2 inline-block"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" data-preview-src="#{url}" data-preview-filename="#{fname}" data-lock-dims></div>)
       else
         match
       end
@@ -102,7 +102,7 @@ class Message < ApplicationRecord
     html.gsub(%r{(^|(?<=[>\s]))(/rails/active_storage/\S+?)(?=<|$|\s)}m) do |match|
       url = $2
       fname = begin; File.basename(URI.parse(url).path); rescue; "sticker"; end
-      %(<div class="mt-2"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" loading="lazy" data-preview-src="#{url}" data-preview-filename="#{fname}"></div>)
+      %(<div class="mt-2 inline-block"><img src="#{url}" class="max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow" data-preview-src="#{url}" data-preview-filename="#{fname}" data-lock-dims></div>)
     end
   end
 
@@ -197,7 +197,7 @@ embeds << %(<div class="mt-2 max-w-sm rounded-lg overflow-hidden border border-g
       # Synchronous fetch for immediate display (fallback/uncached path)
       gif_src = fetch_tenor_og_image(tenor_url)
       if gif_src
-        embeds << %(<div class="mt-2 inline-block relative group/gif" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}" data-gif-url="#{gif_src}" data-preview-url="#{gif_src}"><img src="#{gif_src}" alt="GIF" class="max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-animated-gif data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif"></div>)
+        embeds << %(<div class="mt-2 inline-block relative group/gif" data-tenor-gif-id="#{gif_id}" data-tenor-url="#{tenor_url}" data-gif-url="#{gif_src}" data-preview-url="#{gif_src}"><img src="#{gif_src}" alt="GIF" class="max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer" loading="lazy" data-animated-gif data-preview-src="#{gif_src}" data-preview-filename="tenor-#{gif_id}.gif" data-lock-dims></div>)
       else
         embeds << %(<a href="#{tenor_url}" target="_blank" rel="noopener" class="mt-2 flex items-center gap-3 max-w-xs rounded-lg border border-gray-700 bg-gray-800 hover:bg-gray-750 transition-colors no-underline px-3 py-2.5"><span class="text-red-400 text-sm">View GIF on Tenor</span></a>)
       end

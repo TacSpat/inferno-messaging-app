@@ -1,176 +1,82 @@
 <%= turbo_frame_tag "main-content", class: "flex flex-col flex-1 min-h-0", data: { turbo_action: "advance" } do %>
-<div class="flex flex-col flex-1 min-h-0" data-controller="sidechat" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>">
+<div class="flex flex-col flex-1 min-h-0 relative" data-controller="sidechat" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>">
 
-  <!-- Channel header -->
-  <div class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
-    <!-- Hamburger menu (mobile only) -->
-    <button type="button" class="md:hidden text-gray-400 hover:text-white mr-2 p-1" data-action="click->mobile-nav#toggleSidebar">
-      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-    </button>
+  <!-- Data for persistent header -->
+  <div id="channel-header-data" class="hidden"
+       data-channel-icon="voice"
+       data-channel-name="<%= @channel.name %>"
+       data-channel-name-html="<%= h(render_name_with_emojis(@channel.name, @server)) %>"
+       data-channel-topic="<%= @channel.topic %>"
+       data-pin-count="0"
+       data-pin-url=""></div>
 
-    <svg class="w-5 h-5 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-    <h1 class="font-semibold text-white"><%= render_name_with_emojis(@channel.name, @server) %></h1>
-    <% if @is_afk_channel %>
-      <span class="ml-2 text-xs font-semibold text-warning-light bg-warning-light/10 px-2 py-0.5 rounded-full">AFK</span>
-    <% end %>
-    <% if @channel.topic.present? %>
-      <div class="mx-4 w-px h-6 bg-gray-600 hidden sm:block"></div>
-      <p class="text-sm text-gray-400 truncate hidden sm:block"><%= @channel.topic %></p>
-    <% end %>
+  <%= render "shared/search_panel" %>
 
-    <div class="flex-1"></div>
-
-    <% if @channel.voice_user_limit > 0 %>
-      <span class="text-xs text-gray-500 mr-2"><%= @voice_states.count + @remote_voice_states.size %>/<%= @channel.voice_user_limit %></span>
-    <% end %>
+  <!-- Desktop: Voice + Sidechat + Members horizontal split -->
+  <div class="flex-1 hidden lg:flex min-h-0 relative">
+    <div class="flex-1 flex flex-col min-h-0" style="background: var(--color-gray-950);" data-voice-content
+         data-controller="voice-context" data-voice-context-server-id-value="<%= @server.public_id %>">
+      <%= render "channels/voice_content", voice_configured: @voice_configured, voice_states: @voice_states, remote_voice_states: @remote_voice_states, channel: @channel, server: @server, is_afk_channel: @is_afk_channel %>
+    </div>
 
     <% unless @is_afk_channel %>
-    <!-- Chat toggle button -->
-    <button type="button" data-action="click->sidechat#toggle" data-sidechat-target="toggleBtn" title="Toggle Chat" class="text-gray-400 hover:text-white p-1 transition">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
-    </button>
+    <%= render "channels/sidechat_panel" %>
     <% end %>
   </div>
 
-  <!-- Voice + Sidechat horizontal split -->
-  <div class="flex-1 flex min-h-0">
-
-  <!-- Voice channel content -->
-  <div class="flex-1 flex flex-col min-h-0" style="background: var(--color-gray-950);" data-voice-content
+  <!-- Mobile: Full-height voice + inline controls -->
+  <div class="flex-1 flex flex-col min-h-0 lg:hidden" style="background: var(--color-gray-950);"
        data-controller="voice-context" data-voice-context-server-id-value="<%= @server.public_id %>">
-    <% if !@voice_configured %>
-      <!-- No voice providers available -->
-      <div class="flex-1 flex items-center justify-center p-4">
-        <div class="text-center max-w-sm">
-          <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-            <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
-          </div>
-          <h2 class="text-xl font-bold text-white mb-2">Voice Not Available</h2>
-          <p class="text-gray-400 text-sm mb-4">Voice channels need at least one voice provider. Members can volunteer their LiveKit credentials in server settings.</p>
-          <% membership = current_user.server_memberships.find_by(server: @server) %>
-          <% if membership&.has_permission?("manage_server") || membership&.admin? %>
-            <a href="<%= server_settings_voice_path(@server) %>"
-               class="px-4 py-2 bg-accent hover:bg-accent-light text-white rounded text-sm font-medium cursor-pointer transition inline-block">
-              Voice Settings
-            </a>
-          <% else %>
-            <p class="text-gray-500 text-xs">Ask a server admin to set up voice in Server Settings > Voice.</p>
-          <% end %>
-        </div>
-      </div>
-    <% elsif @voice_states.any? || @remote_voice_states.any? %>
-      <!-- Participant grid -->
-      <div class="flex-1 p-3 overflow-y-auto" data-voice-participant-grid>
-        <div class="voice-grid h-full">
-          <% @voice_states.each do |vs| %>
-            <div class="voice-card group"
-                 data-voice-participant-id="<%= vs.user.public_id %>"
-                 data-voice-state-id="<%= vs.public_id %>"
-                 data-action="contextmenu->voice-context#show"
-                 style="--card-color: <%= vs.user.profile_color || '#1e1c1b' %>">
-              <div class="voice-card-inner">
-                <!-- Avatar -->
-                <div class="voice-avatar-wrapper">
-                  <% if vs.user.effective_avatar_url.present? %>
-                    <img src="<%= vs.user.effective_avatar_url %>" class="voice-avatar">
-                  <% else %>
-                    <div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, <%= vs.user.profile_color || '#1e1c1b' %>, white 20%)">
-                      <%= vs.user.username[0].upcase %>
-                    </div>
-                  <% end %>
-                </div>
-                <!-- Status icons on avatar -->
-                <% if vs.self_mute || vs.self_deaf || vs.server_mute || vs.server_deaf %>
-                  <div class="voice-status-icons">
-                    <% if vs.server_mute %>
-                      <div class="voice-status-badge server-muted">
-                        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg>
-                      </div>
-                    <% elsif vs.self_mute %>
-                      <div class="voice-status-badge">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg>
-                      </div>
-                    <% end %>
-                    <% if vs.server_deaf %>
-                      <div class="voice-status-badge server-deafened">
-                        <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
-                      </div>
-                    <% elsif vs.self_deaf %>
-                      <div class="voice-status-badge">
-                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
-                      </div>
-                    <% end %>
-                  </div>
-                <% end %>
-                <!-- Username pill -->
-                <div class="voice-username-pill">
-                  <span class="truncate"><%= vs.user.display_name.presence || vs.user.username %></span>
-                </div>
-              </div>
-            </div>
-          <% end %>
-          <% @remote_voice_states.each do |rvs| %>
-            <div class="voice-card group"
-                 data-voice-participant-id="<%= rvs[:user_id] %>"
-                 data-voice-remote="true"
-                 data-action="contextmenu->voice-context#show"
-                 style="--card-color: <%= rvs[:profile_color] || '#1e1c1b' %>">
-              <div class="voice-card-inner">
-                <div class="voice-avatar-wrapper">
-                  <% if rvs[:avatar_url].present? %>
-                    <img src="<%= rvs[:avatar_url] %>" class="voice-avatar">
-                  <% else %>
-                    <div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, <%= rvs[:profile_color] || '#1e1c1b' %>, white 20%)">
-                      <%= (rvs[:username] || "?")[0].upcase %>
-                    </div>
-                  <% end %>
-                </div>
-                <div class="voice-username-pill">
-                  <span class="truncate"><%= rvs[:username] || "Remote User" %></span>
-                </div>
-              </div>
-            </div>
-          <% end %>
-        </div>
-      </div>
-    <% else %>
-      <!-- Empty state -->
-      <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
-        <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
-          <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
-        </div>
-        <h2 class="text-xl font-bold text-white mb-1" data-slot="channel-name"><%= render_name_with_emojis(@channel.name, @server) %></h2>
-        <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
-      </div>
-    <% end %>
+    <div class="flex-1 flex flex-col min-h-0">
+      <%= render "channels/voice_content", voice_configured: @voice_configured, voice_states: @voice_states, remote_voice_states: @remote_voice_states, channel: @channel, server: @server, is_afk_channel: @is_afk_channel %>
+    </div>
 
-
-    <!-- Join / Connected bar -->
-    <div class="shrink-0 px-4 py-3 flex items-center justify-center" style="background: var(--color-gray-950);"
-         data-voice-panel-status data-voice-panel-channel="<%= @channel.public_id %>" data-voice-panel-server="<%= @server.public_id %>">
-      <% current_voice_state = VoiceState.find_by(user: current_user, channel: @channel) %>
-      <% if current_voice_state %>
-        <div class="flex items-center gap-2" data-voice-status="connected">
-          <div class="w-2 h-2 rounded-full bg-green-400"></div>
-          <p class="text-green-400 text-sm font-medium">Voice Connected</p>
-        </div>
-      <% else %>
-        <button type="button"
-                class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition flex items-center gap-2 cursor-pointer text-sm"
-                data-voice-status="join"
-                onclick="window.dispatchEvent(new CustomEvent('voice:join', { detail: { channelId: '<%= @channel.public_id %>', serverId: '<%= @server.public_id %>' } }))">
-          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
-          Join Voice
+    <!-- Mobile voice controls bar (synced with sidebar #voice-controls-bar) -->
+    <div id="mobile-voice-controls" class="hidden shrink-0 border-t border-gray-800 px-4 py-2" style="background: var(--color-gray-900);">
+      <script>
+        // Show mobile bar if sidebar voice bar is already visible (user navigated while connected)
+        requestAnimationFrame(() => {
+          const sidebarBar = document.getElementById("voice-controls-bar")
+          const mobileBar = document.getElementById("mobile-voice-controls")
+          if (sidebarBar && !sidebarBar.classList.contains("hidden") && mobileBar) {
+            mobileBar.classList.remove("hidden")
+          }
+        })
+      </script>
+      <div class="flex items-center justify-center gap-3">
+        <button type="button" data-mobile-voice-btn="mute" class="p-2.5 rounded-full hover:bg-gray-700 text-gray-300 hover:text-white transition cursor-pointer" title="Mute"
+                onclick="document.querySelector('[data-voice-channel-target=&quot;muteBtn&quot;]')?.click()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
         </button>
-      <% end %>
+        <button type="button" data-mobile-voice-btn="deafen" class="p-2.5 rounded-full hover:bg-gray-700 text-gray-300 hover:text-white transition cursor-pointer" title="Deafen"
+                onclick="document.querySelector('[data-voice-channel-target=&quot;deafenBtn&quot;]')?.click()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z M15.54 8.46a5 5 0 010 7.07"/></svg>
+        </button>
+        <button type="button" data-mobile-voice-btn="camera" class="p-2.5 rounded-full hover:bg-gray-700 text-gray-300 hover:text-white transition cursor-pointer" title="Camera"
+                onclick="document.querySelector('[data-voice-channel-target=&quot;cameraBtn&quot;]')?.click()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </button>
+        <button type="button" data-mobile-voice-btn="screenshare" class="p-2.5 rounded-full hover:bg-gray-700 text-gray-300 hover:text-white transition cursor-pointer" title="Share Screen"
+                onclick="document.querySelector('[data-voice-channel-target=&quot;screenShareBtn&quot;]')?.click()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        </button>
+        <div class="w-px h-8 bg-gray-700 mx-1"></div>
+        <button type="button" class="p-2.5 rounded-full bg-danger/20 hover:bg-danger/40 text-danger-light hover:text-danger transition cursor-pointer" title="Disconnect"
+                onclick="document.querySelector('[data-voice-channel-target=&quot;disconnectBtn&quot;]')?.click()">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M5 3a2 2 0 00-2 2v1c0 8.284 6.716 15 15 15h1a2 2 0 002-2v-3.28a1 1 0 00-.684-.948l-4.493-1.498a1 1 0 00-1.21.502l-1.13 2.257a11.042 11.042 0 01-5.516-5.517l2.257-1.128a1 1 0 00.502-1.21L9.228 3.683A1 1 0 008.279 3H5z"/></svg>
+        </button>
+        <% unless @is_afk_channel %>
+        <div class="w-px h-8 bg-gray-700 mx-1"></div>
+        <% linked_text = @channel.sidechat_channel_id.present? ? Channel.find_by(id: @channel.sidechat_channel_id) : nil %>
+        <% if linked_text %>
+        <a href="<%= server_channel_path(@server, linked_text) %>" class="p-2.5 rounded-full hover:bg-gray-700 text-gray-300 hover:text-white transition cursor-pointer" title="Open Chat">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+        </a>
+        <% end %>
+        <% end %>
+      </div>
     </div>
   </div>
 
-  <% unless @is_afk_channel %>
-  <!-- Sidechat panel -->
-  <%= render "channels/sidechat_panel" %>
-  <% end %>
-
-  </div><!-- end horizontal split -->
 </div>
 <% end %>

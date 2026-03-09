@@ -4,7 +4,7 @@ class NostrChannelReorderSyncJob < ApplicationJob
   # Publish channel reorder changes to remote instances via Nostr relay.
   # Remote instances receive these and update their local channel positions,
   # then broadcast to their ActionCable clients for instant UI updates.
-  def perform(server_id, channels_data, categories_data, hierarchy_changed)
+  def perform(server_id, channels_data, categories_data, hierarchy_changed = false)
     owner = User.owner
     return unless owner&.nostr_private_key.present?
 

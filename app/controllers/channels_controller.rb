@@ -144,6 +144,7 @@ class ChannelsController < ApplicationController
   def new
     category = params[:category_id].present? ? @server.categories.find_by(public_id: params[:category_id]) : nil
     @channel = @server.channels.new(category: category)
+    @channel.position = params[:position].to_i if params[:position].present?
     if params[:parent_channel_id].present?
       @parent_channel = @server.channels.voice.find_by(public_id: params[:parent_channel_id])
       if @parent_channel
@@ -294,7 +295,7 @@ class ChannelsController < ApplicationController
   end
 
   def channel_params
-    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, :voice_bitrate, :voice_user_limit, :video_enabled, :parent_channel_id, allowed_role_ids: [])
+    permitted = params.require(:channel).permit(:name, :topic, :channel_type, :nsfw, :category_id, :encrypted, :voice_bitrate, :voice_user_limit, :video_enabled, :parent_channel_id, :position, allowed_role_ids: [])
     if permitted[:encrypted] == "1" || permitted[:encrypted] == true
       role_ids = (permitted.delete(:allowed_role_ids) || []).reject(&:blank?)
       permitted[:permissions_overrides] = { "allowed_role_ids" => role_ids }

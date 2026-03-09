@@ -1376,6 +1376,13 @@ class RelaySubscriptionManager
     server = Server.find_by(nostr_group_id: data["server_nostr_group_id"])
     return unless server
 
+    # Skip if this is our own echo — the reorder controller already updated the DB and broadcast
+    owner = User.owner
+    if owner&.nostr_public_key == sender_pubkey
+      Rails.logger.debug("[RelaySubscriptionManager] Ignoring own channel_reorder_sync echo")
+      return
+    end
+
     # Register this remote instance for future sync messages
     self.class.register_remote_owner(server.id, sender_pubkey)
 
@@ -1667,6 +1674,13 @@ class RelaySubscriptionManager
     server = find_server_from_event(event)
     return unless server
     return unless NostrServerAuth.authorized_for_event?(server, event)
+
+    # Skip self-echoes — we already have the correct state locally
+    owner = User.owner
+    if owner&.nostr_public_key == event["pubkey"]
+      Rails.logger.debug("[RelaySubscriptionManager] Ignoring own server_structure echo")
+      return
+    end
 
     tags = event["tags"] || []
     cat_tags = tags.select { |t| t[0] == "cat" }

@@ -1516,11 +1516,25 @@ export default class extends Controller {
 
     const currentText = contentEl.dataset.rawContent || contentEl.textContent.trim()
     const preview = currentText.substring(0, 80) + (currentText.length > 80 ? "..." : "")
+    const attachments = this._extractAttachments(messageEl)
 
     document.dispatchEvent(new CustomEvent("inferno:edit", {
-      detail: { messageId, content: currentText, preview },
+      detail: { messageId, content: currentText, preview, attachments },
       bubbles: true
     }))
+  }
+
+  _extractAttachments(messageEl) {
+    const attachments = []
+    messageEl.querySelectorAll("[data-attachment-id]").forEach(el => {
+      attachments.push({
+        id: el.dataset.attachmentId,
+        type: el.dataset.attachmentType || "file",
+        name: el.dataset.attachmentName || "file",
+        url: el.dataset.attachmentUrl
+      })
+    })
+    return attachments
   }
 
   async deleteMessage(messageId, skipConfirm = false) {

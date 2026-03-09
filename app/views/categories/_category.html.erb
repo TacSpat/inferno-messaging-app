@@ -1,6 +1,5 @@
 <% visible_channels = category.channels.where(parent_channel_id: nil).ordered.select { |ch| ch.visible_to?(current_user) } %>
-<% return if visible_channels.empty? %>
-<div data-controller="category-collapse" data-category-collapse-id-value="<%= category.public_id %>" data-category-id="<%= category.public_id %>" class="mb-1">
+<div data-controller="category-collapse" data-category-collapse-id-value="<%= category.public_id %>" data-category-id="<%= category.public_id %>" data-category-position="<%= category.position %>" class="mb-1">
   <div class="flex items-center justify-between px-2 pt-4 pb-1 cursor-pointer group"
        data-action="click->category-collapse#toggle">
     <div class="flex items-center">
@@ -11,7 +10,7 @@
     </div>
     <% membership = current_user.server_memberships.find_by(server: server) %>
     <% if membership&.has_permission?("manage_channels") %>
-      <a href="<%= new_server_channel_path(server, category_id: category.id) %>" class="text-gray-400 hover:text-gray-200 opacity-0 group-hover:opacity-100" title="Create Channel">
+      <a href="<%= new_server_channel_path(server, category_id: category.public_id) %>" class="text-gray-400 hover:text-gray-200 opacity-0 group-hover:opacity-100" title="Create Channel">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       </a>
     <% end %>

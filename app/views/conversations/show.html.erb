@@ -2,7 +2,7 @@
 <% user_servers_dm = current_user.servers.includes(:server_emojis).map { |s| { id: s.public_id, name: s.name } } %>
 <% livekit_configured = @conversation.participants.any?(&:livekit_configured?) %>
 <% active_call = @conversation.calls.active.last %>
-<div data-controller="dm-message-form unified-picker call" data-dm-message-form-conversation-id-value="<%= @conversation.public_id %>" data-call-conversation-id-value="<%= @conversation.public_id %>" data-call-livekit-configured-value="<%= livekit_configured %>" data-call-active-call-id-value="<%= active_call&.public_id %>" data-unified-picker-can-send-gifs-value="true" data-unified-picker-can-send-custom-emojis-value="true" data-unified-picker-can-send-custom-stickers-value="true" data-unified-picker-user-servers-value="<%= user_servers_dm.to_json %>" class="flex flex-col flex-1 min-h-0 min-w-0">
+<div data-controller="dm-message-form unified-picker call message-search" data-dm-message-form-conversation-id-value="<%= @conversation.public_id %>" data-call-conversation-id-value="<%= @conversation.public_id %>" data-call-livekit-configured-value="<%= livekit_configured %>" data-call-active-call-id-value="<%= active_call&.public_id %>" data-unified-picker-can-send-gifs-value="true" data-unified-picker-can-send-custom-emojis-value="true" data-unified-picker-can-send-custom-stickers-value="true" data-unified-picker-user-servers-value="<%= user_servers_dm.to_json %>" data-message-search-url-value="<%= search_conversation_dm_messages_path(@conversation) %>" class="flex flex-col flex-1 min-h-0 min-w-0 relative">
 
 <!-- DM header -->
 <div class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
@@ -65,12 +65,16 @@
 
   <% if @conversation.group_chat? %>
     <!-- Group settings toggle -->
-    <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer" id="dm-profile-toggle-btn" onclick="var p=document.getElementById('dm-profile-panel');if(p){p.classList.toggle('hidden');this.classList.toggle('text-white',!p.classList.contains('hidden'))}" title="Group Settings">
+    <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer" id="dm-profile-toggle-btn" onclick="window._toggleSidePanel('dm-profile-panel', this)" title="Group Settings">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
     </button>
   <% end %>
   <%= render "shared/header_toolbar", dm_user: @other_user %>
+
+  <%= render "shared/search_input" %>
 </div>
+
+<%= render "shared/search_panel" %>
 
 <!-- Call panel (voice-channel style, replaces messages during calls) -->
 <div data-call-target="callPanel" class="hidden flex flex-col flex-1 min-h-0" style="background: var(--color-gray-950);">

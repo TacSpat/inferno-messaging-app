@@ -100,8 +100,8 @@
       <div class="flex flex-wrap gap-2 mt-2">
         <% message.files.each do |file| %>
           <% if file.content_type&.start_with?("image/") %>
-            <div data-attachment-id="<%= file.id %>" class="inline-block min-h-[4rem] min-w-[4rem] rounded-lg bg-gray-800">
-              <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", data: { preview_src: url_for(file), preview_filename: file.filename.to_s }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
+            <div data-attachment-id="<%= file.id %>" class="inline-block">
+              <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", data: { preview_src: url_for(file), preview_filename: file.filename.to_s, lock_dims: true }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
             </div>
           <% elsif file.content_type&.start_with?("video/") %>
             <div class="inline-block relative rounded-lg overflow-hidden" data-controller="video-player">

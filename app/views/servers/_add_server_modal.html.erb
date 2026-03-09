@@ -5,15 +5,15 @@
     +
   </button>
 
-  <!-- Modal overlay -->
+  <!-- Modal overlay — teleported to <body> on connect so it escapes the server rail's
+       CSS transform (which creates a containing block that breaks fixed positioning on mobile) -->
   <div data-add-server-modal-target="modal"
-       data-action="click->add-server-modal#backdropClose"
        class="hidden fixed inset-0 z-[200] bg-black/60 flex items-center justify-center">
     <div class="w-full max-w-md mx-4 max-h-[85vh] overflow-y-auto rounded-xl bg-gray-800 border border-gray-700/50 shadow-2xl">
       <!-- Header -->
       <div class="flex items-center justify-between px-5 pt-5 pb-2">
         <h2 class="text-lg font-bold text-white">Add a Server</h2>
-        <button type="button" data-action="click->add-server-modal#close"
+        <button type="button" data-dismiss="modal" data-action="click->add-server-modal#close"
                 class="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-700 transition cursor-pointer">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>

@@ -124,8 +124,12 @@ export default class extends Controller {
         const contentEl = msgEl.querySelector(".message-content")
         const editContent = contentEl?.dataset?.rawContent || contentEl?.textContent?.trim() || ""
         const editPreview = editContent.substring(0, 80) + (editContent.length > 80 ? "..." : "")
+        const attachments = []
+        msgEl.querySelectorAll("[data-attachment-id]").forEach(el => {
+          attachments.push({ id: el.dataset.attachmentId, type: el.dataset.attachmentType || "file", name: el.dataset.attachmentName || "file", url: el.dataset.attachmentUrl })
+        })
         document.dispatchEvent(new CustomEvent("inferno:edit", {
-          detail: { messageId, content: editContent, preview: editPreview },
+          detail: { messageId, content: editContent, preview: editPreview, attachments },
           bubbles: true
         }))
       } else if (action === "pin") {

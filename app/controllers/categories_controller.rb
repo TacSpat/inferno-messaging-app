@@ -6,11 +6,17 @@ class CategoriesController < ApplicationController
 
   def new
     @category = @server.categories.new
+    @category.position = params[:position].to_i if params[:position].present?
   end
 
   def create
     @category = @server.categories.new(category_params)
-    @category.position ||= @server.categories.maximum(:position).to_i + 1
+    if @category.position.present?
+      # Shift existing categories at or after this position down
+      @server.categories.where("position >= ?", @category.position).update_all("position = position + 1")
+    else
+      @category.position = @server.categories.maximum(:position).to_i + 1
+    end
 
     if @category.save
       ServerChannel.broadcast_to(@server, {

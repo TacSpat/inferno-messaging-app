@@ -1,0 +1,132 @@
+<% voice_configured = local_assigns[:voice_configured] %>
+<% voice_states = local_assigns[:voice_states] %>
+<% remote_voice_states = local_assigns[:remote_voice_states] %>
+<% channel = local_assigns[:channel] %>
+<% server = local_assigns[:server] %>
+<% is_afk_channel = local_assigns[:is_afk_channel] %>
+
+<% if !voice_configured %>
+  <!-- No voice providers available -->
+  <div class="flex-1 flex items-center justify-center p-4">
+    <div class="text-center max-w-sm">
+      <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
+        <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>
+      </div>
+      <h2 class="text-xl font-bold text-white mb-2">Voice Not Available</h2>
+      <p class="text-gray-400 text-sm mb-4">Voice channels need at least one voice provider. Members can volunteer their LiveKit credentials in server settings.</p>
+      <% membership = current_user.server_memberships.find_by(server: server) %>
+      <% if membership&.has_permission?("manage_server") || membership&.admin? %>
+        <a href="<%= server_settings_voice_path(server) %>"
+           class="px-4 py-2 bg-accent hover:bg-accent-light text-white rounded text-sm font-medium cursor-pointer transition inline-block">
+          Voice Settings
+        </a>
+      <% else %>
+        <p class="text-gray-500 text-xs">Ask a server admin to set up voice in Server Settings > Voice.</p>
+      <% end %>
+    </div>
+  </div>
+<% elsif voice_states.any? || remote_voice_states.any? %>
+  <!-- Participant grid -->
+  <div class="flex-1 p-3 overflow-y-auto" data-voice-participant-grid>
+    <div class="voice-grid h-full">
+      <% voice_states.each do |vs| %>
+        <div class="voice-card group"
+             data-voice-participant-id="<%= vs.user.public_id %>"
+             data-voice-state-id="<%= vs.public_id %>"
+             data-action="contextmenu->voice-context#show"
+             style="--card-color: <%= vs.user.profile_color || '#1e1c1b' %>">
+          <div class="voice-card-inner">
+            <!-- Avatar -->
+            <div class="voice-avatar-wrapper">
+              <% if vs.user.effective_avatar_url.present? %>
+                <img src="<%= vs.user.effective_avatar_url %>" class="voice-avatar">
+              <% else %>
+                <div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, <%= vs.user.profile_color || '#1e1c1b' %>, white 20%)">
+                  <%= vs.user.username[0].upcase %>
+                </div>
+              <% end %>
+            </div>
+            <!-- Status icons on avatar -->
+            <% if vs.self_mute || vs.self_deaf || vs.server_mute || vs.server_deaf %>
+              <div class="voice-status-icons">
+                <% if vs.server_mute %>
+                  <div class="voice-status-badge server-muted">
+                    <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg>
+                  </div>
+                <% elsif vs.self_mute %>
+                  <div class="voice-status-badge">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/></svg>
+                  </div>
+                <% end %>
+                <% if vs.server_deaf %>
+                  <div class="voice-status-badge server-deafened">
+                    <svg class="w-3.5 h-3.5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                  </div>
+                <% elsif vs.self_deaf %>
+                  <div class="voice-status-badge">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>
+                  </div>
+                <% end %>
+              </div>
+            <% end %>
+            <!-- Username pill -->
+            <div class="voice-username-pill">
+              <span class="truncate"><%= vs.user.display_name.presence || vs.user.username %></span>
+            </div>
+          </div>
+        </div>
+      <% end %>
+      <% remote_voice_states.each do |rvs| %>
+        <div class="voice-card group"
+             data-voice-participant-id="<%= rvs[:user_id] %>"
+             data-voice-remote="true"
+             data-action="contextmenu->voice-context#show"
+             style="--card-color: <%= rvs[:profile_color] || '#1e1c1b' %>">
+          <div class="voice-card-inner">
+            <div class="voice-avatar-wrapper">
+              <% if rvs[:avatar_url].present? %>
+                <img src="<%= rvs[:avatar_url] %>" class="voice-avatar">
+              <% else %>
+                <div class="voice-avatar-fallback" style="background-color: color-mix(in srgb, <%= rvs[:profile_color] || '#1e1c1b' %>, white 20%)">
+                  <%= (rvs[:username] || "?")[0].upcase %>
+                </div>
+              <% end %>
+            </div>
+            <div class="voice-username-pill">
+              <span class="truncate"><%= rvs[:username] || "Remote User" %></span>
+            </div>
+          </div>
+        </div>
+      <% end %>
+    </div>
+  </div>
+<% else %>
+  <!-- Empty state -->
+  <div class="flex-1 flex flex-col items-center justify-center p-8" data-voice-empty-state>
+    <div class="w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6" style="background: rgba(255,255,255,0.05);">
+      <svg class="w-12 h-12 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>
+    </div>
+    <h2 class="text-xl font-bold text-white mb-1" data-slot="channel-name"><%= render_name_with_emojis(channel.name, server) %></h2>
+    <p class="text-gray-500 text-sm">No one is in this channel yet.</p>
+  </div>
+<% end %>
+
+<!-- Join / Connected bar -->
+<div class="shrink-0 px-4 py-3 flex items-center justify-center" style="background: var(--color-gray-950);"
+     data-voice-panel-status data-voice-panel-channel="<%= channel.public_id %>" data-voice-panel-server="<%= server.public_id %>">
+  <% current_voice_state = VoiceState.find_by(user: current_user, channel: channel) %>
+  <% if current_voice_state %>
+    <div class="flex items-center gap-2" data-voice-status="connected">
+      <div class="w-2 h-2 rounded-full bg-green-400"></div>
+      <p class="text-green-400 text-sm font-medium">Voice Connected</p>
+    </div>
+  <% else %>
+    <button type="button"
+            class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition flex items-center gap-2 cursor-pointer text-sm"
+            data-voice-status="join"
+            onclick="window.dispatchEvent(new CustomEvent('voice:join', { detail: { channelId: '<%= channel.public_id %>', serverId: '<%= server.public_id %>' } }))">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
+      Join Voice
+    </button>
+  <% end %>
+</div>

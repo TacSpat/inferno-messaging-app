@@ -151,16 +151,18 @@
           <!-- Channels list -->
           <% _membership = current_user.server_memberships.find_by(server: @server) %>
           <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-can-move-members-value="<%= _membership&.has_permission?('move_members') || _membership&.owner? || false %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
-            <%# Uncategorized channels first (skip ember voice channels — rendered nested under hearth) %>
-            <% @server.channels.uncategorized.where(channel_type: [:text, :voice, :announcement]).where(parent_channel_id: nil).ordered.each do |channel| %>
-              <% channel_access = channel.visible_to?(current_user) %>
-              <% next unless channel_access %>
-              <%= render partial: "channels/channel_item", locals: { channel: channel, server: @server, active: (defined?(@channel) && channel == @channel), read_only: channel_access == :read_only } %>
-            <% end %>
-
-            <%# Categorized channels %>
-            <% @server.categories.ordered.each do |category| %>
-              <%= render partial: "categories/category", locals: { category: category, server: @server } %>
+            <%# Render uncategorized channels and categories interleaved by position %>
+            <% root_channels = @server.channels.uncategorized.where(channel_type: [:text, :voice]).where(parent_channel_id: nil).ordered.to_a %>
+            <% root_categories = @server.categories.ordered.to_a %>
+            <% root_items = (root_channels.map { |ch| [:channel, ch] } + root_categories.map { |cat| [:category, cat] }).sort_by { |_type, item| [item.position, item.created_at] } %>
+            <% root_items.each do |type, item| %>
+              <% if type == :channel %>
+                <% channel_access = item.visible_to?(current_user) %>
+                <% next unless channel_access %>
+                <%= render partial: "channels/channel_item", locals: { channel: item, server: @server, active: (defined?(@channel) && item == @channel), read_only: channel_access == :read_only } %>
+              <% else %>
+                <%= render partial: "categories/category", locals: { category: item, server: @server } %>
+              <% end %>
             <% end %>
           </div>
 
@@ -247,87 +249,46 @@
           </div>
         </aside>
 
-        <!-- Main content -->
-        <main class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading">
+        <!-- Main content + member sidebar -->
+        <div class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading message-search"
+             data-message-search-url-value="<%= defined?(@server) && @server ? search_server_path(@server) : '' %>"
+             data-message-search-autocomplete-url-value="<%= defined?(@server) && @server ? server_search_autocomplete_path(@server) : '' %>">
           <%= render "shared/friend_request_bar" %>
-          <%= yield %>
-        </main>
-
-        <!-- Members sidebar (right) -->
-        <% if defined?(@members) && @members %>
-          <aside id="member-sidebar" data-mobile-nav-target="memberSidebar" class="w-60 bg-gray-800 border-l border-gray-900 overflow-y-auto shrink-0 hidden lg:block mobile-member-sidebar"
-                 data-controller="server-members profile-card member-context"
-                 data-server-members-server-id-value="<%= @server.public_id %>" data-profile-card-server-id-value="<%= @server.public_id %>" data-member-context-server-id-value="<%= @server.public_id %>">
-            <%
-              online_members = @members.reject { |m| m.offline? || m.invisible? }
-              offline_members = @members.select { |m| m.offline? || m.invisible? }
-              hoisted_roles = @server.roles.where(hoist: true).where.not(name: ["@everyone", "New Role"]).where("json_extract(permissions, '$.owner') IS NOT TRUE").ordered.to_a
-              everyone_role = @server.roles.find_by(name: "@everyone")
-              everyone_position = everyone_role&.position || 0
-              role_groups = {}
-              ungrouped_online = []
-              online_members.each do |member|
-                membership = member.server_memberships.find { |sm| sm.server_id == @server.id }
-                hoisted = membership&.top_hoisted_role
-                if hoisted
-                  (role_groups[hoisted.id] ||= []) << member
-                else
-                  ungrouped_online << member
-                end
-              end
-              sort_fn = ->(m) {
-                ms = m.server_memberships.find { |sm| sm.server_id == @server.id }
-                [-(ms&.top_role&.position || 0), m.display_name_for(@server).downcase]
-              }
-              role_groups.each_value { |list| list.sort_by!(&sort_fn) }
-              ungrouped_online.sort_by!(&sort_fn)
-              offline_members.sort_by!(&sort_fn)
-              sections = []
-              hoisted_roles.each do |role|
-                group_members = role_groups[role.id]
-                next unless group_members&.any?
-                sections << { type: :role, role: role, members: group_members, position: role.position }
-              end
-              if ungrouped_online.any?
-                sections << { type: :online, members: ungrouped_online, position: everyone_position }
-              end
-              sections.sort_by! { |s| -s[:position] }
-            %>
-            <div class="py-4 px-2" data-server-members-target="list">
-              <% sections.each do |section| %>
-                <% if section[:type] == :role %>
-                  <h3 class="text-xs font-semibold uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2"
-                      style="color: <%= section[:role].color.presence || '#878583' %>"
-                      data-status-group="role:<%= section[:role].public_id %>"
-                      data-role-position="<%= section[:role].position %>">
-                    <%= section[:role].name %> — <%= section[:members].count %>
-                  </h3>
-                  <% section[:members].each do |member| %>
-                    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
-                  <% end %>
-                <% else %>
-                  <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 first:mt-0 px-2"
-                      data-status-group="online"
-                      data-role-position="<%= everyone_position %>">
-                    Online — <%= section[:members].count %>
-                  </h3>
-                  <% section[:members].each do |member| %>
-                    <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
-                  <% end %>
-                <% end %>
-              <% end %>
-              <% if offline_members.any? %>
-                <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1 mt-4 px-2"
-                    data-status-group="offline">
-                  Offline — <%= offline_members.count %>
-                </h3>
-                <% offline_members.each do |member| %>
-                  <%= render partial: "servers/member_item", locals: { member: member, server: @server } %>
-                <% end %>
-              <% end %>
+          <!-- Persistent header bar: channel name/pin updated via JS on frame-load -->
+          <div id="persistent-header" class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
+            <!-- Hamburger menu (mobile only) -->
+            <button type="button" class="md:hidden text-gray-400 hover:text-white mr-2 p-1" data-action="click->mobile-nav#toggleSidebar">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+            </button>
+            <!-- Channel icon + name + topic (updated by JS) -->
+            <span id="ph-channel-icon" class="text-gray-400 mr-2 shrink-0"></span>
+            <h1 id="ph-channel-name" class="font-semibold text-white truncate"></h1>
+            <div id="ph-topic-divider" class="mx-4 w-px h-6 bg-gray-600 hidden"></div>
+            <p id="ph-channel-topic" class="text-sm text-gray-400 truncate hidden"></p>
+            <div class="flex-1"></div>
+            <!-- Pin button (updated by JS) -->
+            <div class="relative" id="ph-pin-wrap">
+              <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer relative"
+                      id="ph-pin-btn" title="Pinned Messages">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+                <span id="ph-pin-badge" class="hidden absolute -top-1 -right-1.5 min-w-[16px] h-4 bg-accent text-[10px] font-bold text-white rounded-full flex items-center justify-center px-0.5">0</span>
+              </button>
             </div>
-          </aside>
-        <% end %>
+            <%= render "shared/header_toolbar" %>
+            <!-- Member list toggle (mobile only) -->
+            <button type="button" class="lg:hidden text-gray-400 hover:text-white p-1" data-action="click->mobile-nav#toggleMembers">
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
+            </button>
+            <%= render "shared/search_input", server: @server if defined?(@server) && @server %>
+          </div>
+          <div class="flex flex-1 min-h-0">
+            <main class="flex-1 flex flex-col min-w-0 min-h-0">
+              <%= yield %>
+            </main>
+            <!-- Member sidebar: outside turbo frame, persists across channel navigations -->
+            <%= render "servers/member_sidebar" if defined?(@members) && @members %>
+          </div>
+        </div>
       </div>
     <% elsif user_signed_in? && @dm_layout %>
       <div class="flex h-full" data-controller="mobile-nav">
@@ -353,13 +314,100 @@
     <%= render "shared/js_templates" if user_signed_in? %>
 
     <script>
+      // Shared panel slide animation helpers
+      function _slideOpen(el, targetW) {
+        el.style.overflow = "hidden";
+        el.style.minWidth = "0px";
+        el.style.maxWidth = "0px";
+        el.style.opacity = "0";
+        el.style.borderLeftWidth = "0px";
+        el.offsetHeight;
+        el.style.transition = "min-width 200ms ease, max-width 200ms ease, opacity 150ms ease, border-left-width 200ms ease";
+        el.style.minWidth = targetW + "px";
+        el.style.maxWidth = targetW + "px";
+        el.style.opacity = "1";
+        el.style.borderLeftWidth = "";
+        el.addEventListener("transitionend", function handler(e) {
+          if (e.propertyName !== "max-width") return;
+          el.removeEventListener("transitionend", handler);
+          el.style.transition = "";
+          el.style.overflow = "";
+          el.style.minWidth = "";
+          el.style.maxWidth = "";
+        });
+      }
+      function _slideClose(el, onDone) {
+        el.style.overflow = "hidden";
+        var w = el.offsetWidth;
+        el.style.minWidth = w + "px";
+        el.style.maxWidth = w + "px";
+        el.offsetHeight;
+        el.style.transition = "min-width 200ms ease, max-width 200ms ease, opacity 150ms ease, border-left-width 200ms ease";
+        el.style.minWidth = "0px";
+        el.style.maxWidth = "0px";
+        el.style.opacity = "0";
+        el.style.borderLeftWidth = "0px";
+        el.addEventListener("transitionend", function handler(e) {
+          if (e.propertyName !== "max-width") return;
+          el.removeEventListener("transitionend", handler);
+          el.style.transition = "";
+          el.style.overflow = "";
+          el.style.minWidth = "";
+          el.style.maxWidth = "";
+          el.style.opacity = "";
+          el.style.borderLeftWidth = "";
+          if (onDone) onDone();
+        });
+      }
+
+      // Generic side panel toggle with width animation
+      window._toggleSidePanel = function(panelId, btn) {
+        var p = document.getElementById(panelId);
+        if (!p) return;
+        if (p._animating) return;
+        var isHidden = p.classList.contains("hidden");
+        if (isHidden) {
+          p.classList.remove("hidden");
+          p._animating = true;
+          var targetW = p.offsetWidth || 320;
+          _slideOpen(p, targetW);
+          p.addEventListener("transitionend", function h(e) {
+            if (e.propertyName !== "max-width") return;
+            p.removeEventListener("transitionend", h);
+            p._animating = false;
+          });
+          if (btn) btn.classList.add("text-white");
+        } else {
+          p._animating = true;
+          _slideClose(p, function() { p.classList.add("hidden"); p._animating = false; });
+          if (btn) btn.classList.remove("text-white");
+        }
+      };
+
       window._toggleMemberSidebar = function() {
         var sb = document.getElementById("member-sidebar");
         if (!sb) return;
-        var hidden = sb.classList.toggle("!hidden");
-        localStorage.setItem("members_hidden", hidden ? "1" : "");
+        if (sb._animating) return;
+        var isHidden = sb.dataset.panelHidden === "true";
+        if (isHidden) {
+          sb.dataset.panelHidden = "false";
+          sb.style.display = "";
+          sb._animating = true;
+          _slideOpen(sb, 240);
+          sb.addEventListener("transitionend", function h(e) {
+            if (e.propertyName !== "max-width") return;
+            sb.removeEventListener("transitionend", h);
+            sb._animating = false;
+          });
+          localStorage.setItem("members_hidden", "");
+        } else {
+          sb.dataset.panelHidden = "true";
+          sb._animating = true;
+          _slideClose(sb, function() { sb.style.display = "none"; sb._animating = false; });
+          localStorage.setItem("members_hidden", "1");
+        }
         var btn = document.getElementById("member-toggle-btn");
-        if (btn) btn.classList.toggle("text-white", !hidden);
+        if (btn) btn.classList.toggle("text-white", isHidden);
       };
       // Apply saved preference on load and after turbo frame navigations
       function _applyMemberPref() {
@@ -368,19 +416,77 @@
         // Always hide for voice channels
         var activeLink = document.querySelector("a[data-channel-id].bg-gray-600");
         var isVoice = activeLink && activeLink.dataset.voiceChannel === "true";
-        if (isVoice) {
-          sb.classList.add("!hidden");
-        } else if (localStorage.getItem("members_hidden") === "1") {
-          sb.classList.add("!hidden");
+        var shouldHide = isVoice || localStorage.getItem("members_hidden") === "1";
+        if (shouldHide) {
+          sb.style.display = "none";
+          sb.dataset.panelHidden = "true";
         } else {
-          sb.classList.remove("!hidden");
+          sb.style.display = "";
+          sb.dataset.panelHidden = "false";
         }
         var btn = document.getElementById("member-toggle-btn");
-        if (btn) btn.classList.toggle("text-white", !sb.classList.contains("!hidden"));
+        if (btn) btn.classList.toggle("text-white", !shouldHide);
       }
       _applyMemberPref();
+
+      // Icons for the persistent header
+      var _headerIcons = {
+        text: '<span class="text-gray-400 text-xl mr-2">#</span>',
+        encrypted: '<svg class="w-5 h-5 text-gray-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>',
+        voice: '<svg class="w-5 h-5 text-gray-400 mr-2 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072M18.364 5.636a9 9 0 010 12.728M5.636 18.364a9 9 0 010-12.728"/></svg>'
+      };
+
+      // Update persistent header from channel-header-data in the turbo frame
+      function _updatePersistentHeader() {
+        var d = document.getElementById("channel-header-data");
+        if (!d) return;
+        // Close any open pinned panel from the previous channel
+        var oldPanel = document.querySelector("#ph-pin-wrap .pinned-panel");
+        if (oldPanel) oldPanel.remove();
+        var icon = document.getElementById("ph-channel-icon");
+        var name = document.getElementById("ph-channel-name");
+        var divider = document.getElementById("ph-topic-divider");
+        var topic = document.getElementById("ph-channel-topic");
+        var pinBtn = document.getElementById("ph-pin-btn");
+        var pinBadge = document.getElementById("ph-pin-badge");
+        var pinWrap = document.getElementById("ph-pin-wrap");
+
+        // Hide entire header for voice channels (they have their own layout)
+        var header = document.getElementById("persistent-header");
+        if (header) header.style.display = d.dataset.channelIcon === "voice" ? "none" : "";
+
+        if (icon) icon.innerHTML = _headerIcons[d.dataset.channelIcon] || _headerIcons.text;
+        if (name) name.innerHTML = d.dataset.channelNameHtml || d.dataset.channelName || "";
+        if (d.dataset.channelTopic) {
+          if (divider) { divider.classList.remove("hidden"); divider.classList.add("sm:block"); }
+          if (topic) { topic.textContent = d.dataset.channelTopic; topic.classList.remove("hidden"); topic.classList.add("sm:block"); }
+        } else {
+          if (divider) { divider.classList.add("hidden"); divider.classList.remove("sm:block"); }
+          if (topic) { topic.classList.add("hidden"); topic.classList.remove("sm:block"); topic.textContent = ""; }
+        }
+
+        var pinCount = parseInt(d.dataset.pinCount) || 0;
+        var pinUrl = d.dataset.pinUrl || "";
+        if (pinWrap) pinWrap.style.display = pinUrl ? "" : "none";
+        if (pinBtn) pinBtn.onclick = function() {
+          document.dispatchEvent(new CustomEvent("toggle-pinned-panel", { detail: { url: pinUrl } }));
+        };
+        if (pinBadge) {
+          pinBadge.textContent = pinCount;
+          // Check localStorage for seen pins — only show badge if there are unseen pins
+          var channelData = document.querySelector("[data-current-channel-id]");
+          var chId = channelData ? channelData.dataset.currentChannelId : "";
+          var seen = chId ? (parseInt(localStorage.getItem("seenPins_" + chId)) || 0) : 0;
+          pinBadge.classList.toggle("hidden", pinCount === 0 || pinCount <= seen);
+        }
+      }
+      _updatePersistentHeader();
+
       document.addEventListener("turbo:frame-load", function(e) {
-        if (e.target.id === "main-content") _applyMemberPref();
+        if (e.target.id === "main-content") {
+          _updatePersistentHeader();
+          _applyMemberPref();
+        }
       });
     </script>
 

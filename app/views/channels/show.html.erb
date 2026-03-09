@@ -5,46 +5,23 @@
 <% can_send_custom_stickers = @current_membership&.has_permission?("send_custom_stickers") != false %>
 <% user_servers = current_user.servers.includes(:server_emojis, :server_stickers).map { |s| { id: s.public_id, name: s.name } } %>
 <% current_ms = current_user.server_memberships.find_by(server: @server) %>
-<div data-controller="message-form unified-picker mention-autocomplete" data-message-form-channel-id-value="<%= @channel.public_id %>" data-message-form-timed-out-until-value="<%= current_ms&.timed_out_until&.iso8601 %>" data-mention-autocomplete-server-id-value="<%= @server.public_id %>" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>" data-unified-picker-server-id-value="<%= @server.public_id %>" data-unified-picker-can-send-gifs-value="<%= can_send_gifs %>" data-unified-picker-can-send-custom-emojis-value="<%= can_send_custom_emojis %>" data-unified-picker-can-send-custom-stickers-value="<%= can_send_custom_stickers %>" data-unified-picker-server-name-value="<%= @server.name %>" data-unified-picker-user-servers-value="<%= user_servers.to_json %>" class="flex flex-col flex-1 min-h-0">
+<div data-controller="message-form unified-picker mention-autocomplete" data-message-form-channel-id-value="<%= @channel.public_id %>" data-message-form-timed-out-until-value="<%= current_ms&.timed_out_until&.iso8601 %>" data-mention-autocomplete-server-id-value="<%= @server.public_id %>" data-current-channel-id="<%= @channel.public_id %>" data-current-server-id="<%= @server.public_id %>" data-unified-picker-server-id-value="<%= @server.public_id %>" data-unified-picker-can-send-gifs-value="<%= can_send_gifs %>" data-unified-picker-can-send-custom-emojis-value="<%= can_send_custom_emojis %>" data-unified-picker-can-send-custom-stickers-value="<%= can_send_custom_stickers %>" data-unified-picker-server-name-value="<%= @server.name %>" data-unified-picker-user-servers-value="<%= user_servers.to_json %>" class="flex flex-col flex-1 min-h-0 relative">
 
-<!-- Channel header -->
-<div class="flex items-center px-4 h-12 border-b border-gray-900 shadow-sm shrink-0">
-  <!-- Hamburger menu (mobile only) -->
-  <button type="button" class="md:hidden text-gray-400 hover:text-white mr-2 p-1" data-action="click->mobile-nav#toggleSidebar">
-    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
-  </button>
+<!-- Data for persistent header (read by JS on turbo:frame-load) -->
+<div id="channel-header-data" class="hidden"
+     data-channel-icon="<%= @channel.encrypted? ? 'encrypted' : (@channel.voice? ? 'voice' : 'text') %>"
+     data-channel-name="<%= @channel.name %>"
+     data-channel-name-html="<%= h(render_name_with_emojis(@channel.name, @server)) %>"
+     data-channel-topic="<%= @channel.topic %>"
+     data-pin-count="<%= @channel.messages.where(pinned: true).count %>"
+     data-pin-url="<%= pinned_channel_messages_path(@channel) %>"></div>
 
-  <% if @channel.encrypted? %>
-    <svg class="w-5 h-5 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-  <% else %>
-    <span class="text-gray-400 text-xl mr-2">#</span>
-  <% end %>
-  <h1 class="font-semibold text-white"><%= render_name_with_emojis(@channel.name, @server) %></h1>
-  <% if @channel.topic.present? %>
-    <div class="mx-4 w-px h-6 bg-gray-600 hidden sm:block"></div>
-    <p class="text-sm text-gray-400 truncate hidden sm:block"><%= @channel.topic %></p>
-  <% end %>
+<%= render "shared/search_panel" %>
 
-  <div class="flex-1"></div>
-
-  <% pin_count = @channel.messages.where(pinned: true).count %>
-  <div class="relative">
-    <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer relative"
-            data-action="click->message-form#togglePinnedPanel"
-            data-pinned-url="<%= pinned_channel_messages_path(@channel) %>"
-            data-message-form-target="pinButton" title="Pinned Messages">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
-      <span data-message-form-target="pinBadge" class="hidden absolute -top-1 -right-1.5 min-w-[16px] h-4 bg-accent text-[10px] font-bold text-white rounded-full flex items-center justify-center px-0.5"><%= pin_count %></span>
-    </button>
-  </div>
-
-  <%= render "shared/header_toolbar" %>
-
-  <!-- Member list toggle (mobile only) -->
-  <button type="button" class="lg:hidden text-gray-400 hover:text-white p-1" data-action="click->mobile-nav#toggleMembers">
-    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/></svg>
-  </button>
-</div>
+<!-- Content row -->
+<div class="flex flex-1 min-h-0">
+  <!-- Messages column -->
+  <div class="flex flex-col flex-1 min-h-0 min-w-0">
 
 <% linked_voice = @channel.voice_channels_using_as_sidechat.first %>
 <% if linked_voice %>
@@ -211,6 +188,10 @@
   </div>
 </div>
 <% end %>
+
+  </div><!-- end messages column -->
+
+</div><!-- end content row -->
 
 </div>
 <% end %>

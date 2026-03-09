@@ -1,0 +1,51 @@
+<% server = local_assigns[:server] %>
+<% mobile = local_assigns[:mobile] %>
+<% action = mobile ? "click->message-search#insertMobileFilter" : "mousedown->message-search#insertFilter" %>
+<div class="px-3 py-1 text-[11px] text-gray-500 font-semibold uppercase tracking-wide">Search Filters</div>
+
+<button type="button" data-action="<%= action %>" data-filter-type="from"
+        class="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 text-left cursor-pointer">
+  <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+  <div>
+    <div class="text-sm text-gray-200 font-medium">From a specific user</div>
+    <div class="text-xs text-gray-500">from: user</div>
+  </div>
+</button>
+
+<% if server %>
+<button type="button" data-action="<%= action %>" data-filter-type="in"
+        class="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 text-left cursor-pointer">
+  <span class="w-5 h-5 flex items-center justify-center text-gray-400 text-lg shrink-0">#</span>
+  <div>
+    <div class="text-sm text-gray-200 font-medium">In a specific channel</div>
+    <div class="text-xs text-gray-500">in: channel</div>
+  </div>
+</button>
+<% end %>
+
+<button type="button" data-action="<%= action %>" data-filter-type="has"
+        class="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 text-left cursor-pointer">
+  <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg>
+  <div>
+    <div class="text-sm text-gray-200 font-medium">Has a specific type</div>
+    <div class="text-xs text-gray-500">has: file, image, or link</div>
+  </div>
+</button>
+
+<button type="button" data-action="<%= action %>" data-filter-type="before"
+        class="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 text-left cursor-pointer">
+  <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+  <div>
+    <div class="text-sm text-gray-200 font-medium">Date filters</div>
+    <div class="text-xs text-gray-500">before:, after:, or on: date</div>
+  </div>
+</button>
+
+<button type="button" data-action="<%= action %>" data-filter-type="pinned"
+        class="w-full flex items-center gap-3 px-3 py-2 hover:bg-gray-800 text-left cursor-pointer">
+  <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
+  <div>
+    <div class="text-sm text-gray-200 font-medium">Pinned messages</div>
+    <div class="text-xs text-gray-500">pinned: true</div>
+  </div>
+</button>

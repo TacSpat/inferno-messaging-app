@@ -45,12 +45,17 @@ export default class extends Controller {
     // Reinit voice sortables after channel reorder (same element, both controllers)
     this._onReorderDone = () => this._initVoiceSortables()
     this.element.addEventListener("channel-reorder:done", this._onReorderDone)
+
+    // Right-click context menu for creating channels/categories
+    this._onContextMenu = this._handleContextMenu.bind(this)
+    this.element.addEventListener("contextmenu", this._onContextMenu)
   }
 
   disconnect() {
     if (this.subscription) this.subscription.unsubscribe()
     this.element.removeEventListener("click", this._onChannelClick, true)
     this.element.removeEventListener("channel-reorder:done", this._onReorderDone)
+    this.element.removeEventListener("contextmenu", this._onContextMenu)
     document.removeEventListener("turbo:before-frame-render", this._onBeforeFrameRender)
     document.removeEventListener("turbo:frame-load", this._onFrameLoad)
     this._channelCache.clear()
@@ -186,13 +191,17 @@ export default class extends Controller {
       }
     }
 
-    // Voice channels: join if not already in a call
+    // Voice channels: join/switch
     if (isVoice) {
       const bar = document.getElementById("voice-controls-bar")
       const inCall = bar && !bar.classList.contains("hidden")
-      if (inCall) return
 
-      if (this.autoJoinVoiceValue) {
+      if (inCall) {
+        // Already in a call — switch to the new channel
+        window.dispatchEvent(new CustomEvent("voice:join", {
+          detail: { channelId: targetId, serverId: this.serverIdValue }
+        }))
+      } else if (this.autoJoinVoiceValue) {
         window.dispatchEvent(new CustomEvent("voice:join", {
           detail: { channelId: targetId, serverId: this.serverIdValue }
         }))
@@ -400,80 +409,67 @@ export default class extends Controller {
   reorderSidebar(data) {
     // If this client just performed a drag-reorder, DOM is already correct — skip
     if (window._skipNextSidebarReorder && Date.now() - window._skipNextSidebarReorder < 5000) {
-      window._skipNextSidebarReorder = null
       return
     }
 
     const { channels, categories } = data
 
-    // Sort categories by position and reorder DOM
-    if (categories?.length) {
-      const sorted = [...categories].sort((a, b) => a.position - b.position)
-      sorted.forEach(cat => {
-        const el = this.element.querySelector(`[data-category-id="${cat.id}"]`)
+    if (!channels?.length && !categories?.length) return
+
+    const rootChannels = (channels || []).filter(ch => !ch.parent_channel_id && !ch.category_id)
+    const nestedChannels = (channels || []).filter(ch => ch.parent_channel_id)
+    const categorizedByGroup = {}
+    ;(channels || []).filter(ch => ch.category_id && !ch.parent_channel_id).forEach(ch => {
+      if (!categorizedByGroup[ch.category_id]) categorizedByGroup[ch.category_id] = []
+      categorizedByGroup[ch.category_id].push(ch)
+    })
+    Object.values(categorizedByGroup).forEach(g => g.sort((a, b) => a.position - b.position))
+
+    // Build interleaved root items: uncategorized channels + categories, sorted by position
+    const rootItems = []
+    rootChannels.forEach(ch => rootItems.push({ type: "channel", id: ch.id, position: ch.position }))
+    ;(categories || []).forEach(cat => rootItems.push({ type: "category", id: cat.id, position: cat.position }))
+    rootItems.sort((a, b) => a.position - b.position)
+
+    // Reorder root-level items in DOM order
+    rootItems.forEach(item => {
+      if (item.type === "category") {
+        const el = this.element.querySelector(`[data-category-id="${item.id}"]`)
         if (el) this.element.appendChild(el)
-      })
-    }
-
-    // Move channels to their correct category/position
-    if (channels?.length) {
-      // Separate root channels from nested (parent_channel_id set)
-      const rootChannels = channels.filter(ch => !ch.parent_channel_id)
-      const nestedChannels = channels.filter(ch => ch.parent_channel_id)
-
-      // Group root channels by category
-      const byCat = {}
-      rootChannels.forEach(ch => {
-        const key = ch.category_id || "__uncategorized__"
-        if (!byCat[key]) byCat[key] = []
-        byCat[key].push(ch)
-      })
-
-      // Sort each group by position
-      Object.values(byCat).forEach(group => group.sort((a, b) => a.position - b.position))
-
-      // Place uncategorized channels before first category
-      if (byCat["__uncategorized__"]) {
-        const firstCat = this.element.querySelector("[data-category-id]")
-        byCat["__uncategorized__"].forEach(ch => {
-          this._moveChannelGroup(ch.id, el => {
-            if (firstCat) firstCat.before(el)
-            else this.element.appendChild(el)
-          })
-        })
+      } else {
+        this._moveChannelGroup(item.id, el => this.element.appendChild(el))
       }
+    })
 
-      // Place categorized channels
-      Object.entries(byCat).forEach(([catId, group]) => {
-        if (catId === "__uncategorized__") return
-        const catEl = this.element.querySelector(`[data-category-id="${catId}"]`)
-        if (!catEl) return
-        const container = catEl.querySelector("[data-category-collapse-target='channels']")
-        if (!container) return
-        group.forEach(ch => {
-          this._moveChannelGroup(ch.id, el => container.appendChild(el))
-        })
+    // Place categorized channels inside their categories
+    Object.entries(categorizedByGroup).forEach(([catId, group]) => {
+      const catEl = this.element.querySelector(`[data-category-id="${catId}"]`)
+      if (!catEl) return
+      const container = catEl.querySelector("[data-category-collapse-target='channels']")
+      if (!container) return
+      group.forEach(ch => {
+        this._moveChannelGroup(ch.id, el => container.appendChild(el))
       })
+    })
 
-      // Place nested channels inside their parent's voice-child-channels
-      nestedChannels.sort((a, b) => a.position - b.position).forEach(ch => {
-        const parentLink = this.element.querySelector(`[data-channel-id="${ch.parent_channel_id}"]`)
-        if (!parentLink) return
-        let childContainer = this.element.querySelector(
-          `.voice-child-channels[data-parent-channel="${ch.parent_channel_id}"]`
+    // Place nested channels inside their parent's voice-child-channels
+    nestedChannels.sort((a, b) => a.position - b.position).forEach(ch => {
+      const parentLink = this.element.querySelector(`[data-channel-id="${ch.parent_channel_id}"]`)
+      if (!parentLink) return
+      let childContainer = this.element.querySelector(
+        `.voice-child-channels[data-parent-channel="${ch.parent_channel_id}"]`
+      )
+      if (!childContainer) {
+        childContainer = document.createElement("div")
+        childContainer.className = "voice-child-channels"
+        childContainer.dataset.parentChannel = ch.parent_channel_id
+        const participants = this.element.querySelector(
+          `.voice-participants[data-voice-channel-participants="${ch.parent_channel_id}"]`
         )
-        if (!childContainer) {
-          childContainer = document.createElement("div")
-          childContainer.className = "voice-child-channels"
-          childContainer.dataset.parentChannel = ch.parent_channel_id
-          const participants = this.element.querySelector(
-            `.voice-participants[data-voice-channel-participants="${ch.parent_channel_id}"]`
-          )
-          ;(participants || parentLink).after(childContainer)
-        }
-        this._moveChannelGroup(ch.id, el => childContainer.appendChild(el))
-      })
-    }
+        ;(participants || parentLink).after(childContainer)
+      }
+      this._moveChannelGroup(ch.id, el => childContainer.appendChild(el))
+    })
 
     this._initVoiceSortables()
   }
@@ -523,15 +519,14 @@ export default class extends Controller {
     }
 
     // Update main voice view participant grid (if viewing this channel)
+    // Use querySelectorAll to update both desktop and mobile grids
     const wrapper = document.querySelector("[data-current-channel-id]")
     if (wrapper?.dataset.currentChannelId === data.channel_id) {
-      const gridContainer = document.querySelector("[data-voice-participant-grid]")
-      const emptyState = document.querySelector("[data-voice-empty-state]")
-
       const color = data.profile_color || "#1e1c1b"
-      const cardEl = this._buildVoiceCard(data, color)
 
-      if (emptyState) {
+      // Handle empty states (both desktop and mobile)
+      document.querySelectorAll("[data-voice-empty-state]").forEach(emptyState => {
+        const cardEl = this._buildVoiceCard(data, color)
         const gridOuter = document.createElement("div")
         gridOuter.className = "flex-1 p-3 overflow-y-auto"
         gridOuter.dataset.voiceParticipantGrid = ""
@@ -540,12 +535,15 @@ export default class extends Controller {
         gridInner.appendChild(cardEl)
         gridOuter.appendChild(gridInner)
         emptyState.replaceWith(gridOuter)
-      } else if (gridContainer) {
+      })
+
+      // Handle existing grids (both desktop and mobile)
+      document.querySelectorAll("[data-voice-participant-grid]").forEach(gridContainer => {
         const grid = gridContainer.querySelector(".voice-grid") || gridContainer
         if (!grid.querySelector(`[data-voice-participant-id="${data.user_id}"]`)) {
-          grid.appendChild(cardEl)
+          grid.appendChild(this._buildVoiceCard(data, color))
         }
-      }
+      })
     }
 
     // For the current user: swap join button and show voice controls bar
@@ -557,7 +555,7 @@ export default class extends Controller {
         joinBtn.outerHTML = '<p class="text-green-400 text-sm font-medium" data-voice-connected-text>You\'re connected to this voice channel</p>'
       }
 
-      // Show voice controls bar
+      // Show voice controls bar (sidebar + mobile)
       const bar = document.getElementById("voice-controls-bar")
       if (bar) {
         bar.classList.remove("hidden")
@@ -567,6 +565,8 @@ export default class extends Controller {
           channelNameEl.textContent = name
         }
       }
+      const mobileBar = document.getElementById("mobile-voice-controls")
+      if (mobileBar) mobileBar.classList.remove("hidden")
     }
 
     this._updateLinkedVoiceBanner(data.channel_id, 1)
@@ -582,19 +582,13 @@ export default class extends Controller {
       if (!container.children.length) container.remove()
     }
 
-    // Update main voice view participant grid (if viewing this channel)
+    // Update main voice view participant grids (both desktop and mobile)
     const wrapper = document.querySelector("[data-current-channel-id]")
     if (wrapper?.dataset.currentChannelId === data.channel_id) {
-      const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
-      if (card) card.remove()
+      document.querySelectorAll(`[data-voice-participant-id="${data.user_id}"]`).forEach(card => card.remove())
 
-      // Show empty state if grid is now empty
-      const gridContainer = document.querySelector("[data-voice-participant-grid]")
-      const voiceGrid = gridContainer?.querySelector(".voice-grid")
-      if (gridContainer && voiceGrid && voiceGrid.children.length === 0) {
-        const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
-        gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
-      }
+      // Show empty state if grids are now empty
+      this._showEmptyStateIfEmpty(wrapper)
     }
 
     // For the current user: swap connected text back to join button and hide controls bar
@@ -616,6 +610,8 @@ export default class extends Controller {
 
       const bar = document.getElementById("voice-controls-bar")
       if (bar) bar.classList.add("hidden")
+      const mobileBar = document.getElementById("mobile-voice-controls")
+      if (mobileBar) mobileBar.classList.add("hidden")
     }
 
     this._updateLinkedVoiceBanner(data.channel_id, -1)
@@ -658,9 +654,8 @@ export default class extends Controller {
         }
       }
 
-      // Update main voice view card status icons
-      const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
-      if (card) {
+      // Update main voice view card status icons (both desktop and mobile grids)
+      document.querySelectorAll(`[data-voice-participant-id="${data.user_id}"]`).forEach(card => {
         const existingIcons = card.querySelector(".voice-status-icons")
         if (existingIcons) existingIcons.remove()
 
@@ -681,7 +676,7 @@ export default class extends Controller {
             inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
           }
         }
-      }
+      })
     }
 
     // Server moderation events still dispatched for the current user
@@ -704,12 +699,10 @@ export default class extends Controller {
       if (!container.children.length) container.remove()
     }
 
-    // Remove card from main voice view
+    // Remove card from main voice view (both desktop and mobile)
     const wrapper = document.querySelector("[data-current-channel-id]")
     if (wrapper?.dataset.currentChannelId === data.channel_id) {
-      const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
-      if (card) card.remove()
-
+      document.querySelectorAll(`[data-voice-participant-id="${data.user_id}"]`).forEach(card => card.remove())
       this._showEmptyStateIfEmpty(wrapper)
     }
 
@@ -746,23 +739,20 @@ export default class extends Controller {
       newContainer.appendChild(this._buildSidebarParticipant(rowData))
     }
 
-    // Update main voice view if viewing either channel
+    // Update main voice view if viewing either channel (both desktop and mobile grids)
     const wrapper = document.querySelector("[data-current-channel-id]")
     if (wrapper) {
       const currentChannelId = wrapper.dataset.currentChannelId
       if (currentChannelId === data.from_channel_id) {
-        // Remove card from old channel view
-        const card = document.querySelector(`[data-voice-participant-id="${data.user_id}"]`)
-        if (card) card.remove()
+        // Remove card from old channel view (all grids)
+        document.querySelectorAll(`[data-voice-participant-id="${data.user_id}"]`).forEach(card => card.remove())
         this._showEmptyStateIfEmpty(wrapper)
       } else if (currentChannelId === data.to_channel_id) {
-        // Add card to new channel view
-        const gridContainer = document.querySelector("[data-voice-participant-grid]")
-        const emptyState = document.querySelector("[data-voice-empty-state]")
+        // Add card to new channel view (all grids)
         const color = data.profile_color || "#1e1c1b"
-        const cardEl = this._buildVoiceCard(data, color)
 
-        if (emptyState) {
+        document.querySelectorAll("[data-voice-empty-state]").forEach(emptyState => {
+          const cardEl = this._buildVoiceCard(data, color)
           const gridOuter = document.createElement("div")
           gridOuter.className = "flex-1 p-3 overflow-y-auto"
           gridOuter.dataset.voiceParticipantGrid = ""
@@ -771,12 +761,14 @@ export default class extends Controller {
           gridInner.appendChild(cardEl)
           gridOuter.appendChild(gridInner)
           emptyState.replaceWith(gridOuter)
-        } else if (gridContainer) {
+        })
+
+        document.querySelectorAll("[data-voice-participant-grid]").forEach(gridContainer => {
           const grid = gridContainer.querySelector(".voice-grid") || gridContainer
           if (!grid.querySelector(`[data-voice-participant-id="${data.user_id}"]`)) {
-            grid.appendChild(cardEl)
+            grid.appendChild(this._buildVoiceCard(data, color))
           }
-        }
+        })
       }
     }
 
@@ -803,12 +795,13 @@ export default class extends Controller {
   }
 
   _showEmptyStateIfEmpty(wrapper) {
-    const gridContainer = document.querySelector("[data-voice-participant-grid]")
-    const voiceGrid = gridContainer?.querySelector(".voice-grid")
-    if (gridContainer && voiceGrid && voiceGrid.children.length === 0) {
-      const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
-      gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
-    }
+    const channelName = wrapper.querySelector("h1")?.textContent || "Voice Channel"
+    document.querySelectorAll("[data-voice-participant-grid]").forEach(gridContainer => {
+      const voiceGrid = gridContainer.querySelector(".voice-grid")
+      if (voiceGrid && voiceGrid.children.length === 0) {
+        gridContainer.replaceWith(this._buildVoiceEmptyState(channelName))
+      }
+    })
   }
 
   _buildVoiceCard(data, color) {
@@ -1041,5 +1034,131 @@ export default class extends Controller {
       toast.style.opacity = "0"
       setTimeout(() => toast.remove(), 300)
     }, 3000)
+  }
+
+  // --- Right-click context menu for channel/category creation ---
+
+  _handleContextMenu(e) {
+    // Only show if user has manage_channels permission
+    const canManage = this.element.dataset.channelReorderCanManageValue === "true"
+    if (!canManage) return
+
+    // Don't override context menu on channel links themselves
+    const channelLink = e.target.closest("[data-channel-id]")
+    if (channelLink) return
+
+    e.preventDefault()
+
+    // Determine insertion context from click location
+    const { categoryId, position } = this._getInsertionPoint(e.target, e.clientY)
+    const serverId = this.serverIdValue
+
+    const items = [
+      {
+        icon: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>',
+        label: "Create Channel",
+        action: () => {
+          let url = `/servers/${serverId}/channels/new?`
+          if (categoryId) url += `category_id=${categoryId}&`
+          if (position !== null) url += `position=${position}`
+          window.Turbo.visit(url)
+        }
+      },
+      {
+        icon: '<svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"/></svg>',
+        label: "Create Category",
+        action: () => {
+          // Category position based on which category area we're in
+          const catPosition = this._getCategoryInsertionPosition(e.target, e.clientY)
+          let url = `/servers/${serverId}/categories/new`
+          if (catPosition !== null) url += `?position=${catPosition}`
+          window.Turbo.visit(url)
+        }
+      }
+    ]
+
+    this._renderSidebarContextMenu(e.clientX, e.clientY, items)
+  }
+
+  _getInsertionPoint(target, clientY) {
+    // Check if we're inside a category
+    const categoryEl = target.closest("[data-category-id]")
+    const categoryId = categoryEl?.dataset.categoryId || null
+
+    // Find the nearest channel above the click point within the same scope
+    let position = null
+    const scope = categoryEl
+      ? categoryEl.querySelector("[data-category-collapse-target='channels']")
+      : this.element
+
+    if (scope) {
+      const channels = scope.querySelectorAll(":scope > [data-channel-id]")
+      let insertAfter = -1
+      for (const ch of channels) {
+        const rect = ch.getBoundingClientRect()
+        if (rect.bottom <= clientY) {
+          const pos = parseInt(ch.dataset.channelPosition, 10)
+          if (!isNaN(pos) && pos > insertAfter) insertAfter = pos
+        }
+      }
+      position = insertAfter + 1
+    }
+
+    return { categoryId, position }
+  }
+
+  _getCategoryInsertionPosition(target, clientY) {
+    const categories = this.element.querySelectorAll("[data-category-id]")
+    let insertAfter = -1
+    for (const cat of categories) {
+      const rect = cat.getBoundingClientRect()
+      if (rect.top <= clientY) {
+        const pos = parseInt(cat.dataset.categoryPosition, 10)
+        if (!isNaN(pos) && pos > insertAfter) insertAfter = pos
+      }
+    }
+    return insertAfter + 1
+  }
+
+  _renderSidebarContextMenu(x, y, items) {
+    // Remove existing context menu
+    document.getElementById("sidebar-context-menu")?.remove()
+
+    const menu = document.createElement("div")
+    menu.id = "sidebar-context-menu"
+    menu.className = "fixed z-[100] bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px]"
+    menu.style.cssText = `left:${x}px;top:${y}px`
+
+    items.forEach(item => {
+      const btn = document.createElement("button")
+      btn.className = "w-full flex items-center px-3 py-2 text-sm text-gray-300 hover:bg-accent/20 hover:text-white transition cursor-pointer"
+      btn.innerHTML = `${item.icon}<span>${item.label}</span>`
+      btn.addEventListener("click", () => {
+        menu.remove()
+        item.action()
+      })
+      menu.appendChild(btn)
+    })
+
+    document.body.appendChild(menu)
+
+    // Adjust position if overflowing viewport
+    const rect = menu.getBoundingClientRect()
+    if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`
+    if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`
+
+    // Close on click outside or Escape
+    const close = (e) => {
+      if (e.type === "keydown" && e.key !== "Escape") return
+      menu.remove()
+      document.removeEventListener("click", close)
+      document.removeEventListener("keydown", close)
+      document.removeEventListener("contextmenu", close)
+    }
+    setTimeout(() => {
+      document.addEventListener("click", close)
+      document.addEventListener("keydown", close)
+      document.addEventListener("contextmenu", close)
+    }, 0)
   }
 }

@@ -1,0 +1,100 @@
+<% server = local_assigns[:server] %>
+<% page = local_assigns[:page] || 1 %>
+<% total = local_assigns[:total] || results.size %>
+<% has_more = local_assigns[:has_more] || false %>
+<% if results.empty? && page == 1 %>
+  <div class="text-center text-gray-500 py-8 text-sm">No messages found</div>
+<% else %>
+  <% grouped = server ? results.group_by(&:channel) : { nil => results } %>
+  <% grouped.each do |channel, messages| %>
+    <% if channel %>
+      <div class="px-3 pt-3 pb-1 flex items-center gap-1.5 text-xs text-gray-500 font-semibold uppercase tracking-wide">
+        <% if channel.encrypted? %>
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        <% else %>
+          <span>#</span>
+        <% end %>
+        <%= channel.name %>
+      </div>
+    <% end %>
+    <% messages.each do |message| %>
+      <%
+        author = message.user
+        if author
+          author_name = server ? author.display_name_for(server) : (author.display_name.presence || author.username)
+          author_avatar = author.effective_avatar_url
+          author_color = server ? author.role_color_for(server) : nil
+          author_initial_bg = author.profile_color || '#1e1c1b'
+        elsif message.nostr_author_pubkey.present? && server
+          remote_member = channel&.server&.remote_members&.find_by(pubkey: message.nostr_author_pubkey)
+          nostr_contact = remote_member ? nil : message.nostr_author
+          author_name = remote_member&.display_name_for || nostr_contact&.effective_display_name || message.nostr_author_pubkey.first(12) + "..."
+          author_avatar = remote_member&.effective_avatar_url || nostr_contact&.avatar_url
+          author_color = remote_member&.role_color_for || '#6b7280'
+          author_initial_bg = '#1e1c1b'
+        else
+          author_name = "Unknown User"
+          author_avatar = nil
+          author_color = nil
+          author_initial_bg = '#1e1c1b'
+        end
+      %>
+      <div class="search-result mx-2 mb-2 bg-gray-900/50 rounded-lg overflow-hidden hover:bg-gray-700/50 cursor-pointer"
+           data-action="click->message-search#jumpToMessage"
+           data-message-id="<%= message.public_id %>"
+           data-message-timestamp="<%= message.created_at.to_i %>"
+           <% if server && message.channel %> data-channel-id="<%= message.channel.public_id %>" data-server-id="<%= server.public_id %>"<% end %>>
+        <div class="px-3 py-2">
+          <div class="flex items-center gap-2 mb-1">
+            <% if author_avatar.present? %>
+              <%= image_tag author_avatar, class: "w-6 h-6 rounded-full object-cover shrink-0", loading: "lazy" %>
+            <% else %>
+              <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0" style="background-color: <%= author_initial_bg %>">
+                <%= author_name[0].upcase %>
+              </div>
+            <% end %>
+            <span class="text-sm font-medium truncate" style="color: <%= author_color || '#ffffff' %>"><%= author_name %></span>
+            <span class="text-[11px] text-gray-500 shrink-0 ml-auto"><%= message.created_at.strftime("%m/%d/%Y %l:%M %p") %></span>
+          </div>
+          <% if message.content.present? %>
+            <div class="text-sm text-gray-200 leading-relaxed break-words pl-8 message-content"><%= message.rendered_content %></div>
+          <% end %>
+          <% if message.files.attached? %>
+            <div class="flex flex-wrap gap-2 mt-1.5 pl-8">
+              <% message.files.each do |file| %>
+                <% if file.content_type&.start_with?("image/") %>
+                  <%= image_tag url_for(file), class: "max-w-[200px] max-h-36 rounded object-cover", loading: "lazy" %>
+                <% elsif file.content_type&.start_with?("video/") %>
+                  <div class="flex items-center gap-1.5 bg-gray-800 rounded px-2 py-1">
+                    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span class="text-xs text-gray-400 truncate max-w-[120px]"><%= file.filename %></span>
+                  </div>
+                <% elsif file.content_type&.start_with?("audio/") %>
+                  <div class="flex items-center gap-1.5 bg-gray-800 rounded px-2 py-1">
+                    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"/></svg>
+                    <span class="text-xs text-gray-400 truncate max-w-[120px]"><%= file.filename %></span>
+                  </div>
+                <% else %>
+                  <div class="flex items-center gap-1.5 bg-gray-800 rounded px-2 py-1">
+                    <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                    <span class="text-xs text-accent-light truncate max-w-[120px]"><%= file.filename %></span>
+                  </div>
+                <% end %>
+              <% end %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% end %>
+  <% if has_more %>
+    <div class="px-3 py-3 text-center">
+      <button type="button" class="text-sm text-accent-light hover:text-white cursor-pointer px-4 py-1.5 rounded bg-gray-700/50 hover:bg-gray-700"
+              data-action="click->message-search#loadMore"
+              data-page="<%= page + 1 %>">
+        Load more results
+      </button>
+    </div>
+  <% end %>
+  <div class="search-meta hidden" data-total="<%= total %>" data-page="<%= page %>"></div>
+<% end %>

@@ -1,0 +1,16 @@
+<%# Search results sidebar (positioned absolutely within the message-search controller wrapper) %>
+<div data-message-search-target="sidebar" class="hidden absolute right-0 top-0 bottom-0 w-[420px] bg-gray-800 border-l border-gray-700 z-40 flex flex-col" style="max-width: 100%;">
+  <%# Sidebar header %>
+  <div class="flex items-center justify-between px-4 py-2.5 border-b border-gray-700 shrink-0">
+    <span data-message-search-target="resultCount" class="text-sm font-semibold text-white">Results</span>
+    <button type="button" data-action="click->message-search#closeSidebar" class="text-gray-400 hover:text-white p-0.5 cursor-pointer">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+  <%# Loading spinner %>
+  <div data-message-search-target="sidebarLoading" class="hidden flex items-center justify-center py-8">
+    <div class="text-sm text-gray-500">Searching...</div>
+  </div>
+  <%# Results container %>
+  <div data-message-search-target="sidebarResults" class="flex-1 overflow-y-auto py-1"></div>
+</div>

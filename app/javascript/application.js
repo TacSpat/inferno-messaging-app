@@ -64,6 +64,81 @@ document.addEventListener("error", (e) => {
   }
 }, true)
 
+// Lock image dimensions after load to prevent layout shift on re-render.
+// Images with data-lock-dims get explicit width/height once naturalWidth is known.
+// Caches dimensions by src URL so shimmer placeholders show at correct size.
+const _imgDimCache = (() => {
+  try { return JSON.parse(sessionStorage.getItem("imgDims") || "{}") } catch { return {} }
+})()
+function _saveImgDimCache() {
+  try { sessionStorage.setItem("imgDims", JSON.stringify(_imgDimCache)) } catch {}
+}
+function lockImageDims(img) {
+  if (img.naturalWidth && img.naturalHeight) {
+    const maxW = parseFloat(getComputedStyle(img).maxWidth) || img.naturalWidth
+    const maxH = parseFloat(getComputedStyle(img).maxHeight) || img.naturalHeight
+    let w = img.naturalWidth, h = img.naturalHeight
+    if (w > maxW) { h = h * (maxW / w); w = maxW }
+    if (h > maxH) { w = w * (maxH / h); h = maxH }
+    const rw = Math.round(w), rh = Math.round(h)
+    img.setAttribute("width", rw)
+    img.setAttribute("height", rh)
+    img.classList.remove("img-loading")
+    if (img.src) { _imgDimCache[img.src] = [rw, rh]; _saveImgDimCache() }
+  }
+}
+// Pre-apply cached dimensions and loading class for shimmer placeholders
+function applyCachedDims(root = document) {
+  root.querySelectorAll("img[data-lock-dims]").forEach(img => {
+    if (img.complete && img.naturalWidth) return // already loaded
+    img.classList.add("img-loading")
+    const cached = _imgDimCache[img.src]
+    if (cached) {
+      img.setAttribute("width", cached[0])
+      img.setAttribute("height", cached[1])
+    }
+  })
+}
+document.addEventListener("load", (e) => {
+  if (e.target.tagName === "IMG" && e.target.hasAttribute("data-lock-dims")) {
+    lockImageDims(e.target)
+  }
+}, true)
+// Also lock dims for images already loaded (cached)
+function lockAllLoadedDims(root = document) {
+  applyCachedDims(root)
+  root.querySelectorAll("img[data-lock-dims]").forEach(img => {
+    if (img.complete && img.naturalWidth) lockImageDims(img)
+  })
+}
+document.addEventListener("turbo:load", () => lockAllLoadedDims())
+document.addEventListener("turbo:frame-render", (e) => lockAllLoadedDims(e.target))
+// Observe DOM for new img[data-lock-dims] elements (e.g. from insertAdjacentHTML)
+new MutationObserver((mutations) => {
+  for (const m of mutations) {
+    for (const node of m.addedNodes) {
+      if (node.nodeType !== 1) continue
+      const imgs = node.tagName === "IMG" && node.hasAttribute("data-lock-dims")
+        ? [node]
+        : node.querySelectorAll ? [...node.querySelectorAll("img[data-lock-dims]")] : []
+      for (const img of imgs) {
+        if (img.complete && img.naturalWidth) { lockImageDims(img) }
+        else {
+          img.classList.add("img-loading")
+          const cached = _imgDimCache[img.src]
+          if (cached) { img.setAttribute("width", cached[0]); img.setAttribute("height", cached[1]) }
+        }
+      }
+    }
+  }
+}).observe(document.body, { childList: true, subtree: true })
+// Apply to images already in DOM on script init
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", () => lockAllLoadedDims())
+} else {
+  lockAllLoadedDims()
+}
+
 // Themed number input spinners — subtle inline chevrons
 function wrapNumberInputs(root = document) {
   const chevronUp = '<svg viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1 5L5 1L9 5"/></svg>'
@@ -364,6 +439,7 @@ import GroupChatModalController from "./controllers/group_chat_modal_controller"
 import AddServerModalController from "./controllers/add_server_modal_controller"
 import ServerInvitePreviewController from "./controllers/server_invite_preview_controller"
 import StatusEmojiController from "./controllers/status_emoji_controller"
+import MessageSearchController from "./controllers/message_search_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -414,4 +490,5 @@ application.register("group-chat-modal", GroupChatModalController)
 application.register("add-server-modal", AddServerModalController)
 application.register("server-invite-preview", ServerInvitePreviewController)
 application.register("status-emoji", StatusEmojiController)
+application.register("message-search", MessageSearchController)
 // rebuild trigger

@@ -1,6 +1,8 @@
 class ServersController < ApplicationController
+  include MessageSearchable
+
   before_action :authenticate_user!
-  before_action :set_server, only: [ :show, :edit, :update, :destroy, :join, :leave ]
+  before_action :set_server, only: [ :show, :edit, :update, :destroy, :join, :leave, :search ]
   before_action :set_no_cache, only: [ :new ]
 
   def show
@@ -55,6 +57,28 @@ class ServersController < ApplicationController
       publish_server_state(:member, pubkey: current_user.nostr_public_key)
     end
     redirect_to server_channel_path(@server, @server.channels.ordered.first)
+  end
+
+  def search
+    channels = @server.channels.accessible_to(current_user)
+
+    # Backfill from relays for channels with time filters
+    channels.each { |ch| backfill_channel_history!(ch) }
+
+    messages = Message.where(channel: channels).where.not(system_message: true)
+    messages = apply_search_filters(messages)
+
+    per_page = 25
+    page = [params[:page].to_i, 1].max
+    total = messages.count
+    @results = messages.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
+
+    ActiveRecord::Associations::Preloader.new(
+      records: @results,
+      associations: [:user, :channel, { files_attachments: :blob }, :reactions]
+    ).call
+
+    render partial: "messages/search_results", locals: { results: @results, server: @server, page: page, total: total, has_more: (page * per_page) < total }
   end
 
   def leave

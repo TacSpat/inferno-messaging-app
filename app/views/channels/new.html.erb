@@ -7,6 +7,9 @@
     </div>
 
     <%= form_with model: [@server, @channel], data: { controller: "encrypted-channel channel-type" } do |f| %>
+      <% if @channel.position.present? %>
+        <%= f.hidden_field :position, value: @channel.position %>
+      <% end %>
       <% if @channel.errors.any? %>
         <div class="bg-danger/10 border border-danger/30 rounded-xl p-4 mb-5">
           <% @channel.errors.full_messages.each do |msg| %>

@@ -33,12 +33,15 @@ export default class extends Controller {
       this.openReactionPickerForMessage(messageId, clientX, clientY)
     }
     this._editHandler = (e) => {
-      const { messageId, content, preview } = e.detail
+      const { messageId, content, preview, attachments } = e.detail
       this._editMessageId = messageId
       this._editOriginalContent = this.inputTarget.value
+      this._editRemoveFileIds = []
+      this._editAttachments = attachments || []
       this.inputTarget.value = content
       if (this.hasEditPreviewTarget) this.editPreviewTarget.textContent = preview
       if (this.hasEditBarTarget) this.editBarTarget.classList.remove("hidden")
+      this._renderEditAttachments()
       this.autoResize()
       this.inputTarget.focus()
       this.inputTarget.setSelectionRange(this.inputTarget.value.length, this.inputTarget.value.length)
@@ -163,7 +166,16 @@ export default class extends Controller {
 
     const content = this.inputTarget.value.trim()
     const hasFiles = this.pendingFiles.length > 0
-    if (!content && !hasFiles) return
+
+    if (this._editMessageId) {
+      const remainingAttachments = (this._editAttachments || []).length
+      if (!content && !remainingAttachments) {
+        this._deleteEditedMessage()
+        return
+      }
+    } else if (!content && !hasFiles) {
+      return
+    }
 
     // Convert emoji placeholders back to :name: before sending
     let msgContent = content
@@ -187,7 +199,7 @@ export default class extends Controller {
         const response = await fetch(url, {
           method: "PATCH",
           headers: { "X-CSRF-Token": token, "Content-Type": "application/json", "Accept": "text/html" },
-          body: JSON.stringify({ message: { content: msgContent } })
+          body: JSON.stringify({ message: { content: msgContent, remove_file_ids: this._editRemoveFileIds || [] } })
         })
         if (response.ok) {
           this._editOriginalContent = null
@@ -345,6 +357,60 @@ export default class extends Controller {
     })
   }
 
+  async _deleteEditedMessage() {
+    const conversationId = this.conversationIdValue
+    const messageId = this._editMessageId
+    const token = document.querySelector("meta[name=csrf-token]")?.content
+    try {
+      await fetch(`/conversations/${conversationId}/dm_messages/${messageId}`, {
+        method: "DELETE",
+        headers: { "X-CSRF-Token": token }
+      })
+    } catch (e) {
+      console.error("Delete edited message failed:", e)
+    }
+    this.clearEdit()
+  }
+
+  _renderEditAttachments() {
+    const container = this.filePreviewTarget
+    container.innerHTML = ""
+    if (!this._editAttachments || this._editAttachments.length === 0) {
+      container.classList.add("hidden")
+      return
+    }
+    container.classList.remove("hidden")
+    this._editAttachments.forEach((att, i) => {
+      const wrapper = document.createElement("div")
+      wrapper.className = "relative inline-flex items-center bg-gray-700 rounded-lg p-2 mr-2 mb-2"
+      if (att.type === "image" && att.url) {
+        const img = document.createElement("img")
+        img.className = "w-16 h-16 object-cover rounded"
+        img.src = att.url
+        wrapper.appendChild(img)
+      } else {
+        const icon = att.type === "video" ? "\u{1F3AC}" : att.type === "audio" ? "\u{1F3B5}" : "\u{1F4CE}"
+        const name = document.createElement("span")
+        name.className = "text-xs text-gray-200 max-w-[100px] truncate"
+        name.textContent = `${icon} ${att.name}`
+        wrapper.appendChild(name)
+      }
+      const btn = document.createElement("button")
+      btn.type = "button"
+      btn.className = "absolute -top-1.5 -right-1.5 w-5 h-5 bg-danger hover:bg-danger-light rounded-full flex items-center justify-center text-white text-xs cursor-pointer"
+      btn.innerHTML = "&times;"
+      btn.addEventListener("click", () => this._removeEditAttachment(i))
+      wrapper.appendChild(btn)
+      container.appendChild(wrapper)
+    })
+  }
+
+  _removeEditAttachment(index) {
+    const removed = this._editAttachments.splice(index, 1)[0]
+    if (removed) this._editRemoveFileIds.push(removed.id)
+    this._renderEditAttachments()
+  }
+
   // --- Replies ---
 
   setReply(event) {
@@ -366,9 +432,13 @@ export default class extends Controller {
 
   clearEdit() {
     this._editMessageId = null
+    this._editRemoveFileIds = []
+    this._editAttachments = []
     if (this.hasEditBarTarget) this.editBarTarget.classList.add("hidden")
     this.inputTarget.value = this._editOriginalContent || ""
     this._editOriginalContent = null
+    this.filePreviewTarget.innerHTML = ""
+    this.filePreviewTarget.classList.add("hidden")
     this.autoResize()
   }
 
@@ -578,7 +648,7 @@ export default class extends Controller {
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
     `
-    header.querySelector("button").addEventListener("click", () => panel.remove())
+    header.querySelector("button").addEventListener("click", (e) => { e.stopPropagation(); panel.remove() })
     panel.appendChild(header)
 
     const content = document.createElement("div")

@@ -6,47 +6,65 @@
 <% else %>
   <div class="divide-y divide-gray-700/50">
     <% messages.each do |msg| %>
+      <% author = msg.user %>
       <div class="px-3 py-2.5 hover:bg-gray-800/60 cursor-pointer transition" data-jump-to-message="<%= msg.public_id %>">
-        <div class="flex items-center gap-1.5 mb-1">
-          <% if msg.user&.effective_avatar_url.present? %>
-            <%= image_tag msg.user.effective_avatar_url, class: "w-4 h-4 rounded-full object-cover" %>
-          <% end %>
-          <span class="text-xs font-medium text-white"><%= msg.user ? (server ? msg.user.display_name_for(server) : (msg.user.display_name.presence || msg.user.username)) : "Unknown" %></span>
-          <span class="text-[10px] text-gray-600"><%= msg.created_at.strftime("%b %d, %Y") %></span>
-        </div>
-
-        <% if msg.is_sticker? %>
-          <div class="max-w-[80px]"><%= msg.rendered_content %></div>
-        <% elsif msg.content.present? %>
-          <div class="text-sm text-gray-300 line-clamp-3 message-content pinned-preview"><%= msg.rendered_content %></div>
-        <% end %>
-
-        <% if msg.files.attached? %>
-          <div class="flex flex-wrap gap-1.5 mt-1.5">
-            <% msg.files.each do |file| %>
-              <% if file.content_type&.start_with?("image/") %>
-                <%= image_tag url_for(file), class: "w-16 h-16 rounded object-cover" %>
-              <% elsif file.content_type&.start_with?("video/") %>
-                <div class="w-16 h-16 rounded bg-gray-800 flex items-center justify-center relative overflow-hidden">
-                  <video src="<%= url_for(file) %>" preload="metadata" class="w-full h-full object-cover"></video>
-                  <div class="absolute inset-0 flex items-center justify-center bg-black/30">
-                    <svg class="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  </div>
-                </div>
-              <% elsif file.content_type&.start_with?("audio/") %>
-                <div class="flex items-center gap-1 bg-gray-800 rounded px-2 py-1">
-                  <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2z"/></svg>
-                  <span class="text-xs text-gray-400 truncate max-w-[100px]"><%= file.filename %></span>
-                </div>
-              <% else %>
-                <div class="flex items-center gap-1 bg-gray-800 rounded px-2 py-1">
-                  <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                  <span class="text-xs text-accent-light truncate max-w-[100px]"><%= file.filename %></span>
-                </div>
-              <% end %>
+        <div class="flex items-start gap-2.5">
+          <!-- Avatar -->
+          <div class="shrink-0 mt-0.5">
+            <% if author&.effective_avatar_url.present? %>
+              <%= image_tag author.effective_avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
+            <% else %>
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= author&.try(:profile_color) || '#1e1c1b' %>">
+                <%= author ? author.username[0].upcase : "?" %>
+              </div>
             <% end %>
           </div>
-        <% end %>
+
+          <!-- Content -->
+          <div class="flex-1 min-w-0">
+            <!-- Name + timestamp -->
+            <div class="flex items-baseline gap-2 mb-0.5">
+              <span class="text-sm font-medium" style="color: <%= author && server ? author.role_color_for(server) : (author ? '#d1d5db' : '#6b7280') %>">
+                <%= author ? (server ? author.display_name_for(server) : (author.display_name.presence || author.username)) : "Unknown" %>
+              </span>
+              <span class="text-[11px] text-gray-500"><%= msg.created_at.strftime("%m/%d/%Y %l:%M %p") %></span>
+            </div>
+
+            <!-- Message body -->
+            <% if msg.is_sticker? %>
+              <div class="max-w-[128px]"><%= msg.rendered_content %></div>
+            <% elsif msg.content.present? %>
+              <div class="text-sm text-gray-200 leading-relaxed message-content text-left"><%= msg.rendered_content %></div>
+            <% end %>
+
+            <!-- Attachments -->
+            <% if msg.files.attached? %>
+              <div class="flex flex-wrap gap-2 mt-2">
+                <% msg.files.each do |file| %>
+                  <% if file.content_type&.start_with?("image/") %>
+                    <div class="inline-block min-h-[4rem] min-w-[4rem] rounded-lg bg-gray-800">
+                      <%= image_tag url_for(file), class: "max-w-full sm:max-w-xs max-h-60 rounded-lg", data: file.content_type == "image/gif" ? { animated_gif: true } : {} %>
+                    </div>
+                  <% elsif file.content_type&.start_with?("video/") %>
+                    <div class="inline-block relative rounded-lg overflow-hidden">
+                      <video preload="metadata" class="max-w-full sm:max-w-xs max-h-60 block rounded-lg" src="<%= url_for(file) %>" controls></video>
+                    </div>
+                  <% elsif file.content_type&.start_with?("audio/") %>
+                    <div class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                      <span class="text-sm text-gray-300"><%= file.filename %></span>
+                      <audio controls preload="metadata" src="<%= url_for(file) %>" class="h-8"></audio>
+                    </div>
+                  <% else %>
+                    <a href="<%= url_for(file) %>" data-turbo-frame="_top" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750" onclick="event.stopPropagation()">
+                      <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                      <span class="text-sm text-accent-light"><%= file.filename %></span>
+                    </a>
+                  <% end %>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
       </div>
     <% end %>
   </div>

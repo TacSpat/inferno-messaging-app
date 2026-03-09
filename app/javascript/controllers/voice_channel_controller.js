@@ -93,6 +93,14 @@ export default class extends Controller {
     window.addEventListener("voice:input-device-changed", this._onInputDeviceChanged)
     window.addEventListener("voice:output-device-changed", this._onOutputDeviceChanged)
 
+    // Re-apply voice panel status after Turbo frame navigations
+    this._onFrameLoad = (e) => {
+      if (e.target.id === "main-content" && this.room && this.currentChannelId) {
+        this._updateVoicePanelStatus("connected")
+      }
+    }
+    document.addEventListener("turbo:frame-load", this._onFrameLoad)
+
     // Auto-rejoin if we were in a voice channel before page refresh
     this._checkPendingRejoin()
   }
@@ -516,6 +524,11 @@ export default class extends Controller {
     // Clear persisted session — explicit disconnect should not auto-rejoin
     this._clearSession()
 
+    // Notify backend FIRST — use sendBeacon for reliability (survives page nav/unload)
+    if (this.currentServerId) {
+      this._sendLeave(this.currentServerId)
+    }
+
     if (this.room) {
       this.room.disconnect()
       this.room = null
@@ -566,22 +579,6 @@ export default class extends Controller {
     }
     this._screenShareTrack = null
 
-    // Notify backend
-    if (this.currentServerId) {
-      const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
-      try {
-        await fetch(`/servers/${this.currentServerId}/voice/leave`, {
-          method: "DELETE",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRF-Token": csrfToken
-          }
-        })
-      } catch (e) {
-        // Best effort
-      }
-    }
-
     this.currentChannelId = null
     this.currentServerId = null
     this.voiceStateId = null
@@ -598,10 +595,29 @@ export default class extends Controller {
     this._updateVoicePanelStatus("join")
   }
 
+  // Reliably notify the backend of a voice leave.
+  // Uses sendBeacon (survives page unload/navigation) with fetch fallback.
+  _sendLeave(serverId) {
+    const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+    const url = `/servers/${serverId}/voice/leave`
+
+    // sendBeacon is the most reliable for unload/navigation scenarios
+    if (navigator.sendBeacon) {
+      const blob = new Blob([JSON.stringify({ authenticity_token: csrfToken })], { type: "application/json" })
+      const sent = navigator.sendBeacon(url, blob)
+      if (sent) return
+    }
+
+    // Fallback: keepalive fetch
+    fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      keepalive: true
+    }).catch(() => {})
+  }
+
   _handleBeforeUnload() {
     // Save session so we can rejoin after refresh.
-    // Don't send leave — the join endpoint cleans up stale state,
-    // and sessionStorage auto-clears on tab close.
     this._saveSession()
   }
 
@@ -1011,38 +1027,38 @@ export default class extends Controller {
   // Updates the voice panel status area (bottom of show_voice view).
   // States: "join" (show join button), "connecting", "connected", "reconnecting"
   _updateVoicePanelStatus(state) {
-    const panel = document.querySelector("[data-voice-panel-status]")
-    if (!panel) return
+    // Update all voice panel status areas (desktop + mobile)
+    document.querySelectorAll("[data-voice-panel-status]").forEach(panel => {
+      const channelId = panel.dataset.voicePanelChannel
+      const serverId = panel.dataset.voicePanelServer
 
-    const channelId = panel.dataset.voicePanelChannel
-    const serverId = panel.dataset.voicePanelServer
+      // Only update if this panel is for the channel we're in (or joining)
+      if (this.currentChannelId && channelId !== this.currentChannelId) return
 
-    // Only update if this panel is for the channel we're in (or joining)
-    if (this.currentChannelId && channelId !== this.currentChannelId) return
+      const statusMap = {
+        join: `<button type="button"
+                 class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition flex items-center gap-2 cursor-pointer text-sm"
+                 data-voice-status="join"
+                 onclick="window.dispatchEvent(new CustomEvent('voice:join', { detail: { channelId: '${channelId}', serverId: '${serverId}' } }))">
+                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
+                 Join Voice
+               </button>`,
+        connecting: `<div class="flex items-center gap-2" data-voice-status="connecting">
+                       <div class="animate-spin w-3.5 h-3.5 border-2 border-accent border-t-transparent rounded-full"></div>
+                       <p class="text-gray-400 text-sm font-medium">Connecting...</p>
+                     </div>`,
+        connected: `<div class="flex items-center gap-2" data-voice-status="connected">
+                      <div class="w-2 h-2 rounded-full bg-green-400"></div>
+                      <p class="text-green-400 text-sm font-medium">Voice Connected</p>
+                    </div>`,
+        reconnecting: `<div class="flex items-center gap-2" data-voice-status="reconnecting">
+                         <div class="animate-spin w-3.5 h-3.5 border-2 border-warning-light border-t-transparent rounded-full"></div>
+                         <p class="text-warning-light text-sm font-medium">Reconnecting...</p>
+                       </div>`
+      }
 
-    const statusMap = {
-      join: `<button type="button"
-               class="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-semibold rounded-full transition flex items-center gap-2 cursor-pointer text-sm"
-               data-voice-status="join"
-               onclick="window.dispatchEvent(new CustomEvent('voice:join', { detail: { channelId: '${channelId}', serverId: '${serverId}' } }))">
-               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M12 6v12m-3.536-2.464a5 5 0 010-7.072"/></svg>
-               Join Voice
-             </button>`,
-      connecting: `<div class="flex items-center gap-2" data-voice-status="connecting">
-                     <div class="animate-spin w-3.5 h-3.5 border-2 border-accent border-t-transparent rounded-full"></div>
-                     <p class="text-gray-400 text-sm font-medium">Connecting...</p>
-                   </div>`,
-      connected: `<div class="flex items-center gap-2" data-voice-status="connected">
-                    <div class="w-2 h-2 rounded-full bg-green-400"></div>
-                    <p class="text-green-400 text-sm font-medium">Voice Connected</p>
-                  </div>`,
-      reconnecting: `<div class="flex items-center gap-2" data-voice-status="reconnecting">
-                       <div class="animate-spin w-3.5 h-3.5 border-2 border-warning-light border-t-transparent rounded-full"></div>
-                       <p class="text-warning-light text-sm font-medium">Reconnecting...</p>
-                     </div>`
-    }
-
-    panel.innerHTML = statusMap[state] || statusMap.join
+      panel.innerHTML = statusMap[state] || statusMap.join
+    })
   }
 
   // ─── Control bar actions ───────────────────────────────────
@@ -1259,24 +1275,30 @@ export default class extends Controller {
   _updateScreenShareIcon() {
     if (!this.hasScreenShareBtnTarget) return
     const btn = this.screenShareBtnTarget
+    const mobileBtn = document.querySelector('[data-mobile-voice-btn="screenshare"]')
     if (this._screenSharing) {
       btn.classList.add("text-green-400")
       btn.classList.remove("text-gray-300")
+      if (mobileBtn) { mobileBtn.classList.add("text-green-400", "bg-green-400/10"); mobileBtn.classList.remove("text-gray-300") }
     } else {
       btn.classList.remove("text-green-400")
       btn.classList.add("text-gray-300")
+      if (mobileBtn) { mobileBtn.classList.remove("text-green-400", "bg-green-400/10"); mobileBtn.classList.add("text-gray-300") }
     }
   }
 
   _updateCameraIcon() {
     if (!this.hasCameraBtnTarget) return
     const btn = this.cameraBtnTarget
+    const mobileBtn = document.querySelector('[data-mobile-voice-btn="camera"]')
     if (this._cameraOn) {
       btn.classList.add("text-green-400")
       btn.classList.remove("text-gray-300")
+      if (mobileBtn) { mobileBtn.classList.add("text-green-400", "bg-green-400/10"); mobileBtn.classList.remove("text-gray-300") }
     } else {
       btn.classList.remove("text-green-400")
       btn.classList.add("text-gray-300")
+      if (mobileBtn) { mobileBtn.classList.remove("text-green-400", "bg-green-400/10"); mobileBtn.classList.add("text-gray-300") }
     }
   }
 
@@ -1554,41 +1576,49 @@ export default class extends Controller {
     // Avoid duplicates
     if (this._cameraElements.has(identity)) return
 
-    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
-    if (!card) return
+    const videos = []
+    // Attach to all matching cards (desktop + mobile grids)
+    document.querySelectorAll(`[data-voice-participant-id="${identity}"]`).forEach(card => {
+      const inner = card.querySelector(".voice-card-inner")
+      if (!inner) return
 
-    const inner = card.querySelector(".voice-card-inner")
-    if (!inner) return
+      const video = track.attach()
+      video.className = "voice-camera-video"
+      video.dataset.cameraIdentity = identity
+      inner.appendChild(video)
+      videos.push(video)
 
-    const video = track.attach()
-    video.className = "voice-camera-video"
-    video.dataset.cameraIdentity = identity
-    inner.appendChild(video)
+      // Hide the avatar
+      const avatarWrapper = inner.querySelector(".voice-avatar-wrapper")
+      if (avatarWrapper) avatarWrapper.style.display = "none"
+    })
 
-    // Hide the avatar
-    const avatarWrapper = inner.querySelector(".voice-avatar-wrapper")
-    if (avatarWrapper) avatarWrapper.style.display = "none"
-
-    this._cameraElements.set(identity, { video, track })
+    if (videos.length) {
+      this._cameraElements.set(identity, { video: videos[0], videos, track })
+    }
   }
 
   _detachCameraTrack(participant) {
     const identity = participant.identity
     const entry = this._cameraElements.get(identity)
     if (entry) {
-      const { video, track } = entry
+      const { videos, track } = entry
       // Properly detach the LiveKit track so no frozen frame remains
       try { track.detach() } catch (_) {}
-      video.remove()
+      // Remove all video elements (desktop + mobile)
+      if (videos) {
+        videos.forEach(v => v.remove())
+      } else if (entry.video) {
+        entry.video.remove()
+      }
       this._cameraElements.delete(identity)
     }
 
-    // Restore avatar
-    const card = document.querySelector(`[data-voice-participant-id="${identity}"]`)
-    if (card) {
+    // Restore avatars in all grids
+    document.querySelectorAll(`[data-voice-participant-id="${identity}"]`).forEach(card => {
       const avatarWrapper = card.querySelector(".voice-avatar-wrapper")
       if (avatarWrapper) avatarWrapper.style.display = ""
-    }
+    })
   }
 
   _showLocalCameraPreview(track, participant) {
@@ -1607,6 +1637,9 @@ export default class extends Controller {
     this._updateControlsBarStatus("connected")
     this._updateMuteIcon()
     this._updateDeafenIcon()
+    // Show mobile voice controls bar if present
+    const mobileBar = document.getElementById("mobile-voice-controls")
+    if (mobileBar) mobileBar.classList.remove("hidden")
   }
 
   _updateControlsBarStatus(state) {
@@ -1627,33 +1660,58 @@ export default class extends Controller {
     if (this.hasControlsBarTarget) {
       this.controlsBarTarget.classList.add("hidden")
     }
+    // Hide mobile voice controls bar if present
+    const mobileBar = document.getElementById("mobile-voice-controls")
+    if (mobileBar) mobileBar.classList.add("hidden")
   }
 
   _updateMuteIcon() {
     if (!this.hasMuteBtnTarget) return
     const btn = this.muteBtnTarget
+    const mobileBtn = document.querySelector('[data-mobile-voice-btn="mute"]')
     if (this._muted) {
       btn.classList.add("text-red-400")
       btn.classList.remove("text-gray-300")
       btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/></svg>'
+      if (mobileBtn) {
+        mobileBtn.classList.add("text-red-400", "bg-red-400/10")
+        mobileBtn.classList.remove("text-gray-300")
+        mobileBtn.innerHTML = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/><line x1="3" y1="3" x2="21" y2="21" stroke-width="2" stroke-linecap="round"/></svg>'
+      }
     } else {
       btn.classList.remove("text-red-400")
       btn.classList.add("text-gray-300")
       btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>'
+      if (mobileBtn) {
+        mobileBtn.classList.remove("text-red-400", "bg-red-400/10")
+        mobileBtn.classList.add("text-gray-300")
+        mobileBtn.innerHTML = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg>'
+      }
     }
   }
 
   _updateDeafenIcon() {
     if (!this.hasDeafenBtnTarget) return
     const btn = this.deafenBtnTarget
+    const mobileBtn = document.querySelector('[data-mobile-voice-btn="deafen"]')
     if (this._deafened) {
       btn.classList.add("text-red-400")
       btn.classList.remove("text-gray-300")
       btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>'
+      if (mobileBtn) {
+        mobileBtn.classList.add("text-red-400", "bg-red-400/10")
+        mobileBtn.classList.remove("text-gray-300")
+        mobileBtn.innerHTML = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/></svg>'
+      }
     } else {
       btn.classList.remove("text-red-400")
       btn.classList.add("text-gray-300")
       btn.innerHTML = '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>'
+      if (mobileBtn) {
+        mobileBtn.classList.remove("text-red-400", "bg-red-400/10")
+        mobileBtn.classList.add("text-gray-300")
+        mobileBtn.innerHTML = '<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072M18.364 5.636a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"/></svg>'
+      }
     }
   }
 
@@ -1722,9 +1780,8 @@ export default class extends Controller {
       }
     }
 
-    // Update main voice view card for self
-    const selfCard = document.querySelector(`[data-voice-participant-id="${currentUserId}"]`)
-    if (selfCard) {
+    // Update main voice view cards for self (both desktop and mobile grids)
+    document.querySelectorAll(`[data-voice-participant-id="${currentUserId}"]`).forEach(selfCard => {
       const existingIcons = selfCard.querySelector(".voice-status-icons")
       if (existingIcons) existingIcons.remove()
 
@@ -1741,29 +1798,29 @@ export default class extends Controller {
           inner.insertAdjacentHTML("beforeend", `<div class="voice-status-icons">${badgesHtml}</div>`)
         }
       }
-    }
+    })
   }
 
   _updateRemoteParticipantMuteIcons(participant) {
     const userId = participant.identity
-    const card = document.querySelector(`[data-voice-participant-id="${userId}"]`)
-    if (!card) return
+    // Update all matching cards (desktop + mobile grids)
+    document.querySelectorAll(`[data-voice-participant-id="${userId}"]`).forEach(card => {
+      const existingIcons = card.querySelector(".voice-status-icons")
+      if (existingIcons) existingIcons.remove()
 
-    const existingIcons = card.querySelector(".voice-status-icons")
-    if (existingIcons) existingIcons.remove()
-
-    const isMuted = !participant.isMicrophoneEnabled
-    if (isMuted) {
-      const inner = card.querySelector(".voice-card-inner")
-      if (inner) {
-        inner.insertAdjacentHTML("beforeend",
-          `<div class="voice-status-icons"><div class="voice-status-badge">` +
-          `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">` +
-          `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>` +
-          `<line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/>` +
-          `</svg></div></div>`)
+      const isMuted = !participant.isMicrophoneEnabled
+      if (isMuted) {
+        const inner = card.querySelector(".voice-card-inner")
+        if (inner) {
+          inner.insertAdjacentHTML("beforeend",
+            `<div class="voice-status-icons"><div class="voice-status-badge">` +
+            `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">` +
+            `<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>` +
+            `<line x1="3" y1="3" x2="21" y2="21" stroke-width="2.5" stroke-linecap="round"/>` +
+            `</svg></div></div>`)
+        }
       }
-    }
+    })
   }
 
   // ─── Cross-instance participant UI ──────────────────────────
@@ -1819,9 +1876,9 @@ export default class extends Controller {
       sidebarContainer.appendChild(row)
     }
 
-    // ── Main voice view card ──
-    const grid = document.querySelector("[data-voice-participant-grid] .voice-grid")
-    if (grid && !grid.querySelector(`[data-voice-participant-id="${userId}"]`)) {
+    // ── Main voice view cards (desktop + mobile grids) ──
+    document.querySelectorAll("[data-voice-participant-grid] .voice-grid").forEach(grid => {
+      if (grid.querySelector(`[data-voice-participant-id="${userId}"]`)) return
       const tpl = document.getElementById("tpl-voice-card")
       if (tpl) {
         const card = tpl.content.cloneNode(true).querySelector(".voice-card")
@@ -1847,7 +1904,7 @@ export default class extends Controller {
         card.querySelector('[data-slot="username"]').textContent = username
         grid.appendChild(card)
       }
-    }
+    })
   }
 
   _removeParticipantUI(participant) {
