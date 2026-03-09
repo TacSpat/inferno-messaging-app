@@ -15,6 +15,8 @@ export default class extends Controller {
     this.pendingFiles = []
     this.typingUsers = new Map()
     this.inputTarget.dataset.originalPlaceholder = this.inputTarget.placeholder
+    this.inputTarget.setAttribute("spellcheck", "false")
+    this.inputTarget.spellcheck = false
     this._lastTypingSent = 0
     this._submitting = false
 
@@ -204,7 +206,9 @@ export default class extends Controller {
 
   _clearTimeoutUI() {
     this.inputTarget.disabled = false
-    this.inputTarget.placeholder = this.inputTarget.dataset.originalPlaceholder || `Message #channel`
+    if (this.inputTarget.dataset.originalPlaceholder) {
+      this.inputTarget.placeholder = this.inputTarget.dataset.originalPlaceholder
+    }
     this.element.querySelector(".timeout-banner")?.remove()
   }
 
@@ -962,9 +966,9 @@ export default class extends Controller {
     // Highlight ~~strikethrough~~
     html = html.replace(/~~(.+?)~~/g, '<span class="text-gray-400 line-through">~~$1~~</span>')
     // Highlight `inline code` (safe now — code blocks are extracted)
-    html = html.replace(/`([^`]+)`/g, '<span class="text-accent bg-gray-700/50 rounded px-0.5">`$1`</span>')
-    // Highlight @mentions
-    html = html.replace(/(^|[\s])(@\w+)/g, '$1<span class="text-accent-light bg-accent-light/15 rounded px-0.5">$2</span>')
+    html = html.replace(/`([^`]+)`/g, '<span class="text-accent bg-gray-700/50 rounded">`$1`</span>')
+    // Highlight @mentions (no padding — must match textarea character widths for cursor alignment)
+    html = html.replace(/(^|[\s])(@\w+)/g, '$1<span class="text-accent-light bg-accent-light/15 rounded">$2</span>')
     // Restore code blocks
     html = html.replace(/\x00CB(\d+)\x00/g, (_, idx) => codeBlocks[parseInt(idx)])
     // Replace emoji placeholders (em-space + PUA char) with inline images

@@ -28,18 +28,19 @@
 <% dm_contact = author ? nil : (message.conversation&.counterparty_pubkey.present? ? Contact.find_by(pubkey: message.conversation.counterparty_pubkey) : nil) %>
 <% dm_remote_name = dm_contact&.effective_display_name || message.conversation&.counterparty_display_name || "Unknown User" %>
 <% dm_remote_avatar = dm_contact&.avatar_url %>
+<% dm_click_id = author&.public_id || message.conversation&.counterparty_pubkey %>
 <div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>"<%= ' data-is-sticker="true"'.html_safe if message.is_sticker? %> data-pinned="<%= message.pinned? %>" data-pin-url="<%= toggle_pin_conversation_dm_message_path(message.conversation, message) %>">
   <!-- Mobile: avatar + name inline row -->
   <div class="flex items-center mb-0.5 sm:hidden">
     <% dm_avatar = author&.effective_avatar_url || dm_remote_avatar %>
     <% if dm_avatar.present? %>
-      <%= image_tag dm_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: author ? { msg_user_id: author.public_id } : {} %>
+      <%= image_tag dm_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
     <% else %>
-      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+      <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
         <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
       </div>
     <% end %>
-    <span class="ml-2 font-medium text-sm text-white truncate"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+    <span class="ml-2 font-medium text-sm text-white truncate"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
       <%= author ? (author.display_name.presence || author.username) : dm_remote_name %>
     </span>
     <span class="ml-2 text-xs text-gray-500 shrink-0">
@@ -54,9 +55,9 @@
   <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
     <% dm_avatar_desktop = author&.effective_avatar_url || dm_remote_avatar %>
     <% if dm_avatar_desktop.present? %>
-      <%= image_tag dm_avatar_desktop, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: author ? { msg_user_id: author.public_id } : {} %>
+      <%= image_tag dm_avatar_desktop, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
     <% else %>
-      <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+      <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
         <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
       </div>
     <% end %>
@@ -75,7 +76,7 @@
 
     <!-- Desktop name/timestamp -->
     <div class="hidden sm:flex items-baseline">
-      <span class="font-medium hover:underline cursor-pointer text-sm text-white"<%= " data-msg-user-id=\"#{author.public_id}\"".html_safe if author %>>
+      <span class="font-medium hover:underline cursor-pointer text-sm text-white"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
         <%= author ? (author.display_name.presence || author.username) : dm_remote_name %>
       </span>
       <span class="ml-2 text-xs text-gray-500">

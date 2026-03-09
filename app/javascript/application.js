@@ -491,4 +491,144 @@ application.register("add-server-modal", AddServerModalController)
 application.register("server-invite-preview", ServerInvitePreviewController)
 application.register("status-emoji", StatusEmojiController)
 application.register("message-search", MessageSearchController)
+
+// --- Custom spatially-aware tooltips: convert title → data-tooltip, position with JS ---
+;(function() {
+  const DELAY = 400
+  const GAP = 6
+  const PAD = 6
+  let tip, arrow, showTimer, currentEl
+
+  function ensureEl() {
+    if (tip) return
+    tip = document.createElement("div")
+    tip.id = "tooltip-el"
+    arrow = document.createElement("div")
+    arrow.id = "tooltip-arrow"
+    tip.appendChild(arrow)
+    document.body.appendChild(tip)
+  }
+
+  function show(el) {
+    const text = el.dataset.tooltip
+    if (!text) return
+    ensureEl()
+    currentEl = el
+    // Set text (arrow is first child, text after)
+    tip.childNodes.forEach((n, i) => { if (i > 0) n.remove() })
+    tip.appendChild(document.createTextNode(text))
+    tip.classList.remove("visible")
+    tip.style.left = "0"
+    tip.style.top = "0"
+
+    // Measure
+    const r = el.getBoundingClientRect()
+    const tw = tip.offsetWidth
+    const th = tip.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+
+    // Pick side: prefer top, fall back to bottom, then left, then right
+    let top, left, side
+    if (r.top - th - GAP >= PAD) {
+      side = "top"
+      top = r.top - th - GAP
+      left = r.left + r.width / 2 - tw / 2
+    } else if (r.bottom + th + GAP <= vh - PAD) {
+      side = "bottom"
+      top = r.bottom + GAP
+      left = r.left + r.width / 2 - tw / 2
+    } else if (r.left - tw - GAP >= PAD) {
+      side = "left"
+      top = r.top + r.height / 2 - th / 2
+      left = r.left - tw - GAP
+    } else {
+      side = "right"
+      top = r.top + r.height / 2 - th / 2
+      left = r.right + GAP
+    }
+
+    // Clamp to viewport
+    left = Math.max(PAD, Math.min(left, vw - tw - PAD))
+    top = Math.max(PAD, Math.min(top, vh - th - PAD))
+
+    tip.style.left = Math.round(left) + "px"
+    tip.style.top = Math.round(top) + "px"
+
+    // Position arrow
+    const aw = 8
+    if (side === "top") {
+      arrow.style.left = Math.round(Math.min(Math.max(r.left + r.width / 2 - left - aw / 2, 4), tw - aw - 4)) + "px"
+      arrow.style.top = (th - aw / 2) + "px"
+      arrow.style.bottom = ""
+      arrow.style.right = ""
+    } else if (side === "bottom") {
+      arrow.style.left = Math.round(Math.min(Math.max(r.left + r.width / 2 - left - aw / 2, 4), tw - aw - 4)) + "px"
+      arrow.style.top = (-aw / 2) + "px"
+      arrow.style.bottom = ""
+      arrow.style.right = ""
+    } else if (side === "left") {
+      arrow.style.top = Math.round(Math.min(Math.max(r.top + r.height / 2 - top - aw / 2, 4), th - aw - 4)) + "px"
+      arrow.style.left = (tw - aw / 2) + "px"
+      arrow.style.right = ""
+      arrow.style.bottom = ""
+    } else {
+      arrow.style.top = Math.round(Math.min(Math.max(r.top + r.height / 2 - top - aw / 2, 4), th - aw - 4)) + "px"
+      arrow.style.left = (-aw / 2) + "px"
+      arrow.style.right = ""
+      arrow.style.bottom = ""
+    }
+
+    tip.classList.add("visible")
+  }
+
+  function hide() {
+    clearTimeout(showTimer)
+    currentEl = null
+    if (tip) tip.classList.remove("visible")
+  }
+
+  function onEnter(e) {
+    const el = e.target.closest("[data-tooltip]")
+    if (!el) return
+    clearTimeout(showTimer)
+    showTimer = setTimeout(() => show(el), DELAY)
+  }
+
+  function onLeave(e) {
+    const el = e.target.closest("[data-tooltip]")
+    if (!el) return
+    hide()
+  }
+
+  document.addEventListener("pointerenter", onEnter, true)
+  document.addEventListener("pointerleave", onLeave, true)
+  document.addEventListener("pointerdown", hide, true)
+  document.addEventListener("scroll", hide, true)
+
+  // Convert title attributes to data-tooltip
+  function convertTitles(root) {
+    if (!root || !root.querySelectorAll) return
+    root.querySelectorAll("[title]").forEach(el => {
+      if (el.dataset.tooltip !== undefined) return
+      const t = el.getAttribute("title")
+      if (!t) return
+      el.dataset.tooltip = t
+      el.removeAttribute("title")
+    })
+  }
+  convertTitles(document)
+  document.addEventListener("turbo:load", () => convertTitles(document))
+  document.addEventListener("turbo:frame-render", (e) => convertTitles(e.target))
+  new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      for (const node of m.addedNodes) {
+        if (node.nodeType === 1) {
+          if (node.hasAttribute?.("title")) { convertTitles(node.parentElement || document) }
+          else if (node.querySelector?.("[title]")) { convertTitles(node) }
+        }
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true })
+})()
 // rebuild trigger

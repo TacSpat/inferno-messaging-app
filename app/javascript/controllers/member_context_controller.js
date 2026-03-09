@@ -42,7 +42,7 @@ export default class extends Controller {
     document.body.appendChild(this.menu)
     positionPopup(this.menu, { x: event.clientX, y: event.clientY }, {
       preferredSide: "below",
-      horizontalAlign: "left"
+      horizontalAlign: "right"
     })
     this.bindMenuActions()
     setTimeout(() => document.addEventListener("click", this.boundClose), 10)
@@ -54,6 +54,15 @@ export default class extends Controller {
       const action = btn.dataset.contextAction
       if (action === "showRoles") {
         btn.addEventListener("click", (e) => this.showRoles(e))
+        // Open on hover with small delay, close when leaving both menu item and dropdown
+        const wrapper = btn.closest(".context-roles-wrapper") || btn
+        wrapper.addEventListener("mouseenter", () => {
+          clearTimeout(this._rolesHideTimer)
+          if (!this.rolesDropdown) this.showRoles({ preventDefault: () => {}, stopPropagation: () => {}, currentTarget: btn })
+        })
+        wrapper.addEventListener("mouseleave", () => {
+          this._rolesHideTimer = setTimeout(() => this._closeRolesDropdown(), 200)
+        })
       } else if (action === "changeNickname") {
         btn.addEventListener("click", (e) => this.changeNickname(e))
       } else if (action === "mention") {
@@ -87,26 +96,40 @@ export default class extends Controller {
 
     // Build the secondary dropdown
     this.rolesDropdown = document.createElement("div")
-    this.rolesDropdown.className = "absolute z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop"
+    this.rolesDropdown.className = "fixed z-[70] w-52 bg-gray-900 rounded-lg shadow-2xl border border-gray-700 py-1.5 text-sm max-h-64 overflow-y-auto context-pop"
 
-    // Position it to the right of the wrapper
-    const wrapper = btn.closest(".context-roles-wrapper")
     const menuRect = this.menu.getBoundingClientRect()
-    const btnRect = wrapper.getBoundingClientRect()
+    const ddW = 208 + 2 // w-52 (208px) + border
+    const ddMaxH = 260
+    const pad = 8
+    const gap = 2
 
-    let ddLeft = btnRect.right + 4
-    // If it would overflow right, show to the left instead
-    if (ddLeft + 210 > window.innerWidth) {
-      ddLeft = btnRect.left - 214
+    // Horizontal: prefer right of menu, flip left if no room
+    let ddLeft = menuRect.right + gap
+    let openedLeft = false
+    if (ddLeft + ddW > window.innerWidth - pad) {
+      ddLeft = menuRect.left - ddW - gap
+      openedLeft = true
     }
+    if (ddLeft < pad) ddLeft = pad
+
+    // Vertical: align top with the Roles button row, clamp to viewport
+    const wrapper = btn.closest(".context-roles-wrapper")
+    const btnRect = wrapper ? wrapper.getBoundingClientRect() : menuRect
     let ddTop = btnRect.top
-    if (ddTop + 260 > window.innerHeight) {
-      ddTop = window.innerHeight - 264
+    if (ddTop + ddMaxH > window.innerHeight - pad) {
+      ddTop = window.innerHeight - ddMaxH - pad
     }
+    if (ddTop < pad) ddTop = pad
 
-    this.rolesDropdown.style.position = "fixed"
-    this.rolesDropdown.style.left = `${ddLeft}px`
-    this.rolesDropdown.style.top = `${ddTop}px`
+    this.rolesDropdown.style.left = `${Math.round(ddLeft)}px`
+    this.rolesDropdown.style.top = `${Math.round(ddTop)}px`
+
+    // Flip the arrow on the Roles button to point toward the submenu
+    const arrow = btn.querySelector("svg")
+    if (arrow && openedLeft) {
+      arrow.style.transform = "rotate(180deg)"
+    }
 
     let html = '<p class="px-3 py-1.5 text-[10px] font-semibold text-gray-500 uppercase sticky top-0 bg-gray-900">Assign Roles</p>'
 
@@ -136,6 +159,14 @@ export default class extends Controller {
 
     // Prevent clicks inside dropdown from closing the menu
     this.rolesDropdown.addEventListener("click", (e) => e.stopPropagation())
+
+    // Keep dropdown open when hovering over it
+    this.rolesDropdown.addEventListener("mouseenter", () => {
+      clearTimeout(this._rolesHideTimer)
+    })
+    this.rolesDropdown.addEventListener("mouseleave", () => {
+      this._rolesHideTimer = setTimeout(() => this._closeRolesDropdown(), 200)
+    })
   }
 
   async handleContextRoleToggle(memberId, serverId) {
@@ -297,6 +328,16 @@ export default class extends Controller {
       detail: { userId, serverId },
       bubbles: true
     }))
+  }
+
+  _closeRolesDropdown() {
+    if (this.rolesDropdown) {
+      // Reset arrow direction on the Roles button
+      const arrow = this.menu?.querySelector('[data-context-action="showRoles"] svg')
+      if (arrow) arrow.style.transform = ""
+      this.rolesDropdown.remove()
+      this.rolesDropdown = null
+    }
   }
 
   closeNicknameModal() {

@@ -8,13 +8,18 @@
       <span data-toolbar-friend-badge class="absolute -top-1 -right-1 min-w-[16px] h-[16px] bg-accent rounded-full flex items-center justify-center text-[10px] font-bold text-white px-0.5 border border-gray-700"><%= fr_count %></span>
     </button>
   <% end %>
-  <% if dm_user %>
-    <%# View profile toggle (DMs only) %>
-    <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer" id="dm-profile-toggle-btn" onclick="window._toggleSidePanel('dm-profile-panel', this)" title="View Profile">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+  <% dm_layout = local_assigns[:dm_layout] %>
+  <% if dm_layout %>
+    <%# DM member sidebar toggle (profile card or member list) %>
+    <button type="button" class="hidden lg:inline-flex text-gray-400 hover:text-white p-1 transition cursor-pointer" id="dm-member-toggle-btn" onclick="window._toggleDmMemberSidebar()" title="<%= dm_user ? 'View Profile' : 'Toggle Member List' %>">
+      <% if dm_user %>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+      <% else %>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <% end %>
     </button>
   <% else %>
-    <%# Member list toggle (server channels only) %>
+    <%# Member list toggle (server channels) %>
     <button type="button" class="hidden lg:inline-flex text-gray-400 hover:text-white p-1 transition cursor-pointer" id="member-toggle-btn" onclick="window._toggleMemberSidebar()" title="Toggle Member List">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
     </button>

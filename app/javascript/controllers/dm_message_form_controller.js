@@ -16,6 +16,8 @@ export default class extends Controller {
       }
     )
     this.pendingFiles = []
+    this.inputTarget.setAttribute("spellcheck", "false")
+    this.inputTarget.spellcheck = false
     this.setupDragAndDrop()
     this.setupPaste()
     this.setupFileIntercept()

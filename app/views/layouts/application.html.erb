@@ -301,11 +301,15 @@
         <!-- DM sidebar -->
         <%= render "conversations/dm_sidebar" %>
 
-        <!-- Main content -->
-        <main class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading">
+        <!-- Main content + DM member sidebar -->
+        <div class="flex-1 flex flex-col min-w-0 bg-gray-700" data-controller="frame-loading">
           <%= render "shared/friend_request_bar" %>
-          <%= yield %>
-        </main>
+          <div class="flex flex-1 min-h-0">
+            <main class="flex-1 flex flex-col min-w-0 min-h-0">
+              <%= yield %>
+            </main>
+          </div>
+        </div>
       </div>
     <% else %>
       <%= yield %>
@@ -429,6 +433,49 @@
       }
       _applyMemberPref();
 
+      // DM member sidebar toggle (profile card for 1-on-1 DMs, member list for group chats)
+      window._toggleDmMemberSidebar = function() {
+        var sb = document.getElementById("dm-member-sidebar");
+        if (!sb) return;
+        if (sb._animating) return;
+        var isHidden = sb.dataset.panelHidden === "true";
+        if (isHidden) {
+          sb.dataset.panelHidden = "false";
+          sb.style.display = "";
+          sb._animating = true;
+          _slideOpen(sb, 240);
+          sb.addEventListener("transitionend", function h(e) {
+            if (e.propertyName !== "max-width") return;
+            sb.removeEventListener("transitionend", h);
+            sb._animating = false;
+          });
+          localStorage.setItem("dm_members_hidden", "");
+        } else {
+          sb.dataset.panelHidden = "true";
+          sb._animating = true;
+          _slideClose(sb, function() { sb.style.display = "none"; sb._animating = false; });
+          localStorage.setItem("dm_members_hidden", "1");
+        }
+        var btn = document.getElementById("dm-member-toggle-btn");
+        if (btn) btn.classList.toggle("text-white", isHidden);
+      };
+
+      function _applyDmMemberPref() {
+        var sb = document.getElementById("dm-member-sidebar");
+        if (!sb) return;
+        var shouldHide = localStorage.getItem("dm_members_hidden") === "1";
+        if (shouldHide) {
+          sb.style.display = "none";
+          sb.dataset.panelHidden = "true";
+        } else {
+          sb.style.display = "";
+          sb.dataset.panelHidden = "false";
+        }
+        var btn = document.getElementById("dm-member-toggle-btn");
+        if (btn) btn.classList.toggle("text-white", !shouldHide);
+      }
+      _applyDmMemberPref();
+
       // Icons for the persistent header
       var _headerIcons = {
         text: '<span class="text-gray-400 text-xl mr-2">#</span>',
@@ -486,6 +533,7 @@
         if (e.target.id === "main-content") {
           _updatePersistentHeader();
           _applyMemberPref();
+          _applyDmMemberPref();
         }
       });
     </script>

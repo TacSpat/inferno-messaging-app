@@ -18,6 +18,12 @@ class UserCardsController < ApplicationController
       @server ||= @member&.server
     end
 
+    # Fall back to pubkey-based lookup (for DM messages from remote users)
+    if @member.nil?
+      @member = RemoteMember.where(pubkey: params[:id]).order(updated_at: :desc).first
+      @server ||= @member&.server
+    end
+
     return head(:not_found) unless @member
 
     respond_to do |format|

@@ -345,6 +345,38 @@ input[type="radio"]:checked::after {
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 
+  /* Custom themed tooltip (positioned by JS) */
+  #tooltip-el {
+    position: fixed;
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: var(--color-gray-950);
+    color: var(--color-gray-100);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 9999;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+    opacity: 0;
+    transition: opacity 100ms ease-in;
+  }
+  #tooltip-el.visible { opacity: 1; }
+  #tooltip-arrow {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    background: var(--color-gray-950);
+    transform: rotate(45deg);
+    pointer-events: none;
+  }
+
+  /* Hide spellcheck squiggles on transparent message inputs (highlight overlay handles styling) */
+  textarea.text-transparent { text-decoration: none !important; }
+  textarea.text-transparent::spelling-error { text-decoration: none; }
+  textarea.text-transparent::grammar-error { text-decoration: none; }
+
   /* Shimmer placeholder for images loading from remote servers */
   @keyframes img-shimmer {
     0% { background-position: -200% 0; }

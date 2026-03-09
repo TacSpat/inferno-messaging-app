@@ -1,0 +1,172 @@
+<aside id="dm-member-sidebar" data-panel-hidden="true" style="display:none" class="w-60 bg-gray-800 shrink-0 flex flex-col mobile-member-sidebar">
+  <div class="py-4 px-2 flex-1 overflow-y-auto border-l border-gray-900" id="dm-member-sidebar-content">
+    <% if @conversation&.group_chat? %>
+      <%# Group chat: member list %>
+      <% participants = @conversation.conversation_participants.includes(user: { avatar_attachment: :blob }, contact: []) %>
+      <% online = participants.select(&:online?) %>
+      <% offline = participants.reject(&:online?) %>
+
+      <% if online.any? %>
+        <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1">
+          Online — <%= online.size %>
+        </p>
+        <% online.each do |cp| %>
+          <div class="flex items-center px-2 py-1 rounded hover:bg-gray-700/50 group cursor-default">
+            <div class="relative shrink-0">
+              <% if cp.avatar_url.present? %>
+                <%= image_tag cp.avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
+              <% else %>
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= cp.user&.profile_color || 'var(--color-gray-600)' %>">
+                  <%= cp.display_name&.first&.upcase || '?' %>
+                </div>
+              <% end %>
+              <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-800 bg-green-500"></div>
+            </div>
+            <span class="ml-2 text-sm text-gray-300 truncate"><%= cp.display_name %></span>
+          </div>
+        <% end %>
+      <% end %>
+
+      <% if offline.any? %>
+        <p class="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-2 mb-1 <%= 'mt-3' if online.any? %>">
+          Offline — <%= offline.size %>
+        </p>
+        <% offline.each do |cp| %>
+          <div class="flex items-center px-2 py-1 rounded hover:bg-gray-700/50 group cursor-default opacity-50">
+            <div class="relative shrink-0">
+              <% if cp.avatar_url.present? %>
+                <%= image_tag cp.avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
+              <% else %>
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= cp.user&.profile_color || 'var(--color-gray-600)' %>">
+                  <%= cp.display_name&.first&.upcase || '?' %>
+                </div>
+              <% end %>
+              <div class="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-gray-800 bg-gray-500"></div>
+            </div>
+            <span class="ml-2 text-sm text-gray-300 truncate"><%= cp.display_name %></span>
+          </div>
+        <% end %>
+      <% end %>
+
+    <% elsif @conversation&.direct? %>
+      <%# 1-on-1 DM: profile card (matches server profile card style) %>
+      <% dm_profile = @other_user || @dm_contact %>
+      <% if dm_profile %>
+        <% dm_pubkey = @other_user&.nostr_public_key || @dm_contact&.pubkey %>
+        <% dm_friend = Contact.find_by(pubkey: dm_pubkey) if dm_pubkey.present? %>
+        <%# Pull profile colors from RemoteMember if the contact doesn't have them %>
+        <% unless dm_profile.try(:profile_color).present? %>
+          <% dm_remote = RemoteMember.where(pubkey: dm_pubkey).where.not(profile_color: [nil, ""]).first if dm_pubkey.present? %>
+        <% end %>
+        <div class="rounded-lg overflow-hidden border border-gray-700 -mx-1">
+          <%# Banner %>
+          <div class="h-[80px] relative">
+            <% dm_banner = dm_profile.try(:effective_banner_url) || dm_profile.try(:banner_url) %>
+            <% if dm_banner.present? %>
+              <%= image_tag dm_banner, class: "w-full h-full object-cover",
+                  style: "object-position: center #{(dm_profile.try(:banner_offset_y) || 0)}px;" %>
+            <% else %>
+              <div class="w-full h-full bg-gray-700"></div>
+            <% end %>
+          </div>
+
+          <%# Gradient body %>
+          <% color_source = @other_user || dm_remote %>
+          <div class="relative px-3 pb-3 pt-1" style="<%= color_source ? profile_card_bg_style(color_source) : "background-color: #1e1c1b;" %>">
+            <%# Avatar %>
+            <div class="relative -mt-[35px] mb-2">
+              <div class="w-[66px] h-[66px] rounded-full p-[5px] inline-block"
+                   style="background: <%= color_source.try(:profile_color_2).presence || color_source.try(:profile_color) || '#1e1c1b' %>">
+                <% dm_avatar = dm_profile.try(:effective_avatar_url) || dm_profile.try(:avatar_url) %>
+                <% if dm_avatar.present? %>
+                  <%= image_tag dm_avatar, class: "w-full h-full rounded-full object-cover" %>
+                <% else %>
+                  <div class="w-full h-full rounded-full flex items-center justify-center text-xl font-bold text-white"
+                       style="background-color: <%= dm_profile.try(:profile_color) || '#1e1c1b' %>">
+                    <%= (dm_profile.try(:username) || dm_profile.try(:effective_display_name) || "?")[0].upcase %>
+                  </div>
+                <% end %>
+              </div>
+              <% if @other_user %>
+                <% status_color = case @other_user.online_state
+                                  when "online" then "bg-green-500"
+                                  when "idle" then "bg-warning"
+                                  when "dnd" then "bg-red-500"
+                                  else "bg-gray-500"
+                                  end %>
+              <% else %>
+                <% status_color = @dm_contact&.online? ? "bg-green-500" : "bg-gray-500" %>
+              <% end %>
+              <div class="absolute bottom-[2px] left-[46px] w-[18px] h-[18px] rounded-full border-[4px] <%= status_color %>"
+                   style="border-color: <%= color_source.try(:profile_color_2).presence || color_source.try(:profile_color) || '#1e1c1b' %>"></div>
+            </div>
+
+            <%# Info card %>
+            <div class="bg-black/30 rounded-lg p-3 space-y-2">
+              <div>
+                <h3 class="text-base font-bold text-white leading-tight"><%= @other_user ? (@other_user.display_name.presence || @other_user.username) : @dm_contact&.effective_display_name %></h3>
+                <% if @other_user %>
+                  <p class="text-xs text-white/60"><%= @other_user.tag %></p>
+                <% end %>
+              </div>
+
+              <% profile_status = dm_profile.try(:status) %>
+              <% if profile_status.present? %>
+                <p class="text-xs text-white/70"><%= dm_profile.try(:status_emoji) %> <%= profile_status %></p>
+              <% end %>
+
+              <% profile_bio = dm_profile.try(:bio) %>
+              <% if profile_bio.present? %>
+                <div class="border-t border-white/10 pt-2">
+                  <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">About Me</h4>
+                  <p class="text-xs text-white/80 break-words"><%= profile_bio %></p>
+                </div>
+              <% end %>
+
+              <% if dm_friend&.accepted? %>
+                <div class="border-t border-white/10 pt-2">
+                  <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Friends Since</h4>
+                  <p class="text-[11px] text-white/50"><%= dm_friend.updated_at.strftime("%b %d, %Y") %></p>
+                </div>
+              <% end %>
+            </div>
+
+            <%# Friend actions %>
+            <% if dm_friend || dm_pubkey.present? %>
+              <div class="mt-2">
+                <% if dm_friend&.accepted? %>
+                  <%= button_to friendship_path(dm_friend), method: :delete,
+                        class: "w-full py-1.5 text-xs text-danger-light hover:bg-danger/20 rounded cursor-pointer text-center",
+                        data: { turbo_confirm: "Remove friend?" } do %>
+                    Remove Friend
+                  <% end %>
+                <% elsif dm_friend&.pending_outgoing? %>
+                  <div class="w-full py-1.5 text-xs text-gray-500 text-center">Request Sent</div>
+                <% elsif dm_friend&.pending_incoming? %>
+                  <div class="flex gap-2">
+                    <%= button_to accept_friendship_path(dm_friend), method: :post,
+                          class: "flex-1 py-1.5 text-xs text-green-400 hover:bg-green-600/20 rounded cursor-pointer text-center" do %>
+                      Accept
+                    <% end %>
+                    <%= button_to decline_friendship_path(dm_friend), method: :post,
+                          class: "flex-1 py-1.5 text-xs text-gray-400 hover:bg-gray-700 rounded cursor-pointer text-center" do %>
+                      Decline
+                    <% end %>
+                  </div>
+                <% elsif dm_pubkey.present? %>
+                  <% npub_val = @other_user&.npub || @dm_contact&.npub %>
+                  <% if npub_val.present? %>
+                    <%= button_to friendships_path(tag: npub_val), method: :post,
+                          class: "w-full py-1.5 text-xs text-white bg-accent hover:bg-accent-light rounded cursor-pointer text-center font-medium" do %>
+                      Add Friend
+                    <% end %>
+                  <% end %>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+    <% end %>
+  </div>
+</aside>

@@ -69,7 +69,7 @@
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
     </button>
   <% end %>
-  <%= render "shared/header_toolbar", dm_user: @other_user %>
+  <%= render "shared/header_toolbar", dm_user: @other_user, dm_layout: true %>
 
   <%= render "shared/search_input" %>
 </div>
@@ -243,6 +243,7 @@
             <div data-dm-message-form-target="highlight" class="absolute inset-0 py-2 px-1 text-sm leading-6 whitespace-pre-wrap break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
             <%= f.text_area :content,
                 placeholder: "Message @#{@other_user&.display_name.presence || @other_user&.username || @conversation.display_name(current_user)}",
+                spellcheck: false,
                 class: "w-full bg-transparent text-transparent caret-white placeholder-gray-400 py-2 px-1 resize-none outline-none text-sm leading-6 max-h-48 relative z-10",
                 rows: 1,
                 data: { action: "keydown->dm-message-form#handleKeydown input->dm-message-form#autoResize input->dm-message-form#updateHighlight", dm_message_form_target: "input", unified_picker_target: "input" } %>
@@ -289,6 +290,8 @@
   <% if @conversation.group_chat? %>
     <%= render "conversations/group_settings" %>
   <% end %>
+  <%= render "conversations/dm_member_sidebar" if @conversation %>
+
   <% dm_profile = @other_user || @dm_contact %>
   <% if dm_profile && @conversation.direct? %>
     <!-- DM Profile Panel (right sidebar) -->

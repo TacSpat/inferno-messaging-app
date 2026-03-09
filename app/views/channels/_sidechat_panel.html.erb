@@ -127,6 +127,7 @@
           <div data-message-form-target="highlight" class="absolute inset-0 py-1.5 px-0.5 text-sm leading-5 whitespace-pre-wrap break-words pointer-events-none overflow-hidden" aria-hidden="true"></div>
           <%= f.text_area :content,
               placeholder: "Message",
+              spellcheck: false,
               class: "w-full bg-transparent text-transparent caret-white placeholder-gray-400 py-1.5 px-0.5 resize-none outline-none text-sm leading-5 max-h-32 relative z-10",
               rows: 1,
               data: { action: "keydown->mention-autocomplete#onKeydown keydown->message-form#handleKeydown input->mention-autocomplete#onInput input->message-form#autoResize input->message-form#updateHighlight input->message-form#sendTyping", message_form_target: "input", unified_picker_target: "input", mention_autocomplete_target: "input" } %>

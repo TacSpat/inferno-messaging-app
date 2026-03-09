@@ -98,11 +98,14 @@
           <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Member Since</h4>
           <p class="text-[11px] text-white/50"><%= membership&.joined_at&.strftime("%b %d, %Y") || "Unknown" %></p>
         </div>
+      <% else %>
+        <% if card_contact&.accepted? %>
+          <div class="border-t border-white/10 pt-2">
+            <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Friends Since</h4>
+            <p class="text-[11px] text-white/50"><%= card_contact.updated_at.strftime("%b %d, %Y") %></p>
+          </div>
+        <% end %>
       <% end %>
-      <div class="border-t border-white/10 pt-2">
-        <h4 class="text-[10px] font-semibold text-white/50 uppercase mb-0.5">Account Created</h4>
-        <p class="text-[11px] text-white/50"><%= member.created_at.strftime("%b %d, %Y") %></p>
-      </div>
     </div>
   </div>
 </div>

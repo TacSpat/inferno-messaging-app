@@ -15,13 +15,25 @@ class MentionsController < ApplicationController
       results << { type: "special", name: "here", display: "@here", description: "Mention online users" }
     end
 
-    # Users
-    server.members.where("LOWER(username) LIKE ?", "%#{query}%").limit(8).each do |user|
+    # Local users
+    server.members.where("LOWER(username) LIKE ?", "%#{query}%").limit(6).each do |user|
       results << { type: "user", id: user.public_id, name: user.username, display: "@#{user.username}" }
     end
 
-    # Roles
-    server.roles.where("LOWER(name) LIKE ?", "%#{query}%").where.not(name: "@everyone").limit(5).each do |role|
+    # Remote users
+    server.remote_members
+      .where("LOWER(username) LIKE ? OR LOWER(display_name) LIKE ?", "%#{query}%", "%#{query}%")
+      .limit(4).each do |rm|
+      name = rm.username.presence || rm.display_name.presence || rm.pubkey[0..11]
+      results << { type: "user", id: rm.public_id, name: name, display: "@#{name}" }
+    end
+
+    # Roles (exclude @everyone and owner roles)
+    server.roles
+      .where("LOWER(name) LIKE ?", "%#{query}%")
+      .where.not(name: "@everyone")
+      .where("json_extract(permissions, '$.owner') IS NOT TRUE")
+      .limit(5).each do |role|
       role_name = role.name.delete_prefix("@")
       results << { type: "role", id: role.public_id, name: role_name, display: "@#{role_name}", color: role.color }
     end
