@@ -147,6 +147,11 @@
             data-pin-toggle data-pin-url="<%= toggle_pin_conversation_dm_message_path(message.conversation, message) %>">
       <svg class="w-4 h-4" fill="<%= message.pinned? ? 'currentColor' : 'none' %>" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
     </button>
+    <button class="p-1.5 text-gray-400 hover:text-danger-light" title="Hide Message"
+            data-action="click->message-actions#hideMessage"
+            data-hide-url="<%= user_settings_hide_message_path(message.public_id) %>">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.618 5.984A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>
+    </button>
     <% if author == current_user && !message.is_sticker? %>
       <button class="p-1.5 text-gray-400 hover:text-gray-200" title="Edit"
               data-msg-edit-id="<%= message.public_id %>">

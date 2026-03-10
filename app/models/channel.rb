@@ -7,7 +7,8 @@ class Channel < ApplicationRecord
   has_many :child_channels, class_name: "Channel", foreign_key: :parent_channel_id, dependent: :destroy
   belongs_to :sidechat_channel, class_name: "Channel", optional: true
   has_many :voice_channels_using_as_sidechat, class_name: "Channel", foreign_key: :sidechat_channel_id
-  has_many :messages, dependent: :destroy
+  has_many :messages, -> { where(hidden_at: nil) }, dependent: :destroy
+  has_many :all_messages, class_name: "Message", foreign_key: :channel_id
   has_many :channel_reads, dependent: :destroy
   has_many :nostr_event_logs, dependent: :destroy
   has_many :voice_states, dependent: :destroy

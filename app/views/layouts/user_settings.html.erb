@@ -58,6 +58,20 @@
                 class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[relays add_relay remove_relay toggle_relay]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
 
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Storage</h3>
+          <div class="space-y-0.5 mb-4">
+            <%= link_to "Storage", user_settings_storage_path,
+                data: { turbo_frame: "settings-frame" },
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[storage update_storage clear_cache run_prune]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+          </div>
+
+          <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Safety</h3>
+          <div class="space-y-0.5 mb-4">
+            <%= link_to "Content Safety", user_settings_safety_path,
+                data: { turbo_frame: "settings-frame" },
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[safety update_safety hide_message unhide_message remove_allowlist clear_shared_hashes]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+          </div>
+
           <% if current_user.instance_admin? %>
             <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide px-2 mb-2 mt-4">Administration</h3>
             <div class="space-y-0.5 mb-4">

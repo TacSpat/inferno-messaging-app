@@ -35,6 +35,7 @@ class RelaySubscriptionManager
   KIND_MUTE_LIST        = 10000
   KIND_TYPING           = 25050
   KIND_REACTION         = 7
+  KIND_REPORT           = 1984
 
   SERVER_STATE_KINDS = [ KIND_SERVER_METADATA, KIND_SERVER_STRUCTURE, KIND_SERVER_ROLES,
                         KIND_SERVER_EMOJIS, KIND_SERVER_STICKERS ].freeze
@@ -356,6 +357,15 @@ class RelaySubscriptionManager
         @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :reactions }
       end
     end
+
+    # Subscription 8: NIP-56 reports (kind 1984) for shared hash registry
+    config = LocalConfig.current
+    if config.safety_shared_hashes_enabled && config.safety_image_hash_enabled
+      sub_id = "reports-#{SecureRandom.hex(4)}"
+      filter = { kinds: [ KIND_REPORT ], since: catchup_since }
+      ws.send(JSON.generate([ "REQ", sub_id, filter ]))
+      @mutex.synchronize { @connections[url][:subscriptions][sub_id] = :reports }
+    end
   end
 
   def handle_message(relay_url, raw_data)
@@ -468,6 +478,8 @@ class RelaySubscriptionManager
       process_typing_event(event)
     when KIND_REACTION
       process_reaction_event(event)
+    when KIND_REPORT
+      process_report_hashes(event)
     end
   rescue => e
     Rails.logger.error("[RelaySubscriptionManager] Error processing event #{event['id']}: #{e.message}")
@@ -2210,6 +2222,48 @@ class RelaySubscriptionManager
     nil
   rescue => e
     Rails.logger.warn("[RelaySubscriptionManager] Error processing reaction event: #{e.message}")
+  end
+
+  # ── NIP-56 Report Hash Processing ────────────────────────────────
+
+  def process_report_hashes(event)
+    config = LocalConfig.current
+    return unless config.safety_shared_hashes_enabled && config.safety_image_hash_enabled
+
+    tags = event["tags"] || []
+    pubkey = event["pubkey"]
+    event_id = event["id"]
+    return if pubkey.blank? || event_id.blank?
+
+    # Skip our own reports
+    owner = User.owner
+    return if owner&.nostr_public_key == pubkey
+
+    x_tags = tags.select { |t| t[0] == "x" && t[1].present? && t[2].present? }
+    return if x_tags.empty?
+
+    x_tags.each do |tag|
+      hash_value = tag[1]
+      hash_type = tag[2]
+
+      ch = ContentHash.find_or_initialize_by(hash_value: hash_value, hash_type: hash_type, source: "shared")
+      reporter_pubkeys = ch.reporter_pubkeys || []
+      nostr_event_ids = ch.nostr_event_ids || []
+
+      next if reporter_pubkeys.include?(pubkey)
+
+      reporter_pubkeys << pubkey
+      nostr_event_ids << event_id
+
+      ch.reporter_pubkeys = reporter_pubkeys
+      ch.nostr_event_ids = nostr_event_ids
+      ch.reporter_count = reporter_pubkeys.size
+      ch.compute_confidence(trust_friends: config.safety_shared_hash_trust_friends)
+    end
+
+    Rails.logger.debug("[RelaySubscriptionManager] Processed report hashes from #{pubkey[0..15]}")
+  rescue => e
+    Rails.logger.warn("[RelaySubscriptionManager] Error processing report hashes: #{e.message}")
   end
 
   # ── Connection Management ──────────────────────────────────────────

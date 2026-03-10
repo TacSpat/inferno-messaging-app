@@ -215,6 +215,136 @@ class SettingsController < ApplicationController
     end
   end
 
+  # === Storage & Cache ===
+
+  def storage
+    @config = LocalConfig.current
+    @db_size = begin
+      db_path = ActiveRecord::Base.connection.execute("PRAGMA database_list").first["file"]
+      db_path.present? && File.exist?(db_path) ? File.size(db_path) : nil
+    rescue
+      nil
+    end
+    @message_count = Message.count
+    @visible_message_count = Message.visible.count
+    @attachment_count = ActiveStorage::Attachment.where(record_type: "Message", name: "files").count
+    @cache_dir = Rails.root.join("public", "cached_assets")
+    if @cache_dir.exist?
+      @cache_files = Dir.glob(@cache_dir.join("**", "*")).select { |f| File.file?(f) }
+      @cache_size = @cache_files.sum { |f| File.size(f) }
+      @cache_count = @cache_files.size
+    else
+      @cache_size = 0
+      @cache_count = 0
+    end
+  end
+
+  def update_storage
+    config = LocalConfig.current
+    config.update!(
+      max_cache_size_mb: params[:max_cache_size_mb].to_i,
+      backfill_days: params[:backfill_days].to_i,
+      backfill_enabled: params[:backfill_enabled] == "1",
+      pruning_strategy: params[:pruning_strategy],
+      message_retention_days: params[:message_retention_days].to_i,
+      attachment_retention_days: params[:attachment_retention_days].to_i,
+      max_db_size_mb: params[:max_db_size_mb].to_i,
+      keep_pinned_messages: params[:keep_pinned_messages] == "1",
+      prune_channel_messages: params[:prune_channel_messages] == "1",
+      prune_dm_messages: params[:prune_dm_messages] == "1"
+    )
+    redirect_to user_settings_storage_path, notice: "Storage settings saved."
+  rescue => e
+    redirect_to user_settings_storage_path, alert: e.message
+  end
+
+  def clear_cache
+    cache_dir = Rails.root.join("public", "cached_assets")
+    count = 0
+    if cache_dir.exist?
+      files = Dir.glob(cache_dir.join("**", "*")).select { |f| File.file?(f) }
+      count = files.size
+      files.each { |f| File.delete(f) }
+    end
+    redirect_to user_settings_storage_path, notice: "Cleared #{count} cached #{'file'.pluralize(count)}."
+  end
+
+  # === Content Safety ===
+
+  def safety
+    @config = LocalConfig.current
+    @hidden_messages = Message.where.not(hidden_at: nil)
+      .includes(:hidden_attachment_records, :channel, :conversation)
+      .order(hidden_at: :desc)
+    @content_hash_count = ContentHash.count
+    @local_hash_count = ContentHash.local_hashes.count
+    @shared_hash_count = ContentHash.shared_hashes.count
+    @allowlisted_hash_count = ContentHash.allowlisted_hashes.count
+    @auto_hidden_count = Message.where("hidden_reason LIKE ?", "auto:%").count
+  end
+
+  def update_safety
+    config = LocalConfig.current
+    config.update!(
+      safety_keyword_filter: params[:safety_keyword_filter].to_s,
+      safety_hide_unknown_senders: params[:safety_hide_unknown_senders] == "1",
+      safety_report_threshold: params[:safety_report_threshold].to_i,
+      safety_reputation_enabled: params[:safety_reputation_enabled] == "1",
+      safety_reputation_threshold: params[:safety_reputation_threshold].to_i,
+      safety_reputation_sensitivity: params[:safety_reputation_sensitivity],
+      safety_image_hash_enabled: params[:safety_image_hash_enabled] == "1",
+      # Shared hash settings
+      safety_shared_hashes_enabled: params[:safety_shared_hashes_enabled] == "1",
+      safety_shared_hash_min_reporters: params[:safety_shared_hash_min_reporters].to_i,
+      safety_shared_hash_trust_friends: params[:safety_shared_hash_trust_friends] == "1",
+      safety_publish_hashes: params[:safety_publish_hashes] == "1",
+      # Keyword presets
+      safety_block_links: params[:safety_block_links] == "1",
+      safety_block_phone_numbers: params[:safety_block_phone_numbers] == "1",
+      safety_block_all_caps: params[:safety_block_all_caps] == "1",
+      safety_block_spam_chars: params[:safety_block_spam_chars] == "1"
+    )
+    redirect_to user_settings_safety_path, notice: "Safety settings saved."
+  rescue => e
+    redirect_to user_settings_safety_path, alert: e.message
+  end
+
+  def remove_allowlist
+    hash = ContentHash.find_by(id: params[:hash_id])
+    if hash
+      hash.update!(allowlisted: false)
+      redirect_to user_settings_safety_path, notice: "Removed from allowlist."
+    else
+      redirect_to user_settings_safety_path, alert: "Hash not found."
+    end
+  end
+
+  def clear_shared_hashes
+    count = ContentHash.shared_hashes.delete_all
+    redirect_to user_settings_safety_path, notice: "Cleared #{count} shared hash#{'es' unless count == 1}."
+  end
+
+  def hide_message
+    message = Message.find_by!(public_id: params[:id])
+    reason = params[:reason].presence || "other"
+    message.hide!(current_user, reason: reason)
+    respond_to do |format|
+      format.html { redirect_to user_settings_safety_path, notice: "Message hidden." }
+      format.json { render json: { status: "ok" } }
+    end
+  end
+
+  def unhide_message
+    message = Message.find_by!(public_id: params[:id])
+    message.unhide!
+    redirect_to user_settings_safety_path, notice: "Message unhidden."
+  end
+
+  def run_prune
+    PruneMessagesJob.perform_later
+    redirect_to user_settings_storage_path, notice: "Prune job queued."
+  end
+
   private
 
   def profile_params

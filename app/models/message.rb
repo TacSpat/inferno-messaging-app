@@ -11,6 +11,8 @@ class Message < ApplicationRecord
   has_many :reactions, dependent: :destroy
   has_many :notifications, dependent: :destroy
   has_many :nostr_event_logs, dependent: :nullify
+  has_many :hidden_attachment_records, dependent: :destroy
+  belongs_to :hidden_by, class_name: "User", optional: true
   has_many_attached :files
 
   validates :content, presence: true, unless: :has_files?
@@ -25,10 +27,13 @@ class Message < ApplicationRecord
   after_create_commit :create_mention_notifications
   after_create_commit :render_and_cache!
   after_create_commit :publish_to_nostr_group, if: :in_channel?
+  after_create_commit :run_content_safety_check
   after_update_commit :render_and_cache!, if: :saved_change_to_content?
 
   scope :ordered, -> { order(created_at: :asc) }
   scope :recent, -> { order(created_at: :desc) }
+  scope :visible, -> { where(hidden_at: nil) }
+  scope :hidden, -> { where.not(hidden_at: nil) }
 
   BLOSSOM_DOMAINS = %w[blossom.primal.net cdn.satellite.earth].freeze
   IMAGE_URL_REGEX = /(?:https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg)(?:\?\S*)?|(?:https?:\/\/\S+)?\/rails\/active_storage\/\S+|https?:\/\/(?:#{BLOSSOM_DOMAINS.map { |d| Regexp.escape(d) }.join("|")})\/[0-9a-f]{64}\b)/i
@@ -419,6 +424,52 @@ end
     edited_at.present?
   end
 
+  def hidden?
+    hidden_at.present?
+  end
+
+  def hide!(user, reason:)
+    # Hash images BEFORE purging so we can match re-posts in the future
+    if LocalConfig.current.safety_image_hash_enabled && files.attached?
+      ImageHasher.hash_message_attachments(self).each do |h|
+        ContentHash.find_or_create_by!(hash_value: h[:hash_value], hash_type: h[:hash_type]) do |ch|
+          ch.media_type = h[:media_type]
+          ch.original_filename = h[:original_filename]
+          ch.message = self
+        end
+      end
+    end
+
+    transaction do
+      files.each do |att|
+        hidden_attachment_records.create!(
+          original_filename: att.filename.to_s,
+          content_type: att.content_type,
+          byte_size: att.byte_size,
+          checksum: att.checksum,
+          purged_at: Time.current,
+          purged_by: user
+        )
+      end
+      files.purge
+      update!(hidden_at: Time.current, hidden_by: user, hidden_reason: reason)
+      increment_author_report_count!
+    end
+    # Publish NIP-56 report to Nostr (outside transaction, non-blocking)
+    publish_nip56_report!(user, reason) if nostr_event_id.present?
+  end
+
+  def unhide!
+    # Allowlist any content hashes associated with this message
+    ContentHash.where(message_id: id).find_each(&:allowlist!)
+
+    update!(hidden_at: nil, hidden_by: nil, hidden_reason: nil)
+  end
+
+  def run_content_safety_check
+    ContentSafetyCheckJob.perform_later(id)
+  end
+
   private
 
   # Convert nostr: URIs to clickable <a> tags (Redcarpet only autolinks http/https)
@@ -722,5 +773,44 @@ end
     end
 
     html
+  end
+
+  def publish_nip56_report!(reporter, reason)
+    return unless reporter.nostr_private_key.present?
+
+    signer = Nostr::Signer.new(private_key: reporter.nostr_private_key)
+    report_type = case reason
+                  when "csam", "illegal" then "illegal"
+                  when "spam" then "spam"
+                  else "other"
+                  end
+    tags = [
+      ["e", nostr_event_id, "", report_type],
+      ["p", nostr_author_pubkey, "", report_type]
+    ].select { |t| t[1].present? }
+
+    # Append image hash tags for shared hash registry (NIP-56 extension)
+    if LocalConfig.current.safety_publish_hashes
+      ContentHash.where(message_id: self.id).each do |ch|
+        tags << ["x", ch.hash_value, ch.hash_type]
+      end
+    end
+
+    event = Nostr::Event.new(
+      kind: 1984,
+      pubkey: reporter.nostr_public_key,
+      content: reason,
+      tags: tags
+    )
+    signed = signer.sign(event)
+    RelayService.publish_to_all(signed.to_json)
+  rescue => e
+    Rails.logger.warn("[NIP-56] Failed to publish report: #{e.message}")
+  end
+
+  def increment_author_report_count!
+    return unless nostr_author_pubkey.present?
+    Contact.where(pubkey: nostr_author_pubkey).update_all("report_count = report_count + 1")
+    RemoteMember.where(pubkey: nostr_author_pubkey).update_all("report_count = report_count + 1")
   end
 end

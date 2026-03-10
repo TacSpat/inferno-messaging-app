@@ -30,6 +30,9 @@ class RemoteAssetCache
     # Already cached
     return local_path if File.exist?(full_path)
 
+    # Check cache size limit before downloading
+    evict_if_over_limit
+
     # Download
     FileUtils.mkdir_p(CACHE_DIR)
     response = fetch_with_redirects(uri)
@@ -63,6 +66,33 @@ class RemoteAssetCache
       local = cache(url)
       map[url] = local if local
     end
+  end
+
+  # Evict oldest cached files when over the configured max_cache_size_mb.
+  # Deletes least-recently-accessed files until usage is under 90% of the limit,
+  # leaving headroom so we don't evict on every single cache call.
+  def self.evict_if_over_limit
+    config = LocalConfig.current
+    return if config.max_cache_size_mb.zero?
+
+    max_bytes = config.max_cache_size_mb * 1024 * 1024
+    return unless CACHE_DIR.exist?
+
+    files = Dir.glob(CACHE_DIR.join("**", "*")).select { |f| File.file?(f) }
+    total = files.sum { |f| File.size(f) rescue 0 }
+    return if total <= max_bytes
+
+    target = (max_bytes * 0.9).to_i
+    # Sort by access time (oldest first)
+    sorted = files.sort_by { |f| File.atime(f) rescue File.mtime(f) }
+    sorted.each do |f|
+      break if total <= target
+      size = File.size(f) rescue 0
+      File.delete(f) rescue nil
+      total -= size
+    end
+  rescue => e
+    Rails.logger.warn("[RemoteAssetCache] Cache eviction failed: #{e.message}")
   end
 
   private

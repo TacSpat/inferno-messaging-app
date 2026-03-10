@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -160,10 +160,31 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.datetime "profile_fetched_at"
     t.string "pubkey", null: false
     t.string "relay_url"
+    t.integer "report_count", default: 0, null: false
     t.datetime "updated_at", null: false
     t.string "username"
     t.index ["friendship_status"], name: "index_contacts_on_friendship_status"
     t.index ["pubkey"], name: "index_contacts_on_pubkey", unique: true
+  end
+
+  create_table "content_hashes", force: :cascade do |t|
+    t.boolean "allowlisted", default: false
+    t.float "confidence", default: 1.0
+    t.datetime "created_at", null: false
+    t.string "hash_type", default: "dhash", null: false
+    t.string "hash_value", null: false
+    t.string "media_type"
+    t.integer "message_id"
+    t.json "nostr_event_ids", default: []
+    t.string "original_filename"
+    t.integer "reporter_count", default: 1
+    t.json "reporter_pubkeys", default: []
+    t.string "source", default: "local"
+    t.datetime "updated_at", null: false
+    t.index ["allowlisted"], name: "index_content_hashes_on_allowlisted"
+    t.index ["hash_value", "hash_type"], name: "index_content_hashes_on_hash_value_and_hash_type"
+    t.index ["message_id"], name: "index_content_hashes_on_message_id"
+    t.index ["source"], name: "index_content_hashes_on_source"
   end
 
   create_table "conversation_participants", force: :cascade do |t|
@@ -273,6 +294,20 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.index ["user_id"], name: "index_gif_favorites_on_user_id"
   end
 
+  create_table "hidden_attachment_records", force: :cascade do |t|
+    t.bigint "byte_size"
+    t.string "checksum"
+    t.string "content_type"
+    t.datetime "created_at", null: false
+    t.integer "message_id", null: false
+    t.string "original_filename", null: false
+    t.datetime "purged_at", null: false
+    t.integer "purged_by_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["message_id"], name: "index_hidden_attachment_records_on_message_id"
+    t.index ["purged_by_id"], name: "index_hidden_attachment_records_on_purged_by_id"
+  end
+
   create_table "instance_blocklists", force: :cascade do |t|
     t.datetime "blocked_at", default: -> { "CURRENT_TIMESTAMP" }, null: false
     t.bigint "blocked_by_id", null: false
@@ -286,6 +321,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
 
   create_table "instance_configs", force: :cascade do |t|
     t.integer "attachment_retention_days", default: 0
+    t.integer "backfill_days", default: 30
+    t.boolean "backfill_enabled", default: true
     t.json "blossom_server_urls"
     t.datetime "created_at", null: false
     t.string "federation_mode", default: "open", null: false
@@ -303,8 +340,10 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.boolean "lockdown_local_signups", default: false, null: false
     t.boolean "lockdown_remote_auth", default: false, null: false
     t.boolean "lockdown_remote_joins", default: false, null: false
+    t.integer "max_cache_size_mb", default: 500
     t.integer "max_categories_per_server", default: 20
     t.integer "max_channels_per_server", default: 50
+    t.integer "max_db_size_mb", default: 0
     t.integer "max_members_per_server", default: 0
     t.integer "max_roles_per_server", default: 25
     t.integer "max_servers", default: 0
@@ -314,7 +353,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.integer "max_users", default: 0
     t.integer "max_voice_participants_per_channel", default: 25
     t.integer "message_retention_days", default: 0
+    t.boolean "prune_channel_messages", default: true
+    t.boolean "prune_dm_messages", default: true
     t.string "pruning_strategy", default: "none"
+    t.boolean "safety_block_all_caps", default: false
+    t.boolean "safety_block_links", default: false
+    t.boolean "safety_block_phone_numbers", default: false
+    t.boolean "safety_block_spam_chars", default: false
+    t.boolean "safety_hide_unknown_senders", default: false
+    t.boolean "safety_image_hash_enabled", default: false
+    t.text "safety_keyword_filter", default: ""
+    t.boolean "safety_publish_hashes", default: true
+    t.integer "safety_report_threshold", default: 0
+    t.boolean "safety_reputation_enabled", default: false
+    t.string "safety_reputation_sensitivity", default: "moderate"
+    t.integer "safety_reputation_threshold", default: 30
+    t.integer "safety_shared_hash_min_reporters", default: 3
+    t.boolean "safety_shared_hash_trust_friends", default: true
+    t.boolean "safety_shared_hashes_enabled", default: false
     t.datetime "updated_at", null: false
     t.boolean "voice_enabled", default: false, null: false
   end
@@ -365,6 +421,9 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.bigint "conversation_id"
     t.datetime "created_at", null: false
     t.datetime "edited_at"
+    t.datetime "hidden_at"
+    t.bigint "hidden_by_id"
+    t.string "hidden_reason"
     t.boolean "is_sticker", default: false, null: false
     t.string "nostr_author_pubkey"
     t.string "nostr_event_id"
@@ -379,6 +438,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.index ["channel_id", "created_at"], name: "index_messages_on_channel_id_and_created_at"
     t.index ["channel_id"], name: "index_messages_on_channel_id"
     t.index ["conversation_id"], name: "index_messages_on_conversation_id"
+    t.index ["hidden_at"], name: "index_messages_on_hidden_at", where: "hidden_at IS NOT NULL"
     t.index ["nostr_event_id"], name: "index_messages_on_nostr_event_id", unique: true
     t.index ["parent_id"], name: "index_messages_on_parent_id"
     t.index ["public_id"], name: "index_messages_on_public_id", unique: true
@@ -546,6 +606,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
     t.datetime "profile_fetched_at"
     t.string "pubkey", null: false
     t.string "public_id"
+    t.integer "report_count", default: 0, null: false
     t.integer "server_id", null: false
     t.string "status"
     t.string "status_emoji"
@@ -872,6 +933,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
   add_foreign_key "channels", "channels", column: "sidechat_channel_id"
   add_foreign_key "channels", "servers"
   add_foreign_key "channels", "users", column: "current_voice_provider_id"
+  add_foreign_key "content_hashes", "messages"
   add_foreign_key "conversation_participants", "contacts"
   add_foreign_key "conversation_participants", "conversations"
   add_foreign_key "conversation_participants", "users"
@@ -883,6 +945,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
   add_foreign_key "gif_collections", "users"
   add_foreign_key "gif_favorites", "gif_collections"
   add_foreign_key "gif_favorites", "users"
+  add_foreign_key "hidden_attachment_records", "messages"
+  add_foreign_key "hidden_attachment_records", "users", column: "purged_by_id"
   add_foreign_key "instance_blocklists", "users", column: "blocked_by_id"
   add_foreign_key "invites", "servers"
   add_foreign_key "invites", "users", column: "creator_id"
@@ -893,6 +957,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_08_100003) do
   add_foreign_key "messages", "conversations"
   add_foreign_key "messages", "messages", column: "parent_id"
   add_foreign_key "messages", "users"
+  add_foreign_key "messages", "users", column: "hidden_by_id"
   add_foreign_key "moderation_reports", "users", column: "reporter_id"
   add_foreign_key "moderation_reports", "users", column: "reviewed_by_id"
   add_foreign_key "nostr_event_logs", "channels"

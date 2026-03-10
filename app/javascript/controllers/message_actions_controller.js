@@ -172,4 +172,29 @@ export default class extends Controller {
     document.body.style.overflow = ""
   }
 
+  hideMessage(e) {
+    const btn = e.currentTarget
+    const hideUrl = btn.dataset.hideUrl
+    if (!hideUrl) return
+
+    const reasons = ["csam", "illegal", "spam", "other"]
+    const reason = prompt("Reason for hiding this message?\n\nOptions: csam, illegal, spam, other", "other")
+    if (!reason) return
+    const normalizedReason = reasons.includes(reason.toLowerCase()) ? reason.toLowerCase() : "other"
+
+    const token = document.querySelector("meta[name=csrf-token]")?.content
+    fetch(hideUrl, {
+      method: "POST",
+      headers: { "X-CSRF-Token": token, "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      body: `reason=${encodeURIComponent(normalizedReason)}`
+    }).then(res => {
+      if (res.ok) {
+        const msgEl = btn.closest("[data-message-id]")
+        if (msgEl) msgEl.remove()
+      } else {
+        alert("Failed to hide message.")
+      }
+    }).catch(() => alert("Failed to hide message."))
+  }
+
 }

@@ -4,8 +4,11 @@ class NostrHistoryFetcher
   # Fetch recent NIP-29 Kind 9 messages for a channel
   def self.fetch_channel(channel)
     return unless channel.nostr_group_id.present?
+    config = LocalConfig.current
+    return unless config.backfill_enabled
 
-    since = channel.messages.maximum(:created_at)&.to_i || 1.day.ago.to_i
+    max_lookback = config.backfill_days.days.ago.to_i
+    since = [channel.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback].max
     filter = {
       kinds: [ 9 ],
       "#h" => [ channel.nostr_group_id ],
@@ -23,8 +26,11 @@ class NostrHistoryFetcher
     owner = User.owner
     return unless owner&.nostr_private_key.present?
     return unless conversation.counterparty_pubkey.present?
+    config = LocalConfig.current
+    return unless config.backfill_enabled
 
-    since = conversation.messages.maximum(:created_at)&.to_i || 1.day.ago.to_i
+    max_lookback = config.backfill_days.days.ago.to_i
+    since = [conversation.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback].max
 
     # Fetch events tagged to our pubkey from the counterparty
     filter = {

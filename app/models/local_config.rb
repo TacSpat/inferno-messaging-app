@@ -7,6 +7,7 @@ class LocalConfig < ApplicationRecord
   validates :max_channels_per_server, :max_categories_per_server,
             :max_roles_per_server, :max_upload_size_mb,
             :message_retention_days, :attachment_retention_days,
+            :max_cache_size_mb, :max_db_size_mb, :backfill_days,
             numericality: { only_integer: true, greater_than_or_equal_to: 0 }
 
   # Singleton access — there's only ever one row

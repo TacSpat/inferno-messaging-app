@@ -1,0 +1,209 @@
+<h2 class="text-xl font-bold text-white mb-6">Storage</h2>
+
+<%= form_with url: user_settings_storage_path, method: :patch, local: true, data: { turbo_frame: "settings-frame" } do %>
+
+<!-- Section 1: Overview -->
+<div class="mb-8">
+  <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Overview</h3>
+  <div class="bg-gray-800 rounded-lg p-4 space-y-4">
+    <div class="grid grid-cols-3 gap-4">
+      <div>
+        <p class="text-sm text-gray-300">Database size</p>
+        <p class="text-lg font-semibold text-white">
+          <% if @db_size %>
+            <%= number_to_human_size(@db_size) %>
+          <% else %>
+            <span class="text-gray-500">Unknown</span>
+          <% end %>
+        </p>
+      </div>
+      <div>
+        <p class="text-sm text-gray-300">Messages</p>
+        <p class="text-lg font-semibold text-white"><%= number_with_delimiter(@message_count) %></p>
+      </div>
+      <div>
+        <p class="text-sm text-gray-300">Attachments</p>
+        <p class="text-lg font-semibold text-white"><%= number_with_delimiter(@attachment_count) %></p>
+      </div>
+    </div>
+
+    <!-- Cache stats -->
+    <div class="border-t border-gray-700 pt-4">
+      <div class="flex items-center justify-between mb-2">
+        <div>
+          <p class="text-sm text-gray-300">Cached assets</p>
+          <p class="text-lg font-semibold text-white">
+            <%= number_to_human_size(@cache_size) %>
+            <span class="text-sm text-gray-500 font-normal">/ <%= @config.max_cache_size_mb %> MB max</span>
+          </p>
+        </div>
+        <div class="text-right">
+          <p class="text-sm text-gray-300">Files</p>
+          <p class="text-lg font-semibold text-white"><%= number_with_delimiter(@cache_count) %></p>
+        </div>
+      </div>
+      <% if @config.max_cache_size_mb > 0 %>
+        <% pct = [(@cache_size / (@config.max_cache_size_mb * 1024.0 * 1024) * 100), 100].min %>
+        <div class="w-full bg-gray-700 rounded-full h-2 mb-3">
+          <div class="h-2 rounded-full transition-all <%= pct >= 100 ? 'bg-danger' : pct > 80 ? 'bg-warning' : 'bg-accent' %>" style="width: <%= pct %>%"></div>
+        </div>
+        <% if pct >= 100 %>
+          <p class="text-xs text-danger-light mb-3">Cache is full. Oldest files will be automatically evicted when new assets are cached.</p>
+        <% elsif pct > 80 %>
+          <p class="text-xs text-warning mb-3">Cache is nearing its limit (<%= pct.round %>% used). Oldest files will be evicted once full.</p>
+        <% end %>
+      <% elsif @cache_size > 0 %>
+        <div class="w-full bg-gray-700 rounded-full h-2 mb-3">
+          <div class="h-2 rounded-full transition-all bg-accent" style="width: 100%"></div>
+        </div>
+        <p class="text-xs text-gray-500 mb-3">No cache limit set. Cache will grow indefinitely.</p>
+      <% end %>
+      <%= button_to "Clear Cache", user_settings_clear_cache_path, method: :post,
+          class: "bg-danger/20 hover:bg-danger/30 text-danger-light text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer",
+          data: { turbo_confirm: "Delete all #{@cache_count} cached files?", turbo_frame: "settings-frame" } %>
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: History Backfill -->
+<div class="mb-8">
+  <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">History Backfill</h3>
+  <div class="bg-gray-800 rounded-lg p-4 space-y-4">
+    <p class="text-sm text-gray-400">Controls how far back Nostr relay history is fetched when opening channels and conversations.</p>
+
+    <div class="flex items-center justify-between">
+      <label class="text-sm text-gray-300">Enable backfill</label>
+      <label class="relative inline-flex items-center cursor-pointer">
+        <input type="hidden" name="backfill_enabled" value="0">
+        <input type="checkbox" name="backfill_enabled" value="1" class="sr-only peer" <%= "checked" if @config.backfill_enabled %>>
+        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
+      </label>
+    </div>
+
+    <div>
+      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Backfill days</label>
+      <input type="number" name="backfill_days" value="<%= @config.backfill_days %>" min="1" max="365"
+             class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
+      <p class="text-xs text-gray-500 mt-1">How many days of history to fetch from relays (1-365).</p>
+    </div>
+
+    <div>
+      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Max cache size (MB)</label>
+      <input type="number" name="max_cache_size_mb" value="<%= @config.max_cache_size_mb %>" min="0"
+             class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
+      <p class="text-xs text-gray-500 mt-1">Maximum size for the remote asset cache. 0 = unlimited.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Section 3: Auto-Pruning -->
+<div class="mb-8" data-controller="pruning-strategy">
+  <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Auto-Pruning</h3>
+  <p class="text-sm text-gray-400 mb-3">Automatically clean up old messages and attachments to reclaim storage. Hidden messages are never pruned.</p>
+  <div class="space-y-4">
+    <!-- Strategy -->
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-2">Pruning Strategy</label>
+      <select name="pruning_strategy" data-action="change->pruning-strategy#toggle" class="bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none w-full max-w-xs">
+        <% LocalConfig::PRUNING_STRATEGIES.each do |strategy| %>
+          <option value="<%= strategy %>" <%= "selected" if @config.pruning_strategy == strategy %>>
+            <%= case strategy
+                when "none" then "Disabled"
+                when "time_based" then "Time-based"
+                when "storage_based" then "Storage-based"
+                end %>
+          </option>
+        <% end %>
+      </select>
+      <div data-pruning-strategy-target="description" class="mt-2 text-xs text-gray-500 bg-gray-900/50 rounded-md px-3 py-2 border border-gray-700/50"></div>
+    </div>
+
+    <!-- Retention -->
+    <div data-pruning-strategy-target="retention" class="bg-gray-800 rounded-lg p-4 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Message retention (days)</label>
+        <input type="number" name="message_retention_days" value="<%= @config.message_retention_days %>" min="0"
+               class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
+        <p class="text-xs text-gray-500 mt-1">0 = keep forever.</p>
+      </div>
+    </div>
+
+    <!-- Attachment retention (storage-based only) -->
+    <div data-pruning-strategy-target="attachmentRetention" class="bg-gray-800 rounded-lg p-4 space-y-4">
+      <div>
+        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Attachment retention (days)</label>
+        <input type="number" name="attachment_retention_days" value="<%= @config.attachment_retention_days %>" min="0"
+               class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
+        <p class="text-xs text-gray-500 mt-1">0 = keep forever. Prunes file attachments older than this before pruning messages.</p>
+      </div>
+      <div>
+        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Max database size (MB)</label>
+        <input type="number" name="max_db_size_mb" value="<%= @config.max_db_size_mb %>" min="0"
+               class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
+        <p class="text-xs text-gray-500 mt-1">When DB exceeds this size, oldest messages are pruned until under limit. 0 = no limit.</p>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div data-pruning-strategy-target="options" class="bg-gray-800 rounded-lg p-4 space-y-3">
+      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Options</label>
+      <div class="flex items-center gap-3">
+        <input type="hidden" name="keep_pinned_messages" value="0">
+        <input type="checkbox" name="keep_pinned_messages" value="1" id="keep_pinned"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0"
+               <%= "checked" if @config.keep_pinned_messages %>>
+        <label for="keep_pinned" class="text-sm text-gray-300 cursor-pointer">Keep pinned messages</label>
+      </div>
+    </div>
+
+    <!-- Scope -->
+    <div data-pruning-strategy-target="scope" class="bg-gray-800 rounded-lg p-4 space-y-3">
+      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Pruning Scope</label>
+      <p class="text-xs text-gray-500 mb-2">Choose which message types to include when pruning.</p>
+      <div class="flex items-center gap-3">
+        <input type="hidden" name="prune_channel_messages" value="0">
+        <input type="checkbox" name="prune_channel_messages" value="1" id="prune_channels"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0"
+               <%= "checked" if @config.prune_channel_messages %>>
+        <label for="prune_channels" class="text-sm text-gray-300 cursor-pointer">Prune channel messages</label>
+      </div>
+      <div class="flex items-center gap-3">
+        <input type="hidden" name="prune_dm_messages" value="0">
+        <input type="checkbox" name="prune_dm_messages" value="1" id="prune_dms"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0"
+               <%= "checked" if @config.prune_dm_messages %>>
+        <label for="prune_dms" class="text-sm text-gray-300 cursor-pointer">Prune DM messages</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Save button -->
+<div class="mb-8">
+  <button type="submit" class="bg-accent hover:bg-accent-light text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer">
+    Save Settings
+  </button>
+</div>
+
+<% end %>
+
+<!-- Section 4: Manual Actions -->
+<div class="mb-8 border-t border-gray-700 pt-6">
+  <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Manual Actions</h3>
+  <div class="bg-gray-800 rounded-lg p-4">
+    <div class="flex items-center justify-between mb-4">
+      <div class="flex gap-6 text-sm text-gray-300">
+        <span>Messages: <strong class="text-white"><%= number_with_delimiter(@visible_message_count) %></strong></span>
+        <span>Attachments: <strong class="text-white"><%= number_with_delimiter(@attachment_count) %></strong></span>
+      </div>
+    </div>
+    <div class="flex gap-3">
+      <%= button_to "Run Prune Now", user_settings_run_prune_path, method: :post,
+          class: "bg-danger/20 hover:bg-danger/30 text-danger-light text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer",
+          data: { turbo_confirm: "Run the prune job now? This will delete messages according to your pruning settings.", turbo_frame: "settings-frame" } %>
+      <%= button_to "Clear Cache", user_settings_clear_cache_path, method: :post,
+          class: "bg-danger/20 hover:bg-danger/30 text-danger-light text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer",
+          data: { turbo_confirm: "Delete all #{@cache_count} cached files?", turbo_frame: "settings-frame" } %>
+    </div>
+  </div>
+</div>

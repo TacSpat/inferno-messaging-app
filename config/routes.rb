@@ -264,6 +264,19 @@ Rails.application.routes.draw do
   delete "settings/relays", to: "settings#remove_relay", as: :settings_remove_relay
   post "settings/relays/toggle", to: "settings#toggle_relay", as: :settings_toggle_relay
   post "settings/relays/check", to: "settings#check_relay", as: :settings_check_relay
+  # Storage & Cache
+  get "settings/storage", to: "settings#storage", as: :user_settings_storage
+  patch "settings/storage", to: "settings#update_storage"
+  post "settings/clear_cache", to: "settings#clear_cache", as: :user_settings_clear_cache
+  post "settings/run_prune", to: "settings#run_prune", as: :user_settings_run_prune
+  # Content Safety
+  get "settings/safety", to: "settings#safety", as: :user_settings_safety
+  patch "settings/safety", to: "settings#update_safety"
+  post "settings/hide_message/:id", to: "settings#hide_message", as: :user_settings_hide_message
+  post "settings/unhide_message/:id", to: "settings#unhide_message", as: :user_settings_unhide_message
+  post "settings/remove_allowlist", to: "settings#remove_allowlist", as: :user_settings_remove_allowlist
+  post "settings/clear_shared_hashes", to: "settings#clear_shared_hashes", as: :user_settings_clear_shared_hashes
+
   resource :profile, only: [ :show, :edit, :update ]
 
   # User cards

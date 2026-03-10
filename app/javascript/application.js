@@ -440,6 +440,8 @@ import AddServerModalController from "./controllers/add_server_modal_controller"
 import ServerInvitePreviewController from "./controllers/server_invite_preview_controller"
 import StatusEmojiController from "./controllers/status_emoji_controller"
 import MessageSearchController from "./controllers/message_search_controller"
+import PruningStrategyController from "./controllers/pruning_strategy_controller"
+import KeywordFilterController from "./controllers/keyword_filter_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -491,6 +493,8 @@ application.register("add-server-modal", AddServerModalController)
 application.register("server-invite-preview", ServerInvitePreviewController)
 application.register("status-emoji", StatusEmojiController)
 application.register("message-search", MessageSearchController)
+application.register("pruning-strategy", PruningStrategyController)
+application.register("keyword-filter", KeywordFilterController)
 
 // --- Custom spatially-aware tooltips: convert title → data-tooltip, position with JS ---
 ;(function() {
@@ -631,4 +635,66 @@ application.register("message-search", MessageSearchController)
     }
   }).observe(document.body, { childList: true, subtree: true })
 })()
+// External link confirmation dialog — intercepts clicks on external <a> tags
+// and shows a modal so the user can verify the URL before proceeding.
+document.addEventListener("click", (e) => {
+  const link = e.target.closest("a[href]")
+  if (!link) return
+  // Skip if inside a settings form (turbo-frame navigations)
+  if (link.closest("turbo-frame#settings-frame") && link.hasAttribute("data-turbo-frame")) return
+  const href = link.getAttribute("href")
+  if (!href || href.startsWith("/") || href.startsWith("#")) return
+  if (href.startsWith("nostr:")) return
+  // Skip javascript: and mailto: links
+  if (href.startsWith("javascript:") || href.startsWith("mailto:")) return
+
+  let url
+  try {
+    url = new URL(href, window.location.origin)
+  } catch {
+    return
+  }
+  if (url.origin === window.location.origin) return
+
+  e.preventDefault()
+  e.stopPropagation()
+
+  const overlay = document.createElement("div")
+  overlay.className = "modal-overlay fixed inset-0 z-[100] flex items-center justify-center bg-black/60"
+  overlay.innerHTML = `
+    <div class="bg-gray-800 rounded-lg shadow-2xl border border-gray-700 w-full max-w-md mx-4 overflow-hidden">
+      <div class="px-5 pt-5 pb-4">
+        <h3 class="text-lg font-semibold text-white mb-2">You are about to leave Inferno</h3>
+        <p class="text-sm text-gray-400 mb-3">This link will take you to an external site:</p>
+        <div class="bg-gray-900 rounded-md px-3 py-2 border border-gray-700 break-all">
+          <code class="text-sm text-accent-light font-mono">${href.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</code>
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 px-5 py-4 bg-gray-900/50">
+        <button data-action="cancel" class="px-4 py-2 text-sm font-medium text-gray-300 hover:text-white hover:underline cursor-pointer">Cancel</button>
+        <button data-action="continue" class="px-4 py-2 text-sm font-medium bg-accent hover:bg-accent-light text-white rounded transition cursor-pointer">Continue</button>
+      </div>
+    </div>
+  `
+
+  const cleanup = () => overlay.remove()
+
+  overlay.addEventListener("click", (ev) => {
+    if (ev.target === overlay) cleanup()
+  })
+  overlay.querySelector('[data-action="cancel"]').addEventListener("click", cleanup)
+  overlay.querySelector('[data-action="continue"]').addEventListener("click", () => {
+    cleanup()
+    window.open(href, "_blank", "noopener")
+  })
+
+  document.addEventListener("keydown", function handler(ev) {
+    if (ev.key === "Escape") { document.removeEventListener("keydown", handler); cleanup() }
+    if (ev.key === "Enter") { document.removeEventListener("keydown", handler); cleanup(); window.open(href, "_blank", "noopener") }
+  })
+
+  document.body.appendChild(overlay)
+  overlay.querySelector('[data-action="continue"]').focus()
+})
+
 // rebuild trigger

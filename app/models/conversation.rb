@@ -5,7 +5,8 @@ class Conversation < ApplicationRecord
   has_many :conversation_participants, dependent: :destroy
   has_many :participants, through: :conversation_participants, source: :user
   has_many :contact_participants, -> { where.not(contact_id: nil) }, class_name: "ConversationParticipant"
-  has_many :messages, dependent: :destroy
+  has_many :messages, -> { where(hidden_at: nil) }, dependent: :destroy
+  has_many :all_messages, class_name: "Message", foreign_key: :conversation_id
   has_many :calls, dependent: :destroy
   has_one_attached :icon
 
