@@ -1,7 +1,7 @@
 <div id="fire-shield" data-controller="fire-shield" data-fire-shield-level-value="<%= @config.safety_protection_level %>" data-fire-shield-save-url-value="<%= user_settings_safety_path %>" data-level="<%= @config.safety_protection_level %>">
 
   <!-- ── Fire Shield ── -->
-  <div class="flex flex-col items-center pt-4 lg:pt-8 pb-8 lg:pb-12 relative">
+  <div class="flex flex-col items-center pt-2 sm:pt-4 lg:pt-8 pb-4 sm:pb-8 lg:pb-12 relative">
 
     <button type="button" data-action="click->fire-shield#toggle" class="relative cursor-pointer focus:outline-none mb-6 shield-scale-wrapper" aria-label="Toggle protection level">
       <!-- Canvas behind everything — embers rise from here -->
@@ -20,8 +20,8 @@
     </button>
 
     <div class="text-center">
-      <h2 data-fire-shield-target="title" class="shield-title text-lg lg:text-xl font-bold mb-1"></h2>
-      <p data-fire-shield-target="subtitle" class="shield-subtitle text-sm lg:text-base max-w-xs lg:max-w-sm"></p>
+      <h2 data-fire-shield-target="title" class="shield-title text-base sm:text-lg lg:text-xl font-bold mb-1"></h2>
+      <p data-fire-shield-target="subtitle" class="shield-subtitle text-xs sm:text-sm lg:text-base max-w-[260px] sm:max-w-xs lg:max-w-sm"></p>
     </div>
   </div>
 
@@ -140,20 +140,20 @@
 
 <style>
   .shield-scale-wrapper {
-    width: 180px; height: 220px;
-    display: flex; align-items: center; justify-content: center;
-    transform: scale(1);
-    transform-origin: center center;
-  }
-  #ember-canvas {
-    inset: -100px -60px -10px -60px;
     width: 300px; height: 330px;
+    display: flex; align-items: center; justify-content: center;
+    transform: scale(0.55);
+    transform-origin: center center;
+    margin: -60px 0;
+  }
+  @media (min-width: 640px) {
+    .shield-scale-wrapper { transform: scale(0.7); margin: -40px 0; }
   }
   @media (min-width: 1024px) {
-    .shield-scale-wrapper { transform: scale(1.35); margin: 20px 0; }
+    .shield-scale-wrapper { transform: scale(0.9); margin: -10px 0; }
   }
   @media (min-width: 1280px) {
-    .shield-scale-wrapper { transform: scale(1.55); margin: 35px 0; }
+    .shield-scale-wrapper { transform: scale(1); margin: 0; }
   }
   .shield-glow {
     inset: 5px;

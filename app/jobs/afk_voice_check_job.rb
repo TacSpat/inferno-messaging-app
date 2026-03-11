@@ -6,7 +6,6 @@ class AfkVoiceCheckJob < ApplicationJob
           .where.not(afk_timeout: 0)
           .where(id: VoiceState.select(:server_id).distinct)
           .find_each do |server|
-
       cutoff = server.afk_timeout.minutes.ago
 
       server.voice_states.includes(:user, :channel).find_each do |vs|

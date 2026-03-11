@@ -7,7 +7,7 @@ class CreateCallParticipants < ActiveRecord::Migration[8.0]
       t.datetime :left_at
       t.integer :duration_seconds
       t.timestamps
-      t.index [:call_id, :user_id], unique: true
+      t.index [ :call_id, :user_id ], unique: true
     end
   end
 end

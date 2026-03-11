@@ -47,7 +47,7 @@ class NsfwDetector
       return false unless message.files.attached?
 
       message.files.select { |f| f.content_type&.start_with?("image/") }.any? do |file|
-        Tempfile.create(["nsfw_check", File.extname(file.filename.to_s)]) do |tmp|
+        Tempfile.create([ "nsfw_check", File.extname(file.filename.to_s) ]) do |tmp|
           tmp.binmode
           tmp.write(file.download)
           tmp.rewind
@@ -71,7 +71,7 @@ class NsfwDetector
       image = Vips::Image.new_from_file(image_path, access: :sequential)
 
       # Resize to INPUT_SIZE x INPUT_SIZE
-      scale = [INPUT_SIZE.to_f / image.width, INPUT_SIZE.to_f / image.height].max
+      scale = [ INPUT_SIZE.to_f / image.width, INPUT_SIZE.to_f / image.height ].max
       image = image.resize(scale)
       image = image.crop(
         (image.width - INPUT_SIZE) / 2,
@@ -92,7 +92,7 @@ class NsfwDetector
         end
       end
 
-      [pixels]
+      [ pixels ]
     rescue => e
       Rails.logger.error("[NsfwDetector] Preprocessing failed: #{e.message}")
       nil

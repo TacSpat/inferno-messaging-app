@@ -6,7 +6,7 @@ class ConversationsController < ApplicationController
   def index
     @tab = params[:tab] || "online"
     @conversations = current_user.conversations
-      .includes(conversation_participants: [:user, :contact], participants: { avatar_attachment: :blob }, messages: :user)
+      .includes(conversation_participants: [ :user, :contact ], participants: { avatar_attachment: :blob }, messages: :user)
       .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
 
@@ -41,7 +41,7 @@ class ConversationsController < ApplicationController
       return
     end
     @conversations = current_user.conversations
-      .includes(conversation_participants: [:user, :contact], participants: { avatar_attachment: :blob }, messages: :user)
+      .includes(conversation_participants: [ :user, :contact ], participants: { avatar_attachment: :blob }, messages: :user)
       .order(Arel.sql("messages.created_at DESC NULLS LAST"))
       .distinct
     @messages = @conversation.messages.includes(user: { avatar_attachment: :blob }, reactions: {}, files_attachments: :blob)

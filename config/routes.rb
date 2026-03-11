@@ -262,9 +262,13 @@ Rails.application.routes.draw do
   get "settings/appearance", to: "settings#appearance", as: :user_settings_appearance
   patch "settings/appearance", to: "settings#update_appearance", as: :settings_update_appearance
   get "settings/notifications", to: "settings#notifications", as: :user_settings_notifications
+  patch "settings/notifications", to: "settings#update_notifications"
   get "settings/keybinds", to: "settings#keybinds", as: :user_settings_keybinds
   get "settings/password", to: "settings#change_password", as: :user_settings_password
   patch "settings/password", to: "settings#update_password", as: :settings_update_password
+  post "settings/dismiss_hint", to: "settings#dismiss_hint", as: :dismiss_hint_settings
+  post "settings/reset_hints", to: "settings#reset_hints", as: :reset_hints_settings
+  post "settings/dismiss_all_hints", to: "settings#dismiss_all_hints", as: :dismiss_all_hints_settings
   post "settings/reveal_nostr_key", to: "settings#reveal_nostr_key", as: :reveal_nostr_key
   post "settings/export_encrypted_key", to: "settings#export_encrypted_key", as: :export_encrypted_key
   get "settings/voice", to: "settings#voice", as: :user_settings_voice

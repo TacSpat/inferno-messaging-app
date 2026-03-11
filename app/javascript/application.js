@@ -51,6 +51,77 @@ Turbo.setConfirmMethod((message) => {
   })
 })
 
+// Scrollbar: show while scrolling or hovering right edge, fade out after idle
+;(() => {
+  const scrollTimers = new WeakMap()
+  const hoverTimers = new WeakMap()
+
+  document.addEventListener("scroll", (e) => {
+    const el = e.target
+    if (el === document) return
+    el.classList.add("is-scrolling")
+    el.classList.remove("scroll-fading")
+    clearTimeout(scrollTimers.get(el))
+    scrollTimers.set(el, setTimeout(() => {
+      el.classList.add("scroll-fading")
+      setTimeout(() => el.classList.remove("is-scrolling", "scroll-fading"), 600)
+    }, 800))
+  }, true)
+
+  document.addEventListener("mousemove", (e) => {
+    const el = e.target
+    if (el === document || el === document.documentElement) return
+    // Walk up to find the nearest scrollable parent
+    let scrollable = el
+    while (scrollable && scrollable !== document.body) {
+      if (scrollable.scrollHeight > scrollable.clientHeight || scrollable.scrollWidth > scrollable.clientWidth) break
+      scrollable = scrollable.parentElement
+    }
+    if (!scrollable || scrollable === document.body) return
+
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const rect = scrollable.getBoundingClientRect()
+    const right = rect.right / zoom
+    const edgeZone = 12
+    const mx = e.clientX / zoom
+    const nearRight = mx >= right - edgeZone && mx <= right + 2
+
+    if (nearRight) {
+      if (!scrollable.classList.contains("scroll-hover")) {
+        clearTimeout(hoverTimers.get(scrollable))
+        hoverTimers.set(scrollable, setTimeout(() => {
+          scrollable.classList.add("scroll-hover")
+        }, 400))
+      }
+    } else {
+      clearTimeout(hoverTimers.get(scrollable))
+      if (scrollable.classList.contains("scroll-hover")) {
+        scrollable.classList.add("scroll-fading")
+        setTimeout(() => scrollable.classList.remove("scroll-hover", "scroll-fading"), 600)
+      }
+    }
+  }, { passive: true })
+})();
+
+// Range slider filled-track for Chromium (Firefox uses ::-moz-range-progress)
+function paintRangeFill(input) {
+  const min = parseFloat(input.min) || 0
+  const max = parseFloat(input.max) || 100
+  const pct = ((input.value - min) / (max - min)) * 100
+  const accent = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()
+  input.style.background = `linear-gradient(to right, rgb(${accent} / 0.5) ${pct}%, rgb(${accent} / 0.2) ${pct}%)`
+}
+document.addEventListener("input", (e) => {
+  if (e.target.matches('input[type="range"]')) paintRangeFill(e.target)
+})
+// Paint on page load and Turbo navigations
+function paintAllRanges() {
+  document.querySelectorAll('input[type="range"]').forEach(paintRangeFill)
+}
+document.addEventListener("turbo:load", paintAllRanges)
+document.addEventListener("turbo:frame-load", paintAllRanges)
+requestAnimationFrame(paintAllRanges)
+
 // Retry failed image loads once after 3s (covers race with background sync).
 // If the retry also fails, apply a subtle placeholder style instead of the ugly broken icon.
 document.addEventListener("error", (e) => {
@@ -447,6 +518,8 @@ import ReportWizardController from "./controllers/report_wizard_controller"
 import FireShieldController from "./controllers/fire_shield_controller"
 import OnboardingWizardController from "./controllers/onboarding_wizard_controller"
 import OnboardingPreviewController from "./controllers/onboarding_preview_controller"
+import HintsController from "./controllers/hints_controller"
+import ConnectionMonitorController from "./controllers/connection_monitor_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -505,6 +578,8 @@ application.register("report-wizard", ReportWizardController)
 application.register("fire-shield", FireShieldController)
 application.register("onboarding-wizard", OnboardingWizardController)
 application.register("onboarding-preview", OnboardingPreviewController)
+application.register("hints", HintsController)
+application.register("connection-monitor", ConnectionMonitorController)
 
 // --- Custom spatially-aware tooltips: convert title → data-tooltip, position with JS ---
 ;(function() {

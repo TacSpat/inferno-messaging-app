@@ -15,6 +15,18 @@ export default class extends Controller {
     this._restoreLastChannels()
     this.sidebarTyping = new Map()
 
+    // Electron desktop notification support
+    this._isElectron = !!window.electronAPI?.showNotification
+    this._windowFocused = true
+    if (this._isElectron) {
+      window.electronAPI.onFocusChange((focused) => { this._windowFocused = focused })
+      window.electronAPI.onNotificationClick((data) => {
+        if (data.navigateTo && window.Turbo) {
+          window.Turbo.visit(data.navigateTo)
+        }
+      })
+    }
+
     this.handleContextMenu = this.handleContextMenu.bind(this)
     document.addEventListener("contextmenu", this.handleContextMenu)
 
@@ -140,6 +152,11 @@ export default class extends Controller {
       if (currentChannelId && String(data.channel_id) === String(currentChannelId)) return
       this.showServerBadge(data.server_id)
       this.showChannelBadge(data.channel_id)
+      this._sendDesktopNotification("desktop_mentions", {
+        title: data.server_name ? `Mention in ${data.server_name}` : "Mention",
+        body: data.body || "You were mentioned",
+        navigateTo: data.channel_path || null
+      })
     } else if (data.type === "dm_message") {
       // Skip if we're currently viewing this conversation
       const currentConvEl = document.querySelector("[data-dm-message-form-conversation-id-value]")
@@ -147,9 +164,18 @@ export default class extends Controller {
       if (currentConvId && String(data.conversation_id) === String(currentConvId)) return
       this.showHomeBadge()
       this.showConversationBadge(data.conversation_id)
+      this._sendDesktopNotification("desktop_dm_messages", {
+        title: data.sender_name || "Direct Message",
+        body: data.body || "New message",
+        navigateTo: data.conversation_id ? `/conversations/${data.conversation_id}` : null
+      })
     } else if (data.type === "friend_request") {
       this.showHomeBadge()
       this._showFriendRequestBar(data)
+      this._sendDesktopNotification("desktop_friend_requests", {
+        title: "Friend Request",
+        body: data.sender_name ? `${data.sender_name} sent you a friend request` : "You have a new friend request"
+      })
     } else if (data.type === "friend_update") {
       this._handleFriendUpdate(data)
     } else if (data.type === "channel_message") {
@@ -209,6 +235,7 @@ export default class extends Controller {
       this.recountServerBadge(serverId)
       this.recountServerUnread(serverId)
     }
+    this._updateElectronBadge()
   }
 
   // ---- Home / DM badge methods ----
@@ -226,6 +253,7 @@ export default class extends Controller {
       const count = parseInt(badge.textContent || "0") + 1
       badge.textContent = count > 99 ? "99+" : count
     }
+    this._updateElectronBadge()
   }
 
   removeHomeBadge() {
@@ -233,6 +261,7 @@ export default class extends Controller {
     if (!homeBtn) return
     const badge = homeBtn.querySelector(".home-badge")
     if (badge) badge.remove()
+    this._updateElectronBadge()
   }
 
   showConversationBadge(conversationId) {
@@ -425,6 +454,35 @@ export default class extends Controller {
     } else if (!serverIcon.querySelector(".mention-badge")) {
       this.showServerUnread(serverId)
     }
+  }
+
+  // ---- Electron desktop notifications ----
+
+  _getNotificationPrefs() {
+    try {
+      return JSON.parse(document.body.dataset.notificationPreferences || "{}")
+    } catch { return {} }
+  }
+
+  _sendDesktopNotification(prefKey, opts) {
+    if (!this._isElectron || this._windowFocused) return
+    const prefs = this._getNotificationPrefs()
+    // Opt-out model: missing key defaults to true
+    if (prefs[prefKey] === false) return
+    window.electronAPI.showNotification(opts)
+    this._updateElectronBadge()
+  }
+
+  _updateElectronBadge() {
+    if (!this._isElectron) return
+    let total = 0
+    document.querySelectorAll(".mention-badge").forEach(el => {
+      total += parseInt(el.textContent || "0") || 0
+    })
+    document.querySelectorAll(".home-badge").forEach(el => {
+      total += parseInt(el.textContent || "0") || 0
+    })
+    window.electronAPI.setBadgeCount(total)
   }
 
   // ---- Friend request bar ----
@@ -1798,7 +1856,7 @@ export default class extends Controller {
     const url = `/users/${userId}/card` + (serverId ? `?server_id=${serverId}` : "")
 
     fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest" } })
-      .then(res => { if (!res.ok) throw new Error(); return res.text() })
+      .then(res => { if (!res.ok) throw new Error(`Card fetch failed: ${res.status}`); return res.text() })
       .then(html => {
         this._userCard = document.createElement("div")
         this._userCard.className = "fixed z-50 context-pop"

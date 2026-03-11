@@ -296,7 +296,7 @@ class ChannelsController < ApplicationController
         (c.permissions_overrides&.dig("allowed_role_ids") || []).sort == my_roles.sort
       }
     else
-      channels = channels.where(encrypted: [false, nil])
+      channels = channels.where(encrypted: [ false, nil ])
     end
     channels
   end

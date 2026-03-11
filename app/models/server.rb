@@ -110,24 +110,24 @@ class Server < ApplicationRecord
       { category: "Information", channels: [
         { name: "welcome", type: :text, read_only: true },
         { name: "rules", type: :text, read_only: true }
-      ]},
+      ] },
       { category: "Text Channels", channels: [
         { name: "general", type: :text },
         { name: "off-topic", type: :text },
         { name: "media", type: :text }
-      ]},
+      ] },
       { category: "Announcements", channels: [
         { name: "announcements", type: :text, mod_only: true }
-      ]}
+      ] }
     ],
     "friends_family" => [
       { category: "Text Channels", channels: [
         { name: "general", type: :text },
         { name: "photos", type: :text }
-      ]},
+      ] },
       { category: "Voice", channels: [
         { name: "hangout", type: :voice }
-      ]}
+      ] }
     ],
     "gaming" => [
       { category: "Text Channels", channels: [
@@ -135,35 +135,35 @@ class Server < ApplicationRecord
         { name: "lfg", type: :text },
         { name: "screenshots", type: :text },
         { name: "clips", type: :text }
-      ]},
+      ] },
       { category: "Voice", channels: [
         { name: "lobby-1", type: :voice },
         { name: "lobby-2", type: :voice }
-      ]}
+      ] }
     ],
     "work_team" => [
       { category: "General", channels: [
         { name: "general", type: :text },
         { name: "random", type: :text }
-      ]},
+      ] },
       { category: "Work", channels: [
         { name: "announcements", type: :text, mod_only: true },
         { name: "standup", type: :text },
         { name: "projects", type: :text }
-      ]}
+      ] }
     ],
     "adult" => [
       { category: "Verification", channels: [
         { name: "rules", type: :text, read_only: true },
         { name: "verification-submit", type: :text, post_only: true }
-      ]},
+      ] },
       { category: "Text Channels", channels: [
         { name: "general", type: :text },
         { name: "media", type: :text }
-      ]},
+      ] },
       { category: "Voice", channels: [
         { name: "voice", type: :voice }
-      ]}
+      ] }
     ]
   }.freeze
 

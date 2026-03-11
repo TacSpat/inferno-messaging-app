@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_10_100002) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_10_100004) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -859,6 +859,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_100002) do
     t.text "nostr_encrypted_private_key"
     t.datetime "nostr_profile_published_at"
     t.string "nostr_public_key"
+    t.json "notification_preferences", default: {}, null: false
     t.datetime "online_at"
     t.integer "online_state", default: 0, null: false
     t.string "profile_color"
@@ -869,10 +870,12 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_100002) do
     t.bigint "remote_user_detail_id"
     t.datetime "reset_password_sent_at"
     t.string "reset_password_token"
+    t.json "seen_hints", default: [], null: false
     t.string "status"
     t.string "status_emoji"
     t.datetime "suspended_at"
     t.string "theme", default: "inferno", null: false
+    t.datetime "tutorial_completed_at"
     t.string "unconfirmed_email"
     t.datetime "updated_at", null: false
     t.string "username", null: false

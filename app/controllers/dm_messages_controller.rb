@@ -60,13 +60,13 @@ class DmMessagesController < ApplicationController
     messages = apply_search_filters(messages)
 
     per_page = 25
-    page = [params[:page].to_i, 1].max
+    page = [ params[:page].to_i, 1 ].max
     total = messages.count
     @results = messages.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
 
     ActiveRecord::Associations::Preloader.new(
       records: @results,
-      associations: [:user, { files_attachments: :blob }, :reactions]
+      associations: [ :user, { files_attachments: :blob }, :reactions ]
     ).call
 
     render partial: "messages/search_results", locals: { results: @results, page: page, total: total, has_more: (page * per_page) < total }

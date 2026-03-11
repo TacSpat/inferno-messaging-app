@@ -8,7 +8,7 @@ class NostrHistoryFetcher
     return unless config.backfill_enabled
 
     max_lookback = config.backfill_days.days.ago.to_i
-    since = [channel.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback].max
+    since = [ channel.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback ].max
     filter = {
       kinds: [ 9 ],
       "#h" => [ channel.nostr_group_id ],
@@ -30,7 +30,7 @@ class NostrHistoryFetcher
     return unless config.backfill_enabled
 
     max_lookback = config.backfill_days.days.ago.to_i
-    since = [conversation.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback].max
+    since = [ conversation.messages.maximum(:created_at)&.to_i || max_lookback, max_lookback ].max
 
     # Fetch events tagged to our pubkey from the counterparty
     filter = {

@@ -17,19 +17,34 @@ export function positionPopup(popup, anchor, options = {}) {
     horizontalAlign = "right"
   } = options
 
+  // Account for CSS zoom on <html> — getBoundingClientRect returns zoomed
+  // coords but fixed positioning and window.innerWidth/Height are unzoomed
+  const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+
   // Ensure popup is visible so we can measure it
   const wasHidden = popup.style.visibility === "hidden"
   popup.style.visibility = "hidden"
   popup.style.display = ""
 
   const popupRect = popup.getBoundingClientRect()
-  const pw = popupRect.width
-  const ph = popupRect.height
+  const pw = popupRect.width / zoom
+  const ph = popupRect.height / zoom
 
-  // Normalize anchor to a rect
-  const rect = anchor instanceof DOMRect || (anchor.top !== undefined && anchor.bottom !== undefined)
+  // Normalize anchor to a rect, adjusting for zoom
+  const raw = anchor instanceof DOMRect || (anchor.top !== undefined && anchor.bottom !== undefined)
     ? anchor
     : { top: anchor.y, bottom: anchor.y, left: anchor.x, right: anchor.x, width: 0, height: 0 }
+  const rect = {
+    top: raw.top / zoom,
+    bottom: raw.bottom / zoom,
+    left: raw.left / zoom,
+    right: raw.right / zoom,
+    width: (raw.width || 0) / zoom,
+    height: (raw.height || 0) / zoom
+  }
+
+  const vpW = window.innerWidth
+  const vpH = window.innerHeight
 
   // Vertical: try preferred side, flip if not enough room
   let top
@@ -40,7 +55,7 @@ export function positionPopup(popup, anchor, options = {}) {
       top = rect.bottom + gap
     }
   } else {
-    if (rect.bottom + ph + gap <= window.innerHeight - viewportPadding) {
+    if (rect.bottom + ph + gap <= vpH - viewportPadding) {
       top = rect.bottom + gap
     } else {
       top = rect.top - ph - gap
@@ -54,12 +69,12 @@ export function positionPopup(popup, anchor, options = {}) {
   } else if (horizontalAlign === "left") {
     left = rect.left
   } else {
-    left = rect.left + (rect.width || 0) / 2 - pw / 2
+    left = rect.left + rect.width / 2 - pw / 2
   }
 
   // Clamp to viewport
-  top = Math.max(viewportPadding, Math.min(top, window.innerHeight - ph - viewportPadding))
-  left = Math.max(viewportPadding, Math.min(left, window.innerWidth - pw - viewportPadding))
+  top = Math.max(viewportPadding, Math.min(top, vpH - ph - viewportPadding))
+  left = Math.max(viewportPadding, Math.min(left, vpW - pw - viewportPadding))
 
   popup.style.position = "fixed"
   popup.style.top = `${Math.round(top)}px`

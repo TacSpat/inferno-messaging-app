@@ -17,7 +17,7 @@
       <% end %>
 
       <!-- Name -->
-      <div>
+      <div data-hint="ss_name">
         <%= f.label :name, "Name", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
         <%= f.text_field :name, class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm", data: { server_profile_preview_target: "nameInput", action: "input->server-profile-preview#updateName" } %>
       </div>
@@ -31,7 +31,7 @@
       <div class="border-t border-gray-700 pt-6"></div>
 
       <!-- Icon -->
-      <div>
+      <div data-hint="ss_icon">
         <h3 class="text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Icon</h3>
         <p class="text-xs text-gray-500 mb-3">We recommend an image of at least 512x512.</p>
         <div class="flex items-center gap-3">
@@ -65,7 +65,7 @@
       <div class="border-t border-gray-700 pt-6"></div>
 
       <!-- Server Configuration -->
-      <div>
+      <div data-hint="ss_config">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4">Server Configuration</h2>
         <div class="space-y-4">
           <label class="flex items-center gap-2.5 cursor-pointer group">
@@ -128,7 +128,7 @@
       <div class="border-t border-gray-700 pt-6"></div>
 
       <!-- Welcome Message Settings -->
-      <div>
+      <div data-hint="ss_welcome">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-4">Welcome Message</h2>
         <div class="space-y-4">
           <div class="flex items-center gap-3">
@@ -152,7 +152,7 @@
   </div>
 
   <!-- Right: Live Preview Card -->
-  <div class="lg:w-72 shrink-0">
+  <div data-hint="ss_preview" class="lg:w-72 shrink-0">
     <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Preview</h3>
     <div class="w-72 rounded-lg overflow-hidden bg-gray-900 shadow-xl">
       <!-- Banner area -->

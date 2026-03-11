@@ -1,2 +1,76 @@
 <h2 class="text-xl font-bold text-white mb-6">Notifications</h2>
-<p class="text-gray-400 text-sm">Coming soon.</p>
+
+<% prefs = @user.notification_preferences || {} %>
+<% desktop_mentions = prefs.key?("desktop_mentions") ? prefs["desktop_mentions"] : true %>
+<% desktop_dm_messages = prefs.key?("desktop_dm_messages") ? prefs["desktop_dm_messages"] : true %>
+<% desktop_friend_requests = prefs.key?("desktop_friend_requests") ? prefs["desktop_friend_requests"] : true %>
+<% desktop_updates = prefs.key?("desktop_updates") ? prefs["desktop_updates"] : true %>
+
+<div id="electron-notice" class="hidden bg-gray-800 rounded-lg p-4 mb-6">
+  <div class="flex items-start gap-3">
+    <svg class="w-5 h-5 text-accent shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    <p class="text-sm text-gray-400">Desktop notifications are available in the Inferno desktop app.</p>
+  </div>
+</div>
+
+<script>
+  if (!window.electronAPI?.showNotification) {
+    document.getElementById('electron-notice').classList.remove('hidden');
+  }
+</script>
+
+<%= form_with url: user_settings_notifications_path, method: :patch, data: { turbo_frame: "settings-frame" } do %>
+  <div class="space-y-1">
+    <!-- Mentions -->
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="flex items-center justify-between cursor-pointer group">
+        <div>
+          <span class="text-sm font-medium text-gray-300 group-hover:text-white transition">Mentions</span>
+          <p class="text-xs text-gray-500 mt-0.5">Get notified when you're @mentioned in a channel</p>
+        </div>
+        <input type="hidden" name="desktop_mentions" value="0">
+        <input type="checkbox" name="desktop_mentions" value="1" <%= "checked" if desktop_mentions %> onchange="this.form.requestSubmit()"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer">
+      </label>
+    </div>
+
+    <!-- Direct Messages -->
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="flex items-center justify-between cursor-pointer group">
+        <div>
+          <span class="text-sm font-medium text-gray-300 group-hover:text-white transition">Direct Messages</span>
+          <p class="text-xs text-gray-500 mt-0.5">Get notified for new direct messages</p>
+        </div>
+        <input type="hidden" name="desktop_dm_messages" value="0">
+        <input type="checkbox" name="desktop_dm_messages" value="1" <%= "checked" if desktop_dm_messages %> onchange="this.form.requestSubmit()"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer">
+      </label>
+    </div>
+
+    <!-- Friend Requests -->
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="flex items-center justify-between cursor-pointer group">
+        <div>
+          <span class="text-sm font-medium text-gray-300 group-hover:text-white transition">Friend Requests</span>
+          <p class="text-xs text-gray-500 mt-0.5">Get notified for incoming friend requests</p>
+        </div>
+        <input type="hidden" name="desktop_friend_requests" value="0">
+        <input type="checkbox" name="desktop_friend_requests" value="1" <%= "checked" if desktop_friend_requests %> onchange="this.form.requestSubmit()"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer">
+      </label>
+    </div>
+
+    <!-- App Updates -->
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="flex items-center justify-between cursor-pointer group">
+        <div>
+          <span class="text-sm font-medium text-gray-300 group-hover:text-white transition">App Updates</span>
+          <p class="text-xs text-gray-500 mt-0.5">Get notified when updates are available</p>
+        </div>
+        <input type="hidden" name="desktop_updates" value="0">
+        <input type="checkbox" name="desktop_updates" value="1" <%= "checked" if desktop_updates %> onchange="this.form.requestSubmit()"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer">
+      </label>
+    </div>
+  </div>
+<% end %>

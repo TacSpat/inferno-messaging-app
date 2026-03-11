@@ -9,7 +9,7 @@ class FetchSharedHashesJob < ApplicationJob
     return unless config.safety_image_hash_enabled
 
     since = 24.hours.ago.to_i
-    filter = { kinds: [1984], since: since }
+    filter = { kinds: [ 1984 ], since: since }
 
     events = RelayService.fetch_from_all(filter, timeout: 15)
     processed = 0

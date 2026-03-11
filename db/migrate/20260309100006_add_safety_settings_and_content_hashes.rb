@@ -19,6 +19,6 @@ class AddSafetySettingsAndContentHashes < ActiveRecord::Migration[8.1]
       t.timestamps
     end
 
-    add_index :content_hashes, [:hash_value, :hash_type]
+    add_index :content_hashes, [ :hash_value, :hash_type ]
   end
 end

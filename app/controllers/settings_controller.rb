@@ -48,6 +48,18 @@ class SettingsController < ApplicationController
     @user = current_user
   end
 
+  def update_notifications
+    @user = current_user
+    prefs = {
+      "desktop_mentions" => params[:desktop_mentions] == "1",
+      "desktop_dm_messages" => params[:desktop_dm_messages] == "1",
+      "desktop_friend_requests" => params[:desktop_friend_requests] == "1",
+      "desktop_updates" => params[:desktop_updates] == "1"
+    }
+    @user.update!(notification_preferences: prefs)
+    redirect_to user_settings_notifications_path, notice: "Notification preferences saved!"
+  end
+
   def keybinds
     @user = current_user
   end
@@ -209,7 +221,7 @@ class SettingsController < ApplicationController
     end
 
     begin
-      result = RelayService.fetch_from_relay(relay.url, { kinds: [0], limit: 1 })
+      result = RelayService.fetch_from_relay(relay.url, { kinds: [ 0 ], limit: 1 })
       relay.mark_connected!
       render json: { status: "ok", message: "Connected successfully" }
     rescue => e
@@ -325,7 +337,7 @@ class SettingsController < ApplicationController
     @message = Message.find_by!(public_id: params[:id])
     unless @message.hidden_at.present?
       redirect_to user_settings_safety_path, alert: "Only hidden messages can be reported."
-      return
+      nil
     end
   end
 
@@ -347,6 +359,30 @@ class SettingsController < ApplicationController
       filename: "inferno-report-#{@message.public_id}-#{Time.current.strftime('%Y%m%d%H%M%S')}.txt",
       type: "text/plain",
       disposition: "attachment"
+  end
+
+  def dismiss_hint
+    key = params[:hint_key].to_s
+    hints = current_user.seen_hints || []
+    unless hints.include?(key)
+      hints << key
+      current_user.update_column(:seen_hints, hints)
+    end
+    head :ok
+  end
+
+  def reset_hints
+    current_user.update_columns(seen_hints: [], tutorial_completed_at: nil)
+    respond_to do |format|
+      format.html { redirect_to root_path, notice: "Tutorial tips restarted!" }
+      format.json { head :ok }
+    end
+  end
+
+  def dismiss_all_hints
+    all_keys = %w[server_rail add_server home_button channel_list message_input voice_controls user_panel member_list dm_friends pin_messages settings_banner settings_theme settings_display settings_status settings_preview ss_name ss_icon ss_config ss_welcome ss_preview]
+    current_user.update_columns(seen_hints: all_keys, tutorial_completed_at: Time.current)
+    head :ok
   end
 
   def run_prune

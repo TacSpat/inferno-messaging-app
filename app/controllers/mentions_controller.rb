@@ -79,7 +79,7 @@ class MentionsController < ApplicationController
     elsif filter_type == "in"
       server.channels.accessible_to(current_user)
         .where("LOWER(name) LIKE ?", "%#{query}%")
-        .where(channel_type: [:text])
+        .where(channel_type: [ :text ])
         .ordered.limit(8).each do |channel|
         results << {
           type: "channel",

@@ -13,7 +13,7 @@ class RelayHealthCheckJob < ApplicationJob
   private
 
   def check_relay(relay)
-    events = RelayService.fetch_from_relay(relay.url, { kinds: [0], limit: 1 }, timeout: 8)
+    events = RelayService.fetch_from_relay(relay.url, { kinds: [ 0 ], limit: 1 }, timeout: 8)
     relay.mark_connected!
   rescue => e
     new_retry_count = (relay.retry_count || 0) + 1

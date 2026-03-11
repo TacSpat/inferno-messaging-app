@@ -42,6 +42,14 @@ class RemoteMember < ApplicationRecord
     roles.any? { |r| r.has_permission?(permission) }
   end
 
+  def avatar_nsfw?
+    false
+  end
+
+  def banner_nsfw?
+    false
+  end
+
   def nostr_public_key
     pubkey
   end

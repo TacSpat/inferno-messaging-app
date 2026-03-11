@@ -88,13 +88,13 @@ class ServersController < ApplicationController
     messages = apply_search_filters(messages)
 
     per_page = 25
-    page = [params[:page].to_i, 1].max
+    page = [ params[:page].to_i, 1 ].max
     total = messages.count
     @results = messages.order(created_at: :desc).offset((page - 1) * per_page).limit(per_page)
 
     ActiveRecord::Associations::Preloader.new(
       records: @results,
-      associations: [:user, :channel, { files_attachments: :blob }, :reactions]
+      associations: [ :user, :channel, { files_attachments: :blob }, :reactions ]
     ).call
 
     render partial: "messages/search_results", locals: { results: @results, server: @server, page: page, total: total, has_more: (page * per_page) < total }
@@ -240,10 +240,10 @@ class ServersController < ApplicationController
     if invite
       server = invite.server
       state = if !invite.active? then "revoked"
-              elsif invite.expired? then "expired"
-              elsif invite.maxed_out? then "maxed_out"
-              else "valid"
-              end
+      elsif invite.expired? then "expired"
+      elsif invite.maxed_out? then "maxed_out"
+      else "valid"
+      end
       return render json: {
         name: server.name,
         description: server.description,
@@ -346,10 +346,10 @@ class ServersController < ApplicationController
     uses_count = tag_val.call("uses_count")&.to_i || 0
 
     state = if revoked then :revoked
-            elsif expires_at_str.present? && Time.parse(expires_at_str) <= Time.current then :expired
-            elsif max_uses.present? && max_uses > 0 && uses_count >= max_uses then :maxed_out
-            else :valid
-            end
+    elsif expires_at_str.present? && Time.parse(expires_at_str) <= Time.current then :expired
+    elsif max_uses.present? && max_uses > 0 && uses_count >= max_uses then :maxed_out
+    else :valid
+    end
 
     server_info = NostrServerSyncService.fetch_metadata_preview(nostr_group_id)
     {

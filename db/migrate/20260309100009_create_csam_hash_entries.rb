@@ -6,7 +6,7 @@ class CreateCsamHashEntries < ActiveRecord::Migration[8.1]
       t.string :list_source
       t.datetime :added_at
       t.timestamps
-      t.index [:hash_value, :hash_type], unique: true
+      t.index [ :hash_value, :hash_type ], unique: true
       t.index :list_source
     end
   end

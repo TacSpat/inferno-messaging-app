@@ -82,7 +82,7 @@ class AuthorityReportGenerator
       end
     end
 
-    relays = RelayConnection.where(active: true).pluck(:url)
+    relays = RelayConnection.active.pluck(:url)
     if relays.any?
       lines << "-" * 60
       lines << "RELAY INFORMATION"

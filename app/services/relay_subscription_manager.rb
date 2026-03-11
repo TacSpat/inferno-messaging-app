@@ -239,7 +239,7 @@ class RelaySubscriptionManager
     # Determine catch-up window based on last successful connection time
     relay_record = RelayConnection.find_by(url: url)
     catchup_since = if relay_record&.last_connected_at.present?
-      [relay_record.last_connected_at.to_i, 24.hours.ago.to_i].max  # cap at 24h
+      [ relay_record.last_connected_at.to_i, 24.hours.ago.to_i ].max  # cap at 24h
     else
       1.hour.ago.to_i
     end

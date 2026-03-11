@@ -17,7 +17,7 @@ class NsfwScanJob < ApplicationJob
     return unless attachment.attached?
     return unless attachment.content_type&.start_with?("image/")
 
-    is_nsfw = Tempfile.create(["nsfw_scan", File.extname(attachment.filename.to_s)]) do |tmp|
+    is_nsfw = Tempfile.create([ "nsfw_scan", File.extname(attachment.filename.to_s) ]) do |tmp|
       tmp.binmode
       tmp.write(attachment.download)
       tmp.rewind

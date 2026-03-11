@@ -9,6 +9,7 @@ export default class extends Controller {
     this.element.style.backdropFilter = ""
     document.body.style.overflow = ""
     if (this.hasFrameTarget) this.frameTarget.innerHTML = ""
+    document.dispatchEvent(new CustomEvent("settings-overlay:closed"))
   }
 
   escClose(e) {

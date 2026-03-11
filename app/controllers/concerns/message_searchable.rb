@@ -100,8 +100,8 @@ module MessageSearchable
 
     until_time = earliest_local&.to_i || Time.current.to_i
     filter = {
-      kinds: [9],
-      "#h" => [channel.nostr_group_id],
+      kinds: [ 9 ],
+      "#h" => [ channel.nostr_group_id ],
       since: target.to_i,
       until: until_time
     }
@@ -125,9 +125,9 @@ module MessageSearchable
 
     until_time = earliest_local&.to_i || Time.current.to_i
     filter = {
-      kinds: [14, 1059, 4],
-      "#p" => [owner.nostr_public_key],
-      authors: [conversation.counterparty_pubkey],
+      kinds: [ 14, 1059, 4 ],
+      "#p" => [ owner.nostr_public_key ],
+      authors: [ conversation.counterparty_pubkey ],
       since: target.to_i,
       until: until_time
     }

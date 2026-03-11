@@ -69,7 +69,7 @@
       }
     </style>
   </head>
-  <body class="h-full overflow-hidden text-gray-100" <% if user_signed_in? %>data-controller="appearance notification-badge" data-current-user-id="<%= current_user.public_id %>"<% end %>>
+  <body class="h-full overflow-hidden text-gray-100" <% if user_signed_in? %>data-controller="appearance notification-badge hints connection-monitor" data-current-user-id="<%= current_user.public_id %>" data-notification-preferences="<%= current_user.notification_preferences.to_json %>" data-hints-seen-value="<%= current_user.seen_hints.to_json %>" data-hints-dismiss-url-value="<%= dismiss_hint_settings_path %>" data-hints-debug-value="<%= params[:debug_tutorial] == '1' %>"<% end %>>
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
     <% if user_signed_in? && current_user.instance_admin? && !request.ssl? && !request.host.in?(%w[localhost 127.0.0.1]) %>
@@ -150,7 +150,7 @@
 
           <!-- Channels list -->
           <% _membership = current_user.server_memberships.find_by(server: @server) %>
-          <div class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-can-move-members-value="<%= _membership&.has_permission?('move_members') || _membership&.owner? || false %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
+          <div data-hint="channel_list" class="flex-1 overflow-y-auto py-2 px-2 space-y-0.5" data-controller="channel-sidebar channel-reorder" data-channel-sidebar-server-id-value="<%= @server.public_id %>" data-channel-sidebar-can-move-members-value="<%= _membership&.has_permission?('move_members') || _membership&.owner? || false %>" data-channel-reorder-server-id-value="<%= @server.public_id %>" data-channel-reorder-can-manage-value="<%= _membership&.has_permission?('manage_channels') || false %>" data-can-manage-messages="<%= _membership&.has_permission?('manage_messages') || false %>">
             <%# Render uncategorized channels and categories interleaved by position %>
             <% root_channels = @server.channels.uncategorized.where(channel_type: [:text, :voice]).where(parent_channel_id: nil).ordered.to_a %>
             <% root_categories = @server.categories.ordered.to_a %>
@@ -167,7 +167,7 @@
           </div>
 
           <!-- Voice controls bar -->
-          <div id="voice-controls-bar" data-turbo-permanent class="hidden voice-controls-inferno" style="background-color: var(--color-gray-900);"
+          <div id="voice-controls-bar" data-turbo-permanent data-hint="voice_controls" class="hidden voice-controls-inferno" style="background-color: var(--color-gray-900);"
                data-controller="voice-channel"
                data-voice-channel-target="controlsBar">
             <!-- Header: status + disconnect -->
@@ -226,7 +226,7 @@
           </div>
 
           <!-- User panel (bottom) -->
-          <div class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: var(--color-gray-950);">
+          <div data-hint="user_panel" class="flex items-center px-2 py-2 bg-gray-850 border-t border-gray-900" style="background-color: var(--color-gray-950);">
             <div class="relative">
               <% if current_user.effective_avatar_url.present? %>
                 <%= image_tag current_user.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
@@ -267,7 +267,7 @@
             <p id="ph-channel-topic" class="text-sm text-gray-400 truncate hidden"></p>
             <div class="flex-1"></div>
             <!-- Pin button (updated by JS) -->
-            <div class="relative" id="ph-pin-wrap">
+            <div class="relative" id="ph-pin-wrap" data-hint="pin_messages">
               <button type="button" class="text-gray-400 hover:text-white p-1 transition cursor-pointer relative"
                       id="ph-pin-btn" title="Pinned Messages">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
@@ -475,6 +475,20 @@
         if (btn) btn.classList.toggle("text-white", !shouldHide);
       }
       _applyDmMemberPref();
+
+      // Mobile DM member sidebar toggle (uses mobile-nav slide-in)
+      window._toggleDmMemberSidebarMobile = function(btn) {
+        var sb = document.getElementById("dm-member-sidebar");
+        if (!sb) return;
+        var isOpen = sb.classList.contains("mobile-members-open");
+        sb.classList.toggle("mobile-members-open", !isOpen);
+        // Show/hide backdrop
+        var backdrop = document.querySelector("[data-mobile-nav-target='backdrop']");
+        if (backdrop) backdrop.classList.toggle("hidden", isOpen);
+        document.body.classList.toggle("overflow-hidden", !isOpen);
+        // On mobile the sidebar needs display:block to be visible even when panel is "hidden"
+        if (!isOpen) sb.style.display = "";
+      };
 
       // Icons for the persistent header
       var _headerIcons = {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, screen } = require('electron');
+const { app, BrowserWindow, dialog, screen, Notification, ipcMain } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -45,7 +45,7 @@ function createSplashWindow() {
     frame: false,
     resizable: false,
     alwaysOnTop: true,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: '#0a0a09',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
@@ -57,6 +57,58 @@ function updateSplashStatus(message) {
   if (splashWindow && !splashWindow.isDestroyed()) {
     splashWindow.webContents.send('status-update', message);
   }
+}
+
+// ── Database preparation ────────────────────────────────────
+
+function prepareDatabase() {
+  return new Promise((resolve, reject) => {
+    const sidecarDir = path.join(process.resourcesPath, 'sidecar');
+    const isWin = process.platform === 'win32';
+    const launcherName = isWin ? 'start.bat' : 'start.sh';
+    const launcherPath = path.join(sidecarDir, launcherName);
+
+    const data = dataDir();
+    ensureDirs(data);
+    const secret = getOrCreateSecret(data);
+
+    const cmd = isWin ? launcherPath : '/bin/sh';
+    const args = isWin
+      ? ['db:prepare']
+      : [launcherPath, 'db:prepare'];
+    const opts = {
+      cwd: path.join(sidecarDir, 'app'),
+      env: {
+        ...process.env,
+        INFERNO_DATA_DIR: data,
+        RAILS_ENV: 'production',
+        SECRET_KEY_BASE: secret,
+        RAILS_LOG_TO_STDOUT: '1',
+      },
+    };
+
+    const child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
+
+    child.stdout.on('data', (chunk) => {
+      process.stdout.write(`[db:prepare] ${chunk}`);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      process.stderr.write(`[db:prepare] ${chunk}`);
+    });
+
+    child.on('error', (err) => {
+      reject(new Error(`db:prepare failed to start: ${err.message}`));
+    });
+
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`db:prepare exited with code ${code}`));
+      }
+    });
+  });
 }
 
 // ── Sidecar management ──────────────────────────────────────
@@ -150,6 +202,39 @@ function waitForHealth() {
   });
 }
 
+function waitForDevServer(url) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+
+    const check = () => {
+      const req = http.get(`${url}/up`, (res) => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          resolve(true);
+        } else {
+          retry();
+        }
+        res.resume();
+      });
+
+      req.on('error', retry);
+      req.setTimeout(2000, () => {
+        req.destroy();
+        retry();
+      });
+    };
+
+    const retry = () => {
+      if (Date.now() - start >= HEALTH_TIMEOUT) {
+        resolve(false);
+      } else {
+        setTimeout(check, HEALTH_INTERVAL);
+      }
+    };
+
+    check();
+  });
+}
+
 // ── Window state persistence ────────────────────────────────
 
 const windowStatePath = path.join(app.getPath('userData'), 'window-state.json');
@@ -166,7 +251,12 @@ function saveWindowState() {
   if (!mainWindow) return;
   const isMaximized = mainWindow.isMaximized();
   const bounds = isMaximized ? mainWindow._lastBounds : mainWindow.getBounds();
-  fs.writeFileSync(windowStatePath, JSON.stringify({ ...bounds, isMaximized }));
+  let lastPath = '/';
+  try {
+    const currentUrl = mainWindow.webContents.getURL();
+    lastPath = new URL(currentUrl).pathname;
+  } catch {}
+  fs.writeFileSync(windowStatePath, JSON.stringify({ ...bounds, isMaximized, lastPath }));
 }
 
 function isStateOnScreen(state) {
@@ -181,7 +271,7 @@ function isStateOnScreen(state) {
 
 // ── Main window ─────────────────────────────────────────────
 
-function createMainWindow() {
+function createMainWindow(url) {
   const saved = loadWindowState();
   const useSaved = saved && isStateOnScreen(saved);
 
@@ -198,14 +288,15 @@ function createMainWindow() {
 
   mainWindow = new BrowserWindow({
     ...windowOpts,
-    minWidth: 940,
-    minHeight: 560,
+    minWidth: 800,
+    minHeight: 500,
     show: false,
     title: 'Inferno',
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
 
@@ -224,7 +315,10 @@ function createMainWindow() {
   mainWindow.on('close', saveWindowState);
 
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadURL(`http://127.0.0.1:${PORT}`);
+
+  const baseUrl = url || `http://127.0.0.1:${PORT}`;
+  const lastPath = saved && saved.lastPath && saved.lastPath !== '/' ? saved.lastPath : '';
+  mainWindow.loadURL(baseUrl + lastPath);
 
   mainWindow.once('ready-to-show', () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
@@ -266,6 +360,41 @@ function killServer() {
   });
 }
 
+// ── IPC: notifications & badge ───────────────────────────────
+
+function setupIPC() {
+  ipcMain.on('show-notification', (_event, opts) => {
+    if (!Notification.isSupported()) return;
+    const notif = new Notification({ title: opts.title || 'Inferno', body: opts.body || '', silent: true });
+    notif.on('click', () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+        mainWindow.webContents.send('notification-click', { navigateTo: opts.navigateTo });
+      }
+    });
+    notif.show();
+  });
+
+  ipcMain.on('set-badge-count', (_event, count) => {
+    if (process.platform === 'win32') {
+      if (mainWindow) mainWindow.flashFrame(count > 0);
+    } else {
+      app.setBadgeCount(count);
+    }
+  });
+}
+
+function setupWindowFocusForwarding() {
+  if (!mainWindow) return;
+  mainWindow.on('focus', () => {
+    mainWindow.webContents.send('window-focus', true);
+  });
+  mainWindow.on('blur', () => {
+    mainWindow.webContents.send('window-focus', false);
+  });
+}
+
 // ── Auto-updater ────────────────────────────────────────────
 
 function setupAutoUpdater() {
@@ -303,12 +432,43 @@ function setupAutoUpdater() {
 
 // ── App lifecycle ───────────────────────────────────────────
 
+const devUrl = process.env.ELECTRON_DEV_URL;
+
 app.whenReady().then(async () => {
+  setupIPC();
+
+  if (devUrl) {
+    createSplashWindow();
+    updateSplashStatus('Connecting to dev server...');
+
+    const healthy = await waitForDevServer(devUrl);
+    if (!healthy) {
+      dialog.showErrorBox('Dev Server Error', `Could not connect to ${devUrl}. Is your Rails server running?`);
+      app.quit();
+      return;
+    }
+
+    createMainWindow(devUrl);
+    setupWindowFocusForwarding();
+    return;
+  }
+
   const isDev = !app.isPackaged;
 
   createSplashWindow();
-  updateSplashStatus('Starting server...');
 
+  if (!isDev) {
+    updateSplashStatus('Preparing database...');
+    try {
+      await prepareDatabase();
+    } catch (err) {
+      dialog.showErrorBox('Database Error', `Failed to prepare database: ${err.message}`);
+      app.quit();
+      return;
+    }
+  }
+
+  updateSplashStatus('Starting server...');
   serverProcess = spawnServer();
 
   updateSplashStatus('Waiting for server...');
@@ -326,6 +486,7 @@ app.whenReady().then(async () => {
 
   updateSplashStatus('Loading app...');
   createMainWindow();
+  setupWindowFocusForwarding();
 
   if (!isDev) {
     setupAutoUpdater();
@@ -333,7 +494,9 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', async () => {
-  await killServer();
+  if (!devUrl) {
+    await killServer();
+  }
   app.quit();
 });
 

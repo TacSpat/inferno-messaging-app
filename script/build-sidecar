@@ -1,0 +1,68 @@
+#!/bin/bash
+# Assemble the sidecar directory for Electron packaging (local dev use).
+# CI uses its own assembly steps in .github/workflows/package.yml.
+set -euo pipefail
+
+SIDECAR_DIR="sidecar-stage"
+rm -rf "$SIDECAR_DIR"
+mkdir -p "$SIDECAR_DIR/app"
+
+echo "==> Copying Rails app to $SIDECAR_DIR/app/ ..."
+
+rsync -a \
+  --exclude='.git' \
+  --exclude='node_modules' \
+  --exclude='tmp' \
+  --exclude='log' \
+  --exclude='sidecar-stage' \
+  --exclude='ruby-sidecar' \
+  --exclude='.github' \
+  --exclude='dist' \
+  --exclude='spec' \
+  --exclude='test' \
+  --exclude='features' \
+  --exclude='.env*' \
+  --exclude='electron' \
+  --exclude='electron-builder.yml' \
+  --exclude='icons' \
+  --exclude='doc' \
+  --exclude='packaging' \
+  --exclude='.claude' \
+  --exclude='.rspec' \
+  --exclude='.rubocop.yml' \
+  --exclude='Procfile.dev' \
+  --exclude='bun.config.js' \
+  --exclude='bun.lock' \
+  --exclude='plan.md' \
+  --exclude='.tebako.yml' \
+  --exclude='.dockerignore' \
+  --exclude='Dockerfile' \
+  --exclude='.kamal' \
+  --exclude='storage/*.sqlite3' \
+  --exclude='.bundle' \
+  --exclude='vendor/bundle' \
+  ./ "$SIDECAR_DIR/app/"
+
+echo "==> Done. Contents:"
+echo ""
+echo "  App dir:  $(du -sh "$SIDECAR_DIR/app/" | cut -f1)"
+
+# Verify key files
+if [ -f "$SIDECAR_DIR/app/lib/models/nsfw_classifier.onnx" ]; then
+  echo "  NSFW model: present ($(du -sh "$SIDECAR_DIR/app/lib/models/nsfw_classifier.onnx" | cut -f1))"
+else
+  echo "  NSFW model: MISSING (lib/models/nsfw_classifier.onnx)"
+fi
+
+# Verify excluded dirs are absent
+for dir in spec test doc packaging .claude .github electron; do
+  if [ -d "$SIDECAR_DIR/app/$dir" ]; then
+    echo "  WARNING: $dir/ should be excluded but is present"
+  fi
+done
+
+echo ""
+echo "Next steps:"
+echo "  1. Copy portable Ruby into $SIDECAR_DIR/ruby/"
+echo "  2. Run 'bundle install' with the sidecar Ruby"
+echo "  3. Build Electron app"

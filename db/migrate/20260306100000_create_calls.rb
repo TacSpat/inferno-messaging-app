@@ -10,7 +10,7 @@ class CreateCalls < ActiveRecord::Migration[8.0]
       t.datetime :ended_at
       t.timestamps
       t.index :public_id, unique: true
-      t.index [:conversation_id, :status]
+      t.index [ :conversation_id, :status ]
     end
   end
 end

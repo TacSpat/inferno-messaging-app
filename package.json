@@ -12,7 +12,7 @@
   "scripts": {
     "build": "bun bun.config.js",
     "build:css": "tailwindcss -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/tailwind.css",
-    "electron:dev": "electron .",
+    "electron:dev": "ELECTRON_DEV_URL=http://localhost:3005 electron .",
     "electron:build": "electron-builder"
   },
   "devDependencies": {

@@ -18,7 +18,7 @@
       <% end %>
 
       <!-- Banner area -->
-      <div class="bg-gray-800 rounded-xl border border-gray-700/50">
+      <div data-hint="settings_banner" class="bg-gray-800 rounded-xl border border-gray-700/50">
         <div class="h-32 relative cursor-grab active:cursor-grabbing group rounded-t-xl overflow-hidden"
              style="background: linear-gradient(135deg, <%= @user.profile_color || '#1e1c1b' %>, <%= @user.profile_color_2 || @user.profile_color || '#1e1c1b' %>);"
              data-banner-editor-target="container">
@@ -70,7 +70,7 @@
       </div>
 
       <!-- Profile Theme -->
-      <div class="bg-gray-800 rounded-xl border border-gray-700/50 p-5">
+      <div data-hint="settings_theme" class="bg-gray-800 rounded-xl border border-gray-700/50 p-5">
         <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Profile Theme</label>
         <div class="flex items-center gap-3">
           <div>
@@ -94,7 +94,7 @@
       <!-- Profile fields -->
       <div class="bg-gray-800 rounded-xl border border-gray-700/50 p-5 space-y-4">
         <!-- Display Name with emoji picker -->
-        <div data-controller="emoji-input" <%= "data-emoji-input-server-id-value=#{emoji_server.public_id}" if emoji_server %>>
+        <div data-hint="settings_display" data-controller="emoji-input" <%= "data-emoji-input-server-id-value=#{emoji_server.public_id}" if emoji_server %>>
           <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Display Name</label>
           <div class="flex items-center bg-gray-900 border border-gray-700/50 rounded-lg px-3 py-2.5 focus-within:border-accent/50 transition">
             <div class="flex-1 relative">
@@ -121,7 +121,7 @@
         </div>
 
         <!-- Custom Status -->
-        <div data-controller="status-emoji" <%= "data-status-emoji-server-id-value=#{emoji_server.public_id}" if emoji_server %>>
+        <div data-hint="settings_status" data-controller="status-emoji" <%= "data-status-emoji-server-id-value=#{emoji_server.public_id}" if emoji_server %>>
           <label class="block text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-2">Custom Status</label>
           <div class="flex gap-2">
             <button type="button" data-action="click->status-emoji#toggle" data-status-emoji-target="button"
@@ -141,7 +141,7 @@
   </div>
 
   <!-- Preview card (right) -->
-  <div class="hidden lg:block w-72 flex-shrink-0">
+  <div data-hint="settings_preview" class="hidden lg:block w-72 flex-shrink-0">
     <h3 class="text-[11px] font-semibold text-gray-500 uppercase tracking-wider mb-3">Preview</h3>
     <%= render 'settings/preview_card' %>
   </div>

@@ -70,14 +70,14 @@ class ReputationScorer
     own_hides = Message.where(nostr_author_pubkey: @pubkey)
                        .where.not(hidden_at: nil)
                        .count
-    own_hide_penalty = [own_hides * OWN_HIDE_WEIGHT, OWN_HIDE_CAP].max
+    own_hide_penalty = [ own_hides * OWN_HIDE_WEIGHT, OWN_HIDE_CAP ].max
 
     # 2. Community report count (aggregated from NIP-56 and other sources)
     report_count = contact&.report_count || 0
     # Also check remote members for additional reports
     remote_reports = RemoteMember.where(pubkey: @pubkey).maximum(:report_count) || 0
-    total_reports = [report_count, remote_reports].max
-    report_penalty = [total_reports * REPORT_WEIGHT, REPORT_CAP].max
+    total_reports = [ report_count, remote_reports ].max
+    report_penalty = [ total_reports * REPORT_WEIGHT, REPORT_CAP ].max
 
     # 3. Banned from servers the local user is in
     ban_count = if User.first # single-user instance
@@ -96,7 +96,7 @@ class ReputationScorer
     else
       0
     end
-    ban_penalty = [ban_count * BAN_WEIGHT, BAN_CAP].max
+    ban_penalty = [ ban_count * BAN_WEIGHT, BAN_CAP ].max
 
     # Apply sensitivity multiplier to all penalties
     total_penalties = ((own_hide_penalty + report_penalty + ban_penalty) * @multiplier).round

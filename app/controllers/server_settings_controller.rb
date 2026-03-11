@@ -485,7 +485,7 @@ class ServerSettingsController < ApplicationController
 
     current_urls = @server.relay_urls || []
     unless current_urls.include?(url)
-      @server.update!(relay_urls: current_urls + [url])
+      @server.update!(relay_urls: current_urls + [ url ])
       # Also ensure it exists in the global relay pool
       RelayConnection.find_or_create_for_relay(url)
     end
@@ -495,7 +495,7 @@ class ServerSettingsController < ApplicationController
   def remove_relay
     url = params[:relay_url].to_s.strip
     current_urls = @server.relay_urls || []
-    @server.update!(relay_urls: current_urls - [url])
+    @server.update!(relay_urls: current_urls - [ url ])
     redirect_to server_settings_relays_path(@server), notice: "Relay removed from server."
   end
 

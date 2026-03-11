@@ -100,7 +100,7 @@ class ContentSafetyFilter
 
     report_count = Contact.where(pubkey: sender_pubkey).pick(:report_count) || 0
     remote_count = RemoteMember.where(pubkey: sender_pubkey).maximum(:report_count) || 0
-    [report_count, remote_count].max >= threshold
+    [ report_count, remote_count ].max >= threshold
   end
 
   # --- Filter 4: Reputation score ---

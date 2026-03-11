@@ -64,6 +64,11 @@ jobs:
             --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
             --exclude='features' --exclude='.env*' --exclude='electron' \
             --exclude='electron-builder.yml' --exclude='icons' \
+            --exclude='doc' --exclude='packaging' --exclude='.claude' \
+            --exclude='.rspec' --exclude='.rubocop.yml' --exclude='Procfile.dev' \
+            --exclude='bun.config.js' --exclude='bun.lock' --exclude='plan.md' \
+            --exclude='.tebako.yml' --exclude='.dockerignore' --exclude='Dockerfile' \
+            --exclude='.kamal' --exclude='storage/*.sqlite3' \
             ./ sidecar-stage/app/
           # Copy portable Ruby
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
@@ -150,6 +155,11 @@ jobs:
             --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
             --exclude='features' --exclude='.env*' --exclude='electron' \
             --exclude='electron-builder.yml' --exclude='icons' \
+            --exclude='doc' --exclude='packaging' --exclude='.claude' \
+            --exclude='.rspec' --exclude='.rubocop.yml' --exclude='Procfile.dev' \
+            --exclude='bun.config.js' --exclude='bun.lock' --exclude='plan.md' \
+            --exclude='.tebako.yml' --exclude='.dockerignore' --exclude='Dockerfile' \
+            --exclude='.kamal' --exclude='storage/*.sqlite3' \
             ./ sidecar-stage/app/
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
           cat > sidecar-stage/start.sh << 'LAUNCHER'
@@ -244,7 +254,11 @@ jobs:
           # Copy Rails app files
           $exclude = @('.git', 'node_modules', 'tmp', 'log', 'sidecar-stage',
                        'ruby-sidecar', '.github', 'dist', 'spec', 'test',
-                       'features', 'electron', 'electron-builder.yml', 'icons')
+                       'features', 'electron', 'electron-builder.yml', 'icons',
+                       'doc', 'packaging', '.claude', '.rspec', '.rubocop.yml',
+                       'Procfile.dev', 'bun.config.js', 'bun.lock', 'plan.md',
+                       '.tebako.yml', '.dockerignore', 'Dockerfile', '.kamal',
+                       'storage')
           Get-ChildItem -Path . -Exclude $exclude | Copy-Item -Destination sidecar-stage\app -Recurse -Force
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse

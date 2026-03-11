@@ -10,7 +10,7 @@
     <%= stylesheet_link_tag :app, "data-turbo-track": "reload" %>
     <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
   </head>
-  <body class="h-full overflow-hidden text-gray-100" data-current-user-id="<%= current_user&.public_id %>">
+  <body class="h-full overflow-hidden text-gray-100" data-current-user-id="<%= current_user&.public_id %>" data-controller="hints" data-hints-seen-value="<%= current_user&.seen_hints&.to_json || '[]' %>" data-hints-dismiss-url-value="<%= dismiss_hint_settings_path %>" data-hints-debug-value="<%= params[:debug_tutorial] == '1' %>">
     <turbo-frame id="settings-frame" class="block h-full">
     <% if notice %><div class="fixed top-4 right-4 z-50 bg-success text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= notice %></div><% end %>
     <% if alert %><div class="fixed top-4 right-4 z-50 bg-danger text-white px-4 py-2 rounded-lg shadow-lg" data-controller="toast"><%= alert %></div><% end %>
@@ -80,6 +80,15 @@
             </div>
           <% end %>
 
+          <div class="border-t border-gray-700 mt-4 pt-4 space-y-0.5">
+            <%= button_to "Restart Tutorial Tips", reset_hints_settings_path, method: :post,
+                data: { turbo_frame: "_top" },
+                class: "block w-full text-left px-2 py-1.5 rounded text-sm text-gray-400 hover:bg-gray-700 hover:text-gray-200 cursor-pointer" %>
+            <button type="button" onclick="document.dispatchEvent(new CustomEvent('hints:dismiss-all'))" class="block w-full text-left px-2 py-1.5 rounded text-sm text-gray-400 hover:bg-gray-700 hover:text-gray-200 cursor-pointer">
+              Dismiss All Tips
+            </button>
+          </div>
+
           <div class="border-t border-gray-700 mt-4 pt-4">
             <%= button_to "Log Out", destroy_user_session_path, method: :delete,
                 data: { turbo_frame: "_top" },
@@ -103,7 +112,7 @@
           </button>
         </div>
 
-        <div class="py-4 sm:py-8 px-4 sm:px-10">
+        <div class="py-4 sm:py-8 px-4 sm:px-10 max-w-3xl mx-auto">
           <!-- Close button (desktop) -->
           <div class="hidden md:flex justify-end mb-4">
             <button type="button" data-action="click->settings-sidebar#exitSettings" class="flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition cursor-pointer">

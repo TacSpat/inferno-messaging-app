@@ -41,7 +41,9 @@ export default class extends Controller {
     this.card.innerHTML = html
 
     // Position to the left of the member sidebar
-    const rect = target.getBoundingClientRect()
+    const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1
+    const raw = target.getBoundingClientRect()
+    const rect = { left: raw.left / zoom, right: raw.right / zoom, top: raw.top / zoom }
     let left = rect.left - 288
     let top = rect.top
     if (left < 8) left = rect.right + 8

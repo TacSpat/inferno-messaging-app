@@ -792,19 +792,19 @@ end
 
     signer = Nostr::Signer.new(private_key: reporter.nostr_private_key)
     report_type = case reason
-                  when "csam", "illegal" then "illegal"
-                  when "spam" then "spam"
-                  else "other"
-                  end
+    when "csam", "illegal" then "illegal"
+    when "spam" then "spam"
+    else "other"
+    end
     tags = [
-      ["e", nostr_event_id, "", report_type],
-      ["p", nostr_author_pubkey, "", report_type]
+      [ "e", nostr_event_id, "", report_type ],
+      [ "p", nostr_author_pubkey, "", report_type ]
     ].select { |t| t[1].present? }
 
     # Append image hash tags for shared hash registry (NIP-56 extension)
     if LocalConfig.current.safety_publish_hashes
       ContentHash.where(message_id: self.id).each do |ch|
-        tags << ["x", ch.hash_value, ch.hash_type]
+        tags << [ "x", ch.hash_value, ch.hash_type ]
       end
     end
 

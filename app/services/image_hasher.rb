@@ -21,7 +21,7 @@ class ImageHasher
     when String
       MiniMagick::Image.open(source)
     when ActiveStorage::Blob
-      tempfile = Tempfile.new(["hash", ".#{source.filename.extension}"])
+      tempfile = Tempfile.new([ "hash", ".#{source.filename.extension}" ])
       tempfile.binmode
       source.download { |chunk| tempfile.write(chunk) }
       tempfile.rewind
@@ -70,7 +70,7 @@ class ImageHasher
   def self.dhash_video(source_path)
     return nil unless ffmpeg_available?
 
-    tempfile = Tempfile.new(["frame", ".png"])
+    tempfile = Tempfile.new([ "frame", ".png" ])
     system("ffprobe", "-version", out: File::NULL, err: File::NULL) # warm up
 
     success = system(
@@ -108,7 +108,7 @@ class ImageHasher
         results << { hash_value: hash, hash_type: "dhash", media_type: "image", original_filename: blob.filename.to_s } if hash
       elsif blob.video?
         # Download to temp file for ffmpeg
-        tempfile = Tempfile.new(["video", ".#{blob.filename.extension}"])
+        tempfile = Tempfile.new([ "video", ".#{blob.filename.extension}" ])
         tempfile.binmode
         blob.download { |chunk| tempfile.write(chunk) }
         tempfile.rewind
