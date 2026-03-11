@@ -29,7 +29,7 @@ Rails.application.routes.draw do
     root "conversations#index", as: :authenticated_root
   end
   devise_scope :user do
-    root "devise/sessions#new"
+    root "users/sessions#new"
   end
 
   # Tenor API proxy & GIF collections
