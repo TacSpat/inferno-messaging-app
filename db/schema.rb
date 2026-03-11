@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_10_100002) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -129,6 +129,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.bigint "parent_channel_id"
     t.json "permissions_overrides"
     t.integer "position"
+    t.boolean "post_only", default: false
     t.string "public_id", limit: 12, null: false
     t.bigint "server_id", null: false
     t.boolean "shared", default: false
@@ -211,6 +212,17 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.string "public_id", limit: 12, null: false
     t.datetime "updated_at", null: false
     t.index ["public_id"], name: "index_conversations_on_public_id", unique: true
+  end
+
+  create_table "csam_hash_entries", force: :cascade do |t|
+    t.datetime "added_at"
+    t.datetime "created_at", null: false
+    t.string "hash_type", null: false
+    t.string "hash_value", null: false
+    t.string "list_source"
+    t.datetime "updated_at", null: false
+    t.index ["hash_value", "hash_type"], name: "index_csam_hash_entries_on_hash_value_and_hash_type", unique: true
+    t.index ["list_source"], name: "index_csam_hash_entries_on_list_source"
   end
 
   create_table "data_exports", force: :cascade do |t|
@@ -360,9 +372,11 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.boolean "safety_block_links", default: false
     t.boolean "safety_block_phone_numbers", default: false
     t.boolean "safety_block_spam_chars", default: false
+    t.boolean "safety_blur_nsfw", default: true
     t.boolean "safety_hide_unknown_senders", default: false
     t.boolean "safety_image_hash_enabled", default: false
     t.text "safety_keyword_filter", default: ""
+    t.string "safety_protection_level", default: "standard"
     t.boolean "safety_publish_hashes", default: true
     t.integer "safety_report_threshold", default: 0
     t.boolean "safety_reputation_enabled", default: false
@@ -432,6 +446,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.boolean "pinned"
     t.string "public_id", limit: 12, null: false
     t.text "rendered_content_cached"
+    t.boolean "spoiler", default: false, null: false
     t.boolean "system_message", default: false
     t.datetime "updated_at", null: false
     t.bigint "user_id"
@@ -678,6 +693,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.integer "position"
     t.string "public_id", limit: 12, null: false
     t.string "role_type"
+    t.boolean "self_assignable", default: false, null: false
     t.bigint "server_id", null: false
     t.datetime "updated_at", null: false
     t.index ["public_id"], name: "index_roles_on_public_id", unique: true
@@ -715,6 +731,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.datetime "created_at", null: false
     t.datetime "joined_at"
     t.string "nickname"
+    t.boolean "onboarding_completed", default: false, null: false
     t.integer "position", default: 0, null: false
     t.string "public_id", limit: 12, null: false
     t.bigint "server_folder_id"
@@ -762,16 +779,24 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
     t.string "afk_action", default: "move", null: false
     t.integer "afk_channel_id"
     t.integer "afk_timeout", default: 5, null: false
+    t.boolean "age_restricted", default: false
+    t.boolean "banner_nsfw", default: false, null: false
     t.datetime "created_at", null: false
     t.text "description"
     t.boolean "discoverable", default: false, null: false
+    t.boolean "icon_nsfw", default: false, null: false
     t.string "invite_code"
     t.string "name"
     t.string "nostr_group_id"
+    t.json "onboarding_default_channel_ids", default: []
+    t.boolean "onboarding_enabled", default: false, null: false
+    t.text "onboarding_rules"
+    t.json "onboarding_self_assignable_role_ids", default: []
     t.bigint "owner_id", null: false
     t.string "public_id", limit: 12, null: false
     t.json "relay_urls"
     t.json "remote_owner_pubkeys", default: []
+    t.string "server_type", default: "community"
     t.datetime "updated_at", null: false
     t.boolean "voice_enabled", default: false
     t.bigint "welcome_channel_id"
@@ -811,6 +836,8 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_09_100007) do
   end
 
   create_table "users", force: :cascade do |t|
+    t.boolean "avatar_nsfw", default: false, null: false
+    t.boolean "banner_nsfw", default: false, null: false
     t.integer "banner_offset_y"
     t.text "bio"
     t.datetime "confirmation_sent_at"

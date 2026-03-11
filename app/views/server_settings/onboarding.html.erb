@@ -1,0 +1,97 @@
+<h1 class="text-xl font-bold text-white mb-1">Onboarding</h1>
+<p class="text-sm text-gray-400 mb-6">Configure what new members see when they join your server.</p>
+
+<%= form_with url: server_settings_update_onboarding_path(@server), method: :patch, class: "space-y-6",
+    data: {
+      controller: "onboarding-preview",
+      onboarding_preview_server_name_value: @server.name,
+      onboarding_preview_server_icon_value: @server.icon.attached? ? url_for(@server.icon) : "",
+      onboarding_preview_server_description_value: @server.description || "",
+      onboarding_preview_member_count_value: @server.total_member_count
+    } do |f| %>
+
+  <!-- Enable toggle -->
+  <label class="flex items-center gap-2.5 cursor-pointer group">
+    <input type="hidden" name="server[onboarding_enabled]" value="0">
+    <input type="checkbox" name="server[onboarding_enabled]" value="1"
+           <%= "checked" if @server.onboarding_enabled? %>
+           class="w-4 h-4 rounded bg-gray-900 border-gray-700 text-accent focus:ring-accent cursor-pointer">
+    <div>
+      <span class="text-sm text-gray-300 group-hover:text-white transition">Enable onboarding wizard</span>
+      <p class="text-[11px] text-gray-500">New members will see a welcome wizard before entering the server.</p>
+    </div>
+  </label>
+
+  <div class="border-t border-gray-700 pt-6"></div>
+
+  <!-- Server Rules -->
+  <div>
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Server Rules</h2>
+    <p class="text-xs text-gray-500 mb-3">New members must accept these rules before continuing. One rule per line.</p>
+    <textarea name="server[onboarding_rules]" rows="8"
+              class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-accent text-sm resize-none"
+              placeholder="Be respectful to all members&#10;No spam or self-promotion&#10;No NSFW content outside designated channels&#10;Keep discussions on-topic"><%= @server.onboarding_rules %></textarea>
+  </div>
+
+  <div class="border-t border-gray-700 pt-6"></div>
+
+  <!-- Self-Assignable Roles -->
+  <div>
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Self-Assignable Roles</h2>
+    <p class="text-xs text-gray-500 mb-3">Members can pick these roles during onboarding to customize their experience.</p>
+
+    <% assignable_roles = @roles.reject { |r| r.system_role? || r.voice_provider? } %>
+    <% if assignable_roles.any? %>
+      <div class="space-y-2">
+        <% assignable_roles.each do |role| %>
+          <label class="flex items-center gap-3 p-3 rounded-lg border border-gray-700 hover:border-gray-600 cursor-pointer transition has-[:checked]:border-accent/50 has-[:checked]:bg-accent/5">
+            <input type="checkbox" name="server[self_assignable_role_ids][]" value="<%= role.public_id %>"
+                   <%= "checked" if role.self_assignable? %>
+                   class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0">
+            <div class="flex items-center gap-2">
+              <span class="w-3 h-3 rounded-full shrink-0" style="background-color: <%= role.color || '#fff' %>"></span>
+              <span class="text-sm text-white"><%= role.name %></span>
+            </div>
+          </label>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="bg-gray-800/50 rounded-lg p-4 text-center">
+        <p class="text-sm text-gray-500">No custom roles yet. Create roles in the <a href="<%= server_settings_roles_path(@server) %>" class="text-accent-light hover:text-accent">Roles</a> settings to make them available here.</p>
+      </div>
+    <% end %>
+  </div>
+
+  <div class="border-t border-gray-700 pt-6"></div>
+
+  <!-- Default Channels -->
+  <div>
+    <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wide mb-2">Highlighted Channels</h2>
+    <p class="text-xs text-gray-500 mb-3">These channels will be shown to new members during onboarding so they know where to start. If none are selected, the first 5 public channels will be shown.</p>
+
+    <div class="space-y-2">
+      <% @channels.each do |channel| %>
+        <label class="flex items-center gap-3 p-3 rounded-lg border border-gray-700 hover:border-gray-600 cursor-pointer transition has-[:checked]:border-accent/50 has-[:checked]:bg-accent/5">
+          <input type="checkbox" name="server[default_channel_ids][]" value="<%= channel.public_id %>"
+                 <%= "checked" if (@server.onboarding_default_channel_ids || []).include?(channel.public_id) %>
+                 class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+            <span class="text-sm text-white"><%= channel.name %></span>
+          </div>
+        </label>
+      <% end %>
+    </div>
+  </div>
+
+  <div class="border-t border-gray-700 pt-6"></div>
+
+  <div class="flex items-center gap-3">
+    <input type="submit" value="Save Changes" class="bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold px-6 py-2 rounded transition cursor-pointer text-sm">
+    <button type="button" class="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition cursor-pointer"
+            data-action="click->onboarding-preview#open">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+      Preview Wizard
+    </button>
+  </div>
+<% end %>

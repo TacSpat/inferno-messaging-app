@@ -69,7 +69,7 @@
           <div class="space-y-0.5 mb-4">
             <%= link_to "Content Safety", user_settings_safety_path,
                 data: { turbo_frame: "settings-frame" },
-                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[safety update_safety hide_message unhide_message remove_allowlist clear_shared_hashes]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[safety update_safety hide_message unhide_message authority_report generate_authority_report]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
 
           <% if current_user.instance_admin? %>

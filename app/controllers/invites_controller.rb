@@ -90,6 +90,13 @@ class InvitesController < ApplicationController
       return
     end
 
+    # Age-restricted servers require explicit confirmation
+    if @server.age_restricted? && params[:age_confirmed] != "true"
+      invite_show_path = params[:nostr_group_id].present? ? nostr_invite_path(params[:nostr_group_id], @invite.code) : invite_path(@invite.code)
+      redirect_to invite_show_path, alert: "You must confirm you are 18 or older to join this server."
+      return
+    end
+
     if current_user.servers.include?(@server)
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else
@@ -99,7 +106,7 @@ class InvitesController < ApplicationController
       end
 
       @invite.increment_uses!
-      @server.server_memberships.create!(user: current_user)
+      membership = @server.server_memberships.create!(user: current_user)
 
       # Re-publish invite with updated uses count
       NostrServerPublishJob.perform_later(current_user.id, @server.id, "invite", invite_code: @invite.code)
@@ -109,7 +116,11 @@ class InvitesController < ApplicationController
         NostrServerPublishJob.perform_later(current_user.id, @server.id, "member", pubkey: current_user.nostr_public_key)
       end
 
-      redirect_to server_channel_path(@server, @server.channels.ordered.first), notice: "Welcome to #{@server.name}!"
+      if @server.onboarding_enabled?
+        redirect_to onboarding_server_path(@server), notice: "Welcome to #{@server.name}!"
+      else
+        redirect_to server_channel_path(@server, @server.channels.ordered.first), notice: "Welcome to #{@server.name}!"
+      end
     end
   end
 

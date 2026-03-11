@@ -42,6 +42,9 @@ class ContentHash < ApplicationRecord
 
   # Allowlist this hash and any shared hashes within hamming distance
   def allowlist!
+    # Never allowlist hashes that match the CSAM database
+    return false if CsamHashEntry.match?(hash_value, hash_type: hash_type)
+
     update!(allowlisted: true)
 
     # Also allowlist similar shared hashes
@@ -71,6 +74,36 @@ class ContentHash < ApplicationRecord
       end
     end
     save! if persisted?
+
+    # Auto-promote to CSAM table when confidence is very high
+    maybe_promote_to_csam! if confidence >= 5.0
+
     confidence
+  end
+
+  private
+
+  # When a shared hash reaches high confidence from trusted reporters,
+  # promote it to the permanent CSAM hash table (non-overridable).
+  # Threshold: confidence >= 5.0 with at least 2 friend reporters or 15+ strangers.
+  def maybe_promote_to_csam!
+    return unless source == "shared"
+    return if allowlisted?
+    return if CsamHashEntry.exists?(hash_value: hash_value, hash_type: hash_type)
+
+    friend_count = (reporter_pubkeys || []).count do |pk|
+      Contact.find_by(pubkey: pk)&.accepted?
+    end
+
+    promote = friend_count >= 2 || (reporter_pubkeys || []).size >= 15
+    return unless promote
+
+    CsamHashEntry.create!(
+      hash_value: hash_value,
+      hash_type: hash_type,
+      list_source: "shared_network",
+      added_at: Time.current
+    )
+    Rails.logger.info("[ContentHash] Promoted shared hash #{hash_value[0..15]}... to CSAM table (confidence: #{confidence})")
   end
 end

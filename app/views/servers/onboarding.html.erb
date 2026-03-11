@@ -1,0 +1,179 @@
+<div class="min-h-screen bg-gray-950 flex items-center justify-center p-4" data-controller="onboarding-wizard">
+
+  <div class="w-full max-w-lg">
+
+    <!-- Server header -->
+    <div class="text-center mb-8">
+      <% if @server.icon.attached? %>
+        <%= image_tag @server.icon, class: "w-16 h-16 rounded-2xl object-cover mx-auto mb-3" %>
+      <% else %>
+        <div class="w-16 h-16 rounded-2xl bg-gray-700 flex items-center justify-center text-2xl font-bold text-white mx-auto mb-3"><%= @server.name[0].upcase %></div>
+      <% end %>
+      <h1 class="text-2xl font-bold text-white">Welcome to <%= @server.name %></h1>
+      <% if @server.description.present? %>
+        <p class="text-sm text-gray-400 mt-1 max-w-sm mx-auto"><%= @server.description %></p>
+      <% end %>
+    </div>
+
+    <!-- Step indicators -->
+    <% steps = ["Rules", "Roles", "Channels"].select.with_index { |label, i|
+         case i
+         when 0 then @server.onboarding_rules.present?
+         when 1 then @self_assignable_roles.any?
+         when 2 then true
+         end
+       } %>
+    <% if steps.size > 1 %>
+      <div class="flex items-center justify-center gap-2 mb-6">
+        <% steps.each_with_index do |label, i| %>
+          <div class="flex items-center gap-2" data-onboarding-wizard-target="stepIndicator">
+            <div class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold transition
+                        <%= i == 0 ? 'bg-accent text-white' : 'bg-gray-700 text-gray-500' %>"
+                 data-onboarding-wizard-target="stepDot"><%= i + 1 %></div>
+            <span class="text-xs font-medium transition hidden sm:inline
+                         <%= i == 0 ? 'text-white' : 'text-gray-500' %>"
+                  data-onboarding-wizard-target="stepLabel"><%= label %></span>
+          </div>
+          <% if i < steps.size - 1 %>
+            <div class="flex-1 h-px bg-gray-700 max-w-8"></div>
+          <% end %>
+        <% end %>
+      </div>
+    <% end %>
+
+    <%= form_with url: complete_onboarding_server_path(@server), method: :post, class: "space-y-0" do %>
+
+      <!-- ═══════════ STEP: Server Rules ═══════════ -->
+      <% if @server.onboarding_rules.present? %>
+        <div data-onboarding-wizard-target="step">
+          <div class="bg-gray-800 rounded-lg p-5 mb-6">
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wide mb-4">Server Rules</h2>
+            <p class="text-xs text-gray-500 mb-4">Please read and agree to these rules before continuing.</p>
+
+            <div class="space-y-3">
+              <% @server.onboarding_rules.split("\n").reject(&:blank?).each_with_index do |rule, i| %>
+                <div class="flex items-start gap-3">
+                  <span class="text-sm font-bold text-accent mt-0.5 shrink-0 w-6 text-right"><%= i + 1 %>.</span>
+                  <span class="text-sm text-gray-300"><%= rule.strip %></span>
+                </div>
+              <% end %>
+            </div>
+          </div>
+
+          <label class="flex items-center gap-3 cursor-pointer mb-6" data-action="change->onboarding-wizard#rulesToggled">
+            <input type="checkbox" data-onboarding-wizard-target="rulesCheck"
+                   class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0">
+            <span class="text-sm text-gray-300">I have read and agree to the server rules</span>
+          </label>
+
+          <div class="flex items-center justify-end gap-3">
+            <% if steps.size > 1 %>
+              <button type="button" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-onboarding-wizard-target="rulesNext"
+                      data-action="click->onboarding-wizard#next" disabled>
+                Continue
+              </button>
+            <% else %>
+              <button type="submit" class="bg-accent hover:bg-accent-dark text-white text-sm font-medium px-5 py-2.5 rounded-lg transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                      data-onboarding-wizard-target="rulesNext" disabled>
+                Enter Server
+              </button>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- ═══════════ STEP: Self-Assignable Roles ═══════════ -->
+      <% if @self_assignable_roles.any? %>
+        <div data-onboarding-wizard-target="step" class="<%= 'hidden' if @server.onboarding_rules.present? %>">
+          <div class="bg-gray-800 rounded-lg p-5 mb-6">
+            <h2 class="text-sm font-semibold text-white uppercase tracking-wide mb-2">Pick Your Roles</h2>
+            <p class="text-xs text-gray-500 mb-4">Choose any roles that interest you. You can change these later in server settings.</p>
+
+            <div class="space-y-2">
+              <% @self_assignable_roles.each do |role| %>
+                <label class="flex items-center gap-3 p-3 rounded-lg border border-gray-700 hover:border-gray-600 cursor-pointer transition has-[:checked]:border-accent/50 has-[:checked]:bg-accent/5">
+                  <input type="checkbox" name="role_ids[]" value="<%= role.public_id %>"
+                         class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0">
+                  <div class="flex items-center gap-2">
+                    <span class="w-3 h-3 rounded-full shrink-0" style="background-color: <%= role.color || '#fff' %>"></span>
+                    <span class="text-sm text-white"><%= role.name %></span>
+                  </div>
+                </label>
+              <% end %>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-3">
+            <% if @server.onboarding_rules.present? %>
+              <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white transition cursor-pointer"
+                      data-action="click->onboarding-wizard#prev">Back</button>
+            <% else %>
+              <div></div>
+            <% end %>
+            <% remaining_steps = steps.size - ([@server.onboarding_rules.present? ? 1 : 0, @self_assignable_roles.any? ? 1 : 0].sum) %>
+            <% if remaining_steps > 0 %>
+              <button type="button" class="bg-gray-700 hover:bg-gray-600 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition cursor-pointer"
+                      data-action="click->onboarding-wizard#next">
+                Continue
+              </button>
+            <% else %>
+              <button type="submit" class="bg-accent hover:bg-accent-dark text-white text-sm font-medium px-5 py-2.5 rounded-lg transition cursor-pointer">
+                Enter Server
+              </button>
+            <% end %>
+          </div>
+        </div>
+      <% end %>
+
+      <!-- ═══════════ STEP: Channels ═══════════ -->
+      <div data-onboarding-wizard-target="step" class="<%= 'hidden' if @server.onboarding_rules.present? || @self_assignable_roles.any? %>">
+        <div class="bg-gray-800 rounded-lg p-5 mb-6">
+          <h2 class="text-sm font-semibold text-white uppercase tracking-wide mb-2">Channels to Get Started</h2>
+          <p class="text-xs text-gray-500 mb-4">Here's where you can jump in. All channels are available in the sidebar.</p>
+
+          <% highlighted = @server.onboarding_default_channel_ids || [] %>
+          <% display_channels = if highlighted.any?
+               @server.channels.text.ordered.select { |c| highlighted.include?(c.public_id) }
+             else
+               @server.channels.text.ordered.first(5)
+             end %>
+
+          <div class="space-y-1">
+            <% display_channels.each do |channel| %>
+              <div class="flex items-center gap-2.5 p-2.5 rounded-lg hover:bg-gray-700/50 transition">
+                <svg class="w-5 h-5 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 20l4-16m2 16l4-16M6 9h14M4 15h14"/></svg>
+                <div class="min-w-0">
+                  <p class="text-sm text-white font-medium"><%= channel.name %></p>
+                  <% if channel.topic.present? %>
+                    <p class="text-xs text-gray-500 truncate"><%= channel.topic %></p>
+                  <% end %>
+                </div>
+              </div>
+            <% end %>
+          </div>
+        </div>
+
+        <div class="flex items-center justify-between gap-3">
+          <% prev_steps = [@server.onboarding_rules.present?, @self_assignable_roles.any?].count(true) %>
+          <% if prev_steps > 0 %>
+            <button type="button" class="px-4 py-2 text-sm text-gray-400 hover:text-white transition cursor-pointer"
+                    data-action="click->onboarding-wizard#prev">Back</button>
+          <% else %>
+            <div></div>
+          <% end %>
+          <button type="submit" class="bg-accent hover:bg-accent-dark text-white text-sm font-medium px-6 py-2.5 rounded-lg transition cursor-pointer">
+            Enter Server
+          </button>
+        </div>
+      </div>
+
+    <% end %>
+
+    <!-- Skip link -->
+    <div class="text-center mt-4">
+      <%= button_to "Skip for now", complete_onboarding_server_path(@server), method: :post, class: "text-xs text-gray-500 hover:text-gray-400 transition cursor-pointer" %>
+    </div>
+
+  </div>
+</div>

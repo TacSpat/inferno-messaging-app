@@ -99,9 +99,17 @@
         </div>
       </div>
 
-      <!-- Encrypted channel -->
+      <!-- Security -->
       <div class="bg-gray-800 rounded-xl border border-gray-700/50 shadow-2xl overflow-hidden mb-6">
         <div class="p-5 space-y-3">
+          <label class="flex items-center gap-3 cursor-pointer">
+            <%= f.check_box :nsfw, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer" %>
+            <div>
+              <span class="text-sm font-medium text-white">Age-Restricted Channel</span>
+              <p class="text-xs text-gray-500">Members must confirm they are 18+ to view this channel.</p>
+            </div>
+          </label>
+
           <label class="flex items-center gap-3 cursor-pointer">
             <%= f.check_box :encrypted, class: "w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent focus:ring-offset-0 cursor-pointer", data: { action: "change->encrypted-channel#toggle", encrypted_channel_target: "checkbox" } %>
             <div>

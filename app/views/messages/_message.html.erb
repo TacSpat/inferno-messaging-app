@@ -47,9 +47,10 @@
       <!-- Mobile: avatar + name inline row -->
       <% msg_avatar = author&.effective_avatar_url || remote_avatar_url %>
       <% msg_member = author || remote_member %>
+      <% msg_avatar_blur = nsfw_blur_class(author&.try(:avatar_nsfw?) || remote_member&.try(:avatar_nsfw?)) %>
       <div class="flex items-center mb-0.5 sm:hidden">
         <% if msg_avatar.present? %>
-          <%= image_tag msg_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
+          <%= image_tag msg_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0 #{msg_avatar_blur}", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
         <% else %>
           <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= msg_member&.try(:profile_color) || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{msg_member&.public_id}\"".html_safe if msg_member %>>
             <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
@@ -69,7 +70,7 @@
       <!-- Desktop: avatar column -->
       <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
         <% if msg_avatar.present? %>
-          <%= image_tag msg_avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
+          <%= image_tag msg_avatar, class: "w-10 h-10 rounded-full object-cover cursor-pointer #{msg_avatar_blur}", data: msg_member ? { msg_user_id: msg_member.public_id } : {} %>
         <% else %>
           <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= msg_member&.try(:profile_color) || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{msg_member&.public_id}\"".html_safe if msg_member %>>
             <%= author ? author.username[0].upcase : (remote_author_name ? remote_author_name[0].upcase : "?") %>
@@ -109,13 +110,58 @@
           Pinned
         </div>
       <% end %>
-      <div class="text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>">
-        <%= message.rendered_content %>
-      </div>
+      <% if message.spoiler? && message.content.present? %>
+        <div class="spoiler-inline" onclick="this.classList.toggle('revealed')" role="button" tabindex="0">
+          <div class="spoiler-inline-content text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>"><%= message.rendered_content %></div>
+        </div>
+      <% else %>
+        <div class="text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>">
+          <%= message.rendered_content %>
+        </div>
+      <% end %>
+
+      <% if local_assigns[:verification_channel] && message.user %>
+        <% author_membership = message.user.server_memberships.find_by(server: server) %>
+        <% if author_membership %>
+          <% verified_role = server.roles.find_by(name: "Verified") %>
+          <% is_verified = verified_role && author_membership.roles.include?(verified_role) %>
+          <div class="flex items-center gap-2 mt-2">
+            <% if is_verified %>
+              <span class="inline-flex items-center gap-1 text-xs text-green-400 bg-green-400/10 px-2 py-1 rounded-lg">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                Verified
+              </span>
+              <%= button_to "Remove Verification",
+                    server_settings_unverify_member_path(server, author_membership.public_id),
+                    method: :post,
+                    class: "text-xs text-gray-500 hover:text-danger-light transition cursor-pointer",
+                    data: { turbo_confirm: "Remove verification from #{message.user.username}?" } %>
+            <% else %>
+              <%= button_to server_settings_verify_member_path(server, author_membership.public_id),
+                    method: :post,
+                    class: "inline-flex items-center gap-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-light px-3 py-1.5 rounded-lg transition cursor-pointer",
+                    data: { turbo_confirm: "Grant Verified role to #{message.user.username}?" } do %>
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                Verify Member
+              <% end %>
+            <% end %>
+          </div>
+        <% end %>
+      <% end %>
 
       <!-- Attachments -->
       <% if message.files.attached? %>
-        <div class="flex flex-wrap gap-2 mt-2">
+        <% spoiler_attach = message.spoiler? %>
+        <% if spoiler_attach %>
+          <div class="spoiler-attachment-wrap mt-2" onclick="this.classList.toggle('revealed')">
+            <div class="spoiler-attachment-hidden">
+              <svg class="w-8 h-8 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.11 6.11m3.768 3.768l4.242 4.242m0 0l3.768 3.768M6.11 6.11L3 3m3.11 3.11l11.78 11.78M21 21l-3.11-3.11"/></svg>
+              <span class="text-sm font-medium text-gray-300">Spoiler</span>
+              <span class="text-xs text-gray-500"><%= message.files.count %> attachment<%= message.files.count == 1 ? '' : 's' %> — click to reveal</span>
+            </div>
+            <div class="spoiler-attachment-content">
+        <% end %>
+        <div class="flex flex-wrap gap-2 <%= 'mt-0' if spoiler_attach %> <%= 'mt-2' unless spoiler_attach %>">
           <% message.files.each do |file| %>
             <% if file.content_type&.start_with?("image/") %>
               <div data-attachment-id="<%= file.id %>" data-attachment-name="<%= file.filename %>" data-attachment-type="image" data-attachment-url="<%= url_for(file) %>" class="inline-block">
@@ -142,6 +188,10 @@
             <% end %>
           <% end %>
         </div>
+        <% if spoiler_attach %>
+            </div>
+          </div>
+        <% end %>
       <% end %>
 
       <!-- Reactions -->
@@ -170,6 +220,13 @@
             <svg class="w-4 h-4" fill="<%= message.pinned? ? 'currentColor' : 'none' %>" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/></svg>
           </button>
         <% end %>
+      <% end %>
+      <% if message.files.attached? && message.files.any? { |f| f.content_type&.start_with?("image/") || f.content_type&.start_with?("video/") } %>
+        <button class="p-1.5 text-gray-400 hover:text-gray-200" title="Toggle Spoiler"
+                data-action="click->message-actions#toggleSpoiler"
+                data-message-id="<%= message.public_id %>">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.11 6.11m3.768 3.768l4.242 4.242m0 0l3.768 3.768M6.11 6.11L3 3m3.11 3.11l11.78 11.78M21 21l-3.11-3.11"/></svg>
+        </button>
       <% end %>
       <button class="p-1.5 text-gray-400 hover:text-danger-light" title="Hide Message"
               data-action="click->message-actions#hideMessage"

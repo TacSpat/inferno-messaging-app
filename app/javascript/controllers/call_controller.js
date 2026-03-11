@@ -216,7 +216,13 @@ export default class extends Controller {
     })
 
     await this.room.connect(url, token)
-    await this.room.localParticipant.setMicrophoneEnabled(true)
+    try {
+      await this.room.localParticipant.setMicrophoneEnabled(true)
+    } catch (micErr) {
+      console.error("[Call] Mic access denied, joining muted:", micErr)
+      this._muted = true
+      this._updateMuteUI()
+    }
 
     // Add local participant card
     this._addLocalParticipantCard()

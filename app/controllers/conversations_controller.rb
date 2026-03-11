@@ -1,6 +1,6 @@
 class ConversationsController < ApplicationController
   before_action :authenticate_user!
-  before_action :set_conversation, only: [ :show, :accept, :update, :destroy, :add_member, :remove_member ]
+  before_action :set_conversation, only: [ :show, :accept, :decline, :update, :destroy, :add_member, :remove_member ]
   before_action :set_dm_layout
 
   def index
@@ -61,6 +61,10 @@ class ConversationsController < ApplicationController
         Thread.new { NostrProfileResolver.resolve(contact_pubkey) }
       end
     end
+
+    # First-contact DM protection: flag unaccepted conversations from non-friends
+    @is_message_request = @conversation.message_request_for?(current_user)
+    @is_message_request = true if params[:debug_message_request] == "1"
 
     # Mark conversation as read
     @conversation.conversation_participants.find_by(user: current_user)&.mark_read!
@@ -130,7 +134,13 @@ class ConversationsController < ApplicationController
   def accept
     participant = @conversation.conversation_participants.find_by(user: current_user)
     participant&.update!(accepted: true)
-    redirect_to conversation_path(@conversation)
+    redirect_to conversation_path(@conversation), status: :see_other
+  end
+
+  def decline
+    participant = @conversation.conversation_participants.find_by(user: current_user)
+    participant&.destroy
+    redirect_to conversations_path, status: :see_other
   end
 
   def add_member

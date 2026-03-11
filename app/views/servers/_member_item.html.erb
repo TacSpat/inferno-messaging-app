@@ -22,7 +22,7 @@
      data-action="click->profile-card#show contextmenu->member-context#show">
   <div class="relative">
     <% if member.effective_avatar_url.present? %>
-      <%= image_tag member.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover" %>
+      <%= image_tag member.effective_avatar_url, class: "w-8 h-8 rounded-full object-cover #{nsfw_blur_class(member.try(:avatar_nsfw?))}" %>
     <% else %>
       <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= member.profile_color || '#1e1c1b' %>">
         <%= member.username[0].upcase %>

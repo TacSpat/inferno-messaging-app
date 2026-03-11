@@ -86,12 +86,14 @@ class NostrHistoryFetcher
         event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
       )
 
-      # Broadcast each message for real-time UI update
-      html = ApplicationController.render(
-        partial: "messages/message",
-        locals: { message: message, server: channel.server }
-      )
-      ChannelChatChannel.broadcast_to(channel, { type: "new_message", html: html })
+      # Broadcast each message for real-time UI update (skip if hidden by safety check)
+      unless message.reload.hidden?
+        html = ApplicationController.render(
+          partial: "messages/message",
+          locals: { message: message, server: channel.server }
+        )
+        ChannelChatChannel.broadcast_to(channel, { type: "new_message", html: html })
+      end
 
       imported += 1
     rescue ActiveRecord::RecordNotUnique
@@ -173,12 +175,14 @@ class NostrHistoryFetcher
         event_created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
       )
 
-      # Broadcast each message for real-time UI update
-      html = ApplicationController.render(
-        partial: "messages/dm_message",
-        locals: { message: message }
-      )
-      ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
+      # Broadcast each message for real-time UI update (skip if hidden by safety check)
+      unless message.reload.hidden?
+        html = ApplicationController.render(
+          partial: "messages/dm_message",
+          locals: { message: message }
+        )
+        ConversationChannel.broadcast_to(conversation, { type: "new_message", html: html })
+      end
 
       imported += 1
     rescue ActiveRecord::RecordNotUnique

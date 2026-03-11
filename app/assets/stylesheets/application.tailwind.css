@@ -1719,3 +1719,142 @@ input[type="radio"]:checked::after {
     filter: drop-shadow(0 0 5px rgb(var(--accent) / 0.3)) drop-shadow(0 0 2px rgb(var(--accent-light) / 0.2));
   }
 }
+
+/* ═══════════════════════════════════════════
+   NSFW blur & spoiler blur
+   ═══════════════════════════════════════════ */
+
+/* NSFW profile/server image blur — applied to avatars, banners, icons flagged as NSFW */
+.nsfw-profile-blur {
+  filter: blur(60px) saturate(0);
+  transition: filter 0.3s ease;
+  cursor: pointer;
+}
+.nsfw-profile-blur.unblurred {
+  filter: none;
+}
+
+/* NSFW channel blur — applied to images/videos in NSFW channels when blur is enabled */
+[data-nsfw-blur="true"] img[data-preview-src],
+[data-nsfw-blur="true"] video {
+  filter: blur(60px) saturate(0);
+  transition: filter 0.3s ease;
+  cursor: pointer;
+}
+[data-nsfw-blur="true"] img[data-preview-src].unblurred,
+[data-nsfw-blur="true"] video.unblurred {
+  filter: none;
+}
+
+/* Spoiler blur — user-applied to any image, works in any channel */
+.spoiler-blur {
+  filter: blur(60px) saturate(0);
+  transition: filter 0.3s ease;
+  cursor: pointer;
+  position: relative;
+}
+.spoiler-blur.unblurred {
+  filter: none;
+}
+/* Spoiler label overlay */
+.spoiler-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 2;
+}
+.spoiler-label span {
+  background: rgba(0, 0, 0, 0.7);
+  color: white;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  backdrop-filter: blur(4px);
+  letter-spacing: 0.02em;
+}
+.spoiler-blur.unblurred .spoiler-label {
+  display: none;
+}
+
+/* Spoiler text — solid dark block hiding all content, click to reveal */
+.spoiler-inline {
+  cursor: pointer;
+  border-radius: 0.375rem;
+  background: #1e1e1e;
+  padding: 0.25rem 0.5rem;
+  transition: background 0.2s ease;
+}
+.spoiler-inline:hover {
+  background: #262626;
+}
+.spoiler-inline .spoiler-inline-content,
+.spoiler-inline .spoiler-inline-content * {
+  color: transparent !important;
+  user-select: none;
+}
+.spoiler-inline .spoiler-inline-content a {
+  pointer-events: none;
+}
+.spoiler-inline .spoiler-inline-content img,
+.spoiler-inline .spoiler-inline-content video {
+  opacity: 0;
+}
+/* Revealed state */
+.spoiler-inline.revealed {
+  background: rgba(255, 255, 255, 0.04);
+}
+.spoiler-inline.revealed .spoiler-inline-content,
+.spoiler-inline.revealed .spoiler-inline-content * {
+  color: inherit !important;
+  user-select: auto;
+}
+.spoiler-inline.revealed .spoiler-inline-content a {
+  pointer-events: auto;
+}
+.spoiler-inline.revealed .spoiler-inline-content img,
+.spoiler-inline.revealed .spoiler-inline-content video {
+  opacity: 1;
+}
+
+/* Spoiler attachment card — hides media behind a placeholder, click to reveal */
+.spoiler-attachment-wrap {
+  position: relative;
+  cursor: pointer;
+  max-width: 24rem;
+}
+.spoiler-attachment-wrap .spoiler-attachment-hidden {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: #1a1a1a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.5rem;
+  padding: 2rem 2.5rem;
+  transition: background 0.2s ease;
+}
+.spoiler-attachment-wrap:hover .spoiler-attachment-hidden {
+  background: #222;
+}
+.spoiler-attachment-wrap .spoiler-attachment-content {
+  display: none;
+}
+.spoiler-attachment-wrap.revealed .spoiler-attachment-hidden {
+  display: none;
+}
+.spoiler-attachment-wrap.revealed .spoiler-attachment-content {
+  display: block;
+}
+
+/* Report message preview — blur any inline media for safety */
+.report-message-preview img,
+.report-message-preview video,
+.report-message-preview iframe {
+  filter: blur(60px) saturate(0);
+  pointer-events: none;
+  user-select: none;
+}

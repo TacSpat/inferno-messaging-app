@@ -2,7 +2,7 @@ import { Controller } from "@hotwired/stimulus"
 import consumer from "../lib/cable"
 
 export default class extends Controller {
-  static targets = ["highlight", "input", "filePreview", "dropzone", "replyBar", "replyAuthor", "replyPreview", "parentId", "pinButton", "pinBadge", "editBar", "editPreview"]
+  static targets = ["highlight", "input", "filePreview", "dropzone", "replyBar", "replyAuthor", "replyPreview", "parentId", "pinButton", "pinBadge", "editBar", "editPreview", "spoilerBtn", "spoilerField", "spoilerBar"]
   static values = { conversationId: String }
 
   connect() {
@@ -256,12 +256,34 @@ export default class extends Controller {
         this.pendingFiles = []
         this.renderPreviews()
         this.clearReply()
+        this._resetSpoiler()
       }
     } catch(e) {
       console.error("DM message send failed:", e)
     } finally {
       this._submitting = false
     }
+  }
+
+  // --- Spoiler Toggle ---
+
+  toggleSpoiler() {
+    if (!this.hasSpoilerFieldTarget) return
+    const active = this.spoilerFieldTarget.value === "1"
+    this.spoilerFieldTarget.value = active ? "0" : "1"
+    this.spoilerBtnTarget.classList.toggle("text-accent-light", !active)
+    this.spoilerBtnTarget.classList.toggle("text-gray-400", active)
+    if (this.hasSpoilerBarTarget) {
+      this.spoilerBarTarget.classList.toggle("hidden", active)
+    }
+  }
+
+  _resetSpoiler() {
+    if (!this.hasSpoilerFieldTarget) return
+    this.spoilerFieldTarget.value = "0"
+    this.spoilerBtnTarget.classList.remove("text-accent-light")
+    this.spoilerBtnTarget.classList.add("text-gray-400")
+    if (this.hasSpoilerBarTarget) this.spoilerBarTarget.classList.add("hidden")
   }
 
   // --- File Preview + Remove + Drag-and-Drop ---

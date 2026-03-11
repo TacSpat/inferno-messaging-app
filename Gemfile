@@ -80,6 +80,7 @@ gem "devise", "~> 5.0"
 gem "redcarpet", "~> 3.6"
 gem "rouge", "~> 4.7"
 gem "image_processing", "~> 1.14"
+gem "onnxruntime", "~> 0.9"
 
 group :development do
   gem "letter_opener", "~> 1.10"

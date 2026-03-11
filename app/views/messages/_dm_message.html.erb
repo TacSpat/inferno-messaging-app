@@ -1,3 +1,4 @@
+<% message_request = local_assigns[:message_request] || false %>
 <% if message.system_message? %>
   <div id="message_<%= message.public_id %>" class="flex items-center py-1 px-2 sm:px-4" data-message-id="<%= message.public_id %>" data-system-message="true">
     <% if message.content&.start_with?("call:") %>
@@ -31,10 +32,11 @@
 <% dm_click_id = author&.public_id || message.conversation&.counterparty_pubkey %>
 <div id="message_<%= message.public_id %>" class="flex flex-col sm:flex-row sm:items-start py-0.5 px-1 sm:px-2 group hover:bg-gray-680 rounded relative" style="--tw-bg-opacity: 0.06;" data-message-id="<%= message.public_id %>" data-author-id="<%= author&.public_id %>"<%= ' data-is-sticker="true"'.html_safe if message.is_sticker? %> data-pinned="<%= message.pinned? %>" data-pin-url="<%= toggle_pin_conversation_dm_message_path(message.conversation, message) %>">
   <!-- Mobile: avatar + name inline row -->
+  <% dm_msg_avatar_blur = nsfw_blur_class(author&.try(:avatar_nsfw?)) %>
   <div class="flex items-center mb-0.5 sm:hidden">
     <% dm_avatar = author&.effective_avatar_url || dm_remote_avatar %>
     <% if dm_avatar.present? %>
-      <%= image_tag dm_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
+      <%= image_tag dm_avatar, class: "w-7 h-7 rounded-full object-cover cursor-pointer shrink-0 #{dm_msg_avatar_blur}", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
     <% else %>
       <div class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white cursor-pointer shrink-0" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
         <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
@@ -55,7 +57,7 @@
   <div class="hidden sm:block shrink-0 mt-0.5 mr-4">
     <% dm_avatar_desktop = author&.effective_avatar_url || dm_remote_avatar %>
     <% if dm_avatar_desktop.present? %>
-      <%= image_tag dm_avatar_desktop, class: "w-10 h-10 rounded-full object-cover cursor-pointer", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
+      <%= image_tag dm_avatar_desktop, class: "w-10 h-10 rounded-full object-cover cursor-pointer #{dm_msg_avatar_blur}", data: dm_click_id ? { msg_user_id: dm_click_id } : {} %>
     <% else %>
       <div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white cursor-pointer" style="background-color: <%= author&.profile_color || '#1e1c1b' %>"<%= " data-msg-user-id=\"#{dm_click_id}\"".html_safe if dm_click_id %>>
         <%= author ? author.username[0].upcase : dm_remote_name[0].upcase %>
@@ -92,37 +94,76 @@
         Pinned
       </div>
     <% end %>
-    <div class="text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>">
-      <%= message.rendered_content %>
-    </div>
+    <% if message.spoiler? && !message_request && message.content.present? %>
+      <div class="spoiler-inline" onclick="this.classList.toggle('revealed')" role="button" tabindex="0">
+        <div class="spoiler-inline-content text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>"><%= message.rendered_content %></div>
+      </div>
+    <% else %>
+      <div class="text-sm text-gray-200 leading-relaxed message-content" data-raw-content="<%= h(message.content) %>">
+        <% if message_request %>
+          <% rendered = message.rendered_content %>
+          <% doc = Nokogiri::HTML.fragment(rendered) %>
+          <% embed_nodes = doc.css('[data-invite-embed], [data-nostr-server-embed]') %>
+          <% invite_embeds = embed_nodes.map(&:to_html) %>
+          <% embed_nodes.each(&:remove) %>
+          <%= sanitize(doc.to_html, tags: %w[p br strong em b i u s del code pre span div blockquote ul ol li h1 h2 h3 h4 h5 h6], attributes: %w[class style]) %>
+          <% invite_embeds.each do |embed_html| %>
+            <%= embed_html.html_safe %>
+          <% end %>
+        <% else %>
+          <%= message.rendered_content %>
+        <% end %>
+      </div>
+    <% end %>
 
     <!-- Attachments -->
     <% if message.files.attached? %>
-      <div class="flex flex-wrap gap-2 mt-2">
-        <% message.files.each do |file| %>
-          <% if file.content_type&.start_with?("image/") %>
-            <div data-attachment-id="<%= file.id %>" class="inline-block">
-              <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", data: { preview_src: url_for(file), preview_filename: file.filename.to_s, lock_dims: true }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
+      <% if message_request %>
+        <div class="mt-2 bg-gray-800/50 rounded-lg px-3 py-2 text-xs text-gray-500 flex items-center gap-2">
+          <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21"/></svg>
+          <%= message.files.count %> attachment<%= message.files.count == 1 ? '' : 's' %> hidden — accept this conversation to view
+        </div>
+      <% else %>
+        <% spoiler_attach = message.spoiler? %>
+        <% if spoiler_attach %>
+          <div class="spoiler-attachment-wrap mt-2" onclick="this.classList.toggle('revealed')">
+            <div class="spoiler-attachment-hidden">
+              <svg class="w-8 h-8 text-gray-400 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.11 6.11m3.768 3.768l4.242 4.242m0 0l3.768 3.768M6.11 6.11L3 3m3.11 3.11l11.78 11.78M21 21l-3.11-3.11"/></svg>
+              <span class="text-sm font-medium text-gray-300">Spoiler</span>
+              <span class="text-xs text-gray-500"><%= message.files.count %> attachment<%= message.files.count == 1 ? '' : 's' %> — click to reveal</span>
             </div>
-          <% elsif file.content_type&.start_with?("video/") %>
-            <div class="inline-block relative rounded-lg overflow-hidden" data-controller="video-player">
-              <video preload="metadata" class="max-w-full sm:max-w-lg max-h-96 block" src="<%= url_for(file) %>"
-                     data-video-player-target="video" data-video-src="<%= url_for(file) %>"
-                     data-video-filename="<%= file.filename %>"></video>
-            </div>
-          <% elsif file.content_type&.start_with?("audio/") %>
-            <div class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
-              <span class="text-sm text-gray-300"><%= file.filename %></span>
-              <audio controls preload="metadata" src="<%= url_for(file) %>" class="h-8"></audio>
-            </div>
-          <% else %>
-            <a href="<%= url_for(file) %>" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
-              <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-              <span class="text-sm text-accent-light"><%= file.filename %></span>
-            </a>
-          <% end %>
+            <div class="spoiler-attachment-content">
         <% end %>
-      </div>
+        <div class="flex flex-wrap gap-2 <%= spoiler_attach ? 'mt-0' : 'mt-2' %>">
+          <% message.files.each do |file| %>
+            <% if file.content_type&.start_with?("image/") %>
+              <div data-attachment-id="<%= file.id %>" class="inline-block">
+                <%= image_tag url_for(file), class: "max-w-full sm:max-w-sm max-h-72 rounded-lg cursor-pointer hover:shadow-lg transition-shadow", data: { preview_src: url_for(file), preview_filename: file.filename.to_s, lock_dims: true }.merge(file.content_type == "image/gif" ? { animated_gif: true } : {}) %>
+              </div>
+            <% elsif file.content_type&.start_with?("video/") %>
+              <div class="inline-block relative rounded-lg overflow-hidden" data-controller="video-player">
+                <video preload="metadata" class="max-w-full sm:max-w-lg max-h-96 block" src="<%= url_for(file) %>"
+                       data-video-player-target="video" data-video-src="<%= url_for(file) %>"
+                       data-video-filename="<%= file.filename %>"></video>
+              </div>
+            <% elsif file.content_type&.start_with?("audio/") %>
+              <div class="flex items-center gap-2 bg-gray-800 rounded-lg px-3 py-2">
+                <span class="text-sm text-gray-300"><%= file.filename %></span>
+                <audio controls preload="metadata" src="<%= url_for(file) %>" class="h-8"></audio>
+              </div>
+            <% else %>
+              <a href="<%= url_for(file) %>" class="flex items-center bg-gray-800 rounded-lg px-3 py-2 hover:bg-gray-750">
+                <svg class="w-6 h-6 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                <span class="text-sm text-accent-light"><%= file.filename %></span>
+              </a>
+            <% end %>
+          <% end %>
+        </div>
+        <% if spoiler_attach %>
+            </div>
+          </div>
+        <% end %>
+      <% end %>
     <% end %>
 
     <!-- Reactions -->

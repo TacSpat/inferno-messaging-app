@@ -60,6 +60,8 @@ Rails.application.routes.draw do
       post :join
       delete :leave
       get :search
+      get :onboarding
+      post :complete_onboarding
     end
     resources :channels, only: [ :show, :new, :create, :edit, :update, :destroy ] do
       member do
@@ -160,10 +162,18 @@ Rails.application.routes.draw do
     post   "batch_ban",     to: "server_settings#batch_ban",     as: :batch_ban
     post   "batch_timeout", to: "server_settings#batch_timeout", as: :batch_timeout
 
+    # Verification
+    post "members/:id/verify", to: "server_settings#verify_member", as: :verify_member
+    post "members/:id/unverify", to: "server_settings#unverify_member", as: :unverify_member
+
     # Relays
     get "relays", to: "server_settings#relays", as: :relays
     post "relays", to: "server_settings#add_relay", as: :add_relay
     delete "relays", to: "server_settings#remove_relay", as: :remove_relay
+
+    # Onboarding
+    get "onboarding", to: "server_settings#onboarding", as: :onboarding
+    patch "onboarding", to: "server_settings#update_onboarding", as: :update_onboarding
   end
 
   # Mentions autocomplete
@@ -202,6 +212,7 @@ Rails.application.routes.draw do
   resources :conversations, only: [ :index, :show, :create, :update, :destroy ] do
     member do
       post :accept
+      post :decline
       post :add_member
       delete :remove_member
     end
@@ -274,8 +285,9 @@ Rails.application.routes.draw do
   patch "settings/safety", to: "settings#update_safety"
   post "settings/hide_message/:id", to: "settings#hide_message", as: :user_settings_hide_message
   post "settings/unhide_message/:id", to: "settings#unhide_message", as: :user_settings_unhide_message
-  post "settings/remove_allowlist", to: "settings#remove_allowlist", as: :user_settings_remove_allowlist
-  post "settings/clear_shared_hashes", to: "settings#clear_shared_hashes", as: :user_settings_clear_shared_hashes
+  # Report to authorities
+  get "settings/authority_report/:id", to: "settings#authority_report", as: :user_settings_authority_report
+  post "settings/generate_authority_report/:id", to: "settings#generate_authority_report", as: :user_settings_generate_authority_report
 
   resource :profile, only: [ :show, :edit, :update ]
 

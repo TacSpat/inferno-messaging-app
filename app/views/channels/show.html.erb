@@ -60,10 +60,40 @@
   </div>
 <% end %>
 
+<% if @post_only_channel %>
+  <div class="bg-accent/10 border-b border-accent/20 px-4 py-2.5 flex items-center gap-2 shrink-0">
+    <svg class="w-4 h-4 text-accent-light shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+    <span class="text-sm text-accent-light">Your submission is only visible to moderators.</span>
+  </div>
+<% end %>
+
+<% nsfw_channel = @channel.nsfw? %>
+<% blur_nsfw = nsfw_channel && LocalConfig.current.safety_blur_nsfw %>
+
+<% if nsfw_channel %>
+<!-- NSFW channel gate — shown once per channel, remembered in localStorage -->
+<div id="nsfw-gate" class="hidden absolute inset-0 z-30 bg-gray-900/95 flex items-center justify-center">
+  <div class="text-center px-6 max-w-sm">
+    <svg class="w-12 h-12 text-red-400 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+    <h3 class="text-lg font-bold text-white mb-2">NSFW Channel</h3>
+    <p class="text-sm text-gray-400 mb-4">This channel may contain content not suitable for all audiences.</p>
+    <button onclick="localStorage.setItem('nsfw_accepted_<%= @channel.public_id %>','1');document.getElementById('nsfw-gate').remove()" class="bg-accent hover:bg-accent-light text-white text-sm font-medium px-6 py-2.5 rounded-lg transition cursor-pointer">
+      I understand, show channel
+    </button>
+  </div>
+</div>
+<script>
+  if (!localStorage.getItem('nsfw_accepted_<%= @channel.public_id %>')) {
+    document.getElementById('nsfw-gate').classList.remove('hidden')
+  }
+</script>
+<% end %>
+
 <!-- Messages area -->
 <div id="messages"
      class="flex-1 overflow-y-auto px-2 sm:px-4 py-4 space-y-0.5 relative"
      data-can-pin="<%= @current_membership&.has_permission?('manage_messages') %>"
+     <% if blur_nsfw %>data-nsfw-blur="true"<% end %>
      data-controller="scroll-position image-preview gif-save message-actions"
      data-scroll-position-channel-id-value="<%= @channel.public_id %>"
      data-scroll-position-server-id-value="<%= @server.public_id %>"
@@ -71,7 +101,13 @@
      data-scroll-position-has-older-value="<%= @has_older %>"
      data-scroll-position-newest-message-id-value="<%= @messages.any? ? @messages.last.public_id : '' %>"
      data-scroll-position-has-newer-value="false">
-  <% if @messages.empty? %>
+  <% if @post_only_channel %>
+    <div class="flex flex-col items-center justify-center h-full text-center px-6">
+      <svg class="w-12 h-12 text-gray-600 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+      <h2 class="text-lg font-bold text-white mb-1">Submit your message below</h2>
+      <p class="text-sm text-gray-500">Only moderators can see submissions in this channel.</p>
+    </div>
+  <% elsif @messages.empty? %>
     <div class="flex flex-col items-center justify-center h-full text-center">
       <div class="w-16 h-16 rounded-full bg-gray-600 flex items-center justify-center text-3xl mb-4">#</div>
       <h2 class="text-2xl font-bold text-white">Welcome to #<%= render_name_with_emojis(@channel.name, @server) %>!</h2>
@@ -87,7 +123,7 @@
                    message.parent_id.nil? &&
                    previous_message.parent_id.nil? &&
                    (message.created_at - previous_message.created_at) < 300 %>
-      <%= render partial: "messages/message", locals: { message: message, server: @server, grouped: grouped } %>
+      <%= render partial: "messages/message", locals: { message: message, server: @server, grouped: grouped, verification_channel: @channel.post_only? } %>
       <% previous_message = message %>
     <% end %>
   <% end %>
@@ -130,6 +166,15 @@
     </button>
   </div>
 
+  <!-- Spoiler bar -->
+  <div data-message-form-target="spoilerBar" class="hidden bg-gray-700 rounded-t-lg px-4 py-2 flex items-center text-sm border-b border-gray-600">
+    <svg class="w-4 h-4 text-gray-300 mr-1.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.11 6.11m3.768 3.768l4.242 4.242m0 0l3.768 3.768M6.11 6.11L3 3m3.11 3.11l11.78 11.78M21 21l-3.11-3.11"/></svg>
+    <span class="text-gray-300 font-medium flex-1">This message will be sent as a spoiler</span>
+    <button type="button" class="text-gray-400 hover:text-gray-200 ml-2 shrink-0" data-action="click->message-form#toggleSpoiler">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+    </button>
+  </div>
+
   <!-- File preview area -->
   <div data-message-form-target="filePreview" class="hidden bg-gray-700 px-4 py-2 flex flex-wrap border-b border-gray-600"></div>
 
@@ -151,6 +196,14 @@
             rows: 1,
             data: { action: "keydown->mention-autocomplete#onKeydown keydown->message-form#handleKeydown input->mention-autocomplete#onInput input->message-form#autoResize input->message-form#updateHighlight input->message-form#sendTyping", message_form_target: "input", unified_picker_target: "input", mention_autocomplete_target: "input" } %>
       </div>
+
+      <!-- Spoiler toggle -->
+      <input type="hidden" name="message[spoiler]" value="0" data-message-form-target="spoilerField">
+      <button type="button" class="text-gray-400 hover:text-gray-200 shrink-0 p-2" title="Mark as Spoiler"
+              data-action="click->message-form#toggleSpoiler"
+              data-message-form-target="spoilerBtn">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L6.11 6.11m3.768 3.768l4.242 4.242m0 0l3.768 3.768M6.11 6.11L3 3m3.11 3.11l11.78 11.78M21 21l-3.11-3.11"/></svg>
+      </button>
 
       <!-- Unified Picker button -->
       <div class="relative">

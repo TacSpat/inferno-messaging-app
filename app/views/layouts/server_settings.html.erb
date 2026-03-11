@@ -31,6 +31,8 @@
           <div class="space-y-0.5 mb-4">
             <%= link_to "Overview", server_settings_overview_path(@server),
                 class: "block px-2 py-1.5 rounded text-sm #{action_name == 'overview' || action_name == 'update_overview' ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
+            <%= link_to "Onboarding", server_settings_onboarding_path(@server),
+                class: "block px-2 py-1.5 rounded text-sm #{action_name.in?(%w[onboarding update_onboarding]) ? 'bg-gray-600 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-gray-200'}" %>
           </div>
           <% end %>
 

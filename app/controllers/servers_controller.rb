@@ -2,7 +2,7 @@ class ServersController < ApplicationController
   include MessageSearchable
 
   before_action :authenticate_user!
-  before_action :set_server, only: [ :show, :edit, :update, :destroy, :join, :leave, :search ]
+  before_action :set_server, only: [ :show, :edit, :update, :destroy, :join, :leave, :search, :onboarding, :complete_onboarding ]
   before_action :set_no_cache, only: [ :new ]
 
   def show
@@ -22,11 +22,18 @@ class ServersController < ApplicationController
     @server = Server.new(server_params)
     @server.owner = current_user
     if @server.save
+      # Apply server type template if specified (replaces default channels/roles)
+      server_type = params.dig(:server, :server_type).presence
+      if server_type && server_type != "community"
+        @server.apply_server_template!(server_type)
+      end
+
       publish_server_state(:metadata)
       publish_server_state(:structure)
       publish_server_state(:roles)
       publish_server_state(:member, pubkey: current_user.nostr_public_key)
-      redirect_to server_channel_path(@server, @server.channels.first), status: :see_other
+      NsfwScanJob.perform_later("Server", @server.id, "icon") if server_params[:icon].present?
+      redirect_to server_channel_path(@server, @server.channels.ordered.first), status: :see_other
     else
       render :new, status: :unprocessable_entity
     end
@@ -38,6 +45,8 @@ class ServersController < ApplicationController
   def update
     if @server.update(server_params)
       publish_server_state(:metadata)
+      NsfwScanJob.perform_later("Server", @server.id, "icon") if server_params[:icon].present?
+      NsfwScanJob.perform_later("Server", @server.id, "banner") if server_params[:banner].present?
       redirect_to server_channel_path(@server, @server.channels.ordered.first)
     else
       render :edit, status: :unprocessable_entity
@@ -45,7 +54,10 @@ class ServersController < ApplicationController
   end
 
   def destroy
-    publish_server_state(:metadata, deleted: true)
+    # Publish deletion synchronously — the server record must exist when the job reads it
+    if current_user.nostr_public_key.present?
+      NostrServerPublishJob.perform_now(current_user.id, @server.id, "metadata", deleted: true)
+    end
     ServerChannel.broadcast_to(@server, { type: "server_deleted" })
     @server.destroy
     redirect_to root_path, notice: "Server deleted.", status: :see_other
@@ -53,7 +65,14 @@ class ServersController < ApplicationController
 
   def join
     unless current_user.servers.include?(@server)
-      @server.server_memberships.create!(user: current_user)
+      # Age-restricted servers require explicit confirmation
+      if @server.age_restricted? && params[:age_confirmed] != "true"
+        redirect_to server_channel_path(@server, @server.channels.ordered.first),
+          alert: "You must confirm you are 18 or older to join this server."
+        return
+      end
+
+      @server.server_memberships.create!(user: current_user, joined_at: Time.current)
       publish_server_state(:member, pubkey: current_user.nostr_public_key)
     end
     redirect_to server_channel_path(@server, @server.channels.ordered.first)
@@ -79,6 +98,35 @@ class ServersController < ApplicationController
     ).call
 
     render partial: "messages/search_results", locals: { results: @results, server: @server, page: page, total: total, has_more: (page * per_page) < total }
+  end
+
+  def onboarding
+    @membership = @server.server_memberships.find_by!(user: current_user)
+
+    unless @server.onboarding_enabled? && !@membership.onboarding_completed?
+      redirect_to server_channel_path(@server, @server.channels.ordered.first)
+      return
+    end
+
+    @self_assignable_roles = @server.roles.where(self_assignable: true).ordered
+    @default_channels = @server.channels.text.ordered
+    render layout: "minimal"
+  end
+
+  def complete_onboarding
+    @membership = @server.server_memberships.find_by!(user: current_user)
+
+    # Assign selected roles
+    role_ids = Array(params[:role_ids]).select(&:present?)
+    if role_ids.any?
+      assignable = @server.roles.where(self_assignable: true, public_id: role_ids)
+      assignable.each do |role|
+        @membership.roles << role unless @membership.roles.include?(role)
+      end
+    end
+
+    @membership.update!(onboarding_completed: true)
+    redirect_to server_channel_path(@server, @server.channels.ordered.first), notice: "Welcome to #{@server.name}!"
   end
 
   def leave
@@ -177,7 +225,7 @@ class ServersController < ApplicationController
   end
 
   def server_params
-    params.require(:server).permit(:name, :description, :icon, :banner, :discoverable)
+    params.require(:server).permit(:name, :description, :icon, :banner, :discoverable, :server_type)
   end
 
   def set_no_cache
@@ -204,7 +252,8 @@ class ServersController < ApplicationController
         online_count: server.members.where(online_state: :online).count,
         join_url: nostr_group_id ? "/inferno/invite/#{nostr_group_id}/#{code}" : "/inferno/invite/#{code}",
         join_method: "invite",
-        state: state
+        state: state,
+        age_restricted: server.age_restricted?
       }
     end
 
@@ -237,7 +286,8 @@ class ServersController < ApplicationController
         member_count: local.total_member_count,
         online_count: local.members.where(online_state: :online).count,
         join_url: "/inferno/server/#{nostr_group_id}/join",
-        join_method: "server"
+        join_method: "server",
+        age_restricted: local.age_restricted?
       }
     end
 

@@ -2,13 +2,14 @@
 # Called after message creation to decide if a message should be auto-hidden.
 #
 # Filters (checked in order, first match wins):
-#   1. Keyword filter — text matching against user-defined word list
+#   0. CSAM hash — perceptual match against known CSAM hashes (non-negotiable, always on)
+#   1. NSFW detection — local ONNX classifier flags explicit images
 #   2. Unknown sender — not a friend or known contact
 #   3. Report threshold — sender has N+ local reports
 #   4. Reputation score — weighted multi-signal score below threshold
 #   5. Image hash — perceptual match against previously-flagged content
 #
-# All auto-hides are reversible via the safety settings page.
+# All auto-hides are reversible via the safety settings page (except CSAM).
 #
 class ContentSafetyFilter
   attr_reader :message, :config, :reason
@@ -22,10 +23,17 @@ class ContentSafetyFilter
   # Run all enabled filters. Returns true if the message was auto-hidden.
   def check!
     return false if message.hidden?
+
+    # CSAM check is non-negotiable — runs even on own messages
+    if image_csam_match?
+      auto_hide!("csam_match")
+      return true
+    end
+
     return false if message.user_id.present? && message.user == local_user # never filter own messages
 
-    if keyword_match?
-      auto_hide!("keyword")
+    if nsfw_image_match?
+      auto_hide!("nsfw")
     elsif unknown_sender?
       auto_hide!("unknown_sender")
     elsif over_report_threshold?
@@ -52,87 +60,24 @@ class ContentSafetyFilter
     @sender_pubkey ||= message.nostr_author_pubkey
   end
 
-  # --- Filter 1: Keyword matching (presets + user rules) ---
+  # --- Filter 0: CSAM hash matching (non-negotiable, always on) ---
 
-  def keyword_match?
-    return false if message.content.blank?
+  def image_csam_match?
+    return false unless message.files.attached?
 
-    content = message.content
-
-    # Preset checks (independent toggles, checked first)
-    return true if config.safety_block_links && has_unsafe_links?(content)
-    return true if config.safety_block_phone_numbers && has_phone_numbers?(content)
-    return true if config.safety_block_all_caps && all_caps?(content)
-    return true if config.safety_block_spam_chars && spam_chars?(content)
-
-    # User-defined keyword rules
-    keywords = config.safety_keyword_filter.to_s.strip
-    return false if keywords.blank?
-
-    content_lower = content.downcase
-    keywords.split("\n").any? do |line|
-      word = line.strip.downcase
-      next false if word.blank?
-
-      if word.end_with?("*") && !word.start_with?("*")
-        # "hate*" -> matches words starting with "hate"
-        prefix = Regexp.escape(word.chomp("*"))
-        content.match?(Regexp.new("\\b#{prefix}\\w*", Regexp::IGNORECASE))
-      elsif word.start_with?("*") && !word.end_with?("*")
-        # "*phobic" -> matches words ending with "phobic"
-        suffix = Regexp.escape(word.delete_prefix("*"))
-        content.match?(Regexp.new("\\w*#{suffix}\\b", Regexp::IGNORECASE))
-      else
-        # Plain word/phrase — case-insensitive include
-        content_lower.include?(word)
-      end
-    end
+    hashes = ImageHasher.hash_message_attachments(message)
+    hashes.any? { |h| CsamHashEntry.fuzzy_match?(h[:hash_value], hash_type: h[:hash_type]) }
   end
 
-  # Block messages with external links (excluding known safe embeds)
-  def has_unsafe_links?(content)
-    urls = content.scan(Message::URL_REGEX)
-    return false if urls.empty?
+  # --- Filter 1: NSFW image detection (ONNX model) ---
 
-    safe_patterns = [
-      Message::IMAGE_URL_REGEX,
-      Message::VIDEO_URL_REGEX,
-      Message::TENOR_REGEX,
-      Message::YOUTUBE_REGEX,
-      Message::INSTAGRAM_REGEX,
-      Message::TIKTOK_REGEX,
-      Message::INFERNO_INVITE_REGEX,
-      Message::NOSTR_INVITE_REGEX,
-      Message::NOSTR_SERVER_REGEX,
-      Message::DISCORD_LINK_REGEX,
-      Message::MESSAGE_LINK_REGEX,
-      Message::REDDIT_REGEX,
-      /\/rails\/active_storage\//i,
-      /(?:#{Message::BLOSSOM_DOMAINS.map { |d| Regexp.escape(d) }.join("|")})\/[0-9a-f]{64}/i
-    ]
+  def nsfw_image_match?
+    return false unless NsfwDetector.available?
+    return false unless message.files.attached?
+    # Skip NSFW detection in age-restricted server channels (explicit content expected)
+    return false if message.channel&.server&.age_restricted?
 
-    urls.any? do |url|
-      !safe_patterns.any? { |pattern| url.match?(pattern) }
-    end
-  end
-
-  # Block messages with phone numbers
-  def has_phone_numbers?(content)
-    content.match?(/(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/)
-  end
-
-  # Block ALL CAPS messages (>80% uppercase, min 20 chars)
-  def all_caps?(content)
-    return false if content.length < 20
-    letters = content.gsub(/[^a-zA-Z]/, "")
-    return false if letters.empty?
-    upper_ratio = letters.gsub(/[^A-Z]/, "").length.to_f / letters.length
-    upper_ratio > 0.8
-  end
-
-  # Block messages with 10+ repeated characters
-  def spam_chars?(content)
-    content.match?(/(.)\1{9,}/)
+    NsfwDetector.any_explicit?(message)
   end
 
   # --- Filter 2: Unknown sender ---

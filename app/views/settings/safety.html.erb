@@ -1,313 +1,203 @@
-<h2 class="text-xl font-bold text-white mb-2">Content Safety</h2>
-<p class="text-sm text-gray-400 mb-6">
-  Configure automatic filters to protect against harmful content. All auto-hidden messages can be reviewed and unhidden below.
-</p>
+<div id="fire-shield" data-controller="fire-shield" data-fire-shield-level-value="<%= @config.safety_protection_level %>" data-fire-shield-save-url-value="<%= user_settings_safety_path %>" data-level="<%= @config.safety_protection_level %>">
 
-<!-- Auto-Filter Settings -->
-<%= form_with url: user_settings_safety_path, method: :patch, local: true, data: { turbo_frame: "settings-frame", controller: "keyword-filter" } do %>
-<div class="space-y-4 mb-8">
+  <!-- ── Fire Shield ── -->
+  <div class="flex flex-col items-center pt-4 lg:pt-8 pb-8 lg:pb-12 relative">
 
-  <!-- Keyword Filter -->
-  <div class="bg-gray-800 rounded-lg p-4">
-    <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-3">Blocked Words & Phrases</label>
+    <button type="button" data-action="click->fire-shield#toggle" class="relative cursor-pointer focus:outline-none mb-6 shield-scale-wrapper" aria-label="Toggle protection level">
+      <!-- Canvas behind everything — embers rise from here -->
+      <canvas data-fire-shield-target="canvas" class="absolute pointer-events-none"></canvas>
 
-    <!-- Preset toggles -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
-      <label class="flex items-center gap-2 bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/50 cursor-pointer">
-        <input type="hidden" name="safety_block_links" value="0">
-        <input type="checkbox" name="safety_block_links" value="1" class="sr-only peer"
-               <%= "checked" if @config.safety_block_links %>
-               data-keyword-filter-target="blockLinks"
-               data-action="change->keyword-filter#testMessage">
-        <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-        <span class="text-xs text-gray-300">Block links</span>
-      </label>
+      <!-- Glow -->
+      <div class="shield-glow absolute rounded-full pointer-events-none"></div>
 
-      <label class="flex items-center gap-2 bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/50 cursor-pointer">
-        <input type="hidden" name="safety_block_phone_numbers" value="0">
-        <input type="checkbox" name="safety_block_phone_numbers" value="1" class="sr-only peer"
-               <%= "checked" if @config.safety_block_phone_numbers %>
-               data-keyword-filter-target="blockPhoneNumbers"
-               data-action="change->keyword-filter#testMessage">
-        <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-        <span class="text-xs text-gray-300">Block phones</span>
-      </label>
-
-      <label class="flex items-center gap-2 bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/50 cursor-pointer">
-        <input type="hidden" name="safety_block_all_caps" value="0">
-        <input type="checkbox" name="safety_block_all_caps" value="1" class="sr-only peer"
-               <%= "checked" if @config.safety_block_all_caps %>
-               data-keyword-filter-target="blockAllCaps"
-               data-action="change->keyword-filter#testMessage">
-        <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-        <span class="text-xs text-gray-300">Block ALL CAPS</span>
-      </label>
-
-      <label class="flex items-center gap-2 bg-gray-900/50 rounded-lg px-3 py-2 border border-gray-700/50 cursor-pointer">
-        <input type="hidden" name="safety_block_spam_chars" value="0">
-        <input type="checkbox" name="safety_block_spam_chars" value="1" class="sr-only peer"
-               <%= "checked" if @config.safety_block_spam_chars %>
-               data-keyword-filter-target="blockSpamChars"
-               data-action="change->keyword-filter#testMessage">
-        <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-        <span class="text-xs text-gray-300">Block spam</span>
-      </label>
-    </div>
-
-    <p class="text-xs text-gray-500 mb-2">One per line. Use <code class="text-gray-400">*</code> at the start or end for partial matching.</p>
-    <textarea name="safety_keyword_filter" rows="4" placeholder="hate*&#10;scam&#10;*phobic&#10;buy now"
-              data-keyword-filter-target="textarea"
-              data-action="input->keyword-filter#updateRuleCount input->keyword-filter#testMessage"
-              class="w-full bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none font-mono resize-y"><%= @config.safety_keyword_filter %></textarea>
-    <p class="text-xs text-gray-500 mt-1" data-keyword-filter-target="ruleCount">0 active rules</p>
-
-    <!-- Test box -->
-    <div class="mt-3 pt-3 border-t border-gray-700/50">
-      <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1.5">Test a message</label>
-      <input type="text" placeholder="Type a sample message..."
-             data-keyword-filter-target="testInput"
-             data-action="input->keyword-filter#testMessage"
-             class="w-full bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
-      <p class="text-xs mt-1.5" data-keyword-filter-target="testResult">
-        <span class="text-gray-500">Type a sample message above</span>
-      </p>
-    </div>
-  </div>
-
-  <!-- Unknown Senders -->
-  <div class="bg-gray-800 rounded-lg p-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <label class="text-sm text-gray-300 block">Hide messages from unknown senders</label>
-        <p class="text-xs text-gray-500 mt-0.5">Auto-hide messages from people who are not on your friends list.</p>
+      <!-- Shield -->
+      <div data-fire-shield-target="icon" class="shield-icon relative flex items-center justify-center" style="width:120px;height:120px;">
+        <svg viewBox="0 0 24 24" class="w-20 h-20" fill="none" stroke-width="1.2">
+          <path class="shield-fill" d="M12 2l8 4v5c0 5.25-3.5 10.74-8 12-4.5-1.26-8-6.75-8-12V6l8-4z" />
+          <path data-fire-shield-target="flamePath" class="flame-path" d="M12 17.5c-2.5 0-4-2.2-4-4.5 0-2 1.5-4 3-5.5.5 1.5 2 2.5 2 2.5s-.5-2.5.5-4c1.5 2 2.5 4 2.5 5.5 0 3.5-1.5 6-4 6z" />
+        </svg>
       </div>
-      <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
-        <input type="hidden" name="safety_hide_unknown_senders" value="0">
-        <input type="checkbox" name="safety_hide_unknown_senders" value="1" class="sr-only peer" <%= "checked" if @config.safety_hide_unknown_senders %>>
-        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-      </label>
-    </div>
-  </div>
-
-  <!-- Report Threshold -->
-  <div class="bg-gray-800 rounded-lg p-4">
-    <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-2">Report Threshold</label>
-    <p class="text-xs text-gray-500 mb-2">Auto-hide messages from senders who have been reported this many times. 0 = disabled.</p>
-    <input type="number" name="safety_report_threshold" value="<%= @config.safety_report_threshold %>" min="0"
-           class="w-32 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
-  </div>
-
-  <!-- Reputation System -->
-  <div class="bg-gray-800 rounded-lg p-4 space-y-3">
-    <div class="flex items-center justify-between">
-      <div>
-        <label class="text-sm text-gray-300 block">Reputation-based filtering</label>
-        <p class="text-xs text-gray-500 mt-0.5">Auto-hide messages from senders with a low trust score. Score weighs reports, bans, and your own hides — capped per signal type to resist abuse.</p>
-      </div>
-      <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
-        <input type="hidden" name="safety_reputation_enabled" value="0">
-        <input type="checkbox" name="safety_reputation_enabled" value="1" class="sr-only peer" <%= "checked" if @config.safety_reputation_enabled %>>
-        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-      </label>
-    </div>
-    <div class="flex items-center gap-6">
-      <div>
-        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Hide below score</label>
-        <input type="number" name="safety_reputation_threshold" value="<%= @config.safety_reputation_threshold %>" min="0" max="100"
-               class="w-24 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
-        <p class="text-xs text-gray-500 mt-1">0-100 scale. Everyone starts at 100.</p>
-      </div>
-      <div>
-        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Sensitivity</label>
-        <select name="safety_reputation_sensitivity" class="bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
-          <% %w[relaxed moderate strict].each do |level| %>
-            <option value="<%= level %>" <%= "selected" if @config.safety_reputation_sensitivity == level %>>
-              <%= level.capitalize %>
-            </option>
-          <% end %>
-        </select>
-        <p class="text-xs text-gray-500 mt-1">How heavily to penalize negative signals.</p>
-      </div>
-    </div>
-    <div class="bg-gray-900/50 rounded-md px-3 py-2 border border-gray-700/50 text-xs text-gray-500">
-      <span class="text-gray-400 font-medium">How scoring works:</span>
-      Everyone starts at 100. Penalties: your hides (-15, max -45), community reports (-3, max -30), server bans (-10, max -30). Bonuses: friends (+20), known contacts (+5). Caps per signal prevent brigading — one angry server or troll can't tank a score alone.
-    </div>
-  </div>
-
-  <!-- Image Hash Matching -->
-  <div class="bg-gray-800 rounded-lg p-4">
-    <div class="flex items-center justify-between">
-      <div>
-        <label class="text-sm text-gray-300 block">Image fingerprinting</label>
-        <p class="text-xs text-gray-500 mt-0.5">
-          When you hide a message with images, their perceptual fingerprint is stored. Future messages with visually similar images are auto-hidden — even if resized, recompressed, or slightly edited.
-          <% if ImageHasher.ffmpeg_available? %>
-            Video first-frames are also fingerprinted.
-          <% end %>
-        </p>
-      </div>
-      <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
-        <input type="hidden" name="safety_image_hash_enabled" value="0">
-        <input type="checkbox" name="safety_image_hash_enabled" value="1" class="sr-only peer" <%= "checked" if @config.safety_image_hash_enabled %>>
-        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-      </label>
-    </div>
-    <% if @content_hash_count > 0 %>
-      <div class="flex items-center gap-4 mt-2 text-xs text-gray-500">
-        <span><%= @local_hash_count %> local</span>
-        <span><%= @shared_hash_count %> shared</span>
-        <span><%= @allowlisted_hash_count %> allowlisted</span>
-      </div>
-    <% end %>
-  </div>
-
-  <!-- Shared Hash Registry -->
-  <div class="bg-gray-800 rounded-lg p-4 space-y-3">
-    <div class="flex items-center justify-between">
-      <div>
-        <label class="text-sm text-gray-300 block">Shared hash registry</label>
-        <p class="text-xs text-gray-500 mt-0.5">Receive image fingerprints from other Nostr users via NIP-56 reports. When enough trusted reporters flag the same image, it's auto-blocked locally.</p>
-      </div>
-      <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-4">
-        <input type="hidden" name="safety_shared_hashes_enabled" value="0">
-        <input type="checkbox" name="safety_shared_hashes_enabled" value="1" class="sr-only peer" <%= "checked" if @config.safety_shared_hashes_enabled %>>
-        <div class="w-9 h-5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-accent"></div>
-      </label>
-    </div>
-
-    <div class="flex items-center gap-6">
-      <div>
-        <label class="text-xs font-bold text-gray-400 uppercase tracking-wide block mb-1">Min confidence to block</label>
-        <input type="number" name="safety_shared_hash_min_reporters" value="<%= @config.safety_shared_hash_min_reporters %>" min="1" max="100"
-               class="w-24 bg-gray-900 border border-gray-600 text-white text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-accent focus:border-accent outline-none">
-        <p class="text-xs text-gray-500 mt-1">Weighted score threshold (3 friends = 3.0, 10 known = 3.0).</p>
-      </div>
-      <div class="space-y-2">
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="hidden" name="safety_shared_hash_trust_friends" value="0">
-          <input type="checkbox" name="safety_shared_hash_trust_friends" value="1" class="sr-only peer" <%= "checked" if @config.safety_shared_hash_trust_friends %>>
-          <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-          <span class="text-xs text-gray-300">Trust friends more</span>
-        </label>
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="hidden" name="safety_publish_hashes" value="0">
-          <input type="checkbox" name="safety_publish_hashes" value="1" class="sr-only peer" <%= "checked" if @config.safety_publish_hashes %>>
-          <div class="w-8 h-4.5 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3.5 after:w-3.5 after:transition-all peer-checked:bg-accent relative shrink-0"></div>
-          <span class="text-xs text-gray-300">Share my hashes with network</span>
-        </label>
-      </div>
-    </div>
-
-    <% if @shared_hash_count > 0 || @allowlisted_hash_count > 0 %>
-      <div class="flex items-center gap-3 pt-2 border-t border-gray-700/50">
-        <% if @shared_hash_count > 0 %>
-          <%= button_to "Clear shared hashes", user_settings_clear_shared_hashes_path, method: :post,
-              class: "text-xs text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg transition cursor-pointer",
-              data: { turbo_confirm: "Remove all #{@shared_hash_count} shared hashes? They'll be re-fetched from relays.", turbo_frame: "settings-frame" } %>
-        <% end %>
-      </div>
-    <% end %>
-  </div>
-
-  <!-- Save -->
-  <div>
-    <button type="submit" class="bg-accent hover:bg-accent-light text-white text-sm font-medium px-4 py-2 rounded-lg transition cursor-pointer">
-      Save Safety Settings
     </button>
-  </div>
-</div>
-<% end %>
 
-<!-- Hidden Messages -->
-<div class="border-t border-gray-700 pt-6">
-  <div class="flex items-center justify-between mb-4">
-    <h3 class="text-sm font-semibold text-gray-400">Hidden Messages</h3>
-    <% if @auto_hidden_count > 0 %>
-      <span class="text-xs text-gray-500"><%= @auto_hidden_count %> auto-hidden</span>
-    <% end %>
+    <div class="text-center">
+      <h2 data-fire-shield-target="title" class="shield-title text-lg lg:text-xl font-bold mb-1"></h2>
+      <p data-fire-shield-target="subtitle" class="shield-subtitle text-sm lg:text-base max-w-xs lg:max-w-sm"></p>
+    </div>
   </div>
 
-  <% if @hidden_messages.any? %>
-    <div class="space-y-3">
-      <% @hidden_messages.each do |message| %>
-        <div class="bg-gray-800 rounded-lg p-4">
-          <div class="flex items-start justify-between gap-4">
-            <div class="min-w-0 flex-1">
-              <!-- Meta -->
-              <div class="flex items-center gap-2 text-xs text-gray-500 mb-1.5">
-                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium
-                  <% reason = message.hidden_reason.to_s %>
-                  <%= if reason.start_with?("auto:")
-                        'bg-accent/20 text-accent-light'
-                      elsif reason.in?(%w[csam illegal])
-                        'bg-danger/20 text-danger-light'
-                      elsif reason == 'spam'
-                        'bg-warning/20 text-warning-light'
-                      else
-                        'bg-gray-700 text-gray-400'
-                      end %>">
-                  <% if reason.start_with?("auto:") %>
-                    AUTO: <%= reason.delete_prefix("auto:").upcase %>
-                  <% else %>
-                    <%= reason.upcase.presence || "OTHER" %>
+  <% if @user_hidden_count > 0 %>
+  <div class="mb-6 flex items-center justify-center gap-2 text-xs text-gray-500">
+    <svg class="w-4 h-4 text-green-400/60 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+    You've helped protect the network from <%= @user_hidden_count %> harmful <%= 'message'.pluralize(@user_hidden_count) %>.
+  </div>
+  <% end %>
+
+  <!-- NSFW blur toggle -->
+  <%= form_with url: user_settings_safety_path, method: :patch, local: true, data: { turbo_frame: "settings-frame" } do %>
+  <div class="border-t border-gray-700 pt-6 pb-6">
+    <div class="bg-gray-800 rounded-lg p-4">
+      <label class="flex items-center justify-between cursor-pointer group">
+        <div>
+          <span class="text-sm font-medium text-gray-300 group-hover:text-white transition">Blur NSFW content</span>
+          <p class="text-xs text-gray-500 mt-0.5">Blurs images in age-restricted channels and profile pictures or banners detected as explicit. Click any blurred image to reveal it.</p>
+        </div>
+        <input type="hidden" name="safety_blur_nsfw" value="0">
+        <input type="checkbox" name="safety_blur_nsfw" value="1" <%= "checked" if @config.safety_blur_nsfw %> onchange="this.form.requestSubmit()"
+               class="w-4 h-4 rounded bg-gray-900 border-gray-600 text-accent focus:ring-accent cursor-pointer">
+      </label>
+    </div>
+  </div>
+  <% end %>
+
+  <!-- Hidden Messages -->
+  <div class="border-t border-gray-700 pt-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-semibold text-gray-400">Hidden Messages</h3>
+      <% if @auto_hidden_count > 0 %>
+        <span class="text-xs text-gray-500"><%= @auto_hidden_count %> auto-hidden</span>
+      <% end %>
+    </div>
+
+    <% if @hidden_messages.any? %>
+      <div class="space-y-3">
+        <% @hidden_messages.each do |message| %>
+          <div class="bg-gray-800 rounded-lg p-4">
+            <div class="flex items-start justify-between gap-4">
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2 text-xs text-gray-500 mb-1.5">
+                  <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium
+                    <% reason = message.hidden_reason.to_s %>
+                    <%= if reason.start_with?("auto:")
+                          'bg-accent/20 text-accent-light'
+                        elsif reason.in?(%w[csam illegal])
+                          'bg-danger/20 text-danger-light'
+                        elsif reason == 'spam'
+                          'bg-warning/20 text-warning-light'
+                        else
+                          'bg-gray-700 text-gray-400'
+                        end %>">
+                    <% if reason.start_with?("auto:") %>
+                      AUTO: <%= reason.delete_prefix("auto:").upcase %>
+                    <% else %>
+                      <%= reason.upcase.presence || "OTHER" %>
+                    <% end %>
+                  </span>
+                  <span>Hidden <%= time_ago_in_words(message.hidden_at) %> ago</span>
+                  <% if message.channel %>
+                    <span>&middot; #<%= message.channel.name %></span>
+                  <% elsif message.conversation %>
+                    <span>&middot; DM</span>
                   <% end %>
-                </span>
-                <span>Hidden <%= time_ago_in_words(message.hidden_at) %> ago</span>
-                <% if message.channel %>
-                  <span>&middot; #<%= message.channel.name %></span>
-                <% elsif message.conversation %>
-                  <span>&middot; DM</span>
+                </div>
+
+                <% if reason == "csam_match" %>
+                  <p class="text-sm text-gray-500 italic">This message was blocked by automated safety systems.</p>
+                <% elsif message.content.present? %>
+                  <p class="text-sm text-gray-300 truncate max-w-lg"><%= truncate(message.content, length: 120) %></p>
+                <% else %>
+                  <p class="text-sm text-gray-500 italic">No text content</p>
+                <% end %>
+
+                <% if message.hidden_attachment_records.any? && reason != "csam_match" %>
+                  <div class="mt-2 space-y-1">
+                    <% message.hidden_attachment_records.each do |rec| %>
+                      <div class="flex items-center gap-2 text-xs text-gray-500">
+                        <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                        <span class="font-mono"><%= rec.original_filename %></span>
+                        <span>&middot; <%= number_to_human_size(rec.byte_size) %></span>
+                        <span>&middot; <%= rec.content_type %></span>
+                      </div>
+                    <% end %>
+                  </div>
                 <% end %>
               </div>
 
-              <!-- Content preview -->
-              <% if message.content.present? %>
-                <p class="text-sm text-gray-300 truncate max-w-lg"><%= truncate(message.content, length: 120) %></p>
-              <% else %>
-                <p class="text-sm text-gray-500 italic">No text content</p>
-              <% end %>
-
-              <!-- Preserved attachment metadata -->
-              <% if message.hidden_attachment_records.any? %>
-                <div class="mt-2 space-y-1">
-                  <% message.hidden_attachment_records.each do |rec| %>
-                    <div class="flex items-center gap-2 text-xs text-gray-500">
-                      <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
-                      <span class="font-mono"><%= rec.original_filename %></span>
-                      <span>&middot; <%= number_to_human_size(rec.byte_size) %></span>
-                      <span>&middot; <%= rec.content_type %></span>
-                      <% if rec.checksum.present? %>
-                        <span class="text-gray-600">SHA: <%= rec.checksum.first(12) %>...</span>
-                      <% end %>
-                    </div>
-                  <% end %>
-                </div>
-              <% end %>
-
-              <!-- Nostr event ID -->
-              <% if message.nostr_event_id.present? %>
-                <p class="text-xs text-gray-600 mt-1 font-mono truncate">Event: <%= message.nostr_event_id %></p>
-              <% end %>
-            </div>
-
-            <!-- Unhide button -->
-            <div class="shrink-0">
-              <%= button_to "Unhide", user_settings_unhide_message_path(message.public_id), method: :post,
-                  class: "text-xs text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg transition cursor-pointer",
-                  data: { turbo_confirm: "Unhide this message? It will reappear in the chat.", turbo_frame: "settings-frame" } %>
+              <div class="shrink-0 flex flex-col gap-1 items-end">
+                <% unless reason == "csam_match" %>
+                  <%= button_to "Unhide", user_settings_unhide_message_path(message.public_id), method: :post,
+                      class: "text-xs text-gray-400 hover:text-white bg-gray-700 hover:bg-gray-600 px-3 py-1.5 rounded-lg transition cursor-pointer",
+                      data: { turbo_confirm: "Unhide this message? It will reappear in the chat.", turbo_frame: "settings-frame" } %>
+                <% end %>
+                <%= link_to "Report to authorities", user_settings_authority_report_path(message.public_id),
+                    class: "text-[11px] text-gray-500 hover:text-gray-300 transition",
+                    data: { turbo_frame: "settings-frame" } %>
+              </div>
             </div>
           </div>
-        </div>
-      <% end %>
-    </div>
-  <% else %>
-    <div class="text-center py-12">
-      <svg class="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
-      </svg>
-      <p class="text-sm text-gray-500">No hidden messages</p>
-      <p class="text-xs text-gray-600 mt-1">Messages you hide (or that are auto-hidden by your filters) will appear here for review.</p>
-    </div>
-  <% end %>
+        <% end %>
+      </div>
+    <% else %>
+      <div class="text-center py-12">
+        <svg class="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+        </svg>
+        <p class="text-sm text-gray-500">No hidden messages</p>
+        <p class="text-xs text-gray-600 mt-1">Messages hidden by your filters will appear here for review.</p>
+      </div>
+    <% end %>
+  </div>
 </div>
+
+<style>
+  .shield-scale-wrapper {
+    width: 180px; height: 220px;
+    display: flex; align-items: center; justify-content: center;
+    transform: scale(1);
+    transform-origin: center center;
+  }
+  #ember-canvas {
+    inset: -100px -60px -10px -60px;
+    width: 300px; height: 330px;
+  }
+  @media (min-width: 1024px) {
+    .shield-scale-wrapper { transform: scale(1.35); margin: 20px 0; }
+  }
+  @media (min-width: 1280px) {
+    .shield-scale-wrapper { transform: scale(1.55); margin: 35px 0; }
+  }
+  .shield-glow {
+    inset: 5px;
+    transition: all 1.5s ease;
+  }
+  .shield-icon {
+    transition: filter 1.5s ease, transform 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
+  }
+  .shield-fill, .flame-path {
+    transition: all 1.2s ease;
+  }
+  .shield-title, .shield-subtitle {
+    transition: color 1s ease, opacity 0.4s ease;
+  }
+
+  /* ── Shielded: JS drives the flame via inline styles ── */
+  #fire-shield[data-level="standard"] .shield-fill {
+    fill: rgba(220,38,38,0.13); stroke: #f87171;
+    transition: fill 1.2s ease, stroke 1.2s ease;
+  }
+  #fire-shield[data-level="standard"] .flame-path {
+    fill: #f97316; stroke: #fbbf24; stroke-width: 0.4;
+    transition: fill 1.2s ease, fill-opacity 1.2s ease, stroke 1.2s ease;
+  }
+  #fire-shield[data-level="standard"] .shield-title { color: #fbbf24; }
+  #fire-shield[data-level="standard"] .shield-subtitle { color: #a8a7a5; }
+
+  /* ── Relaxed: cold stone, no flame ── */
+  #fire-shield[data-level="relaxed"] .shield-fill {
+    fill: rgba(50,48,46,0.25); stroke: #3a3836;
+    transition: fill 1.2s ease, stroke 1.2s ease;
+  }
+  #fire-shield[data-level="relaxed"] .flame-path {
+    fill: #3a3836; fill-opacity: 0; stroke: none;
+    transition: fill 1.2s ease, fill-opacity 1.2s ease, stroke 1.2s ease;
+  }
+  #fire-shield[data-level="relaxed"] .shield-glow { opacity: 0 !important; }
+  #fire-shield[data-level="relaxed"] .shield-icon {
+    filter: drop-shadow(0 0 4px rgba(60,58,56,0.15)) !important;
+    transform: scale(1) !important;
+  }
+  #fire-shield[data-level="relaxed"] .shield-title { color: #706e6c; }
+  #fire-shield[data-level="relaxed"] .shield-subtitle { color: #5c5a58; }
+
+  #shield-toggle:hover .shield-icon { transform: scale(1.04); }
+</style>
+

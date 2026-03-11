@@ -37,6 +37,16 @@ class Role < ApplicationRecord
     move_members: false
   }.freeze
 
+  MOD_PERMISSIONS = DEFAULT_PERMISSIONS.merge(
+    mention_everyone: true,
+    manage_messages: true,
+    manage_invites: true,
+    kick_members: true,
+    mute_members: true,
+    deafen_members: true,
+    move_members: true
+  ).freeze
+
   ADMIN_PERMISSIONS = DEFAULT_PERMISSIONS.merge(
     mention_everyone: true,
     create_emojis: true,

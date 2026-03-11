@@ -2,7 +2,7 @@ class ServerSettingsController < ApplicationController
   before_action :authenticate_user!
   before_action :set_server
   before_action :set_current_membership
-  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers, :voice, :opt_in_voice, :opt_out_voice, :timeout_member, :remove_timeout, :member_history, :prune_preview, :prune_members, :batch_kick, :batch_ban, :batch_timeout, :relays, :add_relay, :remove_relay ]
+  before_action :ensure_permission!, except: [ :invites, :create_invite, :destroy_invite, :update_member, :emojis, :stickers, :voice, :opt_in_voice, :opt_out_voice, :timeout_member, :remove_timeout, :member_history, :prune_preview, :prune_members, :batch_kick, :batch_ban, :batch_timeout, :relays, :add_relay, :remove_relay, :verify_member, :unverify_member ]
   before_action :ensure_relay_permission!, only: [ :relays, :add_relay, :remove_relay ]
   before_action :ensure_invite_permission!, only: [ :invites, :create_invite, :destroy_invite ]
   before_action :ensure_emoji_permission!, only: [ :emojis ]
@@ -444,6 +444,33 @@ class ServerSettingsController < ApplicationController
     redirect_to server_settings_bans_path(@server), notice: "Ban removed."
   end
 
+  def onboarding
+    @roles = @server.roles.where.not("json_extract(permissions, '$.owner') IS TRUE")
+                          .where(name: nil..nil) # all non-owner
+                          .ordered
+    @roles = @server.roles.reject(&:owner?).sort_by { |r| -r.position }
+    @channels = @server.channels.text.ordered
+  end
+
+  def update_onboarding
+    @server.onboarding_enabled = params[:server][:onboarding_enabled] == "1"
+    @server.onboarding_rules = params[:server][:onboarding_rules]
+
+    # Self-assignable roles
+    role_ids = Array(params[:server][:self_assignable_role_ids]).select(&:present?)
+    @server.roles.update_all(self_assignable: false)
+    @server.roles.where(public_id: role_ids).update_all(self_assignable: true)
+
+    # Default channels
+    @server.onboarding_default_channel_ids = Array(params[:server][:default_channel_ids]).select(&:present?)
+
+    if @server.save
+      redirect_to server_settings_onboarding_path(@server), notice: "Onboarding settings saved."
+    else
+      render :onboarding, status: :unprocessable_entity
+    end
+  end
+
   def relays
     @server_relays = @server.relay_urls || []
     @global_relays = RelayConnection.order(:url)
@@ -470,6 +497,60 @@ class ServerSettingsController < ApplicationController
     current_urls = @server.relay_urls || []
     @server.update!(relay_urls: current_urls - [url])
     redirect_to server_settings_relays_path(@server), notice: "Relay removed from server."
+  end
+
+  def verify_member
+    ensure_kick_permission!
+    verified_role = @server.roles.find_by(name: "Verified")
+    unless verified_role
+      respond_to do |format|
+        format.html { redirect_to server_settings_members_path(@server), alert: "No Verified role exists on this server." }
+        format.json { render json: { error: "No Verified role" }, status: :unprocessable_entity }
+      end
+      return
+    end
+
+    membership = @server.server_memberships.find_by(public_id: params[:id])
+    unless membership
+      respond_to do |format|
+        format.html { redirect_to server_settings_members_path(@server), alert: "Member not found." }
+        format.json { render json: { error: "Member not found" }, status: :not_found }
+      end
+      return
+    end
+
+    membership.roles << verified_role unless membership.roles.include?(verified_role)
+    respond_to do |format|
+      format.html { redirect_back fallback_location: server_settings_members_path(@server), notice: "#{membership.user.username} has been verified." }
+      format.json { render json: { success: true, username: membership.user.username } }
+    end
+  end
+
+  def unverify_member
+    ensure_kick_permission!
+    verified_role = @server.roles.find_by(name: "Verified")
+    unless verified_role
+      respond_to do |format|
+        format.html { redirect_to server_settings_members_path(@server), alert: "No Verified role exists." }
+        format.json { render json: { error: "No Verified role" }, status: :unprocessable_entity }
+      end
+      return
+    end
+
+    membership = @server.server_memberships.find_by(public_id: params[:id])
+    unless membership
+      respond_to do |format|
+        format.html { redirect_to server_settings_members_path(@server), alert: "Member not found." }
+        format.json { render json: { error: "Member not found" }, status: :not_found }
+      end
+      return
+    end
+
+    membership.roles.delete(verified_role)
+    respond_to do |format|
+      format.html { redirect_back fallback_location: server_settings_members_path(@server), notice: "#{membership.user.username} verification removed." }
+      format.json { render json: { success: true, username: membership.user.username } }
+    end
   end
 
   private
@@ -602,7 +683,7 @@ class ServerSettingsController < ApplicationController
   end
 
   def server_params
-    params.require(:server).permit(:name, :description, :icon, :banner, :discoverable, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
+    params.require(:server).permit(:name, :description, :icon, :banner, :discoverable, :age_restricted, :welcome_message_enabled, :welcome_channel_id, :welcome_message_template)
   end
 
   def publish_server_state(event_type, **options)

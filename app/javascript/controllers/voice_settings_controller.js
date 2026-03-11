@@ -9,6 +9,7 @@ export default class extends Controller {
     this._syncCheckbox("noise_suppression", "voice-noise-suppression", "voice:noise-suppression-changed", "enabled")
     this._syncCheckbox("echo_cancellation", "voice-echo-cancellation", "voice:echo-cancellation-changed", "enabled")
     this._syncCheckbox("auto_gain_control", "voice-auto-gain-control", "voice:agc-changed", "enabled")
+    this._syncSelect("noise_suppression_level", "voice-noise-suppression-level", "voice:noise-suppression-level-changed", "level")
   }
 
   // Sync a checkbox to localStorage and dispatch a live event on change
@@ -24,6 +25,21 @@ export default class extends Controller {
       const val = checkbox.checked
       localStorage.setItem(storageKey, val ? "true" : "false")
       window.dispatchEvent(new CustomEvent(eventName, { detail: { [detailKey]: val } }))
+    })
+  }
+
+  // Sync a select dropdown to localStorage and dispatch a live event on change
+  _syncSelect(name, storageKey, eventName, detailKey) {
+    const select = this.element.querySelector(`select[name="${name}"]`)
+    if (!select) return
+
+    // Initial sync
+    localStorage.setItem(storageKey, select.value)
+
+    // Live propagation on change
+    select.addEventListener("change", () => {
+      localStorage.setItem(storageKey, select.value)
+      window.dispatchEvent(new CustomEvent(eventName, { detail: { [detailKey]: select.value } }))
     })
   }
 

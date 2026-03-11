@@ -10,11 +10,12 @@
   <a href="<%= server_channel_path(server, server.channels.ordered.first) %>" class="<%= icon_classes %>" title="<%= server.name %>">
   <% end %>
     <% if icon_ok %>
+      <% icon_blur = nsfw_blur_class(server.icon_nsfw?) %>
       <% if is_gif %>
-        <canvas class="gif-static w-full h-full object-cover absolute inset-0" data-gif-freeze></canvas>
-        <%= image_tag server.icon, class: 'gif-animated w-full h-full object-cover absolute inset-0', data: { gif_src: true } %>
+        <canvas class="gif-static w-full h-full object-cover absolute inset-0 <%= icon_blur %>" data-gif-freeze<%= ' onclick="this.classList.toggle(\'unblurred\')"'.html_safe if icon_blur.present? %>></canvas>
+        <%= image_tag server.icon, class: "gif-animated w-full h-full object-cover absolute inset-0 #{icon_blur}", data: { gif_src: true } %>
       <% else %>
-        <%= image_tag server.icon, class: 'w-full h-full object-cover' %>
+        <%= image_tag server.icon, class: "w-full h-full object-cover #{icon_blur}", onclick: icon_blur.present? ? "this.classList.toggle('unblurred')" : nil %>
       <% end %>
     <% else %>
       <span class="text-white font-semibold text-sm"><%= server.name.split.map(&:first).join[0..1].upcase %></span>

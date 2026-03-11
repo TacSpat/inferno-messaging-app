@@ -43,6 +43,12 @@ module ApplicationHelper
     end
   end
 
+  # Returns "nsfw-profile-blur" if the image is flagged NSFW and blur is enabled, otherwise "".
+  def nsfw_blur_class(is_nsfw)
+    return "" unless is_nsfw == true && LocalConfig.current.safety_blur_nsfw
+    "nsfw-profile-blur"
+  end
+
   private
 
   def find_server_emoji(name, message)

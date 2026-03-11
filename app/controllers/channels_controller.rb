@@ -38,9 +38,14 @@ class ChannelsController < ApplicationController
       return
     end
 
-    @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
-                        .ordered.last(50)
-    @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
+    if @post_only_channel
+      @messages = []
+      @has_older = false
+    else
+      @messages = @channel.messages.includes(user: { avatar_attachment: :blob, server_memberships: :roles }, reactions: {}, files_attachments: :blob)
+                          .ordered.last(50)
+      @has_older = @messages.any? && @channel.messages.where("created_at < ?", @messages.first.created_at).exists?
+    end
     @message = Message.new
     current_user.notifications.unread.for_channel(@channel.id).update_all(read: true)
     ChannelRead.upsert(
@@ -271,6 +276,8 @@ class ChannelsController < ApplicationController
       redirect_to server_channel_path(@server, @server.channels.ordered.first), alert: "You don't have access to this channel."
     elsif access == :read_only
       @read_only_channel = true
+    elsif access == :post_only
+      @post_only_channel = true
     end
   end
 

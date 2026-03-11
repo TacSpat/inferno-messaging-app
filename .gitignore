@@ -58,3 +58,6 @@ doc/.obsidian/
 /binaries/
 /sidecar-stage/
 /ruby-sidecar/
+
+# ONNX model files (too large for git).
+/lib/models/*.onnx

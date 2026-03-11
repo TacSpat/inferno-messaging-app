@@ -73,6 +73,7 @@ export default class extends Controller {
     this._onBeforeUnload = this._handleBeforeUnload.bind(this)
     this._onOutputVolumeChanged = this._handleOutputVolumeChanged.bind(this)
     this._onNoiseSuppressionChanged = this._handleNoiseSuppressionChanged.bind(this)
+    this._onNoiseSuppressionLevelChanged = this._handleNoiseSuppressionLevelChanged.bind(this)
     this._onEchoCancellationChanged = this._handleEchoCancellationChanged.bind(this)
     this._onAgcChanged = this._handleAgcChanged.bind(this)
     this._onInputSensitivityChanged = this._handleInputSensitivityChanged.bind(this)
@@ -87,6 +88,7 @@ export default class extends Controller {
     window.addEventListener("beforeunload", this._onBeforeUnload)
     window.addEventListener("voice:output-volume-changed", this._onOutputVolumeChanged)
     window.addEventListener("voice:noise-suppression-changed", this._onNoiseSuppressionChanged)
+    window.addEventListener("voice:noise-suppression-level-changed", this._onNoiseSuppressionLevelChanged)
     window.addEventListener("voice:echo-cancellation-changed", this._onEchoCancellationChanged)
     window.addEventListener("voice:agc-changed", this._onAgcChanged)
     window.addEventListener("voice:input-sensitivity-changed", this._onInputSensitivityChanged)
@@ -115,6 +117,7 @@ export default class extends Controller {
     window.removeEventListener("beforeunload", this._onBeforeUnload)
     window.removeEventListener("voice:output-volume-changed", this._onOutputVolumeChanged)
     window.removeEventListener("voice:noise-suppression-changed", this._onNoiseSuppressionChanged)
+    window.removeEventListener("voice:noise-suppression-level-changed", this._onNoiseSuppressionLevelChanged)
     window.removeEventListener("voice:echo-cancellation-changed", this._onEchoCancellationChanged)
     window.removeEventListener("voice:agc-changed", this._onAgcChanged)
     window.removeEventListener("voice:input-sensitivity-changed", this._onInputSensitivityChanged)
@@ -288,13 +291,17 @@ export default class extends Controller {
     return Math.max(0, Math.min(2, saved / 100))
   }
 
-  // Build audio capture constraints from stored preferences
+  // Build audio capture constraints from stored preferences.
+  // When RNNoise is enabled, we disable the browser's built-in noise
+  // suppression to avoid double-processing artifacts (phasing, pumping).
   _audioCaptureOptions() {
     const deviceId = localStorage.getItem("voice-input-device")
+    const rnnoiseEnabled = localStorage.getItem("voice-noise-suppression") !== "false"
     const opts = {
       autoGainControl: localStorage.getItem("voice-auto-gain-control") !== "false",
       echoCancellation: localStorage.getItem("voice-echo-cancellation") !== "false",
-      noiseSuppression: localStorage.getItem("voice-noise-suppression") !== "false"
+      // Disable browser suppression when RNNoise handles it — they conflict
+      noiseSuppression: !rnnoiseEnabled
     }
     if (deviceId && deviceId !== "default") {
       opts.deviceId = { ideal: deviceId }
@@ -306,6 +313,11 @@ export default class extends Controller {
 
   async _handleNoiseSuppressionChanged() {
     await this._republishMicWithCurrentSettings()
+    await this._syncNoiseProcessor()
+  }
+
+  async _handleNoiseSuppressionLevelChanged() {
+    // Level changed — rebuild the processor with new HP/gate settings
     await this._syncNoiseProcessor()
   }
 
@@ -345,18 +357,28 @@ export default class extends Controller {
   }
 
   // Attach or detach the RNNoise processor based on stored preference.
+  // When the suppression level changes, we tear down and rebuild the processor
+  // so the new high-pass / gate settings take effect.
   async _syncNoiseProcessor() {
     if (!this.room || this._muted) return
     const enabled = localStorage.getItem("voice-noise-suppression") !== "false"
+    const level = localStorage.getItem("voice-noise-suppression-level") || "moderate"
     const pub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)
     const localTrack = pub?.track
     if (!localTrack) return
 
+    // If level changed, tear down old processor so we rebuild with new settings
+    if (enabled && this._rnnoiseProcessor && this._rnnoiseLevel !== level) {
+      try { await localTrack.stopProcessor() } catch (_) {}
+      this._rnnoiseProcessor = null
+    }
+
     if (enabled && !this._rnnoiseProcessor) {
       try {
-        this._rnnoiseProcessor = new RnnoiseProcessor()
+        this._rnnoiseProcessor = new RnnoiseProcessor(level)
+        this._rnnoiseLevel = level
         await localTrack.setProcessor(this._rnnoiseProcessor)
-        console.log("[VoiceChannel] RNNoise processor attached")
+        console.log(`[VoiceChannel] RNNoise processor attached (${level})`)
       } catch (e) {
         console.warn("[VoiceChannel] RNNoise attach failed:", e)
         this._rnnoiseProcessor = null
@@ -366,6 +388,7 @@ export default class extends Controller {
         await localTrack.stopProcessor()
       } catch (_) {}
       this._rnnoiseProcessor = null
+      this._rnnoiseLevel = null
       console.log("[VoiceChannel] RNNoise processor detached")
     }
   }
@@ -452,21 +475,31 @@ export default class extends Controller {
 
     await this.room.connect(data.livekit_url, data.token)
     console.log("[VoiceChannel] Connected to LiveKit, enabling mic...")
+    let micEnabled = false
     try {
       await this.room.localParticipant.setMicrophoneEnabled(true, this._audioCaptureOptions())
       console.log("[VoiceChannel] Mic enabled successfully")
+      micEnabled = true
     } catch (micErr) {
       console.error("[VoiceChannel] Failed to enable mic:", micErr)
       // Retry with no constraints as fallback
       try {
         await this.room.localParticipant.setMicrophoneEnabled(true)
         console.log("[VoiceChannel] Mic enabled with default constraints")
+        micEnabled = true
       } catch (retryErr) {
-        console.error("[VoiceChannel] Mic retry also failed:", retryErr)
+        console.error("[VoiceChannel] Mic retry also failed, joining muted:", retryErr)
       }
     }
 
-    this._muted = false
+    // If mic permission was denied, join muted
+    if (micEnabled) {
+      this._muted = false
+    } else {
+      this._muted = true
+      this._updateSelfMuteUI()
+      this._showError("Microphone access was blocked — you joined muted.")
+    }
     this._deafened = false
 
     // Attach RNNoise processor if noise suppression is enabled

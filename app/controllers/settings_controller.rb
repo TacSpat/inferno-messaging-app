@@ -22,6 +22,8 @@ class SettingsController < ApplicationController
           NostrPublishJob.perform_later(@user.id, :profile)
           @user.publish_member_events
         end
+        NsfwScanJob.perform_later("User", @user.id, "avatar") if profile_params[:avatar].present?
+        NsfwScanJob.perform_later("User", @user.id, "banner") if profile_params[:banner].present?
       end
       redirect_to user_settings_profile_path, notice: "Profile updated!"
     else
@@ -94,6 +96,7 @@ class SettingsController < ApplicationController
     # User-level voice settings (stored in user.voice_settings JSON)
     voice_settings = @user.voice_settings || {}
     voice_settings["noise_suppression"] = params[:noise_suppression] == "1"
+    voice_settings["noise_suppression_level"] = params[:noise_suppression_level].presence_in(%w[low moderate aggressive]) || "moderate"
     voice_settings["echo_cancellation"] = params[:echo_cancellation] != "0"
     voice_settings["auto_gain_control"] = params[:auto_gain_control] != "0"
     voice_settings["input_mode"] = params[:input_mode].presence || "voice_activity"
@@ -241,6 +244,8 @@ class SettingsController < ApplicationController
 
   def update_storage
     config = LocalConfig.current
+    blossom_urls = Array(params[:blossom_server_urls]).map(&:strip).select(&:present?)
+
     config.update!(
       max_cache_size_mb: params[:max_cache_size_mb].to_i,
       backfill_days: params[:backfill_days].to_i,
@@ -251,7 +256,8 @@ class SettingsController < ApplicationController
       max_db_size_mb: params[:max_db_size_mb].to_i,
       keep_pinned_messages: params[:keep_pinned_messages] == "1",
       prune_channel_messages: params[:prune_channel_messages] == "1",
-      prune_dm_messages: params[:prune_dm_messages] == "1"
+      prune_dm_messages: params[:prune_dm_messages] == "1",
+      blossom_server_urls: blossom_urls.any? ? blossom_urls : nil
     )
     redirect_to user_settings_storage_path, notice: "Storage settings saved."
   rescue => e
@@ -276,52 +282,27 @@ class SettingsController < ApplicationController
     @hidden_messages = Message.where.not(hidden_at: nil)
       .includes(:hidden_attachment_records, :channel, :conversation)
       .order(hidden_at: :desc)
-    @content_hash_count = ContentHash.count
-    @local_hash_count = ContentHash.local_hashes.count
-    @shared_hash_count = ContentHash.shared_hashes.count
-    @allowlisted_hash_count = ContentHash.allowlisted_hashes.count
     @auto_hidden_count = Message.where("hidden_reason LIKE ?", "auto:%").count
+    @user_hidden_count = Message.where(hidden_by: current_user).count
   end
 
   def update_safety
     config = LocalConfig.current
-    config.update!(
-      safety_keyword_filter: params[:safety_keyword_filter].to_s,
-      safety_hide_unknown_senders: params[:safety_hide_unknown_senders] == "1",
-      safety_report_threshold: params[:safety_report_threshold].to_i,
-      safety_reputation_enabled: params[:safety_reputation_enabled] == "1",
-      safety_reputation_threshold: params[:safety_reputation_threshold].to_i,
-      safety_reputation_sensitivity: params[:safety_reputation_sensitivity],
-      safety_image_hash_enabled: params[:safety_image_hash_enabled] == "1",
-      # Shared hash settings
-      safety_shared_hashes_enabled: params[:safety_shared_hashes_enabled] == "1",
-      safety_shared_hash_min_reporters: params[:safety_shared_hash_min_reporters].to_i,
-      safety_shared_hash_trust_friends: params[:safety_shared_hash_trust_friends] == "1",
-      safety_publish_hashes: params[:safety_publish_hashes] == "1",
-      # Keyword presets
-      safety_block_links: params[:safety_block_links] == "1",
-      safety_block_phone_numbers: params[:safety_block_phone_numbers] == "1",
-      safety_block_all_caps: params[:safety_block_all_caps] == "1",
-      safety_block_spam_chars: params[:safety_block_spam_chars] == "1"
-    )
-    redirect_to user_settings_safety_path, notice: "Safety settings saved."
-  rescue => e
-    redirect_to user_settings_safety_path, alert: e.message
-  end
-
-  def remove_allowlist
-    hash = ContentHash.find_by(id: params[:hash_id])
-    if hash
-      hash.update!(allowlisted: false)
-      redirect_to user_settings_safety_path, notice: "Removed from allowlist."
-    else
-      redirect_to user_settings_safety_path, alert: "Hash not found."
+    if params[:safety_protection_level].present?
+      config.apply_protection_level!(params[:safety_protection_level])
     end
-  end
-
-  def clear_shared_hashes
-    count = ContentHash.shared_hashes.delete_all
-    redirect_to user_settings_safety_path, notice: "Cleared #{count} shared hash#{'es' unless count == 1}."
+    if params.key?(:safety_blur_nsfw)
+      config.update!(safety_blur_nsfw: params[:safety_blur_nsfw] == "1")
+    end
+    respond_to do |format|
+      format.json { head :ok }
+      format.html { redirect_to user_settings_safety_path, notice: "Safety settings saved." }
+    end
+  rescue => e
+    respond_to do |format|
+      format.json { head :unprocessable_entity }
+      format.html { redirect_to user_settings_safety_path, alert: e.message }
+    end
   end
 
   def hide_message
@@ -338,6 +319,34 @@ class SettingsController < ApplicationController
     message = Message.find_by!(public_id: params[:id])
     message.unhide!
     redirect_to user_settings_safety_path, notice: "Message unhidden."
+  end
+
+  def authority_report
+    @message = Message.find_by!(public_id: params[:id])
+    unless @message.hidden_at.present?
+      redirect_to user_settings_safety_path, alert: "Only hidden messages can be reported."
+      return
+    end
+  end
+
+  def generate_authority_report
+    @message = Message.find_by!(public_id: params[:id])
+    unless @message.hidden_at.present?
+      redirect_to user_settings_safety_path, alert: "Only hidden messages can be reported."
+      return
+    end
+
+    category = params[:category]
+    unless category.in?(%w[csam threats terrorism other_illegal])
+      redirect_to user_settings_authority_report_path(@message.public_id), alert: "Please select a category."
+      return
+    end
+
+    report = AuthorityReportGenerator.new(@message, category: category, reporter: current_user).generate
+    send_data report,
+      filename: "inferno-report-#{@message.public_id}-#{Time.current.strftime('%Y%m%d%H%M%S')}.txt",
+      type: "text/plain",
+      disposition: "attachment"
   end
 
   def run_prune

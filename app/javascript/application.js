@@ -441,7 +441,12 @@ import ServerInvitePreviewController from "./controllers/server_invite_preview_c
 import StatusEmojiController from "./controllers/status_emoji_controller"
 import MessageSearchController from "./controllers/message_search_controller"
 import PruningStrategyController from "./controllers/pruning_strategy_controller"
-import KeywordFilterController from "./controllers/keyword_filter_controller"
+import ServerWizardController from "./controllers/server_wizard_controller"
+import BlossomServersController from "./controllers/blossom_servers_controller"
+import ReportWizardController from "./controllers/report_wizard_controller"
+import FireShieldController from "./controllers/fire_shield_controller"
+import OnboardingWizardController from "./controllers/onboarding_wizard_controller"
+import OnboardingPreviewController from "./controllers/onboarding_preview_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -494,7 +499,12 @@ application.register("server-invite-preview", ServerInvitePreviewController)
 application.register("status-emoji", StatusEmojiController)
 application.register("message-search", MessageSearchController)
 application.register("pruning-strategy", PruningStrategyController)
-application.register("keyword-filter", KeywordFilterController)
+application.register("server-wizard", ServerWizardController)
+application.register("blossom-servers", BlossomServersController)
+application.register("report-wizard", ReportWizardController)
+application.register("fire-shield", FireShieldController)
+application.register("onboarding-wizard", OnboardingWizardController)
+application.register("onboarding-preview", OnboardingPreviewController)
 
 // --- Custom spatially-aware tooltips: convert title → data-tooltip, position with JS ---
 ;(function() {
@@ -695,6 +705,33 @@ document.addEventListener("click", (e) => {
 
   document.body.appendChild(overlay)
   overlay.querySelector('[data-action="continue"]').focus()
+})
+
+// NSFW blur & spoiler click-to-unblur
+// Clicking a blurred image/video toggles the blur off. Clicking again re-blurs.
+document.addEventListener("click", (e) => {
+  // Spoiler images (any channel)
+  const spoiler = e.target.closest(".spoiler-blur")
+  if (spoiler) {
+    e.preventDefault()
+    e.stopPropagation()
+    spoiler.classList.toggle("unblurred")
+    return
+  }
+
+  // NSFW channel blur — only images/videos inside [data-nsfw-blur]
+  const nsfwContainer = e.target.closest("[data-nsfw-blur='true']")
+  if (!nsfwContainer) return
+
+  const media = e.target.closest("img[data-preview-src], video")
+  if (!media) return
+
+  // Don't interfere if already unblurred and user wants to open preview
+  if (media.classList.contains("unblurred")) return
+
+  e.preventDefault()
+  e.stopPropagation()
+  media.classList.add("unblurred")
 })
 
 // rebuild trigger

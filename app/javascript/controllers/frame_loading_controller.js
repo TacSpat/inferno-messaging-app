@@ -63,10 +63,6 @@ export default class extends Controller {
 
     frame.innerHTML = `
       <div class="flex flex-col flex-1 min-h-0 animate-pulse">
-        <div class="flex items-center h-12 px-4 border-b border-gray-900 shrink-0">
-          <div class="w-5 h-5 bg-gray-600 rounded mr-2"></div>
-          <div class="h-4 bg-gray-600 rounded w-28"></div>
-        </div>
         <div class="flex-1 overflow-hidden flex flex-col justify-end py-4 space-y-5">
           ${msgs}
         </div>

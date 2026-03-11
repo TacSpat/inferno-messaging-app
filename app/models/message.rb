@@ -467,10 +467,22 @@ end
   end
 
   def run_content_safety_check
-    ContentSafetyCheckJob.perform_later(id)
+    if from_non_friend?
+      # Run synchronously for non-friends — check images before broadcast
+      ContentSafetyCheckJob.perform_now(id)
+    else
+      ContentSafetyCheckJob.perform_later(id)
+    end
   end
 
   private
+
+  def from_non_friend?
+    return false if user_id.present? && user == User.first  # own messages
+    return true if nostr_author_pubkey.blank?  # no pubkey = unknown
+    contact = Contact.find_by(pubkey: nostr_author_pubkey)
+    contact.nil? || !contact.accepted?
+  end
 
   # Convert nostr: URIs to clickable <a> tags (Redcarpet only autolinks http/https)
   def linkify_nostr_uris(html)

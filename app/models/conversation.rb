@@ -21,7 +21,11 @@ class Conversation < ApplicationRecord
   # Find or create a direct conversation with a counterparty identified by pubkey
   def self.find_or_create_by_pubkey(owner, counterparty_pubkey)
     conv = where(kind: :direct, counterparty_pubkey: counterparty_pubkey).first
-    return conv if conv
+    if conv
+      # Re-add participant if they previously declined
+      conv.conversation_participants.find_or_create_by!(user: owner) { |cp| cp.accepted = true }
+      return conv
+    end
 
     transaction do
       conv = create!(kind: :direct, counterparty_pubkey: counterparty_pubkey)
@@ -37,6 +41,19 @@ class Conversation < ApplicationRecord
       .joins("INNER JOIN conversation_participants cp2 ON cp2.conversation_id = conversations.id AND cp2.user_id = #{user2.id}")
       .first
     return conv if conv
+
+    # Also check if conversation exists but user1 left (declined)
+    conv = joins(:conversation_participants)
+      .where(kind: :direct)
+      .where(conversation_participants: { user_id: user2.id })
+      .where.not(id: ConversationParticipant.where(user_id: user1.id).select(:conversation_id))
+      .joins("INNER JOIN conversation_participants cp2 ON cp2.conversation_id = conversations.id AND cp2.user_id = #{user2.id}")
+      .where("(SELECT COUNT(*) FROM conversation_participants WHERE conversation_id = conversations.id) = 1")
+      .first
+    if conv
+      conv.conversation_participants.create!(user: user1, accepted: true)
+      return conv
+    end
 
     transaction do
       conv = create!(kind: :direct)

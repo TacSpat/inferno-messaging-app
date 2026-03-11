@@ -69,6 +69,16 @@
           </div>
         </div>
 
+        <% is_age_restricted = !@relay_invite && @server.respond_to?(:age_restricted?) && @server.age_restricted? %>
+        <% if is_age_restricted %>
+          <div class="flex items-center gap-1.5 mb-3">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-semibold bg-red-500/15 text-red-400 border border-red-500/20">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              18+ Age Restricted
+            </span>
+          </div>
+        <% end %>
+
         <p class="text-xs text-gray-500 mb-5">Inferno</p>
 
         <% if @invite_state == :expired %>
@@ -112,10 +122,23 @@
                   server_channel_path(@server, @server.channels.ordered.first),
                   class: "block w-full text-center bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition text-sm" %>
           <% elsif user_signed_in? %>
-            <%= button_to "Accept Invite",
-                  accept_path,
-                  method: :post,
-                  class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+            <% if is_age_restricted %>
+              <div class="bg-gray-900/60 border border-red-500/20 rounded-lg p-4 mb-3">
+                <p class="text-sm text-gray-300 mb-1">This server is age-restricted (18+)</p>
+                <p class="text-xs text-gray-500">By joining, you confirm that you are 18 years of age or older.</p>
+              </div>
+              <%= button_to "I am 18 or older — Join Server",
+                    accept_path,
+                    method: :post,
+                    params: { age_confirmed: "true" },
+                    class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm",
+                    data: { turbo_confirm: "This server is age-restricted (18+). By continuing, you confirm you are 18 years of age or older." } %>
+            <% else %>
+              <%= button_to "Accept Invite",
+                    accept_path,
+                    method: :post,
+                    class: "w-full bg-gradient-to-r from-confirm-dark to-confirm hover:from-confirm hover:to-confirm-light text-white font-semibold py-2.5 rounded transition cursor-pointer text-sm" %>
+            <% end %>
           <% else %>
             <% if @detected_home_instance %>
               <!-- Remote user detected — only show federation login -->

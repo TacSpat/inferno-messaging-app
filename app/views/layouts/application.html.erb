@@ -240,7 +240,7 @@
             </div>
             <div class="ml-2 flex-1 min-w-0">
               <p class="text-sm font-medium text-white truncate"><%= current_user.display_name.presence || current_user.username %></p>
-              <p class="text-xs text-gray-400 truncate"><%= current_user.tag %></p>
+              <p class="text-xs text-gray-400 truncate"><%= current_user.status_emoji %> <%= current_user.status.presence || "Online" %></p>
             </div>
             <span class="text-[10px] text-gray-600 ml-auto mr-1">v<%= Inferno::VERSION %></span>
             <%= link_to user_settings_account_path, data: { turbo_frame: "settings-frame" }, onclick: "document.getElementById('settings-overlay')?.classList.remove('hidden'); document.body.style.overflow='hidden'", class: "text-gray-400 hover:text-gray-200 p-1" do %>

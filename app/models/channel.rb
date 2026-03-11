@@ -78,11 +78,19 @@ class Channel < ApplicationRecord
     channel_encryptor.decrypt_and_verify(encrypted_channel_private_key)
   end
 
-  # Returns :full, :read_only, or false
+  # Returns :full, :read_only, :post_only, or false
   def visible_to?(user)
+    membership = user.server_memberships.find_by(server: server)
+
+    # Post-only channels: mods/admins see full, others can only post
+    if post_only?
+      return :full if membership&.owner? || membership&.admin? || membership&.has_permission?(:manage_messages)
+      return :post_only if membership
+      return false
+    end
+
     return :full unless encrypted?
 
-    membership = user.server_memberships.find_by(server: server)
     return :full if membership&.owner? || membership&.admin?
 
     allowed_ids = permissions_overrides&.dig("allowed_role_ids")
