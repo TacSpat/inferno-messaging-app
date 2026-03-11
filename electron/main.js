@@ -72,12 +72,20 @@ function prepareDatabase() {
     ensureDirs(data);
     const secret = getOrCreateSecret(data);
 
+    // Verify sidecar files exist
+    const appDir = path.join(sidecarDir, 'app');
+    console.log(`[db:prepare] sidecarDir: ${sidecarDir}`);
+    console.log(`[db:prepare] launcher: ${launcherPath} (exists: ${fs.existsSync(launcherPath)})`);
+    console.log(`[db:prepare] appDir: ${appDir} (exists: ${fs.existsSync(appDir)})`);
+    console.log(`[db:prepare] ruby: ${path.join(sidecarDir, 'ruby', 'bin', 'ruby')} (exists: ${fs.existsSync(path.join(sidecarDir, 'ruby', 'bin', 'ruby'))})`);
+    console.log(`[db:prepare] bundle config: ${path.join(appDir, '.bundle', 'config')} (exists: ${fs.existsSync(path.join(appDir, '.bundle', 'config'))})`);
+
     const cmd = isWin ? launcherPath : '/bin/sh';
     const args = isWin
       ? ['db:prepare']
       : [launcherPath, 'db:prepare'];
     const opts = {
-      cwd: path.join(sidecarDir, 'app'),
+      cwd: appDir,
       env: {
         ...process.env,
         INFERNO_DATA_DIR: data,
@@ -87,6 +95,7 @@ function prepareDatabase() {
       },
     };
 
+    const stderrChunks = [];
     const child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
 
     child.stdout.on('data', (chunk) => {
@@ -95,6 +104,7 @@ function prepareDatabase() {
 
     child.stderr.on('data', (chunk) => {
       process.stderr.write(`[db:prepare] ${chunk}`);
+      stderrChunks.push(chunk);
     });
 
     child.on('error', (err) => {
@@ -105,7 +115,8 @@ function prepareDatabase() {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`db:prepare exited with code ${code}`));
+        const stderr = Buffer.concat(stderrChunks).toString().slice(-500);
+        reject(new Error(`db:prepare exited with code ${code}\n${stderr}`));
       }
     });
   });
