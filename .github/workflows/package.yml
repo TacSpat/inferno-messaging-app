@@ -35,37 +35,45 @@ jobs:
           bun install --frozen-lockfile
           SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
+      - name: Cache portable Ruby
+        id: ruby-cache
+        uses: actions/cache@v4
+        with:
+          path: ruby-sidecar/ruby
+          key: portable-ruby-slim-linux-${{ env.RUBY_VERSION }}
+
       - name: Download portable Ruby
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
-          RUBY_MAJOR=$(echo ${{ env.RUBY_VERSION }} | cut -d. -f1-2)
-          RUBY_URL="https://cache.ruby-lang.org/pub/ruby/${RUBY_MAJOR}/ruby-${{ env.RUBY_VERSION }}.tar.gz"
-          # Use ruby-build to compile a self-contained Ruby
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
-          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
+          RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
       - name: Slim Ruby
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           RUBY_DIR="ruby-sidecar/ruby"
           echo "Before: $(du -sh "$RUBY_DIR" | cut -f1)"
-          # Remove docs, man pages, ri database
           rm -rf "$RUBY_DIR"/share/ri "$RUBY_DIR"/share/doc "$RUBY_DIR"/share/man
-          # Remove C headers (native extensions already compiled)
           rm -rf "$RUBY_DIR"/include
-          # Remove static libraries
           find "$RUBY_DIR" -name '*.a' -delete
-          # Remove unused default gems (irb, rdoc, rbs, typeprof, debug, racc, etc.)
           for gem in irb rdoc rbs typeprof debug racc reline rdbg syntax_suggest; do
             rm -rf "$RUBY_DIR"/lib/ruby/gems/*/gems/${gem}-*
             rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/${gem}-*.gemspec
             rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/default/${gem}-*.gemspec
           done
-          # Remove gem cache (.gem files)
           rm -rf "$RUBY_DIR"/lib/ruby/gems/*/cache
-          # Strip shared libraries
           find "$RUBY_DIR" -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
           echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
 
+      - name: Cache sidecar gems
+        id: gems-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/bundle
+          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+
       - name: Bundle gems for sidecar
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
           ruby-sidecar/ruby/bin/gem install bundler --no-document
@@ -73,36 +81,30 @@ jobs:
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
           ruby-sidecar/ruby/bin/bundle install
-          # Remove test gems that may still have cached artifacts
           rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
           rm -rf vendor/bundle/ruby/*/gems/capybara-*
 
       - name: Slim gems
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           GEMS_DIR="vendor/bundle"
           echo "Before: $(du -sh "$GEMS_DIR" | cut -f1)"
-          # Remove gem test/spec suites
           find "$GEMS_DIR" -type d \( -name spec -o -name test -o -name tests -o -name features \) -exec rm -rf {} + 2>/dev/null || true
-          # Remove native extension source files (already compiled)
           find "$GEMS_DIR" -type d -name ext -path '*/gems/*/ext' | while read ext_dir; do
             find "$ext_dir" \( -name '*.c' -o -name '*.h' -o -name '*.o' -o -name '*.cpp' \) -delete
           done
-          # Remove gem caches
           find "$GEMS_DIR" -type d -name cache -path '*/cache' -exec rm -rf {} + 2>/dev/null || true
-          # Remove documentation files
           find "$GEMS_DIR" \( -name '*.md' -o -name '*.txt' -o -name '*.rdoc' \) \
             ! -name 'LICENSE*' ! -name 'COPYING*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'CHANGELOG*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'HISTORY*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'NEWS*' -delete 2>/dev/null || true
-          # Strip shared libraries in gems
           find "$GEMS_DIR" -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
           echo "After:  $(du -sh "$GEMS_DIR" | cut -f1)"
 
       - name: Assemble sidecar
         run: |
           mkdir -p sidecar-stage
-          # Copy the Rails app (excluding dev/CI files)
           rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
             --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
             --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
@@ -114,9 +116,7 @@ jobs:
             --exclude='.tebako.yml' --exclude='.dockerignore' --exclude='Dockerfile' \
             --exclude='.kamal' --exclude='storage/*.sqlite3' \
             ./ sidecar-stage/app/
-          # Copy portable Ruby
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
-          # Create launcher script
           cat > sidecar-stage/start.sh << 'LAUNCHER'
           #!/bin/sh
           DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -174,12 +174,21 @@ jobs:
           bun install --frozen-lockfile
           SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
+      - name: Cache portable Ruby
+        id: ruby-cache
+        uses: actions/cache@v4
+        with:
+          path: ruby-sidecar/ruby
+          key: portable-ruby-slim-macos-${{ env.RUBY_VERSION }}
+
       - name: Download portable Ruby
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
-          /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
+          RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
 
       - name: Slim Ruby
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           RUBY_DIR="ruby-sidecar/ruby"
           echo "Before: $(du -sh "$RUBY_DIR" | cut -f1)"
@@ -196,7 +205,15 @@ jobs:
           find "$RUBY_DIR" -name '*.bundle' -exec strip -x {} + 2>/dev/null || true
           echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
 
+      - name: Cache sidecar gems
+        id: gems-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/bundle
+          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+
       - name: Bundle gems for sidecar
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
           ruby-sidecar/ruby/bin/gem install bundler --no-document
@@ -204,11 +221,11 @@ jobs:
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
           ruby-sidecar/ruby/bin/bundle install
-          # Remove gems excluded by 'without' that may still have cached artifacts
           rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
           rm -rf vendor/bundle/ruby/*/gems/capybara-*
 
       - name: Slim gems
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           GEMS_DIR="vendor/bundle"
           echo "Before: $(du -sh "$GEMS_DIR" | cut -f1)"
@@ -304,40 +321,51 @@ jobs:
           $env:SKIP_CSS_BUILD = "true"
           bundle exec rails assets:precompile
 
+      - name: Cache portable Ruby
+        id: ruby-cache
+        uses: actions/cache@v4
+        with:
+          path: ruby-sidecar/ruby
+          key: portable-ruby-slim-windows-${{ env.RUBY_VERSION }}
+
       - name: Download portable Ruby (RubyInstaller)
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           $rubyVer = "${{ env.RUBY_VERSION }}"
           $url = "https://github.com/oneclick/rubyinstaller2/releases/download/RubyInstaller-${rubyVer}-1/rubyinstaller-${rubyVer}-1-x64.7z"
           Write-Host "Downloading: $url"
           Invoke-WebRequest -Uri $url -OutFile ruby.7z
           & "C:\Program Files\7-Zip\7z.exe" x ruby.7z -oruby-sidecar
-          # Rename the extracted folder to just 'ruby'
           $extracted = Get-ChildItem ruby-sidecar -Directory | Select-Object -First 1
           Rename-Item $extracted.FullName "ruby"
 
       - name: Slim Ruby
+        if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           $rubyDir = "ruby-sidecar\ruby"
           $before = (Get-ChildItem -Recurse $rubyDir | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "Before: $([math]::Round($before, 1)) MB"
-          # Remove docs, ri, man pages
           Remove-Item -Recurse -Force "$rubyDir\share\ri", "$rubyDir\share\doc", "$rubyDir\share\man" -ErrorAction SilentlyContinue
-          # Remove C headers
           Remove-Item -Recurse -Force "$rubyDir\include" -ErrorAction SilentlyContinue
-          # Remove static libraries
           Get-ChildItem -Recurse "$rubyDir" -Filter "*.a" | Remove-Item -Force
-          # Remove unused default gems
           $unusedGems = @('irb', 'rdoc', 'rbs', 'typeprof', 'debug', 'racc', 'reline', 'rdbg', 'syntax_suggest')
           foreach ($gem in $unusedGems) {
             Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Directory -Filter "${gem}-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
             Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Filter "${gem}-*.gemspec" -ErrorAction SilentlyContinue | Remove-Item -Force
           }
-          # Remove gem cache
           Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Directory -Filter "cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           $after = (Get-ChildItem -Recurse $rubyDir | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "After:  $([math]::Round($after, 1)) MB"
 
+      - name: Cache sidecar gems
+        id: gems-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor/bundle
+          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+
       - name: Bundle gems for sidecar
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
           $env:PATH = "$rubyBin;$env:PATH"
@@ -350,19 +378,16 @@ jobs:
           & "$rubyBin\ruby.exe" -S bundle install
 
       - name: Slim gems
+        if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           $gemsDir = "vendor\bundle"
           $before = (Get-ChildItem -Recurse $gemsDir | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "Before: $([math]::Round($before, 1)) MB"
-          # Remove gem test/spec suites
           Get-ChildItem -Recurse $gemsDir -Directory | Where-Object { $_.Name -in @('spec', 'test', 'tests', 'features') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          # Remove native extension source files
           Get-ChildItem -Recurse $gemsDir -Directory -Filter "ext" | ForEach-Object {
             Get-ChildItem -Recurse $_.FullName -Include @('*.c', '*.h', '*.o', '*.cpp') | Remove-Item -Force
           }
-          # Remove gem caches
           Get-ChildItem -Recurse $gemsDir -Directory -Filter "cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          # Remove documentation files
           Get-ChildItem -Recurse $gemsDir -Include @('*.md', '*.txt', '*.rdoc') | Where-Object { $_.Name -notmatch '^(LICENSE|COPYING)' } | Remove-Item -Force -ErrorAction SilentlyContinue
           Get-ChildItem -Recurse $gemsDir -Include @('CHANGELOG*', 'HISTORY*', 'NEWS*') | Remove-Item -Force -ErrorAction SilentlyContinue
           $after = (Get-ChildItem -Recurse $gemsDir | Measure-Object -Property Length -Sum).Sum / 1MB
@@ -371,7 +396,6 @@ jobs:
       - name: Assemble sidecar
         run: |
           New-Item -ItemType Directory -Force -Path sidecar-stage\app
-          # Copy Rails app files
           $exclude = @('.git', 'node_modules', 'tmp', 'log', 'sidecar-stage',
                        'ruby-sidecar', '.github', 'dist', 'spec', 'test',
                        'features', 'electron', 'electron-builder.yml', 'icons',
@@ -380,9 +404,7 @@ jobs:
                        '.tebako.yml', '.dockerignore', 'Dockerfile', '.kamal',
                        'storage')
           Get-ChildItem -Path . -Exclude $exclude | Copy-Item -Destination sidecar-stage\app -Recurse -Force
-          # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
-          # Create launcher batch file
           @"
           @echo off
           set "DIR=%~dp0"
