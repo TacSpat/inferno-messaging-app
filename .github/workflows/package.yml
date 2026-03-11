@@ -133,6 +133,13 @@ jobs:
           export GEM_HOME="$VENDOR_GEM_DIR"
           export GEM_PATH="$VENDOR_GEM_DIR:$RUBY_GEM_DIR"
           export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          # Ensure writable tmp/log dirs (sidecar at /opt is read-only)
+          if [ -n "$INFERNO_DATA_DIR" ]; then
+            mkdir -p "$INFERNO_DATA_DIR/tmp/pids" "$INFERNO_DATA_DIR/tmp/cache" "$INFERNO_DATA_DIR/log"
+            rm -rf "$DIR/app/tmp" "$DIR/app/log" 2>/dev/null
+            ln -sfn "$INFERNO_DATA_DIR/tmp" "$DIR/app/tmp"
+            ln -sfn "$INFERNO_DATA_DIR/log" "$DIR/app/log"
+          fi
           cd "$DIR/app"
           exec "$DIR/ruby/bin/ruby" bin/rails "$@"
           LAUNCHER
@@ -265,6 +272,12 @@ jobs:
           export GEM_HOME="$VENDOR_GEM_DIR"
           export GEM_PATH="$VENDOR_GEM_DIR:$RUBY_GEM_DIR"
           export BUNDLE_GEMFILE="$DIR/app/Gemfile"
+          if [ -n "$INFERNO_DATA_DIR" ]; then
+            mkdir -p "$INFERNO_DATA_DIR/tmp/pids" "$INFERNO_DATA_DIR/tmp/cache" "$INFERNO_DATA_DIR/log"
+            rm -rf "$DIR/app/tmp" "$DIR/app/log" 2>/dev/null
+            ln -sfn "$INFERNO_DATA_DIR/tmp" "$DIR/app/tmp"
+            ln -sfn "$INFERNO_DATA_DIR/log" "$DIR/app/log"
+          fi
           cd "$DIR/app"
           exec "$DIR/ruby/bin/ruby" bin/rails "$@"
           LAUNCHER
@@ -405,6 +418,15 @@ jobs:
           for /d %%G in ("%DIR%ruby\lib\ruby\gems\*") do set "RUBY_GEM_DIR=%%G"
           set "GEM_PATH=%GEM_HOME%;%RUBY_GEM_DIR%"
           set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
+          if defined INFERNO_DATA_DIR (
+            if not exist "%INFERNO_DATA_DIR%\tmp\pids" mkdir "%INFERNO_DATA_DIR%\tmp\pids"
+            if not exist "%INFERNO_DATA_DIR%\tmp\cache" mkdir "%INFERNO_DATA_DIR%\tmp\cache"
+            if not exist "%INFERNO_DATA_DIR%\log" mkdir "%INFERNO_DATA_DIR%\log"
+            rmdir "%DIR%app\tmp" 2>nul
+            rmdir "%DIR%app\log" 2>nul
+            mklink /J "%DIR%app\tmp" "%INFERNO_DATA_DIR%\tmp" 2>nul
+            mklink /J "%DIR%app\log" "%INFERNO_DATA_DIR%\log" 2>nul
+          )
           cd /d "%DIR%app"
           "%DIR%ruby\bin\ruby.exe" bin/rails %*
           "@ | Out-File -FilePath sidecar-stage\start.bat -Encoding ASCII
