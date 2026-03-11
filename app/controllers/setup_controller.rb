@@ -15,7 +15,7 @@ class SetupController < ApplicationController
         private_key = params[:nostr_private_key].strip
         # Handle nsec format
         if private_key.start_with?("nsec")
-          private_key = Nostr::Bech32.decode_nsec(private_key)
+          private_key = Nostr::Bech32.decode(private_key)[:data]
         end
         public_key = Nostr::Key.get_public_key(private_key)
         encryptor = ActiveSupport::MessageEncryptor.new(

@@ -145,7 +145,7 @@ class NostrSearchService
   end
 
   def self.decode_npub(npub)
-    decoded = Nostr::Bech32.decode_npub(npub)
+    decoded = Nostr::Bech32.decode(npub)[:data]
     decoded if decoded.is_a?(String) && decoded.length == 64
   rescue
     nil

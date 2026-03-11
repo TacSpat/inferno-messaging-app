@@ -156,7 +156,7 @@ class FriendshipsController < ApplicationController
 
     if input.start_with?("npub1")
       begin
-        decoded = Nostr::Bech32.decode_npub(input)
+        decoded = Nostr::Bech32.decode(input)[:data]
         return decoded if decoded.is_a?(String) && decoded.length == 64
       rescue
         return nil
