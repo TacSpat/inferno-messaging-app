@@ -125,6 +125,9 @@ jobs:
             ./ sidecar-stage/app/
           # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
           cp -r vendor/bundle sidecar-stage/app/vendor/bundle
+          # Safety: remove test gems that may have leaked through
+          find sidecar-stage/app/vendor/bundle -maxdepth 4 -type d -name 'selenium-webdriver-*' -exec rm -rf {} + 2>/dev/null || true
+          find sidecar-stage/app/vendor/bundle -maxdepth 4 -type d -name 'capybara-*' -exec rm -rf {} + 2>/dev/null || true
           # Create .bundle/config so bundler finds the gems
           mkdir -p sidecar-stage/app/.bundle
           cat > sidecar-stage/app/.bundle/config << 'BUNDLECFG'
@@ -140,6 +143,7 @@ jobs:
           #!/bin/sh
           DIR="$(cd "$(dirname "$0")" && pwd)"
           export PATH="$DIR/ruby/bin:$PATH"
+          export LD_LIBRARY_PATH="$DIR/ruby/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
           export GEM_PATH="$GEM_HOME"
           export BUNDLE_GEMFILE="$DIR/app/Gemfile"
@@ -282,6 +286,8 @@ jobs:
             --exclude='vendor/bundle' --exclude='.bundle' \
             ./ sidecar-stage/app/
           cp -r vendor/bundle sidecar-stage/app/vendor/bundle
+          find sidecar-stage/app/vendor/bundle -maxdepth 4 -type d -name 'selenium-webdriver-*' -exec rm -rf {} + 2>/dev/null || true
+          find sidecar-stage/app/vendor/bundle -maxdepth 4 -type d -name 'capybara-*' -exec rm -rf {} + 2>/dev/null || true
           mkdir -p sidecar-stage/app/.bundle
           cat > sidecar-stage/app/.bundle/config << 'BUNDLECFG'
           ---
@@ -294,6 +300,7 @@ jobs:
           #!/bin/sh
           DIR="$(cd "$(dirname "$0")" && pwd)"
           export PATH="$DIR/ruby/bin:$PATH"
+          export DYLD_LIBRARY_PATH="$DIR/ruby/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           export GEM_HOME="$DIR/app/vendor/bundle/ruby/$(ls "$DIR/app/vendor/bundle/ruby/" | head -1)"
           export GEM_PATH="$GEM_HOME"
           export BUNDLE_GEMFILE="$DIR/app/Gemfile"
@@ -440,6 +447,9 @@ jobs:
           # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
           New-Item -ItemType Directory -Force -Path sidecar-stage\app\vendor
           Copy-Item -Path vendor\bundle -Destination sidecar-stage\app\vendor\bundle -Recurse
+          # Safety: remove test gems that may have leaked through
+          Get-ChildItem -Recurse sidecar-stage\app\vendor\bundle -Directory -Filter "selenium-webdriver-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+          Get-ChildItem -Recurse sidecar-stage\app\vendor\bundle -Directory -Filter "capybara-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
           # Create .bundle/config so bundler finds the gems
           New-Item -ItemType Directory -Force -Path sidecar-stage\app\.bundle
           @"
