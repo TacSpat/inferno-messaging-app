@@ -40,13 +40,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-linux-${{ env.RUBY_VERSION }}-v3
+          key: portable-ruby-linux-${{ env.RUBY_VERSION }}-v4
 
       - name: Download portable Ruby
         if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
-          RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
+          RUBY_CONFIGURE_OPTS="--disable-install-doc --enable-load-relative --enable-shared" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
           # Only remove docs/man (safe, never needed at runtime)
           rm -rf ruby-sidecar/ruby/share/ri ruby-sidecar/ruby/share/doc ruby-sidecar/ruby/share/man
           rm -rf ruby-sidecar/ruby/include
@@ -179,13 +179,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-macos-${{ env.RUBY_VERSION }}-v3
+          key: portable-ruby-macos-${{ env.RUBY_VERSION }}-v4
 
       - name: Download portable Ruby
         if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
-          RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
+          RUBY_CONFIGURE_OPTS="--disable-install-doc --enable-load-relative --enable-shared" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
           # Only remove docs/man (safe, never needed at runtime)
           rm -rf ruby-sidecar/ruby/share/ri ruby-sidecar/ruby/share/doc ruby-sidecar/ruby/share/man
           rm -rf ruby-sidecar/ruby/include
@@ -317,7 +317,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v3
+          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v4
 
       - name: Download portable Ruby (RubyInstaller)
         if: steps.ruby-cache.outputs.cache-hit != 'true'
