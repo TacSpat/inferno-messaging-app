@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
+          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -229,7 +229,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
+          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -394,7 +394,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
+          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
