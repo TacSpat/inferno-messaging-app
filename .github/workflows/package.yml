@@ -40,40 +40,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-slim-linux-${{ env.RUBY_VERSION }}-v2
+          key: portable-ruby-linux-${{ env.RUBY_VERSION }}-v3
 
       - name: Download portable Ruby
         if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
           RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
-
-      - name: Slim Ruby and ensure bundler
-        if: steps.ruby-cache.outputs.cache-hit != 'true'
-        run: |
-          RUBY_DIR="ruby-sidecar/ruby"
-          echo "Before: $(du -sh "$RUBY_DIR" | cut -f1)"
-          rm -rf "$RUBY_DIR"/share/ri "$RUBY_DIR"/share/doc "$RUBY_DIR"/share/man
-          rm -rf "$RUBY_DIR"/include
-          find "$RUBY_DIR" -name '*.a' -delete
-          for gem in irb rdoc rbs typeprof debug reline rdbg; do
-            rm -rf "$RUBY_DIR"/lib/ruby/gems/*/gems/${gem}-*
-            rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/${gem}-*.gemspec
-            rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/default/${gem}-*.gemspec
-          done
-          rm -rf "$RUBY_DIR"/lib/ruby/gems/*/cache
-          find "$RUBY_DIR" -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
-          echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
-          # Ensure bundler is present (gets cached with Ruby)
-          "$RUBY_DIR"/bin/gem install bundler --no-document --conservative
-          "$RUBY_DIR"/bin/ruby -e "require 'bundler'; puts \"bundler #{Bundler::VERSION} OK\""
+          # Only remove docs/man (safe, never needed at runtime)
+          rm -rf ruby-sidecar/ruby/share/ri ruby-sidecar/ruby/share/doc ruby-sidecar/ruby/share/man
+          rm -rf ruby-sidecar/ruby/include
 
       - name: Cache sidecar gems
         id: gems-cache
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
+          key: sidecar-gems-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -106,7 +89,6 @@ jobs:
           find "$GEMS_DIR" -name 'CHANGELOG*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'HISTORY*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'NEWS*' -delete 2>/dev/null || true
-          find "$GEMS_DIR" -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
           echo "After:  $(du -sh "$GEMS_DIR" | cut -f1)"
 
       - name: Assemble sidecar
@@ -197,41 +179,23 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-slim-macos-${{ env.RUBY_VERSION }}-v2
+          key: portable-ruby-macos-${{ env.RUBY_VERSION }}-v3
 
       - name: Download portable Ruby
         if: steps.ruby-cache.outputs.cache-hit != 'true'
         run: |
           git clone --depth 1 https://github.com/rbenv/ruby-build.git /tmp/ruby-build
           RUBY_CONFIGURE_OPTS="--disable-install-doc" /tmp/ruby-build/bin/ruby-build ${{ env.RUBY_VERSION }} ruby-sidecar/ruby
-
-      - name: Slim Ruby and ensure bundler
-        if: steps.ruby-cache.outputs.cache-hit != 'true'
-        run: |
-          RUBY_DIR="ruby-sidecar/ruby"
-          echo "Before: $(du -sh "$RUBY_DIR" | cut -f1)"
-          rm -rf "$RUBY_DIR"/share/ri "$RUBY_DIR"/share/doc "$RUBY_DIR"/share/man
-          rm -rf "$RUBY_DIR"/include
-          find "$RUBY_DIR" -name '*.a' -delete
-          for gem in irb rdoc rbs typeprof debug reline rdbg; do
-            rm -rf "$RUBY_DIR"/lib/ruby/gems/*/gems/${gem}-*
-            rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/${gem}-*.gemspec
-            rm -f "$RUBY_DIR"/lib/ruby/gems/*/specifications/default/${gem}-*.gemspec
-          done
-          rm -rf "$RUBY_DIR"/lib/ruby/gems/*/cache
-          find "$RUBY_DIR" -name '*.dylib' -exec strip -x {} + 2>/dev/null || true
-          find "$RUBY_DIR" -name '*.bundle' -exec strip -x {} + 2>/dev/null || true
-          echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
-          # Ensure bundler is present (gets cached with Ruby)
-          "$RUBY_DIR"/bin/gem install bundler --no-document --conservative
-          "$RUBY_DIR"/bin/ruby -e "require 'bundler'; puts \"bundler #{Bundler::VERSION} OK\""
+          # Only remove docs/man (safe, never needed at runtime)
+          rm -rf ruby-sidecar/ruby/share/ri ruby-sidecar/ruby/share/doc ruby-sidecar/ruby/share/man
+          rm -rf ruby-sidecar/ruby/include
 
       - name: Cache sidecar gems
         id: gems-cache
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
+          key: sidecar-gems-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -263,8 +227,6 @@ jobs:
           find "$GEMS_DIR" -name 'CHANGELOG*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'HISTORY*' -delete 2>/dev/null || true
           find "$GEMS_DIR" -name 'NEWS*' -delete 2>/dev/null || true
-          find "$GEMS_DIR" -name '*.dylib' -exec strip -x {} + 2>/dev/null || true
-          find "$GEMS_DIR" -name '*.bundle' -exec strip -x {} + 2>/dev/null || true
           echo "After:  $(du -sh "$GEMS_DIR" | cut -f1)"
 
       - name: Assemble sidecar
@@ -355,7 +317,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-slim-windows-${{ env.RUBY_VERSION }}-v2
+          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v3
 
       - name: Download portable Ruby (RubyInstaller)
         if: steps.ruby-cache.outputs.cache-hit != 'true'
@@ -367,35 +329,16 @@ jobs:
           & "C:\Program Files\7-Zip\7z.exe" x ruby.7z -oruby-sidecar
           $extracted = Get-ChildItem ruby-sidecar -Directory | Select-Object -First 1
           Rename-Item $extracted.FullName "ruby"
-
-      - name: Slim Ruby and ensure bundler
-        if: steps.ruby-cache.outputs.cache-hit != 'true'
-        run: |
-          $rubyDir = "ruby-sidecar\ruby"
-          $before = (Get-ChildItem -Recurse $rubyDir | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "Before: $([math]::Round($before, 1)) MB"
-          Remove-Item -Recurse -Force "$rubyDir\share\ri", "$rubyDir\share\doc", "$rubyDir\share\man" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$rubyDir\include" -ErrorAction SilentlyContinue
-          Get-ChildItem -Recurse "$rubyDir" -Filter "*.a" | Remove-Item -Force
-          $unusedGems = @('irb', 'rdoc', 'rbs', 'typeprof', 'debug', 'reline', 'rdbg')
-          foreach ($gem in $unusedGems) {
-            Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Directory -Filter "${gem}-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
-            Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Filter "${gem}-*.gemspec" -ErrorAction SilentlyContinue | Remove-Item -Force
-          }
-          Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Directory -Filter "cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          $after = (Get-ChildItem -Recurse $rubyDir | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "After:  $([math]::Round($after, 1)) MB"
-          # Ensure bundler is present (gets cached with Ruby)
-          $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
-          & "$rubyBin\ruby.exe" -S gem install bundler --no-document --conservative
-          & "$rubyBin\ruby.exe" -e "require 'bundler'; puts %Q{bundler #{Bundler::VERSION} OK}"
+          # Only remove docs/man (safe, never needed at runtime)
+          Remove-Item -Recurse -Force "ruby-sidecar\ruby\share\ri", "ruby-sidecar\ruby\share\doc", "ruby-sidecar\ruby\share\man" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "ruby-sidecar\ruby\include" -ErrorAction SilentlyContinue
 
       - name: Cache sidecar gems
         id: gems-cache
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
+          key: sidecar-gems-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
