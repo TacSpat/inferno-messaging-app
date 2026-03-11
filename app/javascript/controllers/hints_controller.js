@@ -49,10 +49,14 @@ export default class extends Controller {
       this.seenValue = []
     }
 
-    this._scanHints()
+    // Delay initial scan to let layout settle after connect
+    setTimeout(() => this._scanHints(), 200)
 
     this._onFrameLoad = () => {
-      setTimeout(() => this._scanHints(), 150)
+      setTimeout(() => {
+        this._scanHints()
+        this._repositionDots()
+      }, 200)
     }
     this._onResize = () => this._repositionDots()
     this._onClickOutside = (e) => this._handleOutsideClick(e)
@@ -66,6 +70,7 @@ export default class extends Controller {
 
     document.addEventListener("turbo:frame-load", this._onFrameLoad)
     document.addEventListener("turbo:load", this._onFrameLoad)
+    document.addEventListener("turbo:before-render", this._onFrameLoad)
     window.addEventListener("resize", this._onResize)
     document.addEventListener("mousedown", this._onClickOutside)
     document.addEventListener("settings-overlay:closed", this._onOverlayClosed)
@@ -77,6 +82,7 @@ export default class extends Controller {
   disconnect() {
     document.removeEventListener("turbo:frame-load", this._onFrameLoad)
     document.removeEventListener("turbo:load", this._onFrameLoad)
+    document.removeEventListener("turbo:before-render", this._onFrameLoad)
     window.removeEventListener("resize", this._onResize)
     document.removeEventListener("mousedown", this._onClickOutside)
     document.removeEventListener("settings-overlay:closed", this._onOverlayClosed)
@@ -168,6 +174,12 @@ export default class extends Controller {
     this.activeDots.set(key, dot)
   }
 
+  _getZoomFactor() {
+    // CSS zoom on <html> shifts getBoundingClientRect() relative to fixed positioning
+    const z = parseFloat(getComputedStyle(document.documentElement).zoom)
+    return (z && isFinite(z)) ? z : 1
+  }
+
   _positionDot(dot, el, position, anchor = "center") {
     // Inline dots are positioned via CSS, skip
     if (dot._inline) return
@@ -175,9 +187,15 @@ export default class extends Controller {
     const rect = el.getBoundingClientRect()
     if (rect.width === 0 && rect.height === 0) return
 
+    const z = this._getZoomFactor()
+    // Convert zoomed viewport coords to fixed-position coords
+    const r = { top: rect.top / z, left: rect.left / z, right: rect.right / z, bottom: rect.bottom / z, width: rect.width / z, height: rect.height / z }
+
     let top, left
     const dotSize = 10
     const offset = 6 // gap from element edge
+    const vpW = window.innerWidth / z
+    const vpH = window.innerHeight / z
 
     // Calculate cross-axis position based on anchor
     const crossPos = (start, size) => {
@@ -190,26 +208,26 @@ export default class extends Controller {
 
     switch (position) {
       case "right":
-        top = crossPos(rect.top, rect.height)
-        left = rect.right + offset
+        top = crossPos(r.top, r.height)
+        left = r.right + offset
         break
       case "left":
-        top = crossPos(rect.top, rect.height)
-        left = rect.left - offset - dotSize
+        top = crossPos(r.top, r.height)
+        left = r.left - offset - dotSize
         break
       case "top":
-        top = rect.top - offset - dotSize
-        left = crossPos(rect.left, rect.width)
+        top = r.top - offset - dotSize
+        left = crossPos(r.left, r.width)
         break
       case "bottom":
-        top = rect.bottom + offset
-        left = crossPos(rect.left, rect.width)
+        top = r.bottom + offset
+        left = crossPos(r.left, r.width)
         break
     }
 
     // Clamp to viewport
-    top = Math.max(4, Math.min(top, window.innerHeight - dotSize - 4))
-    left = Math.max(4, Math.min(left, window.innerWidth - dotSize - 4))
+    top = Math.max(4, Math.min(top, vpH - dotSize - 4))
+    left = Math.max(4, Math.min(left, vpW - dotSize - 4))
 
     dot.style.top = `${Math.round(top)}px`
     dot.style.left = `${Math.round(left)}px`
@@ -258,12 +276,14 @@ export default class extends Controller {
   }
 
   _positionTooltip(tooltip, arrow, el, preferredPos) {
-    const rect = el.getBoundingClientRect()
+    const rawRect = el.getBoundingClientRect()
+    const z = this._getZoomFactor()
+    const rect = { top: rawRect.top / z, left: rawRect.left / z, right: rawRect.right / z, bottom: rawRect.bottom / z, width: rawRect.width / z, height: rawRect.height / z }
     const tw = tooltip.offsetWidth
     const th = tooltip.offsetHeight
     const gap = 14
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    const vw = window.innerWidth / z
+    const vh = window.innerHeight / z
 
     let top, left, arrowSide
 

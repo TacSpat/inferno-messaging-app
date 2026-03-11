@@ -65,6 +65,10 @@ jobs:
           find "$RUBY_DIR" -name '*.so' -exec strip --strip-unneeded {} + 2>/dev/null || true
           echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
 
+      - name: Ensure bundler in sidecar Ruby
+        run: |
+          ruby-sidecar/ruby/bin/gem install bundler --no-document --conservative
+
       - name: Cache sidecar gems
         id: gems-cache
         uses: actions/cache@v4
@@ -76,7 +80,6 @@ jobs:
         if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
-          ruby-sidecar/ruby/bin/gem install bundler --no-document
           ruby-sidecar/ruby/bin/bundle config set --local deployment true
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
@@ -230,6 +233,10 @@ jobs:
           find "$RUBY_DIR" -name '*.bundle' -exec strip -x {} + 2>/dev/null || true
           echo "After:  $(du -sh "$RUBY_DIR" | cut -f1)"
 
+      - name: Ensure bundler in sidecar Ruby
+        run: |
+          ruby-sidecar/ruby/bin/gem install bundler --no-document --conservative
+
       - name: Cache sidecar gems
         id: gems-cache
         uses: actions/cache@v4
@@ -241,7 +248,6 @@ jobs:
         if: steps.gems-cache.outputs.cache-hit != 'true'
         run: |
           export PATH="$PWD/ruby-sidecar/ruby/bin:$PATH"
-          ruby-sidecar/ruby/bin/gem install bundler --no-document
           ruby-sidecar/ruby/bin/bundle config set --local deployment true
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
@@ -399,6 +405,11 @@ jobs:
           Get-ChildItem "$rubyDir\lib\ruby\gems" -Recurse -Directory -Filter "cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           $after = (Get-ChildItem -Recurse $rubyDir | Measure-Object -Property Length -Sum).Sum / 1MB
           Write-Host "After:  $([math]::Round($after, 1)) MB"
+
+      - name: Ensure bundler in sidecar Ruby
+        run: |
+          $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
+          & "$rubyBin\ruby.exe" -S gem install bundler --no-document --conservative
 
       - name: Cache sidecar gems
         id: gems-cache
