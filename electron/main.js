@@ -332,12 +332,19 @@ function createMainWindow(url) {
   const lastPath = saved && saved.lastPath && saved.lastPath !== '/' ? saved.lastPath : '';
   mainWindow.loadURL(baseUrl + lastPath);
 
-  mainWindow.once('ready-to-show', () => {
+  const showMainWindow = () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.close();
     }
-    mainWindow.show();
-  });
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+  };
+
+  mainWindow.once('ready-to-show', showMainWindow);
+
+  // Fallback: show window after timeout even if page fails to load
+  setTimeout(showMainWindow, 10000);
 
   mainWindow.on('closed', () => {
     mainWindow = null;
