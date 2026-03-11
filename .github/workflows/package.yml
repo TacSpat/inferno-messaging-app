@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+          key: sidecar-gems-slim-linux-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -81,8 +81,13 @@ jobs:
           ruby-sidecar/ruby/bin/bundle config set --local without 'development test'
           ruby-sidecar/ruby/bin/bundle config set --local path vendor/bundle
           ruby-sidecar/ruby/bin/bundle install
+          # Remove test-only gems that bundler downloads despite --without
           rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
           rm -rf vendor/bundle/ruby/*/gems/capybara-*
+          rm -rf vendor/bundle/ruby/*/gems/cucumber-*
+          rm -rf vendor/bundle/ruby/*/gems/database_cleaner-*
+          rm -rf vendor/bundle/ruby/*/gems/webmock-*
+          rm -rf vendor/bundle/ruby/*/gems/shoulda-*
 
       - name: Slim gems
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -105,6 +110,7 @@ jobs:
       - name: Assemble sidecar
         run: |
           mkdir -p sidecar-stage
+          # Copy Rails app excluding dev/CI files AND vendor/bundle (copied separately)
           rsync -a --exclude='.git' --exclude='node_modules' --exclude='tmp' \
             --exclude='log' --exclude='sidecar-stage' --exclude='ruby-sidecar' \
             --exclude='.github' --exclude='dist' --exclude='spec' --exclude='test' \
@@ -115,8 +121,13 @@ jobs:
             --exclude='bun.config.js' --exclude='bun.lock' --exclude='plan.md' \
             --exclude='.tebako.yml' --exclude='.dockerignore' --exclude='Dockerfile' \
             --exclude='.kamal' --exclude='storage/*.sqlite3' \
+            --exclude='vendor/bundle' --exclude='.bundle' \
             ./ sidecar-stage/app/
+          # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
+          cp -r vendor/bundle sidecar-stage/app/vendor/bundle
+          # Copy portable Ruby
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
+          # Create launcher script
           cat > sidecar-stage/start.sh << 'LAUNCHER'
           #!/bin/sh
           DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -210,7 +221,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+          key: sidecar-gems-slim-macos-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -223,6 +234,10 @@ jobs:
           ruby-sidecar/ruby/bin/bundle install
           rm -rf vendor/bundle/ruby/*/gems/selenium-webdriver-*
           rm -rf vendor/bundle/ruby/*/gems/capybara-*
+          rm -rf vendor/bundle/ruby/*/gems/cucumber-*
+          rm -rf vendor/bundle/ruby/*/gems/database_cleaner-*
+          rm -rf vendor/bundle/ruby/*/gems/webmock-*
+          rm -rf vendor/bundle/ruby/*/gems/shoulda-*
 
       - name: Slim gems
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -256,7 +271,9 @@ jobs:
             --exclude='bun.config.js' --exclude='bun.lock' --exclude='plan.md' \
             --exclude='.tebako.yml' --exclude='.dockerignore' --exclude='Dockerfile' \
             --exclude='.kamal' --exclude='storage/*.sqlite3' \
+            --exclude='vendor/bundle' --exclude='.bundle' \
             ./ sidecar-stage/app/
+          cp -r vendor/bundle sidecar-stage/app/vendor/bundle
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
           cat > sidecar-stage/start.sh << 'LAUNCHER'
           #!/bin/sh
@@ -362,7 +379,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}
+          key: sidecar-gems-slim-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v2
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -396,14 +413,19 @@ jobs:
       - name: Assemble sidecar
         run: |
           New-Item -ItemType Directory -Force -Path sidecar-stage\app
+          # Copy Rails app excluding vendor/bundle (copied separately from sidecar gems)
           $exclude = @('.git', 'node_modules', 'tmp', 'log', 'sidecar-stage',
                        'ruby-sidecar', '.github', 'dist', 'spec', 'test',
                        'features', 'electron', 'electron-builder.yml', 'icons',
                        'doc', 'packaging', '.claude', '.rspec', '.rubocop.yml',
                        'Procfile.dev', 'bun.config.js', 'bun.lock', 'plan.md',
                        '.tebako.yml', '.dockerignore', 'Dockerfile', '.kamal',
-                       'storage')
+                       'storage', 'vendor', '.bundle')
           Get-ChildItem -Path . -Exclude $exclude | Copy-Item -Destination sidecar-stage\app -Recurse -Force
+          # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
+          New-Item -ItemType Directory -Force -Path sidecar-stage\app\vendor
+          Copy-Item -Path vendor\bundle -Destination sidecar-stage\app\vendor\bundle -Recurse
+          # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           @"
           @echo off
