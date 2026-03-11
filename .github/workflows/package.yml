@@ -125,6 +125,14 @@ jobs:
             ./ sidecar-stage/app/
           # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
           cp -r vendor/bundle sidecar-stage/app/vendor/bundle
+          # Create .bundle/config so bundler finds the gems
+          mkdir -p sidecar-stage/app/.bundle
+          cat > sidecar-stage/app/.bundle/config << 'BUNDLECFG'
+          ---
+          BUNDLE_PATH: "vendor/bundle"
+          BUNDLE_WITHOUT: "development:test"
+          BUNDLE_DEPLOYMENT: "true"
+          BUNDLECFG
           # Copy portable Ruby
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
           # Create launcher script
@@ -274,6 +282,13 @@ jobs:
             --exclude='vendor/bundle' --exclude='.bundle' \
             ./ sidecar-stage/app/
           cp -r vendor/bundle sidecar-stage/app/vendor/bundle
+          mkdir -p sidecar-stage/app/.bundle
+          cat > sidecar-stage/app/.bundle/config << 'BUNDLECFG'
+          ---
+          BUNDLE_PATH: "vendor/bundle"
+          BUNDLE_WITHOUT: "development:test"
+          BUNDLE_DEPLOYMENT: "true"
+          BUNDLECFG
           cp -r ruby-sidecar/ruby sidecar-stage/ruby
           cat > sidecar-stage/start.sh << 'LAUNCHER'
           #!/bin/sh
@@ -425,6 +440,14 @@ jobs:
           # Copy sidecar-specific vendor/bundle (slimmed, no test gems)
           New-Item -ItemType Directory -Force -Path sidecar-stage\app\vendor
           Copy-Item -Path vendor\bundle -Destination sidecar-stage\app\vendor\bundle -Recurse
+          # Create .bundle/config so bundler finds the gems
+          New-Item -ItemType Directory -Force -Path sidecar-stage\app\.bundle
+          @"
+          ---
+          BUNDLE_PATH: "vendor/bundle"
+          BUNDLE_WITHOUT: "development:test"
+          BUNDLE_DEPLOYMENT: "true"
+          "@ | Out-File -FilePath sidecar-stage\app\.bundle\config -Encoding UTF8
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           @"
