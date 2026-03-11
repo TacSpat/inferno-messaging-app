@@ -33,7 +33,9 @@ jobs:
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
-          SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          bun run build
+          bun run build:css
+          SKIP_JS_BUILD=true SKIP_CSS_BUILD=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
       - name: Cache portable Ruby
         id: ruby-cache
@@ -181,7 +183,9 @@ jobs:
       - name: Precompile assets
         run: |
           bun install --frozen-lockfile
-          SKIP_BUN_INSTALL=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
+          bun run build
+          bun run build:css
+          SKIP_JS_BUILD=true SKIP_CSS_BUILD=true SECRET_KEY_BASE=placeholder bundle exec rails assets:precompile
 
       - name: Cache portable Ruby
         id: ruby-cache
