@@ -42,8 +42,7 @@ if (data_dir = ENV["INFERNO_DATA_DIR"]).present?
   ENV["QUEUE_DATABASE_PATH"]    ||= db_dir.join("production_queue.sqlite3").to_s
   ENV["CABLE_DATABASE_PATH"]    ||= db_dir.join("production_cable.sqlite3").to_s
 
-  # Active Storage
-  Rails.application.config.active_storage.service_configurations ||= {}
+  # Active Storage — service root is set via ERB in config/storage.yml
 
   # Tmp and log
   Rails.application.config.paths["tmp"] = data_path.join("tmp").to_s

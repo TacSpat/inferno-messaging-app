@@ -28,10 +28,11 @@ threads_count = ENV.fetch("RAILS_MAX_THREADS", 3)
 threads threads_count, threads_count
 
 # Specifies the `port` that Puma will listen on to receive requests; default is 3000.
-port ENV.fetch("PORT", 3000)
+bind_address = ENV.fetch("PUMA_BIND", "0.0.0.0")
+bind "tcp://#{bind_address}:#{ENV.fetch("PORT", 3000)}"
 
 # Allow puma to be restarted by `bin/rails restart` command.
-plugin :tmp_restart
+plugin :tmp_restart unless ENV["INFERNO_DATA_DIR"]
 
 # Run the Solid Queue supervisor inside of Puma for single-server deployments
 plugin :solid_queue if ENV["SOLID_QUEUE_IN_PUMA"]
@@ -39,3 +40,10 @@ plugin :solid_queue if ENV["SOLID_QUEUE_IN_PUMA"]
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
 # In other environments, only set the PID file if requested.
 pidfile ENV["PIDFILE"] if ENV["PIDFILE"]
+
+# Desktop mode: use data dir for state/pidfile
+if ENV["INFERNO_DATA_DIR"]
+  data = ENV["INFERNO_DATA_DIR"]
+  state_path "#{data}/tmp/puma.state"
+  pidfile "#{data}/tmp/pids/server.pid"
+end

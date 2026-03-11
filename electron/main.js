@@ -145,8 +145,8 @@ function spawnServer() {
 
     cmd = isWin ? launcherPath : '/bin/sh';
     args = isWin
-      ? ['server', '-p', String(PORT), '-b', '127.0.0.1']
-      : [launcherPath, 'server', '-p', String(PORT), '-b', '127.0.0.1'];
+      ? ['server']
+      : [launcherPath, 'server'];
     opts = {
       cwd: path.join(sidecarDir, 'app'),
       env: {
@@ -154,6 +154,7 @@ function spawnServer() {
         INFERNO_DATA_DIR: data,
         RAILS_ENV: 'production',
         PORT: String(PORT),
+        PUMA_BIND: '127.0.0.1',
         SECRET_KEY_BASE: secret,
         SOLID_QUEUE_IN_PUMA: 'true',
         RAILS_LOG_TO_STDOUT: '1',
