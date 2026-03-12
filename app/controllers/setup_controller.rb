@@ -11,7 +11,7 @@ class SetupController < ApplicationController
 
     migrate_mode = params[:setup_mode] == "migrate"
 
-    private_key_raw = migrate_mode ? params[:migrate_private_key] : params[:nostr_private_key]
+    private_key_raw = params[:migrate_private_key] if migrate_mode
 
     if private_key_raw.present?
       begin
