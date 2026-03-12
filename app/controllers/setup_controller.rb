@@ -35,11 +35,9 @@ class SetupController < ApplicationController
     end
 
     if migrate_mode
-      # Apply fetched profile fields
+      # Apply fetched profile fields (avatar/banner are Active Storage, handled via Nostr Kind 0)
       @user.display_name = params[:fetched_display_name].presence
       @user.bio = params[:fetched_bio].presence
-      @user.avatar_url = params[:fetched_avatar_url].presence
-      @user.banner_url = params[:fetched_banner_url].presence
     end
 
     if @user.save
