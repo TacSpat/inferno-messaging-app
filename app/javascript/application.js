@@ -520,6 +520,7 @@ import OnboardingWizardController from "./controllers/onboarding_wizard_controll
 import OnboardingPreviewController from "./controllers/onboarding_preview_controller"
 import HintsController from "./controllers/hints_controller"
 import ConnectionMonitorController from "./controllers/connection_monitor_controller"
+import SetupMigrateController from "./controllers/setup_migrate_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -580,6 +581,7 @@ application.register("onboarding-wizard", OnboardingWizardController)
 application.register("onboarding-preview", OnboardingPreviewController)
 application.register("hints", HintsController)
 application.register("connection-monitor", ConnectionMonitorController)
+application.register("setup-migrate", SetupMigrateController)
 
 // --- Custom spatially-aware tooltips: convert title → data-tooltip, position with JS ---
 ;(function() {

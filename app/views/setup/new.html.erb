@@ -1,4 +1,4 @@
-<div class="flex items-center justify-center min-h-screen bg-gray-900">
+<div class="flex items-center justify-center min-h-screen bg-gray-900" data-controller="setup-migrate">
   <div class="w-full max-w-md bg-gray-800 rounded-lg shadow-xl p-8">
     <div class="text-center mb-6">
       <h1 class="text-3xl font-bold text-white">Inferno</h1>
@@ -13,31 +13,140 @@
       </div>
     <% end %>
 
+    <%# Tab bar %>
+    <div class="flex border-b border-gray-700 mb-6">
+      <button type="button"
+        data-setup-migrate-target="newTab"
+        data-action="click->setup-migrate#switchToNew"
+        class="flex-1 pb-2 text-sm font-semibold text-center border-b-2 border-accent text-white transition">
+        New Identity
+      </button>
+      <button type="button"
+        data-setup-migrate-target="migrateTab"
+        data-action="click->setup-migrate#switchToMigrate"
+        class="flex-1 pb-2 text-sm font-semibold text-center border-b-2 border-transparent text-gray-400 hover:text-gray-200 transition">
+        Migrate Identity
+      </button>
+    </div>
+
     <%= form_with url: setup_path, method: :post, scope: :user, class: "space-y-4" do |f| %>
-      <div>
-        <%= f.label :username, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.text_field :username, autofocus: true, placeholder: "your name", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
-      </div>
+      <input type="hidden" name="setup_mode" value="new" data-setup-migrate-target="modeInput">
 
-      <div>
-        <%= f.label :password, "Passphrase", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.password_field :password, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
-        <p class="text-xs text-gray-500 mt-1">Used to unlock Inferno on this machine</p>
-      </div>
-
-      <div>
-        <%= f.label :password_confirmation, "Confirm Passphrase", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
-        <%= f.password_field :password_confirmation, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
-      </div>
-
-      <!-- Federation keypair section -->
-      <div class="pt-2 border-t border-gray-700">
-        <h2 class="text-sm font-semibold text-white mb-2">Federation Identity</h2>
-        <p class="text-xs text-gray-400 mb-3">Leave blank to generate a new keypair, or import an existing one.</p>
-
+      <%# ── New Identity panel ── %>
+      <div data-setup-migrate-target="newPanel">
         <div>
-          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Private Key (hex or encoded)</label>
-          <input type="password" name="nostr_private_key" placeholder="Enter private key..." class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm font-mono" />
+          <%= f.label :username, class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+          <%= f.text_field :username, autofocus: true, placeholder: "your name", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
+        </div>
+
+        <div class="mt-4">
+          <%= f.label :password, "Passphrase", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+          <%= f.password_field :password, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
+          <p class="text-xs text-gray-500 mt-1">Used to unlock Inferno on this machine</p>
+        </div>
+
+        <div class="mt-4">
+          <%= f.label :password_confirmation, "Confirm Passphrase", class: "block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1" %>
+          <%= f.password_field :password_confirmation, autocomplete: "new-password", class: "w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" %>
+        </div>
+
+        <%# Optional key import for new identity %>
+        <div class="pt-4 mt-4 border-t border-gray-700">
+          <h2 class="text-sm font-semibold text-white mb-2">Federation Identity</h2>
+          <p class="text-xs text-gray-400 mb-3">Leave blank to generate a new keypair, or import an existing one.</p>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Private Key (hex or encoded)</label>
+            <input type="password" name="nostr_private_key" placeholder="Enter private key..." class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm font-mono" />
+          </div>
+        </div>
+      </div>
+
+      <%# ── Migrate Identity panel ── %>
+      <div data-setup-migrate-target="migratePanel" class="hidden">
+        <%# Private key input %>
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Private Key</label>
+          <input type="password"
+            name="migrate_private_key"
+            data-setup-migrate-target="privateKeyInput"
+            placeholder="nsec... or hex"
+            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm font-mono" />
+          <p class="text-xs text-gray-500 mt-1">Your nsec or hex private key</p>
+        </div>
+
+        <%# Custom relays %>
+        <div class="mt-4">
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Custom Relays <span class="text-gray-500 normal-case font-normal">(optional)</span></label>
+          <div data-setup-migrate-target="relayList">
+            <input type="text" name="relay_urls[]" placeholder="wss://relay.example.com" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm font-mono" />
+          </div>
+          <button type="button" data-action="click->setup-migrate#addRelayInput" class="text-xs text-accent hover:text-accent-light mt-1">+ Add relay</button>
+          <p class="text-xs text-gray-500 mt-1">Add relays where your profile is published (max 5)</p>
+        </div>
+
+        <%# Fetch button %>
+        <div class="mt-4">
+          <button type="button"
+            data-setup-migrate-target="fetchButton"
+            data-action="click->setup-migrate#fetchProfile"
+            class="w-full bg-gray-700 hover:bg-gray-600 text-white font-semibold py-2 rounded transition text-sm flex items-center justify-center gap-2">
+            <span>Fetch Profile</span>
+            <svg data-setup-migrate-target="fetchSpinner" class="hidden animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+          </button>
+          <p data-setup-migrate-target="fetchError" class="hidden text-sm text-red-400 mt-2"></p>
+        </div>
+
+        <%# Profile not found warning %>
+        <div data-setup-migrate-target="profileNotFound" class="hidden mt-4 bg-yellow-900/30 border border-yellow-700/50 rounded p-3">
+          <p class="text-sm text-yellow-300">No profile found on relays. You can still migrate your key — enter a username below.</p>
+        </div>
+
+        <%# Profile preview %>
+        <div data-setup-migrate-target="profilePreview" class="hidden mt-4 bg-gray-900 rounded overflow-hidden border border-gray-700">
+          <div class="hidden relative h-20">
+            <img data-setup-migrate-target="bannerPreview" src="" class="w-full h-full object-cover" />
+          </div>
+          <div class="p-4 flex items-start gap-3">
+            <img data-setup-migrate-target="avatarPreview" src="" class="hidden w-12 h-12 rounded-full object-cover border-2 border-gray-700 flex-shrink-0" />
+            <div class="min-w-0">
+              <p data-setup-migrate-target="displayNamePreview" class="text-white font-semibold text-sm truncate"></p>
+              <p data-setup-migrate-target="usernamePreview" class="text-gray-400 text-xs truncate"></p>
+              <p data-setup-migrate-target="bioPreview" class="text-gray-300 text-xs mt-1 line-clamp-2"></p>
+            </div>
+          </div>
+        </div>
+
+        <%# Hidden inputs for fetched profile data %>
+        <input type="hidden" name="fetched_display_name" data-setup-migrate-target="fetchedDisplayName" />
+        <input type="hidden" name="fetched_bio" data-setup-migrate-target="fetchedBio" />
+        <input type="hidden" name="fetched_avatar_url" data-setup-migrate-target="fetchedAvatarUrl" />
+        <input type="hidden" name="fetched_banner_url" data-setup-migrate-target="fetchedBannerUrl" />
+        <div data-setup-migrate-target="fetchedRelays"></div>
+        <input type="hidden" name="fetched_username" data-setup-migrate-target="fetchedUsername" />
+
+        <%# Username (editable, pre-filled from fetch) %>
+        <div class="mt-4">
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Username</label>
+          <input type="text"
+            name="user[username]"
+            data-setup-migrate-target="usernameInput"
+            placeholder="your name"
+            class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" />
+        </div>
+
+        <%# Passphrase %>
+        <div class="mt-4">
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Passphrase</label>
+          <input type="password" name="user[password]" autocomplete="new-password" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" />
+          <p class="text-xs text-gray-500 mt-1">Used to unlock Inferno on this machine</p>
+        </div>
+
+        <div class="mt-4">
+          <label class="block text-xs font-semibold text-gray-300 uppercase tracking-wide mb-1">Confirm Passphrase</label>
+          <input type="password" name="user[password_confirmation]" autocomplete="new-password" class="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-accent text-sm" />
         </div>
       </div>
 
