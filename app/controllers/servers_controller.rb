@@ -10,7 +10,7 @@ class ServersController < ApplicationController
     if first_channel
       redirect_to server_channel_path(@server, first_channel)
     else
-      redirect_to root_path
+      render :empty
     end
   end
 

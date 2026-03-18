@@ -151,6 +151,15 @@ export default class extends Controller {
         if (data.role_color) nameSpan.style.color = data.role_color
       }
     })
+    // Also update skeleton names for remote members (matched by pubkey)
+    if (data.pubkey && data.display_name) {
+      document.querySelectorAll(`[data-nostr-pubkey="${data.pubkey}"]`).forEach(el => {
+        el.textContent = data.display_name
+        el.classList.remove("skeleton-shimmer")
+        el.removeAttribute("data-nostr-pubkey")
+        if (data.role_color) el.style.color = data.role_color
+      })
+    }
     // Update own user panel (bottom-left) if it's the current user
     const currentUserId = document.body.dataset.currentUserId
     if (String(data.user_id) === String(currentUserId)) {

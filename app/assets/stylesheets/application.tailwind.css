@@ -1514,6 +1514,18 @@ input[type="radio"]:checked::after {
     to { opacity: 1; transform: translateY(0); }
   }
 
+  /* Skeleton shimmer for unresolved profile names */
+  .skeleton-shimmer {
+    background: linear-gradient(90deg, transparent 25%, rgba(255,255,255,0.08) 50%, transparent 75%);
+    background-size: 200% 100%;
+    animation: skeleton-pulse 1.5s ease-in-out infinite;
+    border-radius: 4px;
+  }
+  @keyframes skeleton-pulse {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
   /* Toast alerts — slide in from right */
   [data-controller="toast"] {
     animation: toast-enter 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;

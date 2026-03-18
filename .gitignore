@@ -61,3 +61,5 @@ doc/.obsidian/
 
 # ONNX model files (too large for git).
 /lib/models/*.onnx
+lib/models/*.onnx
+lib/models/*.onnx.data

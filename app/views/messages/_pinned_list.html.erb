@@ -7,15 +7,23 @@
   <div class="divide-y divide-gray-700/50">
     <% messages.each do |msg| %>
       <% author = msg.user %>
+      <% unless author %>
+        <% remote_member = msg.channel&.server&.remote_members&.find_by(pubkey: msg.nostr_author_pubkey) if msg.nostr_author_pubkey.present? %>
+        <% nostr_contact = remote_member ? nil : msg.nostr_author %>
+      <% end %>
+      <% pin_author_name = author ? (server ? author.display_name_for(server) : (author.display_name.presence || author.username)) : (remote_member&.display_name_for || nostr_contact&.effective_display_name || (msg.nostr_author_pubkey.present? ? msg.nostr_author_pubkey.first(12) + "..." : "Unknown")) %>
+      <% pin_avatar_url = author&.effective_avatar_url || remote_member&.effective_avatar_url || nostr_contact&.avatar_url %>
+      <% pin_color = author && server ? author.role_color_for(server) : (remote_member&.role_color_for || (author ? '#d1d5db' : '#6b7280')) %>
+      <% pin_profile_color = author&.try(:profile_color) || remote_member&.try(:profile_color) || '#1e1c1b' %>
       <div class="px-3 py-2.5 hover:bg-gray-800/60 cursor-pointer transition" data-jump-to-message="<%= msg.public_id %>">
         <div class="flex items-start gap-2.5">
           <!-- Avatar -->
           <div class="shrink-0 mt-0.5">
-            <% if author&.effective_avatar_url.present? %>
-              <%= image_tag author.effective_avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
+            <% if pin_avatar_url.present? %>
+              <%= image_tag pin_avatar_url, class: "w-9 h-9 rounded-full object-cover" %>
             <% else %>
-              <div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= author&.try(:profile_color) || '#1e1c1b' %>">
-                <%= author ? author.username[0].upcase : "?" %>
+              <div class="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white" style="background-color: <%= pin_profile_color %>">
+                <%= pin_author_name[0]&.upcase || "?" %>
               </div>
             <% end %>
           </div>
@@ -24,8 +32,8 @@
           <div class="flex-1 min-w-0">
             <!-- Name + timestamp -->
             <div class="flex items-baseline gap-2 mb-0.5">
-              <span class="text-sm font-medium" style="color: <%= author && server ? author.role_color_for(server) : (author ? '#d1d5db' : '#6b7280') %>">
-                <%= author ? (server ? author.display_name_for(server) : (author.display_name.presence || author.username)) : "Unknown" %>
+              <span class="text-sm font-medium" style="color: <%= pin_color %>">
+                <%= pin_author_name %>
               </span>
               <span class="text-[11px] text-gray-500"><%= msg.created_at.strftime("%m/%d/%Y %l:%M %p") %></span>
             </div>
@@ -33,6 +41,10 @@
             <!-- Message body -->
             <% if msg.is_sticker? %>
               <div class="max-w-[128px]"><%= msg.rendered_content %></div>
+            <% elsif msg.spoiler? && msg.content.present? %>
+              <div class="spoiler-inline" onclick="this.classList.toggle('revealed')" role="button" tabindex="0">
+                <div class="spoiler-inline-content text-sm text-gray-200 leading-relaxed message-content text-left"><%= msg.rendered_content %></div>
+              </div>
             <% elsif msg.content.present? %>
               <div class="text-sm text-gray-200 leading-relaxed message-content text-left"><%= msg.rendered_content %></div>
             <% end %>

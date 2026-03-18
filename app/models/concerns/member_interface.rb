@@ -42,6 +42,7 @@ module MemberInterface
   def role_color_for(_server = nil)
     sorted = roles.loaded? ? roles.sort_by { |r| -r.position } : roles.ordered.to_a
     sorted.each do |role|
+      next if role.try(:owner?)
       return role.color if role.color.present? && role.color != "#99aab5"
     end
     "#ffffff"

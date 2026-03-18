@@ -117,7 +117,8 @@
           </button>
           <span class="font-semibold text-white text-sm capitalize"><%= action_name.tr('_', ' ') %></span>
           <div class="flex-1"></div>
-          <%= link_to server_channel_path(@server, @server.channels.ordered.first), class: "flex items-center justify-center w-8 h-8 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+          <% close_path = @server.channels.ordered.first ? server_channel_path(@server, @server.channels.ordered.first) : server_path(@server) %>
+          <%= link_to close_path, class: "flex items-center justify-center w-8 h-8 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
           <% end %>
         </div>
@@ -125,7 +126,7 @@
         <div class="py-4 sm:py-8 px-4 sm:px-10 max-w-3xl mx-auto">
           <!-- Close button (desktop) -->
           <div class="hidden md:flex justify-end mb-4">
-            <%= link_to server_channel_path(@server, @server.channels.ordered.first), class: "flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
+            <%= link_to close_path, class: "flex items-center justify-center w-9 h-9 rounded-full border-2 border-gray-600 text-gray-400 hover:border-gray-400 hover:text-gray-200 transition" do %>
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
             <% end %>
           </div>

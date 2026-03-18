@@ -4,7 +4,7 @@ class Channel < ApplicationRecord
   belongs_to :server
   belongs_to :category, optional: true
   belongs_to :parent_channel, class_name: "Channel", optional: true
-  has_many :child_channels, class_name: "Channel", foreign_key: :parent_channel_id, dependent: :destroy
+  has_many :child_channels, class_name: "Channel", foreign_key: :parent_channel_id, dependent: :nullify
   belongs_to :sidechat_channel, class_name: "Channel", optional: true
   has_many :voice_channels_using_as_sidechat, class_name: "Channel", foreign_key: :sidechat_channel_id
   has_many :messages, -> { where(hidden_at: nil) }, dependent: :destroy

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.1].define(version: 2026_03_10_100004) do
+ActiveRecord::Schema[8.1].define(version: 2026_03_16_100000) do
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
     t.datetime "created_at", null: false
@@ -786,6 +786,7 @@ ActiveRecord::Schema[8.1].define(version: 2026_03_10_100004) do
     t.boolean "discoverable", default: false, null: false
     t.boolean "icon_nsfw", default: false, null: false
     t.string "invite_code"
+    t.datetime "last_synced_at"
     t.string "name"
     t.string "nostr_group_id"
     t.json "onboarding_default_channel_ids", default: []

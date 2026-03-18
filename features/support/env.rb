@@ -9,7 +9,7 @@ DatabaseCleaner.strategy = :truncation
 
 Before do
   DatabaseCleaner.start
-  InstanceConfig.first_or_create!
+  LocalConfig.first_or_create!
 
   # Stub relay services using class-level method replacement
   RelayService.define_singleton_method(:publish_to_all_original, RelayService.method(:publish_to_all)) rescue nil

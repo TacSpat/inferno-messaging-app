@@ -16,6 +16,7 @@ export default class extends Controller {
       }
     )
     this.pendingFiles = []
+    this._lastTypingSent = 0
     this.inputTarget.setAttribute("spellcheck", "false")
     this.inputTarget.spellcheck = false
     this.setupDragAndDrop()
@@ -500,6 +501,16 @@ export default class extends Controller {
     })
   }
 
+  // --- Typing indicator ---
+
+  sendTyping() {
+    if (!this.inputTarget.value.trim()) return
+    const now = Date.now()
+    if (now - this._lastTypingSent < 2000) return
+    this._lastTypingSent = now
+    this.subscription.perform("typing")
+  }
+
   // --- Input handling ---
 
   handleKeydown(event) {
@@ -625,6 +636,17 @@ export default class extends Controller {
         }
         this._refreshPinnedPanel()
         break
+      case "backfill_complete": {
+        // Backfill imported messages server-side — fetch them via HTTP
+        const scrollCtrl = this.application.getControllerForElementAndIdentifier(
+          document.getElementById("messages"), "scroll-position"
+        )
+        if (scrollCtrl && scrollCtrl.newestMessageIdValue) {
+          scrollCtrl.hasNewerValue = true
+          scrollCtrl.loadNewerMessages()
+        }
+        break
+      }
       case "typing":
         this.showTypingIndicator(data.username, data.user_id)
         break

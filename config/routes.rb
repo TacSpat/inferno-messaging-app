@@ -8,6 +8,7 @@ Rails.application.routes.draw do
   get "setup", to: "setup#new", as: :setup
   post "setup", to: "setup#create"
   post "setup/fetch_profile", to: "setup#fetch_profile", as: :setup_fetch_profile
+  get "setup/migration_status", to: "setup#migration_status", as: :setup_migration_status
 
   # NIP-05 Nostr identity verification
   get "/.well-known/nostr.json", to: "nostr/well_known#show", as: :nostr_well_known

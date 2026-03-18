@@ -229,6 +229,11 @@ class DmMessagesController < ApplicationController
       payload_needed = true
     end
 
+    if message.spoiler?
+      payload[:spoiler] = true
+      payload_needed = true
+    end
+
     # Include file attachment URLs
     if message.files.attached? && base_url.present?
       payload[:files] = message.files.map do |file|

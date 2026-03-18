@@ -269,6 +269,9 @@ export default class extends Controller {
       case "server_deleted":
         this.handleServerDeleted()
         break
+      case "voice_state_sync":
+        this.handleVoiceStateSync(data)
+        break
       case "voice_state_join":
         this.handleVoiceJoin(data)
         break
@@ -491,13 +494,49 @@ export default class extends Controller {
     parts.forEach(p => placeFn(p))
   }
 
-  refreshPage() {
-    // Full page refresh to re-run server-side visibility checks
+  async refreshPage() {
+    // Fetch current page and extract just the sidebar HTML to avoid full page reload
+    try {
+      const resp = await fetch(window.location.href, {
+        headers: { "Accept": "text/html", "X-Requested-With": "XMLHttpRequest" }
+      })
+      if (!resp.ok) return this._fallbackRefresh()
+
+      const html = await resp.text()
+      const doc = new DOMParser().parseFromString(html, "text/html")
+      const newSidebar = doc.querySelector(".mobile-channel-sidebar")
+      const currentSidebar = this.element.closest(".mobile-channel-sidebar")
+
+      if (newSidebar && currentSidebar) {
+        // Preserve scroll position
+        const scrollTop = currentSidebar.scrollTop
+        currentSidebar.innerHTML = newSidebar.innerHTML
+        currentSidebar.scrollTop = scrollTop
+      } else {
+        this._fallbackRefresh()
+      }
+    } catch {
+      this._fallbackRefresh()
+    }
+  }
+
+  _fallbackRefresh() {
     window.Turbo?.visit(window.location.href, { action: "replace" })
   }
 
   handleServerDeleted() {
     window.Turbo?.visit("/", { action: "replace" })
+  }
+
+  handleVoiceStateSync(data) {
+    // Bulk sync of current voice states — received on ActionCable connect.
+    // Re-applies all participants to catch any missed join/leave events.
+    if (!data.voice_states) return
+
+    data.voice_states.forEach(vs => {
+      // Reuse the join handler which already handles dedup
+      this.handleVoiceJoin(vs)
+    })
   }
 
   handleVoiceJoin(data) {

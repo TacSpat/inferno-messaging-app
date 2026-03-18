@@ -193,7 +193,10 @@ class RelaySubscriptionManager
   def run_periodic_sync
     Server.find_each do |server|
       next unless server.nostr_group_id.present?
+      # Skip servers synced within the last hour
+      next if server.last_synced_at.present? && server.last_synced_at > 1.hour.ago
       NostrServerSyncService.new(server.nostr_group_id).sync_all
+      server.update_column(:last_synced_at, Time.current)
     rescue => e
       Rails.logger.warn("[RelaySubscriptionManager] Periodic sync failed for #{server.nostr_group_id}: #{e.message}")
     end
@@ -532,6 +535,7 @@ class RelaySubscriptionManager
     end
 
     is_sticker = (event["tags"] || []).any? { |t| t[0] == "sticker" }
+    is_spoiler = (event["tags"] || []).any? { |t| t[0] == "spoiler" }
 
     message = channel.messages.create!(
       content: event["content"],
@@ -540,6 +544,7 @@ class RelaySubscriptionManager
       nostr_event_id: event["id"],
       nostr_author_pubkey: sender_pubkey,
       is_sticker: is_sticker,
+      spoiler: is_spoiler,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -936,6 +941,7 @@ class RelaySubscriptionManager
     content = plaintext
     emoji_urls = nil
     dm_is_sticker = false
+    dm_is_spoiler = false
     begin
       parsed = JSON.parse(plaintext)
       if parsed.is_a?(Hash)
@@ -948,6 +954,7 @@ class RelaySubscriptionManager
           end
           emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
           dm_is_sticker = parsed["is_sticker"] == true
+          dm_is_spoiler = parsed["spoiler"] == true
         elsif parsed.key?("type")
           # Unknown structured payload — log but don't display as a message
           Rails.logger.info("[RelaySubscriptionManager] Ignoring DM payload type=#{parsed["type"]}")
@@ -993,6 +1000,7 @@ class RelaySubscriptionManager
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
       is_sticker: dm_is_sticker,
+      spoiler: dm_is_spoiler,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -1025,6 +1033,7 @@ class RelaySubscriptionManager
     emoji_urls = nil
     files = nil
     own_dm_is_sticker = false
+    own_dm_is_spoiler = false
     begin
       parsed = JSON.parse(plaintext)
       if parsed.is_a?(Hash)
@@ -1037,6 +1046,7 @@ class RelaySubscriptionManager
           end
           emoji_urls = parsed["emojis"] if parsed["emojis"].is_a?(Hash)
           own_dm_is_sticker = parsed["is_sticker"] == true
+          own_dm_is_spoiler = parsed["spoiler"] == true
         elsif parsed.key?("type")
           return
         end
@@ -1070,6 +1080,7 @@ class RelaySubscriptionManager
       public_id: SecureRandom.alphanumeric(12),
       nostr_event_id: event["id"],
       is_sticker: own_dm_is_sticker,
+      spoiler: own_dm_is_spoiler,
       created_at: event["created_at"] ? Time.at(event["created_at"]) : Time.current
     )
 
@@ -1524,6 +1535,7 @@ class RelaySubscriptionManager
     ServerChannel.broadcast_to(server, {
       type: "member_update",
       user_id: member.public_id,
+      pubkey: member.pubkey,
       html: ApplicationController.render(
         partial: "servers/member_item",
         locals: { member: member.reload, server: server }
@@ -1646,6 +1658,12 @@ class RelaySubscriptionManager
     welcome_message_tag = tags.find { |t| t[0] == "welcome_message" }
     voice_enabled_tag = tags.find { |t| t[0] == "voice_enabled" }
     discoverable_tag = tags.find { |t| t[0] == "discoverable" }
+    server_type_tag = tags.find { |t| t[0] == "server_type" }
+    age_restricted_tag = tags.find { |t| t[0] == "age_restricted" }
+    afk_channel_tag = tags.find { |t| t[0] == "afk_channel" }
+    afk_timeout_tag = tags.find { |t| t[0] == "afk_timeout" }
+    afk_action_tag = tags.find { |t| t[0] == "afk_action" }
+    welcome_channel_tag = tags.find { |t| t[0] == "welcome_channel" }
 
     attrs = {}
     attrs[:name] = name_tag[1] if name_tag&.dig(1).present?
@@ -1654,6 +1672,22 @@ class RelaySubscriptionManager
     attrs[:welcome_message_template] = welcome_message_tag[1] if welcome_message_tag
     attrs[:voice_enabled] = voice_enabled_tag[1] == "true" if voice_enabled_tag
     attrs[:discoverable] = discoverable_tag[1] == "true" if discoverable_tag
+    attrs[:server_type] = server_type_tag[1] if server_type_tag&.dig(1).present?
+    attrs[:age_restricted] = age_restricted_tag[1] == "true" if age_restricted_tag
+    attrs[:afk_timeout] = afk_timeout_tag[1].to_i if afk_timeout_tag&.dig(1).present?
+    attrs[:afk_action] = afk_action_tag[1] if afk_action_tag&.dig(1).present?
+
+    # Link welcome channel by nostr_group_id
+    if welcome_channel_tag&.dig(1).present?
+      wc = server.channels.find_by(nostr_group_id: welcome_channel_tag[1])
+      attrs[:welcome_channel_id] = wc&.id
+    end
+
+    # Link AFK channel by public_id
+    if afk_channel_tag&.dig(1).present?
+      afk_ch = server.channels.find_by(public_id: afk_channel_tag[1])
+      attrs[:afk_channel_id] = afk_ch&.id
+    end
 
     # Download icon/banner and attach via ActiveStorage
     picture_tag = tags.find { |t| t[0] == "picture" }
@@ -1688,10 +1722,13 @@ class RelaySubscriptionManager
     return unless NostrServerAuth.authorized_for_event?(server, event)
 
     # Skip self-echoes — we already have the correct state locally
-    owner = User.owner
-    if owner&.nostr_public_key == event["pubkey"]
-      Rails.logger.debug("[RelaySubscriptionManager] Ignoring own server_structure echo")
-      return
+    # (but not during bootstrap sync, where we need to import our own events)
+    unless Thread.current[:nostr_skip_auth]
+      owner = User.owner
+      if owner&.nostr_public_key == event["pubkey"]
+        Rails.logger.debug("[RelaySubscriptionManager] Ignoring own server_structure echo")
+        return
+      end
     end
 
     tags = event["tags"] || []
@@ -1716,7 +1753,9 @@ class RelaySubscriptionManager
       # Sync channels
       remote_ch_ids = ch_tags.map { |t| t[1] }
       ch_tags.each do |t|
-        # ["ch", public_id, name, type, position, cat_id, topic, nsfw, nostr_group_id, perm_overrides, encrypted, channel_public_key]
+        # ["ch", public_id, name, type, position, cat_id, topic, nsfw, nostr_group_id,
+        #  perm_overrides, encrypted, channel_public_key, sidechat_id, parent_id,
+        #  voice_bitrate, voice_user_limit, video_enabled, post_only]
         ch = server.channels.find_or_initialize_by(public_id: t[1])
         cat = t[5].present? ? server.categories.find_by(public_id: t[5]) : nil
         ch.assign_attributes(
@@ -1737,17 +1776,43 @@ class RelaySubscriptionManager
           ch.encrypted = t[10] == "true"
           ch.channel_public_key = t[11] if t[11].present?
         end
-        # Sync sidechat link
-        if t[12].present?
-          sidechat = server.channels.find_by(public_id: t[12])
-          ch.sidechat_channel = sidechat
-        else
-          ch.sidechat_channel = nil
+        # Sync voice channel settings
+        ch.voice_bitrate = t[14].to_i if t[14].present? && t[14].to_i > 0
+        ch.voice_user_limit = t[15].to_i if t[15].present?
+        ch.video_enabled = t[16] == "true" if t[16].present?
+        ch.post_only = t[17] == "true" if t[17].present?
+        unless ch.save
+          Rails.logger.warn("[RelaySubscriptionManager] Skipping invalid channel #{t[1]}: #{ch.errors.full_messages.join(', ')}")
         end
-        ch.save! if ch.changed? || ch.new_record?
       end
       # Remove channels not in the event
       server.channels.where.not(public_id: remote_ch_ids).destroy_all if remote_ch_ids.any?
+
+      # Second pass: link sidechats and parent channels (all channels exist now)
+      ch_tags.each do |t|
+        ch = server.channels.find_by(public_id: t[1])
+        next unless ch
+
+        updates = {}
+
+        # Sidechat link (t[12])
+        if t[12].present?
+          sidechat = server.channels.find_by(public_id: t[12])
+          updates[:sidechat_channel_id] = sidechat&.id
+        elsif ch.sidechat_channel_id.present?
+          updates[:sidechat_channel_id] = nil
+        end
+
+        # Parent voice channel link (t[13])
+        if t[13].present?
+          parent = server.channels.voice.find_by(public_id: t[13])
+          updates[:parent_channel_id] = parent&.id
+        elsif ch.parent_channel_id.present?
+          updates[:parent_channel_id] = nil
+        end
+
+        ch.update_columns(updates) if updates.any?
+      end
     end
 
     log_server_event(event, server: server)

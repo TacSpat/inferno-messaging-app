@@ -242,6 +242,7 @@ class MessagesController < ApplicationController
     event_content = resolve_active_storage_urls(message.content || "")
     tags = [ [ "h", channel.nostr_group_id ] ]
     tags << [ "sticker" ] if message.is_sticker?
+    tags << [ "spoiler" ] if message.spoiler?
 
     if channel.encrypted? && channel.channel_public_key.present?
       conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)

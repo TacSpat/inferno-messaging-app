@@ -120,6 +120,14 @@ class NostrServerPublishJob < ApplicationJob
     tags << [ "welcome_enabled", @server.welcome_message_enabled?.to_s ]
     tags << [ "voice_enabled", @server.voice_enabled?.to_s ]
     tags << [ "discoverable", @server.discoverable?.to_s ]
+    tags << [ "server_type", @server.server_type || "community" ]
+    tags << [ "age_restricted", @server.age_restricted?.to_s ]
+
+    if @server.afk_channel
+      tags << [ "afk_channel", @server.afk_channel.public_id ]
+    end
+    tags << [ "afk_timeout", (@server.afk_timeout || 5).to_s ]
+    tags << [ "afk_action", @server.afk_action || "move" ]
 
     # Include voice provider pubkeys so other clients can create ServerVoiceProvider records
     @server.server_voice_providers.active.includes(:user).each do |svp|
@@ -147,18 +155,23 @@ class NostrServerPublishJob < ApplicationJob
       perm_overrides = (ch.permissions_overrides || {}).to_json
       tags << [
         "ch",
-        ch.public_id,
-        ch.name,
-        ch.channel_type,
-        ch.position.to_s,
-        ch.category&.public_id || "",
-        ch.topic || "",
-        ch.nsfw?.to_s,
-        ch.nostr_group_id || "",
-        perm_overrides,
-        ch.encrypted?.to_s,
-        ch.channel_public_key || "",
-        ch.sidechat_channel&.public_id || ""
+        ch.public_id,                          # t[1]
+        ch.name,                               # t[2]
+        ch.channel_type,                       # t[3]
+        ch.position.to_s,                      # t[4]
+        ch.category&.public_id || "",          # t[5]
+        ch.topic || "",                        # t[6]
+        ch.nsfw?.to_s,                         # t[7]
+        ch.nostr_group_id || "",               # t[8]
+        perm_overrides,                        # t[9]
+        ch.encrypted?.to_s,                    # t[10]
+        ch.channel_public_key || "",           # t[11]
+        ch.sidechat_channel&.public_id || "",  # t[12]
+        ch.parent_channel&.public_id || "",    # t[13]
+        (ch.voice_bitrate || 64000).to_s,      # t[14]
+        (ch.voice_user_limit || 0).to_s,       # t[15]
+        ch.video_enabled?.to_s,                # t[16]
+        ch.post_only?.to_s                     # t[17]
       ]
     end
 

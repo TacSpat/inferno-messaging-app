@@ -149,7 +149,7 @@ class InvitesController < ApplicationController
       # Try to find the server locally and sync invites from relay
       server = Server.find_by(nostr_group_id: @nostr_group_id)
       if server
-        NostrServerSyncService.new(@nostr_group_id).sync_invites
+        NostrServerSyncService.new(@nostr_group_id).send(:sync_invites)
         @invite = Invite.find_by(code: params[:code])
         if @invite
           @invite_state = if !@invite.active?

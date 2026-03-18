@@ -13,6 +13,15 @@ class RemoteAssetCache
   MAX_SIZE  = 10.megabytes
   TIMEOUT   = 5 # seconds
 
+  # Content-Type to file extension mapping
+  MIME_TO_EXT = {
+    "image/png"  => ".png",  "image/jpeg" => ".jpg", "image/gif"  => ".gif",
+    "image/webp" => ".webp", "image/svg+xml" => ".svg", "image/avif" => ".avif",
+    "video/mp4"  => ".mp4",  "video/webm" => ".webm", "video/quicktime" => ".mov",
+    "audio/mpeg" => ".mp3",  "audio/ogg"  => ".ogg",  "audio/wav" => ".wav",
+    "audio/webm" => ".weba", "audio/mp4"  => ".m4a",
+  }.freeze
+
   # Returns a local path like "/cached_assets/abc123.png"
   # or nil if the download fails.
   def self.cache(remote_url)
@@ -22,13 +31,20 @@ class RemoteAssetCache
     return nil unless uri&.host
 
     hash = Digest::SHA256.hexdigest(remote_url)
-    ext = File.extname(uri.path).presence || ".png"
-    filename = "#{hash}#{ext}"
-    local_path = "/cached_assets/#{filename}"
-    full_path = CACHE_DIR.join(filename)
+    url_ext = File.extname(uri.path).presence
 
-    # Already cached
-    return local_path if File.exist?(full_path)
+    # If URL has an extension, check cache immediately
+    if url_ext
+      filename = "#{hash}#{url_ext}"
+      local_path = "/cached_assets/#{filename}"
+      return local_path if File.exist?(CACHE_DIR.join(filename))
+    else
+      # Extensionless URL (e.g. blossom) — check if any cached file exists for this hash
+      existing = Dir.glob(CACHE_DIR.join("#{hash}.*")).first
+      if existing
+        return "/cached_assets/#{File.basename(existing)}"
+      end
+    end
 
     # Check cache size limit before downloading
     evict_if_over_limit
@@ -39,7 +55,12 @@ class RemoteAssetCache
     return nil unless response.is_a?(Net::HTTPSuccess)
     return nil if response.body.bytesize > MAX_SIZE
 
-    File.binwrite(full_path, response.body)
+    # Determine extension: prefer URL extension, fall back to Content-Type header
+    ext = url_ext || ext_from_content_type(response["content-type"]) || ".bin"
+    filename = "#{hash}#{ext}"
+    local_path = "/cached_assets/#{filename}"
+
+    File.binwrite(CACHE_DIR.join(filename), response.body)
     local_path
   rescue => e
     Rails.logger.warn("[RemoteAssetCache] Failed to cache #{remote_url}: #{e.message}")
@@ -55,9 +76,18 @@ class RemoteAssetCache
     return nil unless uri&.host
 
     hash = Digest::SHA256.hexdigest(remote_url)
-    ext = File.extname(uri.path).presence || ".png"
-    local_path = "/cached_assets/#{hash}#{ext}"
-    File.exist?(CACHE_DIR.join("#{hash}#{ext}")) ? local_path : nil
+    url_ext = File.extname(uri.path).presence
+
+    if url_ext
+      full = CACHE_DIR.join("#{hash}#{url_ext}")
+      return "/cached_assets/#{hash}#{url_ext}" if File.exist?(full)
+    else
+      # Extensionless — find any cached file matching this hash
+      existing = Dir.glob(CACHE_DIR.join("#{hash}.*")).first
+      return "/cached_assets/#{File.basename(existing)}" if existing
+    end
+
+    nil
   end
 
   # Cache multiple URLs in one call. Returns a hash of { remote_url => local_path }.
@@ -96,6 +126,12 @@ class RemoteAssetCache
   end
 
   private
+
+  def self.ext_from_content_type(content_type)
+    return nil if content_type.blank?
+    mime = content_type.split(";").first&.strip&.downcase
+    MIME_TO_EXT[mime]
+  end
 
   def self.fetch_with_redirects(uri, limit = 3)
     return nil if limit <= 0

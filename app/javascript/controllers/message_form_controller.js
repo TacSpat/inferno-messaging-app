@@ -878,6 +878,15 @@ export default class extends Controller {
         }
         this._refreshPinnedPanel()
         break
+      case "backfill_complete": {
+        // Backfill imported messages server-side — fetch them via HTTP
+        const scrollCtrl = this.application.getControllerForElementAndIdentifier(messagesDiv, "scroll-position")
+        if (scrollCtrl && scrollCtrl.newestMessageIdValue) {
+          scrollCtrl.hasNewerValue = true
+          scrollCtrl.loadNewerMessages()
+        }
+        break
+      }
       case "typing": {
         const selfId = document.body.dataset.currentUserId
         if (String(data.user_id) === String(selfId)) break

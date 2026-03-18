@@ -202,6 +202,8 @@ export default class extends Controller {
       this.showServerUnread(data.server_id)
     } else if (data.type === "channel_typing") {
       this._handleChannelTyping(data)
+    } else if (data.type === "migration_complete") {
+      window.Turbo?.visit(window.location.href, { action: "replace" })
     } else if (data.type === "clear") {
       if (data.channel_id) this.removeBadge("channel", data.channel_id)
       if (data.server_id && !data.channel_id) this.removeServerBadge(data.server_id)

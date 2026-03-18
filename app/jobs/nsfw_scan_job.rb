@@ -15,13 +15,22 @@ class NsfwScanJob < ApplicationJob
 
     attachment = record.public_send(attachment_name)
     return unless attachment.attached?
-    return unless attachment.content_type&.start_with?("image/")
+
+    ct = attachment.content_type.to_s
+    return unless ct.start_with?("image/") || ct.start_with?("video/")
 
     is_nsfw = Tempfile.create([ "nsfw_scan", File.extname(attachment.filename.to_s) ]) do |tmp|
       tmp.binmode
       tmp.write(attachment.download)
       tmp.rewind
-      NsfwDetector.explicit?(tmp.path, threshold: 0.7)
+
+      if ct == "image/gif"
+        NsfwDetector.gif_explicit?(tmp.path, threshold: 0.7)
+      elsif ct.start_with?("video/")
+        NsfwDetector.video_explicit?(tmp.path, threshold: 0.7)
+      else
+        NsfwDetector.explicit?(tmp.path, threshold: 0.7)
+      end
     end
 
     flag_column = "#{attachment_name}_nsfw"

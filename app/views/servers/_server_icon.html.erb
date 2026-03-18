@@ -7,7 +7,8 @@
   <% if active %>
   <div class="<%= icon_classes %>" title="<%= server.name %>">
   <% else %>
-  <a href="<%= server_channel_path(server, server.channels.ordered.first) %>" class="<%= icon_classes %>" title="<%= server.name %>">
+  <% first_channel = server.channels.ordered.first %>
+  <a href="<%= first_channel ? server_channel_path(server, first_channel) : server_path(server) %>" class="<%= icon_classes %>" title="<%= server.name %>">
   <% end %>
     <% if icon_ok %>
       <% icon_blur = nsfw_blur_class(server.icon_nsfw?) %>

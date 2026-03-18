@@ -1,15 +1,21 @@
 class SetupController < ApplicationController
-  before_action :redirect_if_setup_complete
+  before_action :redirect_if_setup_complete, only: [ :new, :create, :fetch_profile ]
 
   def new
   end
 
   def create
-    @user = User.new(setup_params)
+    migrate_mode = params[:setup_mode] == "migrate"
+
+    user_attrs = if migrate_mode
+      { username: params[:migrate_username], password: params[:migrate_password], password_confirmation: params[:migrate_password_confirmation] }
+    else
+      setup_params
+    end
+
+    @user = User.new(user_attrs)
     @user.email = "owner@localhost" # Devise requires email, but we don't use it
     @user.theme = "inferno"
-
-    migrate_mode = params[:setup_mode] == "migrate"
 
     private_key_raw = params[:migrate_private_key] if migrate_mode
 
@@ -41,18 +47,26 @@ class SetupController < ApplicationController
     end
 
     if @user.save
+      if migrate_mode
+        attach_profile_media(@user, params[:fetched_avatar_url], params[:fetched_banner_url])
+      end
+
       extra_relay_urls = migrate_mode ? Array(params[:fetched_relays]).select(&:present?) : []
       seed_relays(extra_relay_urls)
 
       NostrPublishJob.perform_later(@user.id, :profile)
       NostrPublishJob.perform_later(@user.id, :relay_list)
 
-      if migrate_mode
-        MigrateIdentityJob.perform_later(@user.id)
-      end
-
       sign_in(@user)
-      redirect_to authenticated_root_path, notice: "Welcome to Inferno!"
+
+      if migrate_mode
+        # Initialize progress cache before enqueueing
+        Rails.cache.write("migrate_identity:#{@user.id}", { step: "starting", progress: 0 }, expires_in: 5.minutes)
+        MigrateIdentityJob.perform_later(@user.id)
+        redirect_to setup_migration_status_path
+      else
+        redirect_to authenticated_root_path, notice: "Welcome to Inferno!"
+      end
     else
       render :new, status: :unprocessable_entity
     end
@@ -116,6 +130,23 @@ class SetupController < ApplicationController
     }
   end
 
+  def migration_status
+    user = current_user || User.owner
+    unless user
+      render json: { step: "failed", progress: 0, error: "No user found" }
+      return
+    end
+
+    data = Rails.cache.read("migrate_identity:#{user.id}")
+    data ||= { step: "waiting", progress: 0 }
+
+    if data[:step] == "complete"
+      data[:redirect_url] = authenticated_root_path
+    end
+
+    render json: data
+  end
+
   private
 
   def setup_params
@@ -124,6 +155,25 @@ class SetupController < ApplicationController
 
   def redirect_if_setup_complete
     redirect_to root_path if User.any?
+  end
+
+  def attach_profile_media(user, avatar_url, banner_url)
+    [ [ avatar_url, :avatar ], [ banner_url, :banner ] ].each do |url, attachment_name|
+      next if url.blank?
+      local_path = RemoteAssetCache.cache(url)
+      next unless local_path
+      full_path = Rails.root.join("public", local_path.delete_prefix("/"))
+      next unless File.exist?(full_path)
+      content_type = Marcel::MimeType.for(Pathname.new(full_path))
+      ext = File.extname(full_path)
+      user.public_send(attachment_name).attach(
+        io: File.open(full_path),
+        filename: "#{attachment_name}#{ext}",
+        content_type: content_type
+      )
+    end
+  rescue => e
+    Rails.logger.warn("[Setup] Failed to attach profile media: #{e.message}")
   end
 
   def seed_relays(extra_urls = [])
