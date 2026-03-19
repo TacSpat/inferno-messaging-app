@@ -42,7 +42,7 @@
             <% if msg.is_sticker? %>
               <div class="max-w-[128px]"><%= msg.rendered_content %></div>
             <% elsif msg.spoiler? && msg.content.present? %>
-              <div class="spoiler-inline" onclick="this.classList.toggle('revealed')" role="button" tabindex="0">
+              <div class="spoiler-inline" onclick="event.stopPropagation(); this.classList.toggle('revealed')" role="button" tabindex="0">
                 <div class="spoiler-inline-content text-sm text-gray-200 leading-relaxed message-content text-left"><%= msg.rendered_content %></div>
               </div>
             <% elsif msg.content.present? %>
