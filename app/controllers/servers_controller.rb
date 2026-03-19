@@ -190,9 +190,14 @@ class ServersController < ApplicationController
   end
 
   def discover
+    Rails.logger.info("[discover] EM running: #{EventMachine.reactor_running?}, relays: #{RelayConnection.active.count}")
     events = Timeout.timeout(12) do
       RelayService.fetch_from_all({ kinds: [31750], limit: 50 }, timeout: 5)
-    end rescue []
+    end
+    Rails.logger.info("[discover] Got #{events.size} events")
+  rescue => e
+    Rails.logger.error("[discover] Error: #{e.class} #{e.message}")
+    events = []
 
     joined_gids = current_user.servers.where.not(nostr_group_id: nil).pluck(:nostr_group_id).to_set
 
