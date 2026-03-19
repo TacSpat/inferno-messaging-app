@@ -32,7 +32,7 @@ Rails.application.configure do
     config.action_controller.perform_caching = false
   end
 
-  config.cache_store = :memory_store
+  config.cache_store = :file_store, Rails.root.join("tmp/cache")
 
   # Store uploaded files on the local file system (see config/storage.yml for options).
   config.active_storage.service = :local
