@@ -522,6 +522,7 @@ import HintsController from "./controllers/hints_controller"
 import ConnectionMonitorController from "./controllers/connection_monitor_controller"
 import SetupMigrateController from "./controllers/setup_migrate_controller"
 import MigrationSyncController from "./controllers/migration_sync_controller"
+import ServerDiscoverController from "./controllers/server_discover_controller"
 
 application.register("message-form", MessageFormController)
 application.register("scroll-position", ScrollPositionController)
@@ -571,6 +572,7 @@ application.register("call", CallController)
 application.register("group-chat-modal", GroupChatModalController)
 application.register("add-server-modal", AddServerModalController)
 application.register("server-invite-preview", ServerInvitePreviewController)
+application.register("server-discover", ServerDiscoverController)
 application.register("status-emoji", StatusEmojiController)
 application.register("message-search", MessageSearchController)
 application.register("pruning-strategy", PruningStrategyController)
