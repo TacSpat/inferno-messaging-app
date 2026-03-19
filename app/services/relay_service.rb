@@ -47,19 +47,23 @@ class RelayService
   def self.publish_via_new_connections(urls, event_message)
     results = {}
     mutex = Mutex.new
+    queue = Queue.new
 
-    run_with_eventmachine do |done|
+    do_publish = proc do
       pending = urls.size
 
       finish_one = lambda do
         count = mutex.synchronize { pending -= 1; pending }
-        done.call if count <= 0
+        queue.push(:done) if count <= 0
       end
 
       urls.each do |url|
         ws = Faye::WebSocket::Client.new(url)
+        finished = false
 
         timer = EventMachine.add_timer(RESPONSE_TIMEOUT) do
+          next if finished
+          finished = true
           mutex.synchronize { results[url] = { success: false, message: "Timeout" } }
           ws.close rescue nil
           finish_one.call
@@ -72,6 +76,8 @@ class RelayService
         ws.on :message do |event|
           data = JSON.parse(event.data) rescue nil
           if data.is_a?(Array) && data[0] == "OK"
+            next if finished
+            finished = true
             EventMachine.cancel_timer(timer)
             mutex.synchronize { results[url] = { success: data[2], message: data[3] || "OK" } }
             ws.close rescue nil
@@ -80,12 +86,16 @@ class RelayService
         end
 
         ws.on :error do |event|
+          next if finished
+          finished = true
           EventMachine.cancel_timer(timer)
           mutex.synchronize { results[url] = { success: false, message: "Error: #{event.message rescue 'unknown'}" } }
           finish_one.call
         end
 
         ws.on :close do |_event|
+          next if finished
+          finished = true
           EventMachine.cancel_timer(timer) rescue nil
           mutex.synchronize { results[url] ||= { success: false, message: "Closed" } }
           finish_one.call
@@ -93,6 +103,13 @@ class RelayService
       end
     end
 
+    if EventMachine.reactor_running?
+      EventMachine.next_tick(&do_publish)
+    else
+      Thread.new { EventMachine.run(&do_publish) }
+    end
+
+    queue.pop(timeout: RESPONSE_TIMEOUT + 3)
     results
   end
   private_class_method :publish_via_new_connections
@@ -104,14 +121,18 @@ class RelayService
     sub_id = SecureRandom.hex(8)
     req_message = JSON.generate([ "REQ", sub_id, filter ])
     close_message = JSON.generate([ "CLOSE", sub_id ])
+    queue = Queue.new
 
-    run_with_eventmachine do |done|
+    do_fetch = proc do
       ws = Faye::WebSocket::Client.new(relay_url)
+      finished = false
 
       timer = EventMachine.add_timer(timeout) do
+        next if finished
+        finished = true
         ws.send(close_message) rescue nil
-        ws.close
-        done.call
+        ws.close rescue nil
+        queue.push(:done)
       end
 
       ws.on :open do |_event|
@@ -126,42 +147,56 @@ class RelayService
         when "EVENT"
           events << data[2] if data[2].is_a?(Hash)
         when "EOSE"
-          # End of stored events — we have all results
+          next if finished
+          finished = true
           EventMachine.cancel_timer(timer)
-          ws.send(close_message)
-          ws.close
-          done.call
+          ws.send(close_message) rescue nil
+          ws.close rescue nil
+          queue.push(:done)
         end
       end
 
       ws.on :error do |_event|
+        next if finished
+        finished = true
         EventMachine.cancel_timer(timer)
-        done.call
+        queue.push(:done)
       end
 
       ws.on :close do |_event|
+        next if finished
+        finished = true
         EventMachine.cancel_timer(timer) rescue nil
-        done.call
+        queue.push(:done)
       end
     end
 
+    if EventMachine.reactor_running?
+      EventMachine.next_tick(&do_fetch)
+    else
+      Thread.new { EventMachine.run(&do_fetch) }
+    end
+
+    queue.pop(timeout: timeout + 3)
     events
   end
 
-  # Fetch events from all active relays in parallel, deduplicating by event id
+  # Fetch events from all active relays in parallel, deduplicating by event id.
+  # Safe to call whether or not EM is already running.
   def self.fetch_from_all(filter, timeout: RESPONSE_TIMEOUT)
     urls = RelayConnection.active.pluck(:url)
     return [] if urls.empty?
 
     all_events = {}
     mutex = Mutex.new
+    queue = Queue.new
 
-    run_with_eventmachine do |done|
+    do_fetch = proc do
       pending = urls.size
 
       finish_one = lambda do
         count = mutex.synchronize { pending -= 1; pending }
-        done.call if count <= 0
+        queue.push(:done) if count <= 0
       end
 
       urls.each do |url|
@@ -170,8 +205,11 @@ class RelayService
         close_message = JSON.generate([ "CLOSE", sub_id ])
 
         ws = Faye::WebSocket::Client.new(url)
+        finished = false
 
         timer = EventMachine.add_timer(timeout) do
+          next if finished
+          finished = true
           ws.send(close_message) rescue nil
           ws.close rescue nil
           finish_one.call
@@ -191,6 +229,8 @@ class RelayService
               mutex.synchronize { all_events[data[2]["id"]] = data[2] }
             end
           when "EOSE"
+            next if finished
+            finished = true
             EventMachine.cancel_timer(timer)
             ws.send(close_message) rescue nil
             ws.close rescue nil
@@ -199,36 +239,30 @@ class RelayService
         end
 
         ws.on :error do |_event|
+          next if finished
+          finished = true
           EventMachine.cancel_timer(timer)
           finish_one.call
         end
 
         ws.on :close do |_event|
+          next if finished
+          finished = true
           EventMachine.cancel_timer(timer) rescue nil
           finish_one.call
         end
       end
     end
 
-    all_events.values
-  end
-
-  private_class_method def self.run_with_eventmachine(&block)
     if EventMachine.reactor_running?
-      # EM already running (RelaySubscriptionManager) — schedule on the reactor
-      # and use a Queue to block the calling thread until done
-      queue = Queue.new
-      EventMachine.next_tick do
-        done = -> { queue.push(:done) rescue nil }
-        block.call(done)
-      end
-      # Wait for completion (with generous timeout to avoid hanging forever)
-      queue.pop(timeout: RESPONSE_TIMEOUT + 5)
+      EventMachine.next_tick(&do_fetch)
     else
-      EventMachine.run do
-        done = -> { EventMachine.stop }
-        block.call(done)
+      Thread.new do
+        EventMachine.run(&do_fetch)
       end
     end
+
+    queue.pop(timeout: timeout + 3)
+    all_events.values
   end
 end
