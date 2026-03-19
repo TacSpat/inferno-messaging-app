@@ -560,7 +560,7 @@ class RelaySubscriptionManager
 
     html = ApplicationController.render(
       partial: "messages/message",
-      locals: { message: message, server: channel.server }
+      locals: { message: message, server: channel.server, current_user: User.owner }
     )
     ChannelChatChannel.broadcast_to(channel, { type: "new_message", html: html })
   rescue ActiveRecord::RecordNotUnique
@@ -575,7 +575,7 @@ class RelaySubscriptionManager
 
     html = ApplicationController.render(
       partial: "messages/message",
-      locals: { message: message, server: channel.server }
+      locals: { message: message, server: channel.server, current_user: User.owner }
     )
     ChannelChatChannel.broadcast_to(channel, {
       type: "update_message",
@@ -658,7 +658,7 @@ class RelaySubscriptionManager
 
       html = ApplicationController.render(
         partial: "messages/message",
-        locals: { message: message, server: channel.server }
+        locals: { message: message, server: channel.server, current_user: User.owner }
       )
       ChannelChatChannel.broadcast_to(channel, {
         type: "update_message",
