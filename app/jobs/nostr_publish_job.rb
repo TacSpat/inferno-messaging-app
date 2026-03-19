@@ -46,8 +46,10 @@ class NostrPublishJob < ApplicationJob
     profile_data = {
       name: user.username,
       display_name: user.display_name.presence || user.username,
-      about: user.bio.presence || ""
-    }
+      about: user.bio.presence || "",
+      status: user.status.presence,
+      status_emoji: user.status_emoji.presence
+    }.compact
 
     # Upload avatar/banner to Blossom and include URLs
     if user.avatar.attached?

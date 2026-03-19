@@ -38,6 +38,8 @@ class Contact < ApplicationRecord
       banner_url: metadata["banner"],
       bio: metadata["about"],
       nip05: metadata["nip05"],
+      status: metadata["status"],
+      status_emoji: metadata["status_emoji"],
       profile_fetched_at: Time.current
     )
   end
