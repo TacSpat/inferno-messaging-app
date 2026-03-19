@@ -190,7 +190,9 @@ class ServersController < ApplicationController
   end
 
   def discover
-    events = RelayService.fetch_from_all({ kinds: [31750], limit: 50 }, timeout: 8)
+    events = Timeout.timeout(12) do
+      RelayService.fetch_from_all({ kinds: [31750], limit: 50 }, timeout: 5)
+    end rescue []
 
     joined_gids = current_user.servers.where.not(nostr_group_id: nil).pluck(:nostr_group_id).to_set
 
