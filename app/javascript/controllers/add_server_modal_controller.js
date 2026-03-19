@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { fetchDiscoverServers } from "../lib/server_discover"
 
 export default class extends Controller {
   static targets = ["modal"]
@@ -21,6 +22,8 @@ export default class extends Controller {
       this._closeHandler = () => this.close()
       closeBtn.addEventListener("click", this._closeHandler)
     }
+
+    this._discoverList = this._modal.querySelector("[data-discover-list]")
   }
 
   disconnect() {
@@ -33,6 +36,9 @@ export default class extends Controller {
 
   open() {
     this._modal.classList.remove("hidden")
+    if (this._discoverList) {
+      fetchDiscoverServers(this._discoverList)
+    }
   }
 
   close() {

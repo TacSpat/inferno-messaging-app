@@ -190,14 +190,9 @@ class ServersController < ApplicationController
   end
 
   def discover
-    Rails.logger.info("[discover] EM running: #{EventMachine.reactor_running?}, relays: #{RelayConnection.active.count}")
-    events = Timeout.timeout(12) do
-      RelayService.fetch_from_all({ kinds: [31750], limit: 50 }, timeout: 5)
-    end
-    Rails.logger.info("[discover] Got #{events.size} events")
-  rescue => e
-    Rails.logger.error("[discover] Error: #{e.class} #{e.message}")
-    events = []
+    urls = RelayConnection.active.pluck(:url)
+    filter = { kinds: [31750], limit: 50 }
+    events = discover_from_relays(urls, filter, timeout: 6)
 
     joined_gids = current_user.servers.where.not(nostr_group_id: nil).pluck(:nostr_group_id).to_set
 
@@ -396,6 +391,92 @@ class ServersController < ApplicationController
   rescue => e
     Rails.logger.warn("[ServersController] fetch_invite_from_relay failed: #{e.message}")
     nil
+  end
+
+  # Fetch events from relays, safe to call whether or not EM is already running.
+  # When EM is running, schedules work via next_tick; otherwise starts a temporary reactor.
+  def discover_from_relays(urls, filter, timeout: 6)
+    return [] if urls.empty?
+
+    all_events = {}
+    mutex = Mutex.new
+    queue = Queue.new
+
+    do_fetch = proc do
+      pending = urls.size
+
+      finish_one = lambda do
+        count = mutex.synchronize { pending -= 1; pending }
+        queue.push(:done) if count <= 0
+      end
+
+      urls.each do |url|
+        sub_id = SecureRandom.hex(8)
+        req_msg = JSON.generate(["REQ", sub_id, filter])
+        close_msg = JSON.generate(["CLOSE", sub_id])
+
+        ws = Faye::WebSocket::Client.new(url)
+        closed = false
+
+        timer = EventMachine.add_timer(timeout) do
+          next if closed
+          closed = true
+          ws.send(close_msg) rescue nil
+          ws.close rescue nil
+          finish_one.call
+        end
+
+        ws.on :open do |_|
+          ws.send(req_msg)
+        end
+
+        ws.on :message do |event|
+          data = JSON.parse(event.data) rescue nil
+          next unless data.is_a?(Array)
+          case data[0]
+          when "EVENT"
+            mutex.synchronize { all_events[data[2]["id"]] = data[2] } if data[2].is_a?(Hash)
+          when "EOSE"
+            next if closed
+            closed = true
+            EventMachine.cancel_timer(timer)
+            ws.send(close_msg) rescue nil
+            ws.close rescue nil
+            finish_one.call
+          end
+        end
+
+        ws.on :error do |_|
+          next if closed
+          closed = true
+          EventMachine.cancel_timer(timer)
+          finish_one.call
+        end
+
+        ws.on :close do |_|
+          next if closed
+          closed = true
+          EventMachine.cancel_timer(timer) rescue nil
+          finish_one.call
+        end
+      end
+    end
+
+    if EventMachine.reactor_running?
+      EventMachine.next_tick(&do_fetch)
+      queue.pop(timeout: timeout + 3)
+    else
+      Thread.new do
+        EventMachine.run(&do_fetch)
+      end
+      queue.pop(timeout: timeout + 3)
+      EventMachine.stop if EventMachine.reactor_running?
+    end
+
+    all_events.values
+  rescue => e
+    Rails.logger.error("[discover_from_relays] #{e.class}: #{e.message}")
+    []
   end
 
   def publish_server_state(event_type, **options)
