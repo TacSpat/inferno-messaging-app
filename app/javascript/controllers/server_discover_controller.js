@@ -9,6 +9,7 @@ export default class extends Controller {
   static targets = ["list"]
 
   connect() {
+    console.log("[server-discover] connected, fetching...")
     this.fetchServers()
   }
 
@@ -23,14 +24,16 @@ export default class extends Controller {
 
     try {
       const res = await fetch("/discover_servers", {
-        headers: { "Accept": "application/json" }
+        headers: { "Accept": "application/json" },
+        credentials: "same-origin"
       })
-      if (!res.ok) throw new Error("Failed to fetch")
+      if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
       const servers = await res.json()
       cachedServers = servers
       cacheTime = Date.now()
       this.render(servers)
-    } catch {
+    } catch (err) {
+      console.error("[server-discover]", err)
       this.listTarget.innerHTML = this.emptyHTML("Could not reach relays")
     }
   }
