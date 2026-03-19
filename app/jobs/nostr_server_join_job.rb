@@ -21,7 +21,8 @@ class NostrServerJoinJob < ApplicationJob
       sync_step(cache_key, "emojis", 60) { service.send(:sync_emojis) }
       sync_step(cache_key, "stickers", 70) { service.send(:sync_stickers) }
       sync_step(cache_key, "bans", 80) { service.send(:sync_bans) }
-      sync_step(cache_key, "invites", 90) { service.send(:sync_invites) }
+      sync_step(cache_key, "invites", 85) { service.send(:sync_invites) }
+      sync_step(cache_key, "pins", 90) { service.send(:sync_pins) }
 
       # Create membership
       update_progress(cache_key, "joining", 95)

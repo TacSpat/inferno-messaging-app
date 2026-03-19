@@ -67,6 +67,7 @@ class NostrServerSyncService
     sync_stickers
     sync_bans
     sync_invites
+    sync_pins
     Rails.logger.info("[NostrServerSyncService] Full sync complete for #{@gid}")
   end
 
@@ -231,6 +232,46 @@ class NostrServerSyncService
     end
 
     Rails.logger.info("[NostrServerSyncService] Synced #{count} invites for #{@gid}")
+  end
+
+  def sync_pins
+    server = Server.find_by(nostr_group_id: @gid)
+    return unless server
+
+    # Fetch all Kind 9006 pin events for this server's channels
+    group_ids = server.channels.where.not(nostr_group_id: nil).pluck(:nostr_group_id)
+    return if group_ids.empty?
+
+    events = RelayService.fetch_from_all({
+      kinds: [RelaySubscriptionManager::NIP29_PIN_MESSAGE],
+      "#h" => group_ids
+    })
+
+    # Group by target event ID (e tag), take latest pin state per message
+    grouped = events.group_by { |e|
+      (e["tags"] || []).find { |t| t[0] == "e" }&.dig(1)
+    }.compact
+
+    # Reset all pins first — relay is authoritative
+    Message.where(channel: server.channels, pinned: true).update_all(pinned: false)
+
+    count = 0
+    grouped.each do |target_event_id, pin_events|
+      next if target_event_id.blank?
+      latest = pin_events.max_by { |e| e["created_at"].to_i }
+      pinned_tag = (latest["tags"] || []).find { |t| t[0] == "pinned" }
+      pinned = pinned_tag && pinned_tag[1] == "true"
+
+      if pinned
+        message = Message.find_by(nostr_event_id: target_event_id)
+        if message
+          message.update_columns(pinned: true)
+          count += 1
+        end
+      end
+    end
+
+    Rails.logger.info("[NostrServerSyncService] Synced #{count} pins for #{@gid}")
   end
 
   # Fetch events for a single replaceable event (one d-tag value)
