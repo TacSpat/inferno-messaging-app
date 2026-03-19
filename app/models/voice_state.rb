@@ -11,6 +11,7 @@ class VoiceState < ApplicationRecord
   validates :session_id, presence: true, uniqueness: true
 
   after_create_commit :broadcast_join, :sync_join_to_remote
+  after_update_commit :sync_update_to_remote, if: -> { saved_change_to_self_mute? || saved_change_to_self_deaf? }
   after_destroy_commit :broadcast_leave, :sync_leave_to_remote
   after_destroy_commit :clear_channel_provider_if_empty
 
@@ -69,10 +70,26 @@ class VoiceState < ApplicationRecord
       user.public_id,
       user.display_name.presence || user.username,
       user.effective_avatar_url,
-      user.profile_color
+      user.profile_color,
+      self_mute: self_mute,
+      self_deaf: self_deaf
     )
   rescue => e
     Rails.logger.error "[VoiceState] sync_join_to_remote failed: #{e.message}"
+  end
+
+  def sync_update_to_remote
+    NostrVoiceStateSyncJob.perform_later(
+      "update", server_id, channel.public_id,
+      user.public_id,
+      user.display_name.presence || user.username,
+      user.effective_avatar_url,
+      user.profile_color,
+      self_mute: self_mute,
+      self_deaf: self_deaf
+    )
+  rescue => e
+    Rails.logger.error "[VoiceState] sync_update_to_remote failed: #{e.message}"
   end
 
   def sync_leave_to_remote

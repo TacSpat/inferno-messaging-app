@@ -1368,7 +1368,9 @@ class RelaySubscriptionManager
         user_id: user_id,
         username: data["username"] || "Remote User",
         avatar_url: data["avatar_url"],
-        profile_color: data["profile_color"]
+        profile_color: data["profile_color"],
+        self_mute: data["self_mute"] || false,
+        self_deaf: data["self_deaf"] || false
       })
 
       ServerChannel.broadcast_to(server, {
@@ -1378,9 +1380,35 @@ class RelaySubscriptionManager
         voice_state_id: nil,
         username: data["username"] || "Remote User",
         avatar_url: data["avatar_url"],
-        profile_color: data["profile_color"]
+        profile_color: data["profile_color"],
+        self_mute: data["self_mute"] || false,
+        self_deaf: data["self_deaf"] || false
       })
       Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{data["username"]} joined #{channel_id}")
+    elsif action == "update"
+      # Update cached state
+      self.class.cache_remote_voice_state(channel_id, {
+        user_id: user_id,
+        username: data["username"] || "Remote User",
+        avatar_url: data["avatar_url"],
+        profile_color: data["profile_color"],
+        self_mute: data["self_mute"] || false,
+        self_deaf: data["self_deaf"] || false
+      })
+
+      ServerChannel.broadcast_to(server, {
+        type: "voice_state_update",
+        channel_id: channel_id,
+        user_id: user_id,
+        self_mute: data["self_mute"] || false,
+        self_deaf: data["self_deaf"] || false,
+        server_mute: false,
+        server_deaf: false,
+        video_on: false,
+        screen_share_on: false,
+        broadcasting: false
+      })
+      Rails.logger.info("[RelaySubscriptionManager] Voice state sync: #{user_id} updated mute=#{data["self_mute"]} deaf=#{data["self_deaf"]}")
     elsif action == "leave"
       self.class.remove_remote_voice_state(channel_id, user_id)
 

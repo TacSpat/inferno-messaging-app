@@ -2,41 +2,37 @@
 // Plugs into LocalAudioTrack.setProcessor() — routes mic audio through
 // a multi-stage audio pipeline and exposes the cleaned output as processedTrack.
 //
-// Pipeline: source → highpass → RNNoise → gate (expander) → destination
-//
-// The high-pass filter removes low-frequency rumble (AC hum, fans, traffic)
-// before RNNoise processes the signal. The noise gate after RNNoise squelches
-// residual artifacts during silence.
+// Pipeline: source → highpass → RNNoise → noise gate → destination
 //
 // Suppression levels:
-//   "low"        — gentle HP (80Hz), no gate, minimal processing
-//   "moderate"   — standard HP (120Hz) + mild gate
-//   "aggressive" — steep HP (200Hz) + tight gate, cuts most background noise
+//   "low"        — gentle HP (80Hz), open gate
+//   "moderate"   — standard HP (120Hz) + balanced gate
+//   "aggressive" — steep HP (200Hz) + tight gate
 
 const PRESETS = {
   low: {
     highpassFreq: 80,
     highpassQ: 0.5,
-    gateThreshold: -80,   // effectively off
-    gateRatio: 1,
+    gateThresholdDb: -60,
     gateAttack: 0.01,
-    gateRelease: 0.1
+    gateRelease: 0.15,
+    gateFloor: 0.1
   },
   moderate: {
     highpassFreq: 120,
     highpassQ: 0.707,
-    gateThreshold: -50,
-    gateRatio: 4,
+    gateThresholdDb: -45,
     gateAttack: 0.005,
-    gateRelease: 0.15
+    gateRelease: 0.2,
+    gateFloor: 0.02
   },
   aggressive: {
     highpassFreq: 200,
     highpassQ: 1.0,
-    gateThreshold: -40,
-    gateRatio: 12,
+    gateThresholdDb: -38,
     gateAttack: 0.003,
-    gateRelease: 0.2
+    gateRelease: 0.25,
+    gateFloor: 0.0
   }
 }
 
@@ -71,26 +67,56 @@ export class RnnoiseProcessor {
     // Stage 2: RNNoise ML denoiser
     this._rnnoise = new RnnoiseWorkletNode(audioContext, { wasmBinary, maxChannels: 1 })
 
-    // Stage 3: Noise gate (using DynamicsCompressor as expander)
-    // A compressor with high threshold acts as a noise gate — signals below
-    // the threshold get pushed down by the ratio, silencing residual noise.
-    this._gate = audioContext.createDynamicsCompressor()
-    this._gate.threshold.value = preset.gateThreshold
-    this._gate.ratio.value = preset.gateRatio
-    this._gate.attack.value = preset.gateAttack
-    this._gate.release.value = preset.gateRelease
-    this._gate.knee.value = 6
+    // Stage 3: Noise gate — squelches residual noise during silence
+    this._gateAnalyser = audioContext.createAnalyser()
+    this._gateAnalyser.fftSize = 256
+    this._gateAnalyser.smoothingTimeConstant = 0.5
+
+    this._gateGain = audioContext.createGain()
+    this._gateGain.gain.value = 1.0
+
+    const thresholdLinear = Math.pow(10, preset.gateThresholdDb / 20)
+    const floor = preset.gateFloor
+    const attackTime = preset.gateAttack
+    const releaseTime = preset.gateRelease
+    let gateOpen = false
+
+    const postData = new Float32Array(this._gateAnalyser.fftSize)
+    this._gateInterval = setInterval(() => {
+      this._gateAnalyser.getFloatTimeDomainData(postData)
+      let sum = 0
+      for (let i = 0; i < postData.length; i++) sum += postData[i] * postData[i]
+      const rms = Math.sqrt(sum / postData.length)
+
+      const now = audioContext.currentTime
+      if (rms > thresholdLinear) {
+        if (!gateOpen) {
+          this._gateGain.gain.cancelScheduledValues(now)
+          this._gateGain.gain.setTargetAtTime(1.0, now, attackTime)
+          gateOpen = true
+        }
+      } else {
+        if (gateOpen) {
+          this._gateGain.gain.cancelScheduledValues(now)
+          this._gateGain.gain.setTargetAtTime(floor, now, releaseTime)
+          gateOpen = false
+        }
+      }
+    }, 10)
 
     // Destination
     this._dest = audioContext.createMediaStreamDestination()
 
-    // Wire up: source → highpass → rnnoise → gate → dest
+    // Wire up: source → highpass → rnnoise → analyser → gateGain → dest
     this._source.connect(this._highpass)
     this._highpass.connect(this._rnnoise)
-    this._rnnoise.connect(this._gate)
-    this._gate.connect(this._dest)
+    this._rnnoise.connect(this._gateAnalyser)
+    this._gateAnalyser.connect(this._gateGain)
+    this._gateGain.connect(this._dest)
 
     this.processedTrack = this._dest.stream.getAudioTracks()[0]
+
+    console.log(`[RNNoise] Initialized: level=${this._level}, sampleRate=${audioContext.sampleRate}`)
   }
 
   async restart({ track, audioContext }) {
@@ -99,11 +125,13 @@ export class RnnoiseProcessor {
   }
 
   async destroy() {
+    if (this._gateInterval) clearInterval(this._gateInterval)
     this._source?.disconnect()
     this._highpass?.disconnect()
     this._rnnoise?.disconnect()
     this._rnnoise?.destroy?.()
-    this._gate?.disconnect()
+    this._gateAnalyser?.disconnect()
+    this._gateGain?.disconnect()
     this.processedTrack = undefined
   }
 }

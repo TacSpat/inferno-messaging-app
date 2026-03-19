@@ -8,6 +8,7 @@ import {
 } from "livekit-client"
 
 import { RnnoiseProcessor } from "../lib/rnnoise_processor"
+import { DeepFilterNoiseFilterProcessor } from "deepfilternet3-noise-filter"
 
 const VOICE_SESSION_KEY = "voice-active-session"
 
@@ -300,7 +301,7 @@ export default class extends Controller {
     const opts = {
       autoGainControl: localStorage.getItem("voice-auto-gain-control") !== "false",
       echoCancellation: localStorage.getItem("voice-echo-cancellation") !== "false",
-      // Disable browser suppression when RNNoise handles it — they conflict
+      // Disable browser suppression when RNNoise handles it
       noiseSuppression: !rnnoiseEnabled
     }
     if (deviceId && deviceId !== "default") {
@@ -367,29 +368,51 @@ export default class extends Controller {
     const localTrack = pub?.track
     if (!localTrack) return
 
+    // Map level names to DeepFilterNet3 suppression values (0-100)
+    const dfLevels = { low: 40, moderate: 80, aggressive: 95 }
+    const dfLevel = dfLevels[level] ?? 60
+
     // If level changed, tear down old processor so we rebuild with new settings
-    if (enabled && this._rnnoiseProcessor && this._rnnoiseLevel !== level) {
+    if (enabled && this._noiseProcessor && this._noiseLevel !== level) {
       try { await localTrack.stopProcessor() } catch (_) {}
-      this._rnnoiseProcessor = null
+      this._noiseProcessor = null
     }
 
-    if (enabled && !this._rnnoiseProcessor) {
+    if (enabled && !this._noiseProcessor) {
+      // Try DeepFilterNet3 first, fall back to RNNoise
       try {
-        this._rnnoiseProcessor = new RnnoiseProcessor(level)
-        this._rnnoiseLevel = level
-        await localTrack.setProcessor(this._rnnoiseProcessor)
-        console.log(`[VoiceChannel] RNNoise processor attached (${level})`)
+        this._noiseProcessor = new DeepFilterNoiseFilterProcessor({
+          sampleRate: 48000,
+          noiseReductionLevel: dfLevel,
+          enabled: true
+        })
+        this._noiseLevel = level
+        await localTrack.setProcessor(this._noiseProcessor)
+        console.log(`[VoiceChannel] DeepFilterNet3 processor attached (${level}=${dfLevel})`)
       } catch (e) {
-        console.warn("[VoiceChannel] RNNoise attach failed:", e)
-        this._rnnoiseProcessor = null
+        console.warn("[VoiceChannel] DeepFilterNet3 failed, falling back to RNNoise:", e)
+        this._noiseProcessor = null
+        try {
+          this._noiseProcessor = new RnnoiseProcessor(level)
+          this._noiseLevel = level
+          await localTrack.setProcessor(this._noiseProcessor)
+          console.log(`[VoiceChannel] RNNoise processor attached (${level})`)
+        } catch (e2) {
+          console.warn("[VoiceChannel] RNNoise attach also failed:", e2)
+          this._noiseProcessor = null
+        }
       }
-    } else if (!enabled && this._rnnoiseProcessor) {
+    } else if (enabled && this._noiseProcessor?.setSuppressionLevel) {
+      // DeepFilterNet3 supports live level adjustment
+      this._noiseProcessor.setSuppressionLevel(dfLevel)
+      this._noiseLevel = level
+    } else if (!enabled && this._noiseProcessor) {
       try {
         await localTrack.stopProcessor()
       } catch (_) {}
-      this._rnnoiseProcessor = null
-      this._rnnoiseLevel = null
-      console.log("[VoiceChannel] RNNoise processor detached")
+      this._noiseProcessor = null
+      this._noiseLevel = null
+      console.log("[VoiceChannel] Noise processor detached")
     }
   }
 
@@ -398,10 +421,10 @@ export default class extends Controller {
     if (!this.room || this._muted) return
     try {
       // Processor must be detached before disabling the track
-      if (this._rnnoiseProcessor) {
+      if (this._noiseProcessor) {
         const pub = this.room.localParticipant.getTrackPublication(Track.Source.Microphone)
         try { await pub?.track?.stopProcessor() } catch (_) {}
-        this._rnnoiseProcessor = null
+        this._noiseProcessor = null
       }
       await this.room.localParticipant.setMicrophoneEnabled(false)
       this._cleanupLocalLevelMeter()
@@ -552,7 +575,7 @@ export default class extends Controller {
     this._userInitiatedDisconnect = true
     this._stopLevelLoop()
     this._cleanupLocalLevelMeter()
-    this._rnnoiseProcessor = null
+    this._noiseProcessor = null
 
     // Clear persisted session — explicit disconnect should not auto-rejoin
     this._clearSession()

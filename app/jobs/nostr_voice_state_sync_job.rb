@@ -3,7 +3,7 @@ class NostrVoiceStateSyncJob < ApplicationJob
 
   # Publish voice state changes (join/leave) to remote instances via Nostr relay.
   # Remote instances receive these and broadcast to their local ActionCable clients.
-  def perform(action, server_id, channel_public_id, user_public_id, username, avatar_url, profile_color)
+  def perform(action, server_id, channel_public_id, user_public_id, username, avatar_url, profile_color, self_mute: false, self_deaf: false)
     owner = User.owner
     return unless owner&.nostr_private_key.present?
 
@@ -37,7 +37,9 @@ class NostrVoiceStateSyncJob < ApplicationJob
       user_id: user_public_id,
       username: username,
       avatar_url: avatar_url,
-      profile_color: profile_color
+      profile_color: profile_color,
+      self_mute: self_mute,
+      self_deaf: self_deaf
     }.to_json
 
     target_pubkeys.each do |pubkey|
