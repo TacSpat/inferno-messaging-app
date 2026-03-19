@@ -16,31 +16,11 @@
 
         <!-- Discoverable servers from connected relays -->
         <div data-server-invite-preview-target="discoverable">
-          <% discoverable_servers = Server.where(discoverable: true).where.not(nostr_group_id: nil).where.not(id: current_user.servers.select(:id)).limit(5) %>
-          <% if discoverable_servers.any? %>
+          <div data-controller="server-discover">
             <p class="text-[11px] text-gray-500 uppercase tracking-wide font-semibold mb-2 mt-1">Servers on your relays</p>
-            <div class="space-y-1">
-              <% discoverable_servers.each do |server| %>
-                <% icon_ok = server.icon.attached? && (server.icon.blob rescue nil)&.persisted? %>
-                <div class="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-gray-700/50 transition cursor-pointer group"
-                     data-action="click->server-invite-preview#joinDirect"
-                     data-nostr-group-id="<%= server.nostr_group_id %>">
-                  <% if icon_ok %>
-                    <%= image_tag server.icon, class: "w-9 h-9 rounded-lg object-cover shrink-0" %>
-                  <% else %>
-                    <div class="w-9 h-9 rounded-lg bg-gray-700 flex items-center justify-center text-sm font-bold text-white shrink-0">
-                      <%= server.name[0].upcase %>
-                    </div>
-                  <% end %>
-                  <div class="flex-1 min-w-0">
-                    <p class="text-sm text-white font-medium truncate"><%= server.name %></p>
-                    <p class="text-[11px] text-gray-500"><%= server.members.count %> members</p>
-                  </div>
-                  <svg class="w-4 h-4 text-gray-600 group-hover:text-accent-light transition shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                </div>
-              <% end %>
+            <div data-server-discover-target="list" class="space-y-1">
             </div>
-          <% end %>
+          </div>
         </div>
 
         <!-- Server preview card (hidden until resolved) -->

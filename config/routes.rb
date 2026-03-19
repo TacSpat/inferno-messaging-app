@@ -57,6 +57,7 @@ Rails.application.routes.draw do
   # Servers
   patch :reorder_servers, to: "servers#reorder_servers"
   post :resolve_server_preview, to: "servers#resolve_preview"
+  get :discover_servers, to: "servers#discover"
   resources :servers, only: [ :show, :new, :create, :edit, :update, :destroy ] do
     member do
       post :join

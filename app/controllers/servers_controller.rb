@@ -189,6 +189,34 @@ class ServersController < ApplicationController
     render json: { error: "Could not resolve input" }, status: :not_found
   end
 
+  def discover
+    events = RelayService.fetch_from_all({ kinds: [31750], limit: 50 }, timeout: 8)
+
+    joined_gids = current_user.servers.where.not(nostr_group_id: nil).pluck(:nostr_group_id).to_set
+
+    servers = events.filter_map do |event|
+      tags = event["tags"] || []
+      next unless tags.find { |t| t[0] == "discoverable" }&.dig(1) == "true"
+      next if tags.find { |t| t[0] == "deleted" }&.dig(1) == "true"
+
+      d_tag = tags.find { |t| t[0] == "d" }&.dig(1)
+      gid = d_tag&.sub(/\Ainferno-/, "")
+      next if gid.blank?
+      next if joined_gids.include?(gid)
+
+      {
+        nostr_group_id: gid,
+        name: tags.find { |t| t[0] == "name" }&.dig(1),
+        description: tags.find { |t| t[0] == "about" }&.dig(1),
+        icon_url: tags.find { |t| t[0] == "picture" }&.dig(1),
+        server_type: tags.find { |t| t[0] == "server_type" }&.dig(1),
+        age_restricted: tags.find { |t| t[0] == "age_restricted" }&.dig(1) == "true"
+      }
+    end.uniq { |s| s[:nostr_group_id] }
+
+    render json: servers
+  end
+
   def reorder_servers
     items = params.require(:items)
     memberships = current_user.server_memberships.includes(:server).index_by { |m| m.server.public_id }
