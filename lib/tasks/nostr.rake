@@ -127,7 +127,27 @@ namespace :nostr do
         next match unless blob
         cached = blob.metadata&.dig("blossom_url")
         next cached if cached.present?
-        match
+        # Upload to Blossom
+        data = blob.download
+        result = BlossomClientService.upload(StringIO.new(data), content_type: blob.content_type || "application/octet-stream", filename: blob.filename.to_s)
+        blob.update!(metadata: (blob.metadata || {}).merge("blossom_url" => result[:url], "sha256" => result[:sha256]))
+        result[:url]
+      end
+
+      # Append Blossom URLs for attached files not already in content
+      if message.files.attached?
+        message.files.each do |file|
+          blob = file.blob
+          blossom_url = blob.metadata&.dig("blossom_url")
+          unless blossom_url.present?
+            data = blob.download
+            result = BlossomClientService.upload(StringIO.new(data), content_type: blob.content_type || "application/octet-stream", filename: blob.filename.to_s)
+            blob.update!(metadata: (blob.metadata || {}).merge("blossom_url" => result[:url], "sha256" => result[:sha256]))
+            blossom_url = result[:url]
+          end
+          next if event_content.include?(blossom_url)
+          event_content = [event_content, blossom_url].reject(&:blank?).join("\n")
+        end
       end
 
       # Build tags with all current attributes

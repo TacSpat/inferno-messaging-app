@@ -240,6 +240,7 @@ class MessagesController < ApplicationController
   def publish_channel_message_to_nostr(message, channel)
     user = message.user
     event_content = resolve_active_storage_urls(message.content || "")
+    event_content = append_blossom_file_urls(message, event_content)
     tags = [ [ "h", channel.nostr_group_id ] ]
     tags << [ "sticker" ] if message.is_sticker?
     tags << [ "spoiler" ] if message.spoiler?
@@ -276,6 +277,35 @@ class MessagesController < ApplicationController
     RelayService.publish_to_all(signed_hash)
   rescue => e
     Rails.logger.error("Failed to publish channel message to Nostr: #{e.message}")
+  end
+
+  # Upload attached files to Blossom and append their URLs to event content.
+  # Handles file-only messages where content is empty and files are only in Active Storage.
+  def append_blossom_file_urls(message, event_content)
+    return event_content unless message.files.attached?
+
+    file_urls = message.files.filter_map do |file|
+      blob = file.blob
+      # Skip if URL already appears in content (already resolved by resolve_active_storage_urls)
+      cached = blob.metadata&.dig("blossom_url")
+      if cached.present?
+        next nil if event_content.include?(cached)
+        next cached
+      end
+
+      # Upload to Blossom
+      data = blob.download
+      result = BlossomClientService.upload(StringIO.new(data), content_type: blob.content_type || "application/octet-stream", filename: blob.filename.to_s)
+      blob.update!(metadata: (blob.metadata || {}).merge("blossom_url" => result[:url], "sha256" => result[:sha256]))
+      next nil if event_content.include?(result[:url])
+      result[:url]
+    rescue => e
+      Rails.logger.warn("[MessagesController] Failed to upload file to Blossom: #{e.message}")
+      nil
+    end
+
+    return event_content if file_urls.empty?
+    [event_content, *file_urls].reject(&:blank?).join("\n")
   end
 
   # Replace local Active Storage paths with Blossom URLs so remote instances can access them.
