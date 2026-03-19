@@ -85,6 +85,8 @@ class ContentSafetyFilter
   def unknown_sender?
     return false unless config.safety_hide_unknown_senders
     return false if sender_pubkey.blank?
+    # Server members are trusted — only filter unknown senders in DMs/conversations
+    return false if message.channel_id.present?
 
     contact = Contact.find_by(pubkey: sender_pubkey)
     # Unknown = no contact record, or contact exists but not a friend
