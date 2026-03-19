@@ -94,4 +94,85 @@ namespace :nostr do
     File.write(output_path, pubkeys.join("\n") + "\n")
     puts "Wrote #{pubkeys.size} pubkeys to #{output_path}"
   end
+
+  desc "Re-publish all channel messages to relays with current tags (spoiler, sticker, etc.)"
+  task republish_messages: :environment do
+    messages = Message.joins(channel: :server)
+                      .where.not(channels: { nostr_group_id: nil })
+                      .where.not(system_message: true)
+                      .includes(:user, channel: :server)
+
+    total = messages.count
+    puts "Re-publishing #{total} messages to relays..."
+
+    published = 0
+    skipped = 0
+    errors = 0
+
+    messages.find_each.with_index do |message, i|
+      user = message.user
+      channel = message.channel
+
+      # Skip messages without a local user (remote messages)
+      unless user&.nostr_private_key.present?
+        skipped += 1
+        next
+      end
+
+      # Build content — resolve Active Storage URLs to Blossom URLs
+      event_content = message.content || ""
+      event_content = event_content.gsub(%r{/rails/active_storage/blobs/(?:redirect/)?([^/\s]+)/[^\s]+}) do |match|
+        signed_id = $1
+        blob = ActiveStorage::Blob.find_signed(signed_id) rescue nil
+        next match unless blob
+        cached = blob.metadata&.dig("blossom_url")
+        next cached if cached.present?
+        match
+      end
+
+      # Build tags with all current attributes
+      tags = [["h", channel.nostr_group_id]]
+      tags << ["sticker"] if message.is_sticker?
+      tags << ["spoiler"] if message.spoiler?
+
+      if channel.encrypted? && channel.channel_public_key.present?
+        conversation_key = Nip44Service.conversation_key(user.nostr_private_key, channel.channel_public_key)
+        event_content = Nip44Service.encrypt(event_content, conversation_key)
+        tags << ["encrypted", "nip44"]
+        tags << ["channel_pubkey", channel.channel_public_key]
+      end
+
+      # Sign and publish
+      signer = Nostr::Signer.new(private_key: user.nostr_private_key)
+      event = Nostr::Event.new(
+        kind: 9,
+        pubkey: user.nostr_public_key,
+        content: event_content,
+        tags: tags
+      )
+      signed = signer.sign(event)
+      signed_hash = signed.to_json
+
+      message.update_columns(nostr_event_id: signed.id)
+
+      NostrEventLog.create!(
+        event_id: signed.id,
+        kind: 9,
+        pubkey: user.nostr_public_key,
+        message: message,
+        channel: channel,
+        direction: "outbound",
+        event_created_at: message.created_at
+      )
+
+      RelayService.publish_to_all(signed_hash)
+      published += 1
+      print "\r  #{i + 1}/#{total} (#{published} published, #{skipped} skipped)"
+    rescue => e
+      errors += 1
+      puts "\n  Error on message #{message.id}: #{e.message}"
+    end
+
+    puts "\nDone. Published: #{published}, Skipped: #{skipped}, Errors: #{errors}"
+  end
 end
