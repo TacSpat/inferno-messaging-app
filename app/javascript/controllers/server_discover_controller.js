@@ -9,8 +9,12 @@ export default class extends Controller {
   static targets = ["list"]
 
   connect() {
-    console.log("[server-discover] connected, fetching...")
+    console.log("[server-discover] connected, hasListTarget:", this.hasListTarget)
     this.fetchServers()
+  }
+
+  disconnect() {
+    console.log("[server-discover] disconnected")
   }
 
   async fetchServers() {
@@ -23,12 +27,15 @@ export default class extends Controller {
     this.listTarget.innerHTML = this.spinnerHTML()
 
     try {
+      console.log("[server-discover] fetching /discover_servers...")
       const res = await fetch("/discover_servers", {
         headers: { "Accept": "application/json" },
         credentials: "same-origin"
       })
+      console.log("[server-discover] response:", res.status, res.headers.get("content-type"))
       if (!res.ok) throw new Error(`Fetch failed: ${res.status}`)
       const servers = await res.json()
+      console.log("[server-discover] servers:", servers.length)
       cachedServers = servers
       cacheTime = Date.now()
       this.render(servers)
