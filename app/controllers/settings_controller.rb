@@ -16,12 +16,13 @@ class SettingsController < ApplicationController
       # Model callback covers scalar field changes, but avatar/banner
       # attachment changes don't trigger saved_change_to_*, so broadcast
       # explicitly when attachments were included in the update.
+      # Always re-publish profile to relays on any profile change
+      if @user.nostr_public_key.present?
+        NostrPublishJob.perform_later(@user.id, :profile)
+      end
       if profile_params[:avatar].present? || profile_params[:banner].present?
         @user.broadcast_profile_update
-        if @user.nostr_public_key.present?
-          NostrPublishJob.perform_later(@user.id, :profile)
-          @user.publish_member_events
-        end
+        @user.publish_member_events if @user.nostr_public_key.present?
         NsfwScanJob.perform_later("User", @user.id, "avatar") if profile_params[:avatar].present?
         NsfwScanJob.perform_later("User", @user.id, "banner") if profile_params[:banner].present?
       end

@@ -12,12 +12,12 @@ class ProfilesController < ApplicationController
   def update
     @user = current_user
     if @user.update(profile_params)
+      if @user.nostr_public_key.present?
+        NostrPublishJob.perform_later(@user.id, :profile)
+      end
       if profile_params[:avatar].present? || profile_params[:banner].present?
         @user.broadcast_profile_update
-        if @user.nostr_public_key.present?
-          NostrPublishJob.perform_later(@user.id, :profile)
-          @user.publish_member_events
-        end
+        @user.publish_member_events if @user.nostr_public_key.present?
       end
       redirect_to profile_path, notice: "Profile updated."
     else
