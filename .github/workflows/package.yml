@@ -435,6 +435,7 @@ jobs:
             '@echo off'
             'set "DIR=%~dp0"'
             'set "PATH=%DIR%ruby\bin;%DIR%ruby\bin\ruby_builtin_dlls;%PATH%"'
+            'set "RUBYLIB=%DIR%ruby\lib\ruby\3.4.0;%DIR%ruby\lib\ruby\3.4.0\x64-mingw-ucrt"'
             'set "GEM_HOME=%DIR%app\vendor\bundle\ruby\3.4.0"'
             'set "GEM_PATH=%DIR%app\vendor\bundle\ruby\3.4.0;%DIR%ruby\lib\ruby\gems\3.4.0"'
             'set "BUNDLE_GEMFILE=%DIR%app\Gemfile"'

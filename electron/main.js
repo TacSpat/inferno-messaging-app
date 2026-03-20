@@ -84,10 +84,25 @@ function prepareDatabase() {
     const args = isWin
       ? ['/c', launcherPath, 'db:prepare']
       : [launcherPath, 'db:prepare'];
+
+    // On Windows, set Ruby env vars from JS since batch %~dp0 expansion
+    // may not work correctly when spawned from Electron
+    const rubyEnv = {};
+    if (isWin) {
+      const rubyBin = path.join(sidecarDir, 'ruby', 'bin');
+      rubyEnv.PATH = `${rubyBin};${path.join(rubyBin, 'ruby_builtin_dlls')};${process.env.PATH || ''}`;
+      rubyEnv.RUBYLIB = `${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0')};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0', 'x64-mingw-ucrt')}`;
+      rubyEnv.GEM_HOME = path.join(appDir, 'vendor', 'bundle', 'ruby', '3.4.0');
+      rubyEnv.GEM_PATH = `${rubyEnv.GEM_HOME};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', 'gems', '3.4.0')}`;
+      rubyEnv.BUNDLE_GEMFILE = path.join(appDir, 'Gemfile');
+      rubyEnv.BUNDLE_PATH = path.join(appDir, 'vendor', 'bundle');
+    }
+
     const opts = {
       cwd: appDir,
       env: {
         ...process.env,
+        ...rubyEnv,
         INFERNO_DATA_DIR: data,
         RAILS_ENV: 'production',
         SECRET_KEY_BASE: secret,
@@ -147,10 +162,24 @@ function spawnServer() {
     args = isWin
       ? ['/c', launcherPath, 'server']
       : [launcherPath, 'server'];
+
+    const appDirServer = path.join(sidecarDir, 'app');
+    const rubyEnvServer = {};
+    if (isWin) {
+      const rubyBin = path.join(sidecarDir, 'ruby', 'bin');
+      rubyEnvServer.PATH = `${rubyBin};${path.join(rubyBin, 'ruby_builtin_dlls')};${process.env.PATH || ''}`;
+      rubyEnvServer.RUBYLIB = `${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0')};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0', 'x64-mingw-ucrt')}`;
+      rubyEnvServer.GEM_HOME = path.join(appDirServer, 'vendor', 'bundle', 'ruby', '3.4.0');
+      rubyEnvServer.GEM_PATH = `${rubyEnvServer.GEM_HOME};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', 'gems', '3.4.0')}`;
+      rubyEnvServer.BUNDLE_GEMFILE = path.join(appDirServer, 'Gemfile');
+      rubyEnvServer.BUNDLE_PATH = path.join(appDirServer, 'vendor', 'bundle');
+    }
+
     opts = {
-      cwd: path.join(sidecarDir, 'app'),
+      cwd: appDirServer,
       env: {
         ...process.env,
+        ...rubyEnvServer,
         INFERNO_DATA_DIR: data,
         RAILS_ENV: 'production',
         PORT: String(PORT),
