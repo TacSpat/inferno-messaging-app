@@ -414,7 +414,8 @@ jobs:
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           # Write start.bat line by line to avoid heredoc whitespace/encoding issues
-          # Hardcode gem paths using known Ruby version — avoids fragile for /d loops and delayed expansion
+          # Hardcode gem paths using known Ruby version
+          # Use "ruby -S bundle exec" for all commands — ensures bundler is found via GEM_PATH
           $bat = @(
             '@echo off'
             'set "DIR=%~dp0"'
@@ -427,7 +428,7 @@ jobs:
             'if "%~1"=="server" ('
             '  "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9'
             ') else ('
-            '  "%DIR%ruby\bin\ruby.exe" bin\rails %*'
+            '  "%DIR%ruby\bin\ruby.exe" -S bundle exec rails %*'
             ')'
           )
           $bat -join "`r`n" | Set-Content -Path sidecar-stage\start.bat -Encoding ASCII -NoNewline
