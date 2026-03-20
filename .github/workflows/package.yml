@@ -414,43 +414,25 @@ jobs:
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           # Write start.bat line by line to avoid heredoc whitespace/encoding issues
+          # Hardcode gem paths using known Ruby version — avoids fragile for /d loops and delayed expansion
           $bat = @(
             '@echo off'
-            'setlocal enabledelayedexpansion'
             'set "DIR=%~dp0"'
             'set "PATH=%DIR%ruby\bin;%PATH%"'
+            'set "GEM_HOME=%DIR%app\vendor\bundle\ruby\3.4.0"'
+            'set "GEM_PATH=%DIR%app\vendor\bundle\ruby\3.4.0;%DIR%ruby\lib\ruby\gems\3.4.0"'
             'set "BUNDLE_GEMFILE=%DIR%app\Gemfile"'
-            'for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "VENDOR_GEM_DIR=%%G"'
-            'for /d %%G in ("%DIR%ruby\lib\ruby\gems\*") do set "RUBY_GEM_DIR=%%G"'
-            'set "GEM_HOME=!VENDOR_GEM_DIR!"'
-            'set "GEM_PATH=!VENDOR_GEM_DIR!;!RUBY_GEM_DIR!"'
             'set "BUNDLE_PATH=%DIR%app\vendor\bundle"'
-            'echo [start.bat] DIR=%DIR% 1>&2'
-            'echo [start.bat] GEM_HOME=!GEM_HOME! 1>&2'
-            'echo [start.bat] GEM_PATH=!GEM_PATH! 1>&2'
-            'echo [start.bat] BUNDLE_GEMFILE=%BUNDLE_GEMFILE% 1>&2'
-            'echo [start.bat] ruby exists: 1>&2'
-            'if exist "%DIR%ruby\bin\ruby.exe" (echo   YES 1>&2) else (echo   NO 1>&2)'
-            'echo [start.bat] bundler gem dir: 1>&2'
-            'dir /b "!RUBY_GEM_DIR!\gems\bundler-*" 2>nul 1>&2'
             'cd /d "%DIR%app"'
-            'set "CMD=%~1"'
-            'if "!CMD!"=="server" ('
+            'if "%~1"=="server" ('
             '  "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9'
-            ') else if "!CMD!"=="db:prepare" ('
-            '  "%DIR%ruby\bin\ruby.exe" bin\rails db:prepare'
             ') else ('
             '  "%DIR%ruby\bin\ruby.exe" bin\rails %*'
             ')'
           )
           $bat -join "`r`n" | Set-Content -Path sidecar-stage\start.bat -Encoding ASCII -NoNewline
-          # Verify sidecar structure
-          Write-Host "=== Sidecar structure ==="
-          Write-Host "Ruby bin:" ; Get-ChildItem sidecar-stage\ruby\bin\*.exe | Select-Object Name
-          Write-Host "Ruby gems dir:" ; Get-ChildItem sidecar-stage\ruby\lib\ruby\gems\ -ErrorAction SilentlyContinue | Select-Object Name
-          Write-Host "Bundler:" ; Get-ChildItem sidecar-stage\ruby\lib\ruby\gems\*\gems\bundler-* -ErrorAction SilentlyContinue | Select-Object Name
-          Write-Host "Vendor bundle:" ; Get-ChildItem sidecar-stage\app\vendor\bundle\ruby\ -ErrorAction SilentlyContinue | Select-Object Name
-          Write-Host "Bundle config:" ; Get-Content sidecar-stage\app\.bundle\config
+          Write-Host "=== start.bat ==="
+          Get-Content sidecar-stage\start.bat
 
       - name: Build Electron app
         run: |
