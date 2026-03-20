@@ -338,7 +338,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v5
+          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v6
 
       - name: Download portable Ruby (RubyInstaller)
         if: steps.ruby-cache.outputs.cache-hit != 'true'
@@ -353,23 +353,25 @@ jobs:
           # Only remove docs/include (safe, never needed at runtime)
           Remove-Item -Recurse -Force "ruby-sidecar\ruby\share\ri", "ruby-sidecar\ruby\share\doc", "ruby-sidecar\ruby\share\man" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "ruby-sidecar\ruby\include" -ErrorAction SilentlyContinue
-          # Copy MSYS2 ucrt64 DLLs directly into ruby\bin\ (not ruby_builtin_dlls subdirectory)
-          # The manifest-based DLL loading from ruby_builtin_dlls/ doesn't work when Ruby is relocated.
-          # Placing DLLs alongside ruby.exe ensures Windows finds them via standard DLL search order.
-          $msysBin = (Get-ChildItem -Path "D:\a\_temp" -Directory -Filter "rubyinstaller-*" | Select-Object -First 1).FullName + "\msys64\ucrt64\bin"
-          if (Test-Path $msysBin) {
-            Copy-Item "$msysBin\*.dll" "ruby-sidecar\ruby\bin\" -Force
-            Write-Host "Copied $(Get-ChildItem "$msysBin\*.dll" | Measure-Object | Select-Object -ExpandProperty Count) DLLs to ruby\bin\"
-          } else {
-            Write-Host "WARNING: MSYS2 ucrt64 bin not found, trying RI_DEVKIT"
-            $riDevkit = "$env:RI_DEVKIT\ucrt64\bin"
-            if (Test-Path $riDevkit) {
-              Copy-Item "$riDevkit\*.dll" "ruby-sidecar\ruby\bin\" -Force
-              Write-Host "Copied DLLs from RI_DEVKIT to ruby\bin\"
-            } else {
-              Write-Host "ERROR: No MSYS2 DLLs found"
+          # Copy MSYS2 ucrt64 DLLs directly into ruby\bin\ alongside ruby.exe.
+          # Try multiple known locations for the MSYS2 ucrt64 bin directory.
+          $dllDest = "ruby-sidecar\ruby\bin"
+          $msysSources = @(
+            "$env:RI_DEVKIT\ucrt64\bin",
+            "C:\hostedtoolcache\windows\Ruby\${{ env.RUBY_VERSION }}\x64\msys64\ucrt64\bin",
+            (Get-ChildItem -Path "D:\a\_temp" -Directory -Filter "rubyinstaller-*" -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName) + "\msys64\ucrt64\bin"
+          )
+          $copied = $false
+          foreach ($src in $msysSources) {
+            if ($src -and (Test-Path $src)) {
+              Copy-Item "$src\*.dll" $dllDest -Force
+              $count = (Get-ChildItem "$src\*.dll" | Measure-Object).Count
+              Write-Host "Copied $count DLLs from $src to $dllDest"
+              $copied = $true
+              break
             }
           }
+          if (-not $copied) { Write-Host "ERROR: No MSYS2 ucrt64 DLLs found anywhere" }
 
       - name: Cache sidecar gems
         id: gems-cache
