@@ -80,9 +80,9 @@ function prepareDatabase() {
     console.log(`[db:prepare] ruby: ${path.join(sidecarDir, 'ruby', 'bin', 'ruby')} (exists: ${fs.existsSync(path.join(sidecarDir, 'ruby', 'bin', 'ruby'))})`);
     console.log(`[db:prepare] bundle config: ${path.join(appDir, '.bundle', 'config')} (exists: ${fs.existsSync(path.join(appDir, '.bundle', 'config'))})`);
 
-    const cmd = isWin ? launcherPath : '/bin/sh';
+    const cmd = isWin ? process.env.COMSPEC || 'cmd.exe' : '/bin/sh';
     const args = isWin
-      ? ['db:prepare']
+      ? ['/c', launcherPath, 'db:prepare']
       : [launcherPath, 'db:prepare'];
     const opts = {
       cwd: appDir,
@@ -143,9 +143,9 @@ function spawnServer() {
     ensureDirs(data);
     const secret = getOrCreateSecret(data);
 
-    cmd = isWin ? launcherPath : '/bin/sh';
+    cmd = isWin ? (process.env.COMSPEC || 'cmd.exe') : '/bin/sh';
     args = isWin
-      ? ['server']
+      ? ['/c', launcherPath, 'server']
       : [launcherPath, 'server'];
     opts = {
       cwd: path.join(sidecarDir, 'app'),
