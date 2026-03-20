@@ -418,29 +418,29 @@ jobs:
           "@ | Out-File -FilePath sidecar-stage\app\.bundle\config -Encoding UTF8
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
-          @"
-          @echo off
-          setlocal enabledelayedexpansion
-          set "DIR=%~dp0"
-          set "PATH=%DIR%ruby\bin;%PATH%"
-          set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
-          REM Find vendor bundle ruby version dir
-          for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "VENDOR_GEM_DIR=%%G"
-          REM Find Ruby's own gem dir
-          for /d %%G in ("%DIR%ruby\lib\ruby\gems\*") do set "RUBY_GEM_DIR=%%G"
-          set "GEM_HOME=!VENDOR_GEM_DIR!"
-          set "GEM_PATH=!VENDOR_GEM_DIR!;!RUBY_GEM_DIR!"
-          set "BUNDLE_PATH=%DIR%app\vendor\bundle"
-          cd /d "%DIR%app"
-          set "CMD=%~1"
-          if "!CMD!"=="server" (
-            "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9
-          ) else if "!CMD!"=="db:prepare" (
-            "%DIR%ruby\bin\ruby.exe" bin/rails db:prepare
-          ) else (
-            "%DIR%ruby\bin\ruby.exe" bin/rails %*
+          # Write start.bat line by line to avoid heredoc whitespace/encoding issues
+          $bat = @(
+            '@echo off'
+            'setlocal enabledelayedexpansion'
+            'set "DIR=%~dp0"'
+            'set "PATH=%DIR%ruby\bin;%PATH%"'
+            'set "BUNDLE_GEMFILE=%DIR%app\Gemfile"'
+            'for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "VENDOR_GEM_DIR=%%G"'
+            'for /d %%G in ("%DIR%ruby\lib\ruby\gems\*") do set "RUBY_GEM_DIR=%%G"'
+            'set "GEM_HOME=!VENDOR_GEM_DIR!"'
+            'set "GEM_PATH=!VENDOR_GEM_DIR!;!RUBY_GEM_DIR!"'
+            'set "BUNDLE_PATH=%DIR%app\vendor\bundle"'
+            'cd /d "%DIR%app"'
+            'set "CMD=%~1"'
+            'if "!CMD!"=="server" ('
+            '  "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9'
+            ') else if "!CMD!"=="db:prepare" ('
+            '  "%DIR%ruby\bin\ruby.exe" bin\rails db:prepare'
+            ') else ('
+            '  "%DIR%ruby\bin\ruby.exe" bin\rails %*'
+            ')'
           )
-          "@ | Out-File -FilePath sidecar-stage\start.bat -Encoding ASCII
+          $bat -join "`r`n" | Set-Content -Path sidecar-stage\start.bat -Encoding ASCII -NoNewline
 
       - name: Build Electron app
         run: |
