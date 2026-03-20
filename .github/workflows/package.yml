@@ -353,17 +353,19 @@ jobs:
           # Only remove docs/include (safe, never needed at runtime)
           Remove-Item -Recurse -Force "ruby-sidecar\ruby\share\ri", "ruby-sidecar\ruby\share\doc", "ruby-sidecar\ruby\share\man" -ErrorAction SilentlyContinue
           Remove-Item -Recurse -Force "ruby-sidecar\ruby\include" -ErrorAction SilentlyContinue
-          # Copy MSYS2 ucrt64 DLLs from setup-ruby's devkit — needed for native extensions (psych, openssl, etc.)
+          # Copy MSYS2 ucrt64 DLLs directly into ruby\bin\ (not ruby_builtin_dlls subdirectory)
+          # The manifest-based DLL loading from ruby_builtin_dlls/ doesn't work when Ruby is relocated.
+          # Placing DLLs alongside ruby.exe ensures Windows finds them via standard DLL search order.
           $msysBin = (Get-ChildItem -Path "D:\a\_temp" -Directory -Filter "rubyinstaller-*" | Select-Object -First 1).FullName + "\msys64\ucrt64\bin"
           if (Test-Path $msysBin) {
-            Copy-Item "$msysBin\*.dll" "ruby-sidecar\ruby\bin\ruby_builtin_dlls\" -Force
-            Write-Host "Copied $(Get-ChildItem "$msysBin\*.dll" | Measure-Object | Select-Object -ExpandProperty Count) DLLs from MSYS2 ucrt64"
+            Copy-Item "$msysBin\*.dll" "ruby-sidecar\ruby\bin\" -Force
+            Write-Host "Copied $(Get-ChildItem "$msysBin\*.dll" | Measure-Object | Select-Object -ExpandProperty Count) DLLs to ruby\bin\"
           } else {
             Write-Host "WARNING: MSYS2 ucrt64 bin not found, trying RI_DEVKIT"
             $riDevkit = "$env:RI_DEVKIT\ucrt64\bin"
             if (Test-Path $riDevkit) {
-              Copy-Item "$riDevkit\*.dll" "ruby-sidecar\ruby\bin\ruby_builtin_dlls\" -Force
-              Write-Host "Copied DLLs from RI_DEVKIT"
+              Copy-Item "$riDevkit\*.dll" "ruby-sidecar\ruby\bin\" -Force
+              Write-Host "Copied DLLs from RI_DEVKIT to ruby\bin\"
             } else {
               Write-Host "ERROR: No MSYS2 DLLs found"
             }
