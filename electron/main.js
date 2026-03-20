@@ -130,8 +130,12 @@ function prepareDatabase() {
       if (code === 0) {
         resolve();
       } else {
-        const stderr = Buffer.concat(stderrChunks).toString().slice(-500);
-        reject(new Error(`db:prepare exited with code ${code}\n${stderr}`));
+        const stderr = Buffer.concat(stderrChunks).toString();
+        // Write full error to file for debugging
+        const fs = require('fs');
+        const errFile = path.join(data, 'db_prepare_error.txt');
+        fs.writeFileSync(errFile, stderr);
+        reject(new Error(`db:prepare exited with code ${code}\n${stderr.slice(-2000)}`));
       }
     });
   });
