@@ -420,18 +420,19 @@ jobs:
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           @"
           @echo off
+          setlocal enabledelayedexpansion
           set "DIR=%~dp0"
           set "PATH=%DIR%ruby\bin;%PATH%"
+          set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
           for /d %%G in ("%DIR%app\vendor\bundle\ruby\*") do set "GEM_HOME=%%G"
           for /d %%G in ("%DIR%ruby\lib\ruby\gems\*") do set "RUBY_GEM_DIR=%%G"
-          set "GEM_PATH=%GEM_HOME%;%RUBY_GEM_DIR%"
-          set "BUNDLE_GEMFILE=%DIR%app\Gemfile"
+          set "GEM_PATH=!GEM_HOME!;!RUBY_GEM_DIR!"
+          set "RUBYLIB=%DIR%ruby\lib"
           cd /d "%DIR%app"
           if "%~1"=="server" (
-            shift
-            "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %1 %2 %3 %4 %5 %6 %7 %8 %9
+            "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9
           ) else (
-            "%DIR%ruby\bin\ruby.exe" bin/rails %*
+            "%DIR%ruby\bin\ruby.exe" -S bundle exec rails %*
           )
           "@ | Out-File -FilePath sidecar-stage\start.bat -Encoding ASCII
 
