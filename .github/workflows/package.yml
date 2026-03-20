@@ -415,11 +415,11 @@ jobs:
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           # Write start.bat line by line to avoid heredoc whitespace/encoding issues
           # Hardcode gem paths using known Ruby version
-          # Use "ruby -S bundle exec" for all commands — ensures bundler is found via GEM_PATH
+          # Include ruby_builtin_dlls on PATH for ucrt64 DLL dependencies
           $bat = @(
             '@echo off'
             'set "DIR=%~dp0"'
-            'set "PATH=%DIR%ruby\bin;%PATH%"'
+            'set "PATH=%DIR%ruby\bin;%DIR%ruby\bin\ruby_builtin_dlls;%PATH%"'
             'set "GEM_HOME=%DIR%app\vendor\bundle\ruby\3.4.0"'
             'set "GEM_PATH=%DIR%app\vendor\bundle\ruby\3.4.0;%DIR%ruby\lib\ruby\gems\3.4.0"'
             'set "BUNDLE_GEMFILE=%DIR%app\Gemfile"'
@@ -434,6 +434,15 @@ jobs:
           $bat -join "`r`n" | Set-Content -Path sidecar-stage\start.bat -Encoding ASCII -NoNewline
           Write-Host "=== start.bat ==="
           Get-Content sidecar-stage\start.bat
+          # Verify critical files
+          Write-Host "=== Ruby DLLs ==="
+          Get-ChildItem sidecar-stage\ruby\bin\ruby_builtin_dlls\ -ErrorAction SilentlyContinue | Select-Object Name
+          Write-Host "=== Psych extension ==="
+          Get-ChildItem -Recurse sidecar-stage\ruby\lib\ruby\3.4.0 -Filter "psych*" -ErrorAction SilentlyContinue | Select-Object FullName
+          Write-Host "=== Bundle binstub ==="
+          Get-ChildItem sidecar-stage\ruby\bin\bundle* -ErrorAction SilentlyContinue | Select-Object Name
+          Write-Host "=== Gem specs ==="
+          Get-ChildItem sidecar-stage\ruby\lib\ruby\gems\3.4.0\specifications\bundler* -ErrorAction SilentlyContinue | Select-Object Name
 
       - name: Build Electron app
         run: |
