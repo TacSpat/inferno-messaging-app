@@ -374,7 +374,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: vendor/bundle
-          key: sidecar-gems-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v3
+          key: sidecar-gems-windows-${{ env.RUBY_VERSION }}-${{ hashFiles('Gemfile.lock') }}-v4
 
       - name: Bundle gems for sidecar
         if: steps.gems-cache.outputs.cache-hit != 'true'
@@ -388,22 +388,6 @@ jobs:
           & "$rubyBin\ruby.exe" -S bundle config set --local without "development test"
           & "$rubyBin\ruby.exe" -S bundle config set --local path vendor/bundle
           & "$rubyBin\ruby.exe" -S bundle install
-
-      - name: Slim gems
-        if: steps.gems-cache.outputs.cache-hit != 'true'
-        run: |
-          $gemsDir = "vendor\bundle"
-          $before = (Get-ChildItem -Recurse $gemsDir | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "Before: $([math]::Round($before, 1)) MB"
-          Get-ChildItem -Recurse $gemsDir -Directory | Where-Object { $_.Name -in @('spec', 'test', 'tests', 'features') } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          Get-ChildItem -Recurse $gemsDir -Directory -Filter "ext" | ForEach-Object {
-            Get-ChildItem -Recurse $_.FullName -Include @('*.c', '*.h', '*.o', '*.cpp') | Remove-Item -Force
-          }
-          Get-ChildItem -Recurse $gemsDir -Directory -Filter "cache" | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-          Get-ChildItem -Recurse $gemsDir -Include @('*.md', '*.txt', '*.rdoc') | Where-Object { $_.Name -notmatch '^(LICENSE|COPYING)' } | Remove-Item -Force -ErrorAction SilentlyContinue
-          Get-ChildItem -Recurse $gemsDir -Include @('CHANGELOG*', 'HISTORY*', 'NEWS*') | Remove-Item -Force -ErrorAction SilentlyContinue
-          $after = (Get-ChildItem -Recurse $gemsDir | Measure-Object -Property Length -Sum).Sum / 1MB
-          Write-Host "After:  $([math]::Round($after, 1)) MB"
 
       - name: Assemble sidecar
         run: |
