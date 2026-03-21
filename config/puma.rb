@@ -35,7 +35,11 @@ bind "tcp://#{bind_address}:#{ENV.fetch("PORT", 3000)}"
 plugin :tmp_restart unless ENV["INFERNO_DATA_DIR"]
 
 # Run the Solid Queue supervisor inside of Puma for single-server deployments
-plugin :solid_queue if ENV["SOLID_QUEUE_IN_PUMA"]
+if ENV["SOLID_QUEUE_IN_PUMA"]
+  plugin :solid_queue
+  # Windows can't fork — use async (threaded) mode instead
+  solid_queue_mode :async if Gem.win_platform?
+end
 
 # Specify the PID file. Defaults to tmp/pids/server.pid in development.
 # In other environments, only set the PID file if requested.
