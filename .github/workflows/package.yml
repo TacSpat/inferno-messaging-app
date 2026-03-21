@@ -338,7 +338,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ruby-sidecar/ruby
-          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v6
+          key: portable-ruby-windows-${{ env.RUBY_VERSION }}-v7
 
       - name: Download portable Ruby (RubyInstaller)
         if: steps.ruby-cache.outputs.cache-hit != 'true'
@@ -372,27 +372,20 @@ jobs:
             }
           }
           if (-not $copied) { Write-Host "ERROR: No MSYS2 ucrt64 DLLs found anywhere" }
-          # Install libsodium — needed by Nip44Service/Nip49Service for encryption
-          $msysRoot = $null
-          foreach ($src in $msysSources) {
-            $candidate = (Split-Path (Split-Path (Split-Path $src)))  # ucrt64\bin -> msys64
-            if (Test-Path "$candidate\usr\bin\pacman.exe") { $msysRoot = $candidate; break }
-          }
-          if ($msysRoot) {
-            Write-Host "Installing libsodium via pacman from $msysRoot"
-            & "$msysRoot\usr\bin\pacman.exe" -S --noconfirm mingw-w64-ucrt-x86_64-libsodium
-            Copy-Item "$msysRoot\ucrt64\bin\libsodium*.dll" $dllDest -Force -ErrorAction SilentlyContinue
-            Write-Host "libsodium DLL copied"
+
+      - name: Install libsodium
+        run: |
+          $dest = "ruby-sidecar\ruby\bin\libsodium.dll"
+          if (Test-Path $dest) {
+            Write-Host "libsodium already present"
           } else {
-            # Fallback: download prebuilt libsodium
             Write-Host "Downloading libsodium..."
             Invoke-WebRequest -Uri "https://download.libsodium.org/libsodium/releases/libsodium-1.0.20-stable-mingw.tar.gz" -OutFile libsodium.tar.gz
             tar -xf libsodium.tar.gz
-            Copy-Item "libsodium-win64\bin\libsodium.dll" $dllDest -Force -ErrorAction SilentlyContinue
-            if (-not (Test-Path "$dllDest\libsodium.dll")) {
-              Get-ChildItem -Recurse libsodium* -Filter "libsodium*.dll" | Select-Object -First 1 | Copy-Item -Destination $dllDest -Force
-            }
-            Write-Host "libsodium DLL: $(Test-Path "$dllDest\libsodium.dll")"
+            $dll = Get-ChildItem -Recurse -Filter "libsodium*.dll" | Where-Object { $_.FullName -match "win64|x64" -and $_.FullName -notmatch "win32|i686" } | Select-Object -First 1
+            if (-not $dll) { $dll = Get-ChildItem -Recurse -Filter "libsodium*.dll" | Select-Object -First 1 }
+            if ($dll) { Copy-Item $dll.FullName $dest -Force; Write-Host "Installed: $($dll.FullName)" }
+            else { Write-Host "ERROR: libsodium DLL not found in archive" }
           }
 
       - name: Cache sidecar gems
