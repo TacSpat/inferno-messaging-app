@@ -206,7 +206,6 @@ function spawnServer() {
     if (isWin) {
       const rubyBin = path.join(sidecarDir, 'ruby', 'bin');
       rubyEnvServer.PATH = `${rubyBin};${path.join(rubyBin, 'ruby_builtin_dlls')};${process.env.PATH || ''}`;
-      rubyEnvServer.RUBYLIB = `${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0')};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0', 'x64-mingw-ucrt')}`;
       rubyEnvServer.GEM_HOME = path.join(appDirServer, 'vendor', 'bundle', 'ruby', '3.4.0');
       rubyEnvServer.GEM_PATH = `${rubyEnvServer.GEM_HOME};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', 'gems', '3.4.0')}`;
       rubyEnvServer.BUNDLE_GEMFILE = path.join(appDirServer, 'Gemfile');
@@ -231,18 +230,23 @@ function spawnServer() {
 
   const child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
 
+  // Capture server output for debugging startup failures
+  const serverLog = [];
   child.stdout.on('data', (chunk) => {
     process.stdout.write(`[rails] ${chunk}`);
+    serverLog.push(chunk.toString());
   });
 
   child.stderr.on('data', (chunk) => {
     process.stderr.write(`[rails] ${chunk}`);
+    serverLog.push(chunk.toString());
   });
 
   child.on('error', (err) => {
     console.error('Failed to start server:', err.message);
   });
 
+  child._serverLog = serverLog;
   return child;
 }
 
@@ -563,9 +567,12 @@ app.whenReady().then(async () => {
   const healthy = await waitForHealth();
 
   if (!healthy) {
+    const log = (serverProcess?._serverLog || []).join('').slice(-2000);
+    const data = dataDir();
+    try { fs.writeFileSync(path.join(data, 'server_error.txt'), (serverProcess?._serverLog || []).join('')); } catch {}
     dialog.showErrorBox(
       'Server Error',
-      `Rails server failed to start within ${HEALTH_TIMEOUT / 1000} seconds.`
+      `Rails server failed to start within ${HEALTH_TIMEOUT / 1000} seconds.\n\n${log}`
     );
     await killServer();
     app.quit();
