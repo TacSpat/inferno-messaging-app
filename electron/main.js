@@ -390,6 +390,13 @@ function createMainWindow(url) {
 
   mainWindow._lastBounds = mainWindow.getBounds();
 
+  // Enable dev tools via Ctrl+Shift+I even in packaged app
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.control && input.shift && input.key === 'I') {
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
+
   if (useSaved && saved.isMaximized) {
     mainWindow.maximize();
   }
