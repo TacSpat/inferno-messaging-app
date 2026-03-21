@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const PORT = 13100;
+const BUILD_TAG = '2026-03-21-v7'; // Debug: verify correct main.js is packaged
 const HEALTH_TIMEOUT = 30000;
 const HEALTH_INTERVAL = 500;
 
@@ -581,6 +582,11 @@ app.whenReady().then(async () => {
   createSplashWindow();
 
   if (!isDev) {
+    // Write build tag to data dir so we can verify correct main.js is packaged
+    const data = dataDir();
+    ensureDirs(data);
+    fs.writeFileSync(path.join(data, 'build_tag.txt'), BUILD_TAG);
+
     cleanStaleDataOnUpdate();
 
     updateSplashStatus('Preparing database...');
