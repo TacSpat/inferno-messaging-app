@@ -91,4 +91,5 @@ gem "nostr_ruby", "~> 0.2"
 gem "livekit-server-sdk", "~> 0.6"
 gem "jwt", "~> 2.9"
 gem "rack-attack", "~> 6.7"
-gem "fiddle"
+# fiddle is a Ruby default gem — don't pin it here, just require it directly.
+# Pinning causes version conflicts on portable Ruby (RubyInstaller ships 1.1.6, dev has 1.1.8).

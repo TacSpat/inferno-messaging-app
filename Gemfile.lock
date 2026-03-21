@@ -191,7 +191,6 @@ GEM
     ffi (1.17.3-x64-mingw-ucrt)
     ffi (1.17.3-x86_64-linux-gnu)
     ffi (1.17.3-x86_64-linux-musl)
-    fiddle (1.1.8)
     fugit (1.12.1)
       et-orbi (~> 1.4)
       raabro (~> 1.4)
@@ -568,7 +567,6 @@ DEPENDENCIES
   devise (~> 5.0)
   dotenv-rails
   factory_bot_rails (~> 6.4)
-  fiddle
   image_processing (~> 1.14)
   jbuilder
   jsbundling-rails

@@ -386,8 +386,6 @@ jobs:
           $rubyBin = "$PWD\ruby-sidecar\ruby\bin"
           $env:PATH = "$rubyBin;$env:PATH"
           & "$rubyBin\ruby.exe" -S gem install bundler --no-document
-          # Re-lock only default gems to match portable Ruby's versions (e.g. fiddle 1.1.6)
-          & "$rubyBin\ruby.exe" -S bundle lock --update fiddle io-console psych strscan stringio
           & "$rubyBin\ruby.exe" -S bundle config set --local without "development test"
           & "$rubyBin\ruby.exe" -S bundle config set --local path vendor/bundle
           & "$rubyBin\ruby.exe" -S bundle install
