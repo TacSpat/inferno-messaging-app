@@ -124,7 +124,8 @@ function prepareDatabase() {
     if (isWin) {
       const rubyBin = path.join(sidecarDir, 'ruby', 'bin');
       rubyEnv.PATH = `${rubyBin};${path.join(rubyBin, 'ruby_builtin_dlls')};${process.env.PATH || ''}`;
-      rubyEnv.RUBYLIB = `${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0')};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', '3.4.0', 'x64-mingw-ucrt')}`;
+      // Don't set RUBYLIB — RubyInstaller uses --enable-load-relative to find its own stdlib.
+      // Setting RUBYLIB causes double-loading of prism.rb and other stdlib files.
       rubyEnv.GEM_HOME = path.join(appDir, 'vendor', 'bundle', 'ruby', '3.4.0');
       rubyEnv.GEM_PATH = `${rubyEnv.GEM_HOME};${path.join(sidecarDir, 'ruby', 'lib', 'ruby', 'gems', '3.4.0')}`;
       rubyEnv.BUNDLE_GEMFILE = path.join(appDir, 'Gemfile');
