@@ -432,7 +432,7 @@ jobs:
             'if "%~1"=="server" ('
             '  "%DIR%ruby\bin\ruby.exe" -S bundle exec puma -C config/puma.rb %2 %3 %4 %5 %6 %7 %8 %9'
             ') else ('
-            '  "%DIR%ruby\bin\ruby.exe" -S bundle exec rails %*'
+            '  "%DIR%ruby\bin\ruby.exe" bin\rails %*'
             ')'
           )
           $bat -join "`r`n" | Set-Content -Path sidecar-stage\start.bat -Encoding ASCII -NoNewline
