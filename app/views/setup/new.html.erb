@@ -30,7 +30,7 @@
       </button>
     </div>
 
-    <%= form_with url: setup_path, method: :post, scope: :user, class: "space-y-4" do |f| %>
+    <%= form_with url: setup_path, method: :post, scope: :user, class: "space-y-4", data: { turbo: false } do |f| %>
       <input type="hidden" name="setup_mode" value="new" data-setup-migrate-target="modeInput">
 
       <%# ── New Identity panel ── %>

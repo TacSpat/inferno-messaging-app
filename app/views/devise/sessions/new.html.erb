@@ -6,7 +6,7 @@
       <p class="text-gray-400 mt-1">Welcome back, <%= User.owner&.display_name || "owner" %>!</p>
     </div>
 
-    <%= form_for(resource, as: resource_name, url: session_path(resource_name), html: { class: "space-y-4" }) do |f| %>
+    <%= form_for(resource, as: resource_name, url: session_path(resource_name), html: { class: "space-y-4", data: { turbo: false } }) do |f| %>
       <!-- Hidden email field since we only have one user -->
       <%= f.hidden_field :email, value: User.owner&.email %>
 
