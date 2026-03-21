@@ -35,6 +35,8 @@ class Users::SessionsController < Devise::SessionsController
   end
 
   def redirect_if_authenticated
-    redirect_to authenticated_root_path if user_signed_in?
+    if user_signed_in?
+      redirect_to authenticated_root_path, status: :see_other
+    end
   end
 end

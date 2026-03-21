@@ -65,7 +65,7 @@ class SetupController < ApplicationController
         MigrateIdentityJob.perform_later(@user.id)
         redirect_to setup_migration_status_path
       else
-        redirect_to authenticated_root_path, notice: "Welcome to Inferno!"
+        redirect_to authenticated_root_path, notice: "Welcome to Inferno!", status: :see_other
       end
     else
       render :new, status: :unprocessable_entity
