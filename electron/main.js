@@ -59,6 +59,39 @@ function updateSplashStatus(message) {
   }
 }
 
+// ── Clean stale data on update ──────────────────────────────
+
+function cleanStaleDataOnUpdate() {
+  const data = dataDir();
+  const versionFile = path.join(data, '.app_version');
+  const currentVersion = app.getVersion();
+
+  // Check if version changed since last run
+  let lastVersion = null;
+  try { lastVersion = fs.readFileSync(versionFile, 'utf8').trim(); } catch {}
+
+  if (lastVersion === currentVersion) return; // Same version, nothing to clean
+
+  console.log(`[update] Version changed: ${lastVersion || 'fresh'} → ${currentVersion}`);
+
+  // Clear tmp (cached gem specs, bootsnap cache, Bundler cache)
+  const tmpDir = path.join(data, 'tmp');
+  try {
+    if (fs.existsSync(tmpDir)) {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      console.log('[update] Cleared tmp directory');
+    }
+  } catch (e) {
+    console.warn(`[update] Failed to clear tmp: ${e.message}`);
+  }
+
+  // Recreate required subdirectories
+  ensureDirs(data);
+
+  // Write current version
+  try { fs.writeFileSync(versionFile, currentVersion); } catch {}
+}
+
 // ── Database preparation ────────────────────────────────────
 
 function prepareDatabase() {
@@ -510,6 +543,8 @@ app.whenReady().then(async () => {
   createSplashWindow();
 
   if (!isDev) {
+    cleanStaleDataOnUpdate();
+
     updateSplashStatus('Preparing database...');
     try {
       await prepareDatabase();
