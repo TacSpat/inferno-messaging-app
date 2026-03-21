@@ -404,6 +404,9 @@ function createMainWindow(url) {
 
   mainWindow.setMenuBarVisibility(false);
 
+  // Clear Electron's HTTP cache to avoid stale assets after updates
+  mainWindow.webContents.session.clearCache();
+
   const baseUrl = url || `http://127.0.0.1:${PORT}`;
   const lastPath = saved && saved.lastPath && saved.lastPath !== '/' ? saved.lastPath : '';
   mainWindow.loadURL(baseUrl + lastPath);
