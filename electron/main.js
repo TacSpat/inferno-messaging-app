@@ -418,6 +418,11 @@ function createMainWindow(url) {
   const lastPath = saved && saved.lastPath && saved.lastPath !== '/' ? saved.lastPath : '';
   mainWindow.loadURL(baseUrl + lastPath);
 
+  // Auto-open dev tools in packaged builds to debug white page
+  if (!url) {
+    mainWindow.webContents.openDevTools();
+  }
+
   const showMainWindow = () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
       splashWindow.close();
