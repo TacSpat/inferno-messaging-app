@@ -413,7 +413,7 @@ jobs:
           Get-ChildItem -Recurse sidecar-stage\app\vendor\bundle -Directory -Filter "capybara-*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
           # Create .bundle/config so bundler finds the gems
           New-Item -ItemType Directory -Force -Path sidecar-stage\app\.bundle
-          @("---", 'BUNDLE_PATH: "vendor/bundle"', 'BUNDLE_WITHOUT: "development:test"', 'BUNDLE_DEPLOYMENT: "true"') -join "`n" | Set-Content -Path sidecar-stage\app\.bundle\config -Encoding UTF8 -NoNewline
+          @("---", 'BUNDLE_PATH: "vendor/bundle"', 'BUNDLE_WITHOUT: "development:test"') -join "`n" | Set-Content -Path sidecar-stage\app\.bundle\config -Encoding UTF8 -NoNewline
           # Copy portable Ruby
           Copy-Item -Path ruby-sidecar\ruby -Destination sidecar-stage\ruby -Recurse
           # Write start.bat line by line to avoid heredoc whitespace/encoding issues
