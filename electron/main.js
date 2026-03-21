@@ -418,10 +418,23 @@ function createMainWindow(url) {
   const lastPath = saved && saved.lastPath && saved.lastPath !== '/' ? saved.lastPath : '';
   mainWindow.loadURL(baseUrl + lastPath);
 
-  // Auto-open dev tools in packaged builds to debug white page
-  if (!url) {
-    mainWindow.webContents.openDevTools();
-  }
+  // Debug: log renderer events
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[renderer] did-fail-load: ${errorCode} ${errorDescription} ${validatedURL}`);
+    // Write to log file
+    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] did-fail-load: ${errorCode} ${errorDescription} ${validatedURL}\n`);
+  });
+  mainWindow.webContents.on('did-finish-load', () => {
+    console.log('[renderer] did-finish-load: ' + mainWindow.webContents.getURL());
+    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] did-finish-load: ${mainWindow.webContents.getURL()}\n`);
+  });
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer-console] ${message}\n`);
+  });
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] CRASHED: ${JSON.stringify(details)}\n`);
+  });
+  mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   const showMainWindow = () => {
     if (splashWindow && !splashWindow.isDestroyed()) {
