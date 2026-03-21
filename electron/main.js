@@ -230,15 +230,20 @@ function spawnServer() {
 
   const child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
 
-  // Capture server output for debugging startup failures
+  // Write all server output to a log file in the data directory for debugging
+  const logFile = path.join(dataDir(), 'server.log');
+  const logStream = fs.createWriteStream(logFile, { flags: 'w' });
+
   const serverLog = [];
   child.stdout.on('data', (chunk) => {
     process.stdout.write(`[rails] ${chunk}`);
+    logStream.write(chunk);
     serverLog.push(chunk.toString());
   });
 
   child.stderr.on('data', (chunk) => {
     process.stderr.write(`[rails] ${chunk}`);
+    logStream.write(chunk);
     serverLog.push(chunk.toString());
   });
 
