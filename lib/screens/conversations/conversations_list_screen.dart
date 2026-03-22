@@ -9,6 +9,8 @@ import '../../providers/auth_provider.dart';
 import '../../database/database.dart';
 import '../../providers/database_provider.dart';
 import '../../theme/all_themes.dart';
+import '../../providers/realtime_provider.dart';
+import '../../services/presence_service.dart';
 import '../../nostr/nostr_filter.dart';
 import '../../crypto/bech32_nostr.dart';
 import 'package:drift/drift.dart' show Value;
@@ -122,8 +124,15 @@ class _ContactsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final friendsAsync = ref.watch(friendsStreamProvider);
+    final presenceSvc = ref.watch(presenceServiceProvider);
+
     return friendsAsync.when(
-      data: (contacts) {
+      data: (allContacts) {
+        // Filter by online status if on the Online tab
+        final contacts = tab == 'online'
+            ? allContacts.where((c) => presenceSvc.getPresence(c.pubkey) != OnlineState.offline).toList()
+            : allContacts;
+
         if (contacts.isEmpty) {
           return _EmptyState(
             icon: Icons.people_outline,
@@ -146,6 +155,7 @@ class _ContactsTab extends ConsumerWidget {
             ...contacts.map((contact) => _ContactItem(
               contact: contact,
               colors: colors,
+              presenceState: presenceSvc.getPresence(contact.pubkey),
               onTap: () async {
                 // Open or create a DM conversation
                 final db = ref.read(databaseProvider);
@@ -184,9 +194,10 @@ class _ContactsTab extends ConsumerWidget {
 class _ContactItem extends StatefulWidget {
   final Contact contact;
   final InfernoColors colors;
+  final OnlineState presenceState;
   final VoidCallback? onTap;
   final VoidCallback? onRemove;
-  const _ContactItem({required this.contact, required this.colors, this.onTap, this.onRemove});
+  const _ContactItem({required this.contact, required this.colors, this.presenceState = OnlineState.offline, this.onTap, this.onRemove});
 
   @override
   State<_ContactItem> createState() => _ContactItemState();
@@ -194,6 +205,24 @@ class _ContactItem extends StatefulWidget {
 
 class _ContactItemState extends State<_ContactItem> {
   bool _hovering = false;
+
+  static Color _presenceColor(OnlineState state, InfernoColors c) {
+    switch (state) {
+      case OnlineState.online: return c.online;
+      case OnlineState.idle: return c.idle;
+      case OnlineState.dnd: return c.dnd;
+      default: return c.offline;
+    }
+  }
+
+  static String _presenceLabel(OnlineState state) {
+    switch (state) {
+      case OnlineState.online: return 'Online';
+      case OnlineState.idle: return 'Idle';
+      case OnlineState.dnd: return 'Do Not Disturb';
+      default: return 'Offline';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -230,7 +259,7 @@ class _ContactItemState extends State<_ContactItem> {
                     child: Container(
                       width: 14, height: 14,
                       decoration: BoxDecoration(
-                        color: c.offline,
+                        color: _presenceColor(widget.presenceState, c),
                         shape: BoxShape.circle,
                         border: Border.all(color: c.gray700, width: 2),
                       ),
@@ -244,7 +273,7 @@ class _ContactItemState extends State<_ContactItem> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
-                    Text('Offline', style: TextStyle(color: c.gray400, fontSize: 12)),
+                    Text(_presenceLabel(widget.presenceState), style: TextStyle(color: c.gray400, fontSize: 12)),
                   ],
                 ),
               ),
@@ -688,6 +717,10 @@ class _SearchResultItemState extends State<_SearchResultItem> {
           publicKeyHex: auth.publicKeyHex!,
           recipientPubkey: widget.result['pubkey'],
         );
+        // Update friendship status to pending_outgoing
+        final db = widget.ref.read(databaseProvider);
+        await (db.update(db.contacts)..where((c) => c.pubkey.equals(widget.result['pubkey'])))
+            .write(ContactsCompanion(friendshipStatus: const Value(1), updatedAt: Value(DateTime.now())));
       }
 
       if (mounted) setState(() => _buttonState = 'sent');
