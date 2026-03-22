@@ -6,7 +6,10 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const PORT = 13100;
-const BUILD_TAG = '2026-03-21-v7'; // Debug: verify correct main.js is packaged
+const BUILD_TAG = '2026-03-21-v8';
+
+// Disable GPU acceleration to prevent renderer crashes (0xC0000005) on some Windows machines
+app.disableHardwareAcceleration();
 const HEALTH_TIMEOUT = 30000;
 const HEALTH_INTERVAL = 500;
 
