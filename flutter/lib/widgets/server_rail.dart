@@ -5,6 +5,7 @@ import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../theme/all_themes.dart';
 import 'add_server_dialog.dart';
+import 'inferno_logo.dart';
 
 class ServerRail extends ConsumerWidget {
   final String? activeServerId;
@@ -21,9 +22,9 @@ class ServerRail extends ConsumerWidget {
       child: Column(
         children: [
           const SizedBox(height: 12),
-          // Home / DM button
+          // Home / DM button with Inferno logo
           _RailItem(
-            icon: Icons.explore,
+            customChild: const InfernoLogo(size: 28),
             tooltip: 'Direct Messages',
             isActive: activeServerId == null,
             onTap: () => context.go('/conversations'),
@@ -93,8 +94,9 @@ class _RailItem extends StatefulWidget {
   final bool isActive;
   final Color? color;
   final VoidCallback? onTap;
+  final Widget? customChild;
 
-  const _RailItem({this.icon, this.text, this.imageUrl, this.tooltip, this.isActive = false, this.color, this.onTap});
+  const _RailItem({this.icon, this.text, this.imageUrl, this.tooltip, this.isActive = false, this.color, this.onTap, this.customChild});
 
   @override
   State<_RailItem> createState() => _RailItemState();
@@ -167,9 +169,9 @@ class _RailItemState extends State<_RailItem> {
                   ),
                   child: widget.imageUrl == null
                       ? Center(
-                          child: widget.icon != null
+                          child: widget.customChild ?? (widget.icon != null
                               ? Icon(widget.icon, color: widget.color ?? Colors.white, size: 24)
-                              : Text(widget.text ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                              : Text(widget.text ?? '', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
                         )
                       : null,
                 ),

@@ -6,6 +6,9 @@ import '../../providers/database_provider.dart';
 import '../../database/database.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/message_input.dart';
+import '../../services/backfill_service.dart';
+import '../../services/dm_service.dart';
+import '../../services/group_message_service.dart';
 
 class ConversationDetailScreen extends ConsumerStatefulWidget {
   final String conversationPublicId;
@@ -31,6 +34,30 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
           ..where((c) => c.publicId.equals(widget.conversationPublicId)))
         .getSingleOrNull();
     if (mounted) setState(() => _conversation = conv);
+
+    // Trigger backfill (matches Rails: Thread.new { NostrHistoryFetcher.fetch_conversation(conv) })
+    if (conv?.counterpartyPubkey != null) {
+      _backfillConversation(conv!);
+    }
+  }
+
+  Future<void> _backfillConversation(Conversation conv) async {
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
+    if (conv.counterpartyPubkey == null) return;
+    try {
+      final db = ref.read(databaseProvider);
+      final pool = ref.read(relayPoolProvider);
+      final groupMsgSvc = GroupMessageService(db, pool);
+      final dmSvc = DmService(db, pool);
+      final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc);
+      await backfill.backfillConversation(
+        ownPubkey: auth.publicKeyHex!,
+        counterpartyPubkey: conv.counterpartyPubkey!,
+        backfillDays: 30,
+        privateKeyHex: auth.privateKeyHex!,
+      );
+    } catch (_) {}
   }
 
   @override

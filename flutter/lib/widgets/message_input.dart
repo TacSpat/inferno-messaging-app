@@ -6,8 +6,9 @@ class MessageInput extends StatefulWidget {
   final void Function(String content) onSend;
   final String? channelName;
   final String? recipientName;
+  final VoidCallback? onTyping;
 
-  const MessageInput({super.key, required this.onSend, this.channelName, this.recipientName});
+  const MessageInput({super.key, required this.onSend, this.channelName, this.recipientName, this.onTyping});
 
   @override
   State<MessageInput> createState() => _MessageInputState();
@@ -78,7 +79,10 @@ class _MessageInputState extends State<MessageInput> {
                 child: TextField(
                   controller: _controller,
                   focusNode: _focusNode,
-                  onChanged: (v) => setState(() => _hasText = v.trim().isNotEmpty),
+                  onChanged: (v) {
+                    setState(() => _hasText = v.trim().isNotEmpty);
+                    if (v.trim().isNotEmpty) widget.onTyping?.call();
+                  },
                   maxLines: 6,
                   minLines: 1,
                   textInputAction: TextInputAction.newline,

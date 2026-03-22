@@ -6,6 +6,7 @@ import '../providers/auth_provider.dart';
 import '../providers/database_provider.dart';
 import '../providers/servers_provider.dart';
 import '../services/role_service.dart';
+import '../nostr/nostr_filter.dart';
 import '../theme/all_themes.dart';
 
 class AddServerDialog extends ConsumerStatefulWidget {
@@ -22,6 +23,14 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
   String _serverType = 'community';
   bool _loading = false;
   String? _error;
+  List<Map<String, dynamic>> _discoveredServers = [];
+  bool _discovering = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _discoverServers();
+  }
 
   @override
   void dispose() {
@@ -29,6 +38,93 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
     _nameController.dispose();
     _descController.dispose();
     super.dispose();
+  }
+
+  /// Fetch Kind 31750 server metadata from relays, filter by discoverable=true.
+  /// Matches Rails ServersController#discover
+  Future<void> _discoverServers() async {
+    setState(() => _discovering = true);
+    try {
+      final pool = ref.read(relayPoolProvider);
+      final db = ref.read(databaseProvider);
+      final filter = NostrFilter(kinds: [31750], limit: 50);
+      final events = await pool.fetch(filter, timeout: const Duration(seconds: 6));
+
+      // Get already-joined server group IDs
+      final joinedServers = await db.select(db.servers).get();
+      final joinedGids = joinedServers
+          .where((s) => s.nostrGroupId != null)
+          .map((s) => s.nostrGroupId!)
+          .toSet();
+
+      final servers = <Map<String, dynamic>>[];
+      for (final event in events) {
+        final tags = event.tags;
+        String? getTag(String key) {
+          final tag = tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
+          return tag != null && tag.length > 1 ? tag[1] : null;
+        }
+
+        // Must be discoverable and not deleted
+        if (getTag('discoverable') != 'true') continue;
+        if (getTag('deleted') == 'true') continue;
+
+        final dTag = getTag('d');
+        if (dTag == null) continue;
+        if (joinedGids.contains(dTag)) continue;
+
+        servers.add({
+          'nostr_group_id': dTag,
+          'name': getTag('name') ?? 'Unknown Server',
+          'description': getTag('about'),
+          'icon_url': getTag('picture'),
+          'server_type': getTag('server_type'),
+          'age_restricted': getTag('age_restricted') == 'true',
+          'pubkey': event.pubkey,
+        });
+      }
+
+      // Dedup by group ID
+      final seen = <String>{};
+      final unique = servers.where((s) {
+        final gid = s['nostr_group_id'] as String;
+        if (seen.contains(gid)) return false;
+        seen.add(gid);
+        return true;
+      }).toList();
+
+      if (mounted) setState(() { _discoveredServers = unique; _discovering = false; });
+    } catch (_) {
+      if (mounted) setState(() => _discovering = false);
+    }
+  }
+
+  Future<void> _joinDiscoveredServer(Map<String, dynamic> server) async {
+    final db = ref.read(databaseProvider);
+    final now = DateTime.now();
+    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+    final gid = server['nostr_group_id'] as String;
+
+    final serverId = await db.into(db.servers).insert(ServersCompanion.insert(
+      publicId: publicId, ownerId: 0, name: server['name'] as String,
+      description: Value(server['description'] as String?),
+      iconUrl: Value(server['icon_url'] as String?),
+      nostrGroupId: Value(gid),
+      serverType: Value(server['server_type'] as String? ?? 'community'),
+      createdAt: now, updatedAt: now,
+    ));
+
+    await db.into(db.serverMemberships).insert(ServerMembershipsCompanion.insert(
+      publicId: (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12),
+      userId: 1, serverId: serverId,
+      joinedAt: Value(now), createdAt: now, updatedAt: now,
+    ));
+
+    // Sync structure from relays
+    final syncService = ref.read(serverSyncServiceProvider);
+    await syncService.syncServer(gid);
+
+    if (mounted) Navigator.pop(context, publicId);
   }
 
   Future<void> _createServer() async {
@@ -71,9 +167,24 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         joinedAt: Value(now), createdAt: now, updatedAt: now,
       ));
 
+      // Add local user as a remote member so they appear in the member list
+      final auth = ref.read(authServiceProvider);
+      if (auth.publicKeyHex != null) {
+        final rmId = (now.microsecondsSinceEpoch + 3).toRadixString(36).padLeft(12, '0').substring(0, 12);
+        await db.into(db.remoteMembers).insert(RemoteMembersCompanion.insert(
+          publicId: Value(rmId),
+          serverId: serverId,
+          pubkey: auth.publicKeyHex!,
+          username: const Value('user'),
+          onlineState: const Value(1), // online
+          joinedAt: Value(now),
+          createdAt: now,
+          updatedAt: now,
+        ));
+      }
+
       // Publish to Nostr
       final serverPublish = ref.read(serverPublishServiceProvider);
-      final auth = ref.read(authServiceProvider);
       if (auth.privateKeyHex != null) {
         final newServer = await (db.select(db.servers)..where((s) => s.id.equals(serverId))).getSingle();
         await serverPublish.publishMetadata(
@@ -154,18 +265,33 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
                 const SizedBox(height: 8),
                 Text('SERVERS ON YOUR RELAYS', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    children: [
-                      Icon(Icons.search, size: 40, color: c.gray500),
-                      const SizedBox(height: 8),
-                      Text('No servers found on your relays', style: TextStyle(color: c.gray400, fontSize: 14)),
-                      Text('Servers will appear here as they\'re discovered on your relays',
-                        style: TextStyle(color: c.gray500, fontSize: 12)),
-                    ],
-                  ),
-                ),
+                if (_discovering)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: c.gray400))),
+                  )
+                else if (_discoveredServers.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        Icon(Icons.search, size: 40, color: c.gray500),
+                        const SizedBox(height: 8),
+                        Text('No servers found on your relays', style: TextStyle(color: c.gray400, fontSize: 14)),
+                        Text('Servers will appear here as they\'re discovered on your relays',
+                          style: TextStyle(color: c.gray500, fontSize: 12)),
+                      ],
+                    ),
+                  )
+                else
+                  ...List.generate(_discoveredServers.length, (i) {
+                    final server = _discoveredServers[i];
+                    return _DiscoverServerItem(
+                      server: server,
+                      colors: c,
+                      onJoin: () => _joinDiscoveredServer(server),
+                    );
+                  }),
                 const SizedBox(height: 16),
 
                 // === CREATE ===
@@ -298,6 +424,91 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         ),
         Expanded(child: Container(height: 1, color: c.gray700.withValues(alpha: 0.5))),
       ],
+    );
+  }
+}
+
+class _DiscoverServerItem extends StatefulWidget {
+  final Map<String, dynamic> server;
+  final InfernoColors colors;
+  final VoidCallback onJoin;
+  const _DiscoverServerItem({required this.server, required this.colors, required this.onJoin});
+
+  @override
+  State<_DiscoverServerItem> createState() => _DiscoverServerItemState();
+}
+
+class _DiscoverServerItemState extends State<_DiscoverServerItem> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    final s = widget.server;
+    final name = s['name'] as String? ?? 'Unknown';
+    final desc = s['description'] as String?;
+    final iconUrl = s['icon_url'] as String?;
+    final ageRestricted = s['age_restricted'] == true;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: widget.onJoin,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          margin: const EdgeInsets.only(bottom: 4),
+          decoration: BoxDecoration(
+            color: _hovering ? c.gray700 : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            children: [
+              // Server icon
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                  color: c.gray600,
+                  borderRadius: BorderRadius.circular(10),
+                  image: iconUrl != null ? DecorationImage(image: NetworkImage(iconUrl), fit: BoxFit.cover) : null,
+                ),
+                child: iconUrl == null
+                    ? Center(child: Text(name[0].toUpperCase(), style: TextStyle(color: c.gray200, fontWeight: FontWeight.bold, fontSize: 16)))
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              // Server info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Flexible(
+                          child: Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                            overflow: TextOverflow.ellipsis),
+                        ),
+                        if (ageRestricted) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                            decoration: BoxDecoration(color: c.accent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(3)),
+                            child: Text('18+', style: TextStyle(color: c.accent, fontSize: 10, fontWeight: FontWeight.w700)),
+                          ),
+                        ],
+                      ],
+                    ),
+                    if (desc != null && desc.isNotEmpty)
+                      Text(desc, style: TextStyle(color: c.gray500, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+              if (_hovering)
+                Icon(Icons.arrow_forward_ios, size: 14, color: c.gray400),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

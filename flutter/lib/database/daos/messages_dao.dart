@@ -81,6 +81,14 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
         .get();
   }
 
+  // Watch pinned messages for a channel (reactive)
+  Stream<List<Message>> watchPinnedMessages(int channelId) {
+    return (select(messages)
+          ..where((m) => m.channelId.equals(channelId) & m.pinned.equals(true))
+          ..orderBy([(m) => OrderingTerm.desc(m.createdAt)]))
+        .watch();
+  }
+
   // Watch reactions for a message
   Stream<List<Reaction>> watchReactions(int messageId) {
     return (select(reactions)..where((r) => r.messageId.equals(messageId)))

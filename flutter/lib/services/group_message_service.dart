@@ -59,6 +59,7 @@ class GroupMessageService {
         publicId: publicId,
         content: Value(content),
         channelId: Value(channel.id),
+        nostrAuthorPubkey: Value(publicKeyHex),
         nostrEventId: Value(signed.id),
         nostrEventJson: Value(json.encode(signed.toJson())),
         createdAt: now,
@@ -113,6 +114,14 @@ class GroupMessageService {
             ..where((m) => m.nostrEventId.equals(replyTag[1])))
           .getSingleOrNull();
       parentId = parent?.id;
+    }
+
+    // Skip if we already have this event (dedup relay echo)
+    if (event.id != null) {
+      final existing = await (_db.select(_db.messages)
+            ..where((m) => m.nostrEventId.equals(event.id!)))
+          .getSingleOrNull();
+      if (existing != null) return;
     }
 
     final publicId = NostrKey.bytesToHex(NostrKey.hexToBytes(event.id!).sublist(0, 6));

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
+import '../../widgets/inferno_logo.dart';
 import '../../services/app_bootstrap_service.dart';
 import '../../crypto/bech32_nostr.dart';
 
@@ -84,7 +85,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               children: [
                 const SizedBox(height: 16),
                 // Icon
-                Icon(Icons.local_fire_department, size: 48, color: primary),
+                const InfernoLogo(size: 48),
                 const SizedBox(height: 16),
                 Text('Choose your identity', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 8),
