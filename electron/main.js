@@ -8,11 +8,11 @@ const crypto = require('crypto');
 const PORT = 13100;
 const BUILD_TAG = '2026-03-21-v8';
 
-// Prevent renderer crashes on Windows:
-// - disableHardwareAcceleration: avoids GPU driver crashes (0xC0000005)
-// - CalculateNativeWinOcclusion: Chromium feature that crashes renderer (-36861)
+// Prevent renderer crashes on Windows
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
+app.commandLine.appendSwitch('no-sandbox');
+app.commandLine.appendSwitch('disable-gpu-sandbox');
 const HEALTH_TIMEOUT = 30000;
 const HEALTH_INTERVAL = 500;
 
@@ -391,6 +391,7 @@ function createMainWindow(url) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: false,
       preload: path.join(__dirname, 'preload.js'),
     },
   });
@@ -438,11 +439,15 @@ function createMainWindow(url) {
   mainWindow.webContents.on('console-message', (event, level, message) => {
     fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer-console] ${message}\n`);
   });
+  let crashCount = 0;
   mainWindow.webContents.on('render-process-gone', (event, details) => {
-    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] CRASHED: ${JSON.stringify(details)}\n`);
-    // Auto-recover: reload the page after a renderer crash
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      setTimeout(() => mainWindow.loadURL(`http://127.0.0.1:${PORT}`), 1000);
+    crashCount++;
+    fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] CRASHED #${crashCount}: ${JSON.stringify(details)}\n`);
+    // Auto-recover up to 3 times, then give up
+    if (crashCount <= 3 && mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => mainWindow.loadURL(`http://127.0.0.1:${PORT}`), 2000);
+    } else if (mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showErrorBox('Renderer Error', `The app renderer crashed ${crashCount} times. Try opening http://127.0.0.1:${PORT} in your browser instead.`);
     }
   });
   mainWindow.webContents.openDevTools({ mode: 'detach' });
