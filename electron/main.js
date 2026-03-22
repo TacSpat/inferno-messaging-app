@@ -481,7 +481,13 @@ function killServer() {
         resolve();
       });
     } else {
-      child.kill();
+      // On Windows, cmd.exe /c start.bat spawns ruby.exe as a child process.
+      // child.kill() only kills cmd.exe, not ruby.exe. Use taskkill /T to kill
+      // the entire process tree.
+      const { execSync } = require('child_process');
+      try {
+        execSync(`taskkill /pid ${child.pid} /T /F`, { stdio: 'ignore' });
+      } catch {}
       resolve();
     }
   });
