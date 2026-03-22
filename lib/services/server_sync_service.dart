@@ -11,11 +11,15 @@ class ServerSyncService {
 
   ServerSyncService(this._db, this._relayPool);
 
-  /// Sync all server state from relays for a given nostr group ID
+  /// Sync all server state from relays for a given nostr group ID.
+  /// Matches Rails NostrServerJoinJob: metadata → structure → roles → members → emojis → stickers → bans → pins
   Future<Server?> syncServer(String nostrGroupId) async {
-    // Fetch metadata (Kind 31750)
+    // Step 1: Metadata (Kind 31750)
+    // The d-tag IS the nostrGroupId (e.g. "inferno-00hgw34x2mn1")
+    // Also try without prefix in case the gid doesn't start with "inferno-"
+    final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
     final metadataEvents = await _relayPool.fetch(
-      NostrFilter(kinds: [31750], tags: {'#d': ['inferno-$nostrGroupId']}),
+      NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
       timeout: const Duration(seconds: 10),
     );
     if (metadataEvents.isEmpty) return null;
@@ -25,13 +29,24 @@ class ServerSyncService {
     final server = await _processMetadata(metadata, nostrGroupId);
     if (server == null) return null;
 
-    // Fetch structure, roles, emojis, stickers in parallel
+    // Steps 2-4: Structure, roles, members in parallel
     await Future.wait([
       _syncStructure(nostrGroupId, server.id),
       _syncRoles(nostrGroupId, server.id),
-      _syncEmojis(nostrGroupId, server.id),
-      _syncStickers(nostrGroupId, server.id),
+      _syncMembers(nostrGroupId, server.id),
     ]);
+
+    // Steps 5-7: Emojis, stickers, bans (lower priority, can fail)
+    await Future.wait([
+      _syncEmojis(nostrGroupId, server.id).catchError((_) {}),
+      _syncStickers(nostrGroupId, server.id).catchError((_) {}),
+    ]);
+
+    // Step 8: Backfill messages for all channels
+    await _backfillAllChannels(server.id);
+
+    // Step 9: Subscribe to new channels for live updates
+    _subscribeToServerChannels(server.id);
 
     return server;
   }
@@ -109,8 +124,9 @@ class ServerSyncService {
 
   /// Sync Kind 31751 structure (channels + categories)
   Future<void> _syncStructure(String nostrGroupId, int serverId) async {
+    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
     final events = await _relayPool.fetch(
-      NostrFilter(kinds: [31751], tags: {'#d': ['inferno-struct-$nostrGroupId']}),
+      NostrFilter(kinds: [31751], tags: {'#d': ['inferno-struct-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
     if (events.isEmpty) return;
@@ -170,8 +186,9 @@ class ServerSyncService {
 
   /// Sync Kind 31752 roles
   Future<void> _syncRoles(String nostrGroupId, int serverId) async {
+    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
     final events = await _relayPool.fetch(
-      NostrFilter(kinds: [31752], tags: {'#d': ['inferno-roles-$nostrGroupId']}),
+      NostrFilter(kinds: [31752], tags: {'#d': ['inferno-roles-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
     if (events.isEmpty) return;
@@ -199,8 +216,9 @@ class ServerSyncService {
 
   /// Sync Kind 31754 emojis
   Future<void> _syncEmojis(String nostrGroupId, int serverId) async {
+    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
     final events = await _relayPool.fetch(
-      NostrFilter(kinds: [31754], tags: {'#d': ['inferno-emojis-$nostrGroupId']}),
+      NostrFilter(kinds: [31754], tags: {'#d': ['inferno-emojis-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
     if (events.isEmpty) return;
@@ -225,8 +243,9 @@ class ServerSyncService {
 
   /// Sync Kind 31755 stickers
   Future<void> _syncStickers(String nostrGroupId, int serverId) async {
+    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
     final events = await _relayPool.fetch(
-      NostrFilter(kinds: [31755], tags: {'#d': ['inferno-stickers-$nostrGroupId']}),
+      NostrFilter(kinds: [31755], tags: {'#d': ['inferno-stickers-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
     if (events.isEmpty) return;
@@ -264,5 +283,227 @@ class ServerSyncService {
       if (tag.length >= 2) result[tag[0]] = tag[1];
     }
     return result;
+  }
+
+  /// Sync Kind 31753 members — matches Rails sync_members
+  /// Member events use d-tag: "inferno-mbr-{gid}-{pubkey}"
+  Future<void> _syncMembers(String nostrGroupId, int serverId) async {
+    final events = await _relayPool.fetch(
+      NostrFilter(kinds: [31753]),
+      timeout: const Duration(seconds: 10),
+    );
+
+    // Filter to our server's member events by d-tag prefix
+    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
+    final prefix = 'inferno-mbr-$baseId-';
+    final memberEvents = events.where((e) {
+      final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+      return dTag != null && dTag.length > 1 && dTag[1].startsWith(prefix);
+    }).toList();
+
+    // Group by d-tag and take latest per member
+    final grouped = <String, nostr.NostrEvent>{};
+    for (final e in memberEvents) {
+      final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').first[1];
+      final existing = grouped[dTag];
+      if (existing == null || e.createdAt > existing.createdAt) {
+        grouped[dTag] = e;
+      }
+    }
+
+    final now = DateTime.now();
+    for (final event in grouped.values) {
+      // Get member pubkey from p tag
+      final pTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'p').firstOrNull;
+      if (pTag == null || pTag.length < 2) continue;
+
+      final memberPubkey = pTag[1];
+      final removed = event.tags.where((t) => t.isNotEmpty && t[0] == 'removed').firstOrNull;
+      if (removed != null && removed.length > 1 && removed[1] == 'true') {
+        // Remove member
+        await (_db.delete(_db.remoteMembers)
+              ..where((m) => m.serverId.equals(serverId) & m.pubkey.equals(memberPubkey)))
+            .go();
+        continue;
+      }
+
+      // Get role info from tags
+      final roleTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'role').firstOrNull;
+
+      final publicId = memberPubkey.substring(0, 12);
+      await _db.into(_db.remoteMembers).insertOnConflictUpdate(
+        RemoteMembersCompanion.insert(
+          publicId: Value(publicId),
+          serverId: serverId,
+          pubkey: memberPubkey,
+          joinedAt: Value(DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+
+      // Fetch profile for this member (Kind 0)
+      _fetchMemberProfile(memberPubkey);
+    }
+  }
+
+  /// Fetch a member's Kind 0 profile and update contacts + remote_members
+  Future<void> _fetchMemberProfile(String pubkey) async {
+    try {
+      final events = await _relayPool.fetch(
+        NostrFilter(kinds: [0], authors: [pubkey], limit: 1),
+        timeout: const Duration(seconds: 5),
+      );
+      if (events.isEmpty) return;
+
+      final profile = json.decode(events.first.content) as Map<String, dynamic>;
+      final now = DateTime.now();
+
+      // Update contacts table
+      await _db.into(_db.contacts).insertOnConflictUpdate(
+        ContactsCompanion.insert(
+          pubkey: pubkey,
+          username: Value(profile['name'] as String?),
+          displayName: Value(profile['display_name'] as String?),
+          bio: Value(profile['about'] as String?),
+          avatarUrl: Value(profile['picture'] as String?),
+          bannerUrl: Value(profile['banner'] as String?),
+          nip05: Value(profile['nip05'] as String?),
+          profileFetchedAt: Value(now),
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+
+      // Update remote_members with profile data
+      await (_db.update(_db.remoteMembers)
+            ..where((m) => m.pubkey.equals(pubkey)))
+          .write(RemoteMembersCompanion(
+        username: Value(profile['name'] as String?),
+        displayName: Value(profile['display_name'] as String?),
+        avatarUrl: Value(profile['picture'] as String?),
+        bannerUrl: Value(profile['banner'] as String?),
+        bio: Value(profile['about'] as String?),
+        nip05: Value(profile['nip05'] as String?),
+        profileFetchedAt: Value(now),
+        updatedAt: Value(now),
+      ));
+    } catch (_) {}
+  }
+
+  /// Backfill messages for all channels in a server
+  Future<void> _backfillAllChannels(int serverId) async {
+    final channels = await (_db.select(_db.channels)
+          ..where((c) => c.serverId.equals(serverId)))
+        .get();
+
+    final since = DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch ~/ 1000;
+
+    for (final channel in channels) {
+      if (channel.nostrGroupId == null) continue;
+      try {
+        final events = await _relayPool.fetch(
+          NostrFilter(
+            kinds: [9, 9005, 9006],
+            tags: {'#h': [channel.nostrGroupId!]},
+            since: since,
+          ),
+          timeout: const Duration(seconds: 10),
+        );
+
+        // Sort chronologically
+        final sorted = events.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+
+        for (final event in sorted) {
+          if (event.kind == 9) {
+            // Check dedup
+            if (event.id != null) {
+              final existing = await (_db.select(_db.messages)
+                    ..where((m) => m.nostrEventId.equals(event.id!)))
+                  .getSingleOrNull();
+              if (existing != null) continue;
+            }
+
+            final content = event.content;
+            final publicId = event.id != null
+                ? event.id!.substring(0, 12)
+                : DateTime.now().microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+            final eventTime = DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000);
+
+            await _db.into(_db.messages).insert(
+              MessagesCompanion.insert(
+                publicId: publicId,
+                content: Value(content),
+                channelId: Value(channel.id),
+                nostrAuthorPubkey: Value(event.pubkey),
+                nostrEventId: Value(event.id),
+                nostrEventJson: Value(json.encode(event.toJson())),
+                createdAt: eventTime,
+                updatedAt: DateTime.now(),
+              ),
+            );
+
+            // Auto-create remote member if unknown
+            _ensureRemoteMember(channel.serverId, event.pubkey);
+          } else if (event.kind == 9005) {
+            final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
+            if (eTag != null && eTag.length > 1) {
+              await (_db.delete(_db.messages)..where((m) => m.nostrEventId.equals(eTag[1]))).go();
+            }
+          } else if (event.kind == 9006) {
+            // Pin/unpin
+            final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
+            final pinnedTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'pinned').firstOrNull;
+            if (eTag != null && eTag.length > 1) {
+              final pinned = pinnedTag != null && pinnedTag.length > 1 && pinnedTag[1] == 'true';
+              await (_db.update(_db.messages)..where((m) => m.nostrEventId.equals(eTag[1])))
+                  .write(MessagesCompanion(pinned: Value(pinned), updatedAt: Value(DateTime.now())));
+            }
+          }
+        }
+      } catch (_) {
+        // Continue with next channel on failure
+      }
+    }
+  }
+
+  /// Ensure a remote member exists for a pubkey in a server
+  Future<void> _ensureRemoteMember(int serverId, String pubkey) async {
+    final existing = await (_db.select(_db.remoteMembers)
+          ..where((m) => m.serverId.equals(serverId) & m.pubkey.equals(pubkey)))
+        .getSingleOrNull();
+    if (existing != null) return;
+
+    final now = DateTime.now();
+    final publicId = pubkey.substring(0, 12);
+    await _db.into(_db.remoteMembers).insertOnConflictUpdate(
+      RemoteMembersCompanion.insert(
+        publicId: Value(publicId),
+        serverId: serverId,
+        pubkey: pubkey,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+
+    // Fetch profile in background
+    _fetchMemberProfile(pubkey);
+  }
+
+  /// Subscribe to live events for newly synced server channels
+  void _subscribeToServerChannels(int serverId) async {
+    final channels = await (_db.select(_db.channels)
+          ..where((c) => c.serverId.equals(serverId)))
+        .get();
+    final groupIds = channels
+        .where((c) => c.nostrGroupId != null)
+        .map((c) => c.nostrGroupId!)
+        .toList();
+    if (groupIds.isEmpty) return;
+
+    final since = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch ~/ 1000;
+    _relayPool.subscribe(filters: [
+      NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: since),
+    ]);
   }
 }

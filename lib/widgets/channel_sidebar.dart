@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../database/database.dart';
@@ -116,6 +117,7 @@ class _ServerHeaderState extends ConsumerState<_ServerHeader> {
           if (mounted) setState(() => _dropdownOpen = false);
         },
         ref: ref,
+        router: GoRouter.of(this.context),
       ),
     );
     overlay.insert(entry);
@@ -160,6 +162,7 @@ class _ServerDropdownOverlay extends StatefulWidget {
   final Rect anchor;
   final VoidCallback onDismiss;
   final WidgetRef ref;
+  final GoRouter router;
 
   const _ServerDropdownOverlay({
     required this.server,
@@ -167,6 +170,7 @@ class _ServerDropdownOverlay extends StatefulWidget {
     required this.anchor,
     required this.onDismiss,
     required this.ref,
+    required this.router,
   });
 
   @override
@@ -212,7 +216,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
                     colors: c,
                     onTap: () {
                       widget.onDismiss();
-                      // TODO: show invite dialog
+                      _showInviteDialog(context);
                     },
                   ),
                   _DropdownItem(
@@ -266,7 +270,89 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
   }
 
   void _showServerSettings(BuildContext context) {
-    // TODO: open server settings overlay (separate from user settings)
+    // TODO: open server settings overlay
+  }
+
+  Future<void> _showInviteDialog(BuildContext ctx) async {
+    final c = widget.colors;
+    final auth = widget.ref.read(authServiceProvider);
+    final inviteService = widget.ref.read(inviteServiceProvider);
+
+    if (auth.privateKeyHex == null) return;
+
+    // Create invite
+    String? inviteCode;
+    String? error;
+    try {
+      final invite = await inviteService.createInvite(
+        privateKeyHex: auth.privateKeyHex!,
+        publicKeyHex: auth.publicKeyHex!,
+        server: widget.server,
+        creatorId: 1,
+      );
+      inviteCode = invite.code;
+    } catch (e) {
+      error = e.toString();
+    }
+
+    if (!ctx.mounted) return;
+
+    showDialog(
+      context: ctx,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: c.gray800,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Invite People', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Text('Share this invite link with others:', style: TextStyle(color: c.gray400, fontSize: 14)),
+              const SizedBox(height: 12),
+              if (error != null)
+                Text(error, style: TextStyle(color: c.accent, fontSize: 13))
+              else if (inviteCode != null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(8)),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: SelectableText(
+                          'inferno://invite/${widget.server.nostrGroupId ?? widget.server.publicId}/$inviteCode',
+                          style: TextStyle(color: c.gray200, fontSize: 13, fontFamily: 'monospace'),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      GestureDetector(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(
+                            text: 'inferno://invite/${widget.server.nostrGroupId ?? widget.server.publicId}/$inviteCode',
+                          ));
+                        },
+                        child: Icon(Icons.copy, size: 16, color: c.gray400),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Done', style: TextStyle(color: c.gray400)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showCreateChannel(BuildContext ctx) async {
@@ -480,15 +566,22 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
       ),
     );
 
-    if (confirmed == true && ctx.mounted) {
+    if (confirmed == true) {
       final db = widget.ref.read(databaseProvider);
-      // Delete membership, channels, categories, remote members for this server
-      await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(widget.server.id))).go();
-      await (db.delete(db.channels)..where((ch) => ch.serverId.equals(widget.server.id))).go();
-      await (db.delete(db.categories)..where((cat) => cat.serverId.equals(widget.server.id))).go();
-      await (db.delete(db.remoteMembers)..where((m) => m.serverId.equals(widget.server.id))).go();
-      await (db.delete(db.servers)..where((s) => s.id.equals(widget.server.id))).go();
-      if (ctx.mounted) GoRouter.of(ctx).go('/conversations');
+      final serverId = widget.server.id;
+      // Delete all messages in this server's channels first
+      final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(serverId))).get();
+      for (final ch in channels) {
+        await (db.delete(db.messages)..where((m) => m.channelId.equals(ch.id))).go();
+      }
+      // Delete membership, channels, categories, remote members, then server
+      await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(serverId))).go();
+      await (db.delete(db.channels)..where((ch) => ch.serverId.equals(serverId))).go();
+      await (db.delete(db.categories)..where((cat) => cat.serverId.equals(serverId))).go();
+      await (db.delete(db.remoteMembers)..where((m) => m.serverId.equals(serverId))).go();
+      await (db.delete(db.servers)..where((s) => s.id.equals(serverId))).go();
+      // Navigate using the router passed from the server header context
+      widget.router.go('/conversations');
     }
   }
 }
