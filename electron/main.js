@@ -8,11 +8,11 @@ const crypto = require('crypto');
 const PORT = 13100;
 const BUILD_TAG = '2026-03-21-v8';
 
-// Prevent renderer crashes on Windows
+// Prevent renderer crashes on Windows (especially VMs with no real GPU)
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
 app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
-app.commandLine.appendSwitch('no-sandbox');
-app.commandLine.appendSwitch('disable-gpu-sandbox');
 const HEALTH_TIMEOUT = 30000;
 const HEALTH_INTERVAL = 500;
 
