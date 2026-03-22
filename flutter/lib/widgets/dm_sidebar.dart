@@ -3,7 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart';
+import '../providers/database_provider.dart';
+import '../providers/realtime_provider.dart';
+import '../database/database.dart';
 import '../services/auth_service.dart';
+import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 import '../screens/settings/settings_overlay.dart';
 
@@ -17,6 +21,7 @@ class DmSidebar extends ConsumerWidget {
     final c = Theme.of(context).extension<InfernoColors>()!;
     final currentPath = GoRouterState.of(context).uri.toString();
     final isFriendsActive = currentPath == '/conversations';
+    final presenceSvc = ref.watch(presenceServiceProvider);
 
     return Container(
       width: 240,
@@ -36,8 +41,13 @@ class DmSidebar extends ConsumerWidget {
                   child: Text('Direct Messages',
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
                 ),
-                _HeaderButton(icon: Icons.group_add, tooltip: 'New Group Chat', colors: c, onTap: () {}),
-                _HeaderButton(icon: Icons.search, tooltip: 'Find conversation', colors: c, onTap: () {}),
+                _HeaderButton(icon: Icons.group_add, tooltip: 'New Group Chat', colors: c, onTap: () {
+                  // TODO: group chat creation dialog
+                }),
+                _HeaderButton(icon: Icons.search, tooltip: 'Find conversation', colors: c, onTap: () {
+                  // Navigate to search tab
+                  context.go('/conversations?tab=search');
+                }),
                 _HeaderButton(icon: Icons.person_add, tooltip: 'Add Friend', colors: c, onTap: () {
                   context.go('/conversations?tab=search');
                 }),
@@ -70,10 +80,15 @@ class DmSidebar extends ConsumerWidget {
                             ?? conv.counterpartyPubkey?.substring(0, 12)
                             ?? 'Unknown';
                         final isActive = currentPath.contains(conv.publicId);
+                        // Get presence for counterparty
+                        final presenceState = conv.counterpartyPubkey != null
+                            ? presenceSvc.getPresence(conv.counterpartyPubkey!)
+                            : OnlineState.offline;
                         return _ConversationItem(
                           name: name,
                           isGroup: conv.kind == 1,
                           isActive: isActive,
+                          presenceState: presenceState,
                           colors: c,
                           onTap: () => context.go('/conversations/${conv.publicId}'),
                         );
@@ -166,8 +181,7 @@ class _NavItemState extends State<_NavItem> {
           ),
           child: Row(
             children: [
-              Icon(widget.icon, size: 20,
-                color: active ? Colors.white : c.gray400),
+              Icon(widget.icon, size: 20, color: active ? Colors.white : c.gray400),
               const SizedBox(width: 12),
               Text(widget.label, style: TextStyle(
                 color: active ? Colors.white : (_hovering ? c.gray200 : c.gray400),
@@ -185,9 +199,10 @@ class _ConversationItem extends StatefulWidget {
   final String name;
   final bool isGroup;
   final bool isActive;
+  final OnlineState presenceState;
   final InfernoColors colors;
   final VoidCallback onTap;
-  const _ConversationItem({required this.name, required this.isGroup, required this.isActive, required this.colors, required this.onTap});
+  const _ConversationItem({required this.name, required this.isGroup, required this.isActive, required this.presenceState, required this.colors, required this.onTap});
 
   @override
   State<_ConversationItem> createState() => _ConversationItemState();
@@ -195,6 +210,16 @@ class _ConversationItem extends StatefulWidget {
 
 class _ConversationItemState extends State<_ConversationItem> {
   bool _hovering = false;
+
+  Color _statusColor() {
+    final c = widget.colors;
+    switch (widget.presenceState) {
+      case OnlineState.online: return c.online;
+      case OnlineState.idle: return c.idle;
+      case OnlineState.dnd: return c.dnd;
+      default: return c.offline;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +239,6 @@ class _ConversationItemState extends State<_ConversationItem> {
           ),
           child: Row(
             children: [
-              // Avatar
               Stack(
                 children: [
                   CircleAvatar(
@@ -225,14 +249,13 @@ class _ConversationItemState extends State<_ConversationItem> {
                         : Text(widget.name[0].toUpperCase(),
                             style: TextStyle(color: c.gray200, fontSize: 13, fontWeight: FontWeight.bold)),
                   ),
-                  // Online status dot
                   if (!widget.isGroup)
                     Positioned(
                       right: -2, bottom: -2,
                       child: Container(
                         width: 14, height: 14,
                         decoration: BoxDecoration(
-                          color: c.offline,
+                          color: _statusColor(),
                           shape: BoxShape.circle,
                           border: Border.all(color: c.gray800, width: 2),
                         ),
@@ -255,62 +278,89 @@ class _ConversationItemState extends State<_ConversationItem> {
   }
 }
 
-class _UserPanel extends StatelessWidget {
+class _UserPanel extends ConsumerWidget {
   final AuthService auth;
   final InfernoColors colors;
   const _UserPanel({required this.auth, required this.colors});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final pubkey = auth.publicKeyHex;
-    final shortName = pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User';
+    final db = ref.watch(databaseProvider);
+    final presenceSvc = ref.watch(presenceServiceProvider);
+    final currentState = presenceSvc.currentState;
+    final statusColor = _presenceColor(currentState, colors);
+    final statusText = currentState.value[0].toUpperCase() + currentState.value.substring(1);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.gray950,
-        border: Border(top: BorderSide(color: colors.gray900)),
-      ),
-      child: Row(
-        children: [
-          Stack(
+    return StreamBuilder<List<Contact>>(
+      stream: pubkey != null
+          ? (db.select(db.contacts)..where((c) => c.pubkey.equals(pubkey))).watch()
+          : const Stream.empty(),
+      builder: (context, snap) {
+        final contact = snap.data?.firstOrNull;
+        final displayName = contact?.displayName ?? contact?.username ?? (pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User');
+        final avatarUrl = contact?.avatarUrl;
+
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          decoration: BoxDecoration(
+            color: colors.gray950,
+            border: Border(top: BorderSide(color: colors.gray900)),
+          ),
+          child: Row(
             children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: colors.gray600,
-                child: Text(shortName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14)),
-              ),
-              Positioned(
-                right: -1, bottom: -1,
-                child: Container(
-                  width: 14, height: 14,
-                  decoration: BoxDecoration(
-                    color: colors.online,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: colors.gray950, width: 2),
+              Stack(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: colors.gray600,
+                    backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                    child: avatarUrl == null
+                        ? Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14))
+                        : null,
                   ),
+                  Positioned(
+                    right: -1, bottom: -1,
+                    child: Container(
+                      width: 14, height: 14,
+                      decoration: BoxDecoration(
+                        color: statusColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: colors.gray950, width: 2),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(displayName, style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
+                      overflow: TextOverflow.ellipsis),
+                    Text(statusText, style: TextStyle(color: colors.gray400, fontSize: 11)),
+                  ],
                 ),
+              ),
+              GestureDetector(
+                onTap: () => showSettingsOverlay(context),
+                child: Icon(Icons.settings, color: colors.gray400, size: 16),
               ),
             ],
           ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(shortName, style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis),
-                Text('Online', style: TextStyle(color: colors.gray400, fontSize: 11)),
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: () => showSettingsOverlay(context),
-            child: Icon(Icons.settings, color: colors.gray400, size: 16),
-          ),
-        ],
-      ),
+        );
+      },
     );
+  }
+
+  static Color _presenceColor(OnlineState state, InfernoColors c) {
+    switch (state) {
+      case OnlineState.online: return c.online;
+      case OnlineState.idle: return c.idle;
+      case OnlineState.dnd: return c.dnd;
+      default: return c.offline;
+    }
   }
 }

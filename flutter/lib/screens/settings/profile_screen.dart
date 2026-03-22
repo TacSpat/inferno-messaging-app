@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/auth_provider.dart';
+import '../../providers/database_provider.dart';
 import '../../theme/all_themes.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -16,6 +17,31 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final _avatarUrlController = TextEditingController();
   final _bannerUrlController = TextEditingController();
   bool _dirty = false;
+  bool _loaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadExistingProfile();
+  }
+
+  Future<void> _loadExistingProfile() async {
+    final auth = ref.read(authServiceProvider);
+    if (auth.publicKeyHex == null) return;
+    final db = ref.read(databaseProvider);
+    final contact = await db.contactsDao.getByPubkey(auth.publicKeyHex!);
+    if (contact != null && mounted) {
+      setState(() {
+        _displayNameController.text = contact.displayName ?? contact.username ?? '';
+        _bioController.text = contact.bio ?? '';
+        _avatarUrlController.text = contact.avatarUrl ?? '';
+        _bannerUrlController.text = contact.bannerUrl ?? '';
+        _loaded = true;
+      });
+    } else {
+      if (mounted) setState(() => _loaded = true);
+    }
+  }
 
   @override
   void dispose() {
@@ -29,6 +55,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final c = Theme.of(context).extension<InfernoColors>()!;
+    final avatarUrl = _avatarUrlController.text.trim();
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -63,37 +90,42 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ],
         ),
         const SizedBox(height: 24),
-        // Avatar preview
+        // Avatar preview — shows actual avatar if URL is set
         Center(
           child: CircleAvatar(
             radius: 48,
             backgroundColor: c.gray800,
-            child: Icon(Icons.person, size: 48, color: c.gray500),
+            backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+            child: avatarUrl.isEmpty ? Icon(Icons.person, size: 48, color: c.gray500) : null,
           ),
         ),
         const SizedBox(height: 24),
         TextField(
           controller: _displayNameController,
-          decoration: const InputDecoration(labelText: 'Display Name'),
+          style: TextStyle(color: c.gray200),
+          decoration: InputDecoration(labelText: 'Display Name', labelStyle: TextStyle(color: c.gray500)),
           onChanged: (_) => setState(() => _dirty = true),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _bioController,
-          decoration: const InputDecoration(labelText: 'Bio'),
+          style: TextStyle(color: c.gray200),
+          decoration: InputDecoration(labelText: 'Bio', labelStyle: TextStyle(color: c.gray500)),
           maxLines: 3,
           onChanged: (_) => setState(() => _dirty = true),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _avatarUrlController,
-          decoration: const InputDecoration(labelText: 'Avatar URL', hintText: 'Blossom URL or image link'),
+          style: TextStyle(color: c.gray200),
+          decoration: InputDecoration(labelText: 'Avatar URL', hintText: 'Blossom URL or image link', labelStyle: TextStyle(color: c.gray500), hintStyle: TextStyle(color: c.gray600)),
           onChanged: (_) => setState(() => _dirty = true),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _bannerUrlController,
-          decoration: const InputDecoration(labelText: 'Banner URL', hintText: 'Blossom URL or image link'),
+          style: TextStyle(color: c.gray200),
+          decoration: InputDecoration(labelText: 'Banner URL', hintText: 'Blossom URL or image link', labelStyle: TextStyle(color: c.gray500), hintStyle: TextStyle(color: c.gray600)),
           onChanged: (_) => setState(() => _dirty = true),
         ),
       ],
