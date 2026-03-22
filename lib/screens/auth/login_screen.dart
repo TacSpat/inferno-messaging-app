@@ -5,6 +5,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/app_bootstrap_service.dart';
+import '../../widgets/inferno_logo.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -61,7 +62,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.local_fire_department, size: 64, color: primary),
+              const InfernoLogo(size: 64),
               const SizedBox(height: 24),
               const CircularProgressIndicator(),
               const SizedBox(height: 16),
@@ -80,7 +81,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Spacer(flex: 2),
-              Icon(Icons.local_fire_department, size: 80, color: primary),
+              const InfernoLogo(size: 80),
               const SizedBox(height: 16),
               Text(
                 'Inferno',

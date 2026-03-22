@@ -181,14 +181,17 @@ class AppBootstrapService {
     if (authService.publicKeyHex == null) return;
     final pubKey = authService.publicKeyHex!;
 
+    // Catchup window: fetch events since last 24 hours (matches Rails catchup_since)
+    final catchupSince = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch ~/ 1000;
+
     // Subscribe to inbound DMs
     relayPool.subscribe(filters: [
-      NostrFilter(kinds: [14, 1059], tags: {'#p': [pubKey]}),
+      NostrFilter(kinds: [14, 1059], tags: {'#p': [pubKey]}, since: catchupSince),
     ]);
 
     // Subscribe to own outbound DMs (from other devices)
     relayPool.subscribe(filters: [
-      NostrFilter(kinds: [14, 1059], authors: [pubKey]),
+      NostrFilter(kinds: [14, 1059], authors: [pubKey], since: catchupSince),
     ]);
 
     // Subscribe to profiles and presence of contacts
@@ -197,10 +200,13 @@ class AppBootstrapService {
     ]);
 
     // Subscribe to group messages for all joined channels
-    _subscribeToChannels();
+    _subscribeToChannels(catchupSince);
+
+    // Fetch own profile from relays so user panel shows resolved name
+    _fetchOwnProfile(pubKey);
   }
 
-  Future<void> _subscribeToChannels() async {
+  Future<void> _subscribeToChannels(int catchupSince) async {
     final channels = await db.select(db.channels).get();
     final groupIds = channels
         .where((c) => c.nostrGroupId != null)
@@ -209,7 +215,35 @@ class AppBootstrapService {
     if (groupIds.isEmpty) return;
 
     relayPool.subscribe(filters: [
-      NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}),
+      NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: catchupSince),
     ]);
+  }
+
+  /// Fetch our own Kind 0 profile so the user panel shows our display name
+  Future<void> _fetchOwnProfile(String pubKey) async {
+    try {
+      final events = await relayPool.fetch(
+        NostrFilter(kinds: [0], authors: [pubKey], limit: 1),
+        timeout: const Duration(seconds: 10),
+      );
+      if (events.isNotEmpty) {
+        final event = events.first;
+        final profile = json.decode(event.content) as Map<String, dynamic>;
+        await db.into(db.contacts).insertOnConflictUpdate(
+          ContactsCompanion.insert(
+            pubkey: pubKey,
+            username: Value(profile['name'] as String?),
+            displayName: Value(profile['display_name'] as String?),
+            bio: Value(profile['about'] as String?),
+            avatarUrl: Value(profile['picture'] as String?),
+            bannerUrl: Value(profile['banner'] as String?),
+            nip05: Value(profile['nip05'] as String?),
+            profileFetchedAt: Value(DateTime.now()),
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          ),
+        );
+      }
+    } catch (_) {}
   }
 }

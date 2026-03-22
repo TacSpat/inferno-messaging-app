@@ -51,6 +51,34 @@ class ReactionService {
     _relayPool.publish(signed);
   }
 
+  /// Toggle a reaction by event ID (add if not present, remove if present)
+  Future<void> toggleReaction({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String eventId,
+    required String emoji,
+  }) async {
+    final message = await (_db.select(_db.messages)
+          ..where((m) => m.nostrEventId.equals(eventId)))
+        .getSingleOrNull();
+    if (message == null) return;
+
+    // Check if already reacted
+    final existing = await (_db.select(_db.reactions)
+          ..where((r) => r.messageId.equals(message.id) & r.emoji.equals(emoji) & r.userId.equals(0)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await removeReaction(message.id, emoji);
+    } else {
+      await addReaction(
+        privateKeyHex: privateKeyHex,
+        publicKeyHex: publicKeyHex,
+        message: message,
+        emoji: emoji,
+      );
+    }
+  }
+
   /// Remove a reaction
   Future<void> removeReaction(int messageId, String emoji) async {
     await (_db.delete(_db.reactions)

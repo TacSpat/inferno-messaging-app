@@ -34,6 +34,9 @@ dependencies:
   # HTTP
   http: ^1.3.0
 
+  # SVG rendering
+  flutter_svg: ^2.0.17
+
   # Secure storage (key encryption at rest)
   flutter_secure_storage: ^9.2.4
 
@@ -83,3 +86,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/icons/

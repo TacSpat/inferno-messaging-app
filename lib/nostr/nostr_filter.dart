@@ -7,6 +7,7 @@ class NostrFilter {
   final int? since;
   final int? until;
   final int? limit;
+  final String? search; // NIP-50 search query
   // Tag filters: #e, #p, #h, #d, etc.
   final Map<String, List<String>> tags;
 
@@ -17,6 +18,7 @@ class NostrFilter {
     this.since,
     this.until,
     this.limit,
+    this.search,
     Map<String, List<String>>? tags,
   }) : tags = tags ?? {};
 
@@ -48,6 +50,7 @@ class NostrFilter {
     if (since != null) map['since'] = since;
     if (until != null) map['until'] = until;
     if (limit != null) map['limit'] = limit;
+    if (search != null) map['search'] = search;
     for (final entry in tags.entries) {
       map[entry.key] = entry.value;
     }
