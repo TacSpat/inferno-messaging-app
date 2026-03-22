@@ -8,8 +8,11 @@ const crypto = require('crypto');
 const PORT = 13100;
 const BUILD_TAG = '2026-03-21-v8';
 
-// Disable GPU acceleration to prevent renderer crashes (0xC0000005) on some Windows machines
+// Prevent renderer crashes on Windows:
+// - disableHardwareAcceleration: avoids GPU driver crashes (0xC0000005)
+// - CalculateNativeWinOcclusion: Chromium feature that crashes renderer (-36861)
 app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion');
 const HEALTH_TIMEOUT = 30000;
 const HEALTH_INTERVAL = 500;
 
@@ -437,6 +440,10 @@ function createMainWindow(url) {
   });
   mainWindow.webContents.on('render-process-gone', (event, details) => {
     fs.appendFileSync(path.join(dataDir(), 'server.log'), `\n[renderer] CRASHED: ${JSON.stringify(details)}\n`);
+    // Auto-recover: reload the page after a renderer crash
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      setTimeout(() => mainWindow.loadURL(`http://127.0.0.1:${PORT}`), 1000);
+    }
   });
   mainWindow.webContents.openDevTools({ mode: 'detach' });
 
