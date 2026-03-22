@@ -1,5 +1,8 @@
+import 'package:drift/drift.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'providers/database_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/auth/signup_screen.dart';
 import 'screens/auth/key_import_screen.dart';
@@ -20,38 +23,14 @@ CustomTransitionPage<void> _noAnimationPage(Widget child, GoRouterState state) {
   );
 }
 
-class _PlaceholderScreen extends StatelessWidget {
-  final String title;
-  const _PlaceholderScreen({required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(title, style: Theme.of(context).textTheme.titleLarge),
-    );
-  }
-}
-
 final router = GoRouter(
   initialLocation: '/auth/login',
   routes: [
-    // Auth routes (these keep default transitions — they're full-screen flows)
-    GoRoute(
-      path: '/auth/login',
-      builder: (context, state) => const LoginScreen(),
-    ),
-    GoRoute(
-      path: '/auth/signup',
-      builder: (context, state) => const SignupScreen(),
-    ),
-    GoRoute(
-      path: '/auth/import',
-      builder: (context, state) => const KeyImportScreen(),
-    ),
-    GoRoute(
-      path: '/auth/setup',
-      builder: (context, state) => const SetupWizardScreen(),
-    ),
+    // Auth routes
+    GoRoute(path: '/auth/login', builder: (context, state) => const LoginScreen()),
+    GoRoute(path: '/auth/signup', builder: (context, state) => const SignupScreen()),
+    GoRoute(path: '/auth/import', builder: (context, state) => const KeyImportScreen()),
+    GoRoute(path: '/auth/setup', builder: (context, state) => const SetupWizardScreen()),
 
     // Main app shell — persistent 3-column layout, content swaps instantly
     ShellRoute(
@@ -69,29 +48,25 @@ final router = GoRouter(
         GoRoute(
           path: '/conversations',
           pageBuilder: (context, state) => _noAnimationPage(
-            ConversationsListScreen(
-              initialTab: state.uri.queryParameters['tab'],
-            ),
+            ConversationsListScreen(initialTab: state.uri.queryParameters['tab']),
             state,
           ),
           routes: [
             GoRoute(
               path: ':id',
               pageBuilder: (context, state) => _noAnimationPage(
-                ConversationDetailScreen(
-                  conversationPublicId: state.pathParameters['id']!,
-                ),
+                ConversationDetailScreen(conversationPublicId: state.pathParameters['id']!),
                 state,
               ),
             ),
           ],
         ),
 
-        // Servers / Channels
+        // Server landing — redirects to first channel (matches Rails servers#show)
         GoRoute(
           path: '/servers/:serverId',
           pageBuilder: (context, state) => _noAnimationPage(
-            const _PlaceholderScreen(title: 'Select a channel'),
+            _ServerRedirectScreen(serverId: state.pathParameters['serverId']!),
             state,
           ),
           routes: [
@@ -107,8 +82,46 @@ final router = GoRouter(
             ),
           ],
         ),
-
       ],
     ),
   ],
 );
+
+/// When navigating to /servers/:id with no channel, redirect to the first channel.
+/// Matches Rails `ServersController#show` which redirects to `server_channel_path(@server, first_channel)`.
+class _ServerRedirectScreen extends ConsumerStatefulWidget {
+  final String serverId;
+  const _ServerRedirectScreen({required this.serverId});
+
+  @override
+  ConsumerState<_ServerRedirectScreen> createState() => _ServerRedirectScreenState();
+}
+
+class _ServerRedirectScreenState extends ConsumerState<_ServerRedirectScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _redirect();
+  }
+
+  Future<void> _redirect() async {
+    final db = ref.read(databaseProvider);
+    final server = await db.serversDao.getByPublicId(widget.serverId);
+    if (server == null || !mounted) return;
+
+    final channels = await (db.select(db.channels)
+          ..where((c) => c.serverId.equals(server.id))
+          ..orderBy([(c) => OrderingTerm.asc(c.position)])
+          ..limit(1))
+        .get();
+
+    if (channels.isNotEmpty && mounted) {
+      GoRouter.of(context).go('/servers/${widget.serverId}/channels/${channels.first.publicId}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(); // Brief flash while redirecting
+  }
+}
