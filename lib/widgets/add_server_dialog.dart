@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../database/database.dart';
 import '../providers/auth_provider.dart';
 import '../providers/database_provider.dart';
@@ -8,6 +9,9 @@ import '../providers/servers_provider.dart';
 import '../services/role_service.dart';
 import '../nostr/nostr_filter.dart';
 import '../theme/all_themes.dart';
+
+// Session-level cache for discovered servers (relay only sends events once per connection)
+List<Map<String, dynamic>>? _discoveryCache;
 
 class AddServerDialog extends ConsumerStatefulWidget {
   const AddServerDialog({super.key});
@@ -47,84 +51,101 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
     try {
       final pool = ref.read(relayPoolProvider);
       final db = ref.read(databaseProvider);
-      final filter = NostrFilter(kinds: [31750], limit: 50);
-      final events = await pool.fetch(filter, timeout: const Duration(seconds: 6));
 
-      // Get already-joined server group IDs
+      // Check relay connectivity
+      final connectedCount = pool.connectedCount;
+      debugPrint('[Discovery] Connected relays: $connectedCount');
+
+      if (connectedCount == 0) {
+        // Try to reconnect
+        debugPrint('[Discovery] No relays connected, cannot discover servers');
+        if (mounted) setState(() { _discoveredServers = []; _discovering = false; });
+        return;
+      }
+
+      // Fetch from relays, or use cache if relay returns empty (relays only send events once per connection)
+      final filter = NostrFilter(kinds: [31750], limit: 50);
+      final events = await pool.fetch(filter, timeout: const Duration(seconds: 10));
+      debugPrint('[Discovery] Fetched ${events.length} Kind 31750 events');
+
+      // If relay returned events, parse and cache them
+      if (events.isNotEmpty) {
+        final parsed = <Map<String, dynamic>>[];
+        for (final event in events) {
+          final tags = event.tags;
+          String? getTag(String key) {
+            final tag = tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
+            return tag != null && tag.length > 1 ? tag[1] : null;
+          }
+
+          if (getTag('discoverable') != 'true') continue;
+          if (getTag('deleted') == 'true') continue;
+
+          final dTag = getTag('d');
+          if (dTag == null) continue;
+
+          parsed.add({
+            'nostr_group_id': dTag,
+            'name': getTag('name') ?? 'Unknown Server',
+            'description': getTag('about'),
+            'icon_url': getTag('picture'),
+            'server_type': getTag('server_type'),
+            'age_restricted': getTag('age_restricted') == 'true',
+            'pubkey': event.pubkey,
+          });
+        }
+
+        // Dedup and cache
+        final seen = <String>{};
+        _discoveryCache = parsed.where((s) {
+          final gid = s['nostr_group_id'] as String;
+          if (seen.contains(gid)) return false;
+          seen.add(gid);
+          return true;
+        }).toList();
+      }
+
+      // Filter out already-joined servers from cache (re-checked each time dialog opens)
       final joinedServers = await db.select(db.servers).get();
       final joinedGids = joinedServers
           .where((s) => s.nostrGroupId != null)
           .map((s) => s.nostrGroupId!)
           .toSet();
 
-      final servers = <Map<String, dynamic>>[];
-      for (final event in events) {
-        final tags = event.tags;
-        String? getTag(String key) {
-          final tag = tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
-          return tag != null && tag.length > 1 ? tag[1] : null;
-        }
+      final available = (_discoveryCache ?? [])
+          .where((s) => !joinedGids.contains(s['nostr_group_id'] as String))
+          .toList();
 
-        // Must be discoverable and not deleted
-        if (getTag('discoverable') != 'true') continue;
-        if (getTag('deleted') == 'true') continue;
-
-        final dTag = getTag('d');
-        if (dTag == null) continue;
-        if (joinedGids.contains(dTag)) continue;
-
-        servers.add({
-          'nostr_group_id': dTag,
-          'name': getTag('name') ?? 'Unknown Server',
-          'description': getTag('about'),
-          'icon_url': getTag('picture'),
-          'server_type': getTag('server_type'),
-          'age_restricted': getTag('age_restricted') == 'true',
-          'pubkey': event.pubkey,
-        });
-      }
-
-      // Dedup by group ID
-      final seen = <String>{};
-      final unique = servers.where((s) {
-        final gid = s['nostr_group_id'] as String;
-        if (seen.contains(gid)) return false;
-        seen.add(gid);
-        return true;
-      }).toList();
-
-      if (mounted) setState(() { _discoveredServers = unique; _discovering = false; });
+      if (mounted) setState(() { _discoveredServers = available; _discovering = false; });
     } catch (_) {
       if (mounted) setState(() => _discovering = false);
     }
   }
 
   Future<void> _joinDiscoveredServer(Map<String, dynamic> server) async {
-    final db = ref.read(databaseProvider);
-    final now = DateTime.now();
-    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+    final serverName = server['name'] as String;
     final gid = server['nostr_group_id'] as String;
 
-    final serverId = await db.into(db.servers).insert(ServersCompanion.insert(
-      publicId: publicId, ownerId: 0, name: server['name'] as String,
-      description: Value(server['description'] as String?),
-      iconUrl: Value(server['icon_url'] as String?),
-      nostrGroupId: Value(gid),
-      serverType: Value(server['server_type'] as String? ?? 'community'),
-      createdAt: now, updatedAt: now,
-    ));
+    // Show the sync progress overlay (replaces the add server dialog)
+    if (!mounted) return;
+    final nav = Navigator.of(context);
+    final router = GoRouter.of(context);
 
-    await db.into(db.serverMemberships).insert(ServerMembershipsCompanion.insert(
-      publicId: (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12),
-      userId: 1, serverId: serverId,
-      joinedAt: Value(now), createdAt: now, updatedAt: now,
-    ));
+    // Replace current dialog with sync overlay
+    nav.pop(); // close add server dialog
+    final publicId = await showDialog<String>(
+      context: nav.context,
+      barrierDismissible: false,
+      builder: (_) => _ServerSyncOverlay(
+        serverName: serverName,
+        serverData: server,
+        gid: gid,
+      ),
+    );
 
-    // Sync structure from relays
-    final syncService = ref.read(serverSyncServiceProvider);
-    await syncService.syncServer(gid);
-
-    if (mounted) Navigator.pop(context, publicId);
+    if (publicId != null) {
+      router.go('/servers/$publicId');
+    }
   }
 
   Future<void> _createServer() async {
@@ -271,16 +292,18 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
                     child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: c.gray400))),
                   )
                 else if (_discoveredServers.isEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        Icon(Icons.search, size: 40, color: c.gray500),
-                        const SizedBox(height: 8),
-                        Text('No servers found on your relays', style: TextStyle(color: c.gray400, fontSize: 14)),
-                        Text('Servers will appear here as they\'re discovered on your relays',
-                          style: TextStyle(color: c.gray500, fontSize: 12)),
-                      ],
+                  GestureDetector(
+                    onTap: _discoverServers,
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          Icon(Icons.search, size: 40, color: c.gray500),
+                          const SizedBox(height: 8),
+                          Text('No servers found on your relays', style: TextStyle(color: c.gray400, fontSize: 14)),
+                          Text('Tap to retry', style: TextStyle(color: c.accent, fontSize: 12)),
+                        ],
+                      ),
                     ),
                   )
                 else
@@ -507,6 +530,159 @@ class _DiscoverServerItemState extends State<_DiscoverServerItem> {
                 Icon(Icons.arrow_forward_ios, size: 14, color: c.gray400),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen sync progress overlay shown while joining a server.
+class _ServerSyncOverlay extends ConsumerStatefulWidget {
+  final String serverName;
+  final Map<String, dynamic> serverData;
+  final String gid;
+
+  const _ServerSyncOverlay({
+    required this.serverName,
+    required this.serverData,
+    required this.gid,
+  });
+
+  @override
+  ConsumerState<_ServerSyncOverlay> createState() => _ServerSyncOverlayState();
+}
+
+class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
+  String _step = 'Connecting...';
+  double _progress = 0.0;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _runSync();
+  }
+
+  Future<void> _runSync() async {
+    try {
+      final db = ref.read(databaseProvider);
+      final now = DateTime.now();
+      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+
+      _updateStep('Creating server record...', 0.05);
+      final serverId = await db.into(db.servers).insert(ServersCompanion.insert(
+        publicId: publicId,
+        ownerId: 0,
+        name: widget.serverData['name'] as String,
+        description: Value(widget.serverData['description'] as String?),
+        iconUrl: Value(widget.serverData['icon_url'] as String?),
+        nostrGroupId: Value(widget.gid),
+        serverType: Value(widget.serverData['server_type'] as String? ?? 'community'),
+        createdAt: now,
+        updatedAt: now,
+      ));
+
+      await db.into(db.serverMemberships).insert(ServerMembershipsCompanion.insert(
+        publicId: (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12),
+        userId: 1, serverId: serverId,
+        joinedAt: Value(now), createdAt: now, updatedAt: now,
+      ));
+
+      // Run sync with real progress callbacks
+      // The server record was already created above, so syncServer will find it and update it
+      final syncService = ref.read(serverSyncServiceProvider);
+      final result = await syncService.syncServer(
+        widget.gid,
+        onProgress: (step, progress) {
+          if (mounted) _updateStep(step, progress);
+        },
+      );
+
+      // If sync couldn't fetch metadata (relay already sent events), that's OK —
+      // the server record was already created with the discovery data.
+      // Just load the server from DB.
+      if (result == null) {
+        // Server record exists from the insert above, try to load it
+        final existingServer = await (db.select(db.servers)
+              ..where((s) => s.nostrGroupId.equals(widget.gid)))
+            .getSingleOrNull();
+        if (existingServer == null) {
+          if (mounted) setState(() { _error = 'Could not find server on relays'; _step = 'Failed'; });
+          return;
+        }
+        // At minimum we have the server — sync what we can
+        _updateStep('Done!', 1.0);
+      }
+
+      await Future.delayed(const Duration(milliseconds: 300));
+      if (mounted) Navigator.pop(context, publicId);
+    } catch (e) {
+      if (mounted) setState(() { _error = e.toString(); _step = 'Failed'; });
+    }
+  }
+
+  void _updateStep(String step, double progress) {
+    if (mounted) setState(() { _step = step; _progress = progress; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = Theme.of(context).extension<InfernoColors>()!;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: c.gray800,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64, height: 64,
+              decoration: BoxDecoration(
+                color: c.gray700,
+                borderRadius: BorderRadius.circular(16),
+                image: widget.serverData['icon_url'] != null
+                    ? DecorationImage(image: NetworkImage(widget.serverData['icon_url'] as String), fit: BoxFit.cover)
+                    : null,
+              ),
+              child: widget.serverData['icon_url'] == null
+                  ? Center(child: Text(widget.serverName[0].toUpperCase(), style: TextStyle(color: c.gray200, fontSize: 28, fontWeight: FontWeight.bold)))
+                  : null,
+            ),
+            const SizedBox(height: 16),
+            Text('Joining ${widget.serverName}', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            if (_error != null) ...[
+              Icon(Icons.error_outline, size: 32, color: c.accent),
+              const SizedBox(height: 8),
+              Text(_error!, style: TextStyle(color: c.accent, fontSize: 13), textAlign: TextAlign.center),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Close', style: TextStyle(color: c.gray400)),
+              ),
+            ] else ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: _progress,
+                  backgroundColor: c.gray700,
+                  valueColor: AlwaysStoppedAnimation<Color>(c.accent),
+                  minHeight: 6,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(_step, style: TextStyle(color: c.gray400, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text('${(_progress * 100).toInt()}%', style: TextStyle(color: c.gray500, fontSize: 12)),
+            ],
+          ],
         ),
       ),
     );

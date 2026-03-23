@@ -57,15 +57,9 @@ class MainShellState extends ConsumerState<MainShell> {
     final server = await db.serversDao.getByPublicId(widget.activeServerId!);
     if (mounted) setState(() => _activeServer = server);
 
-    // Auto-sync from relays if server needs data
+    // Always sync from relays to keep data fresh (structure, members, profiles)
     if (server != null && server.nostrGroupId != null) {
-      final channels = await (db.select(db.channels)
-            ..where((c) => c.serverId.equals(server.id)))
-          .get();
-      // Sync if no channels, or if server was never synced
-      if (channels.isEmpty || server.lastSyncedAt == null) {
-        _syncServerFromRelays(server);
-      }
+      _syncServerFromRelays(server);
     }
   }
 

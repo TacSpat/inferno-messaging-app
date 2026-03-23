@@ -68,19 +68,21 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
 
   Future<void> _backfillChannel(Channel channel) async {
     if (channel.nostrGroupId == null) return;
+    final db = ref.read(databaseProvider);
+    final pool = ref.read(relayPoolProvider);
+    final auth = ref.read(authServiceProvider);
+    final groupMsgSvc = ref.read(groupMessageServiceProvider);
+    final dmSvc = DmService(db, pool);
+    final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc);
     try {
-      final db = ref.read(databaseProvider);
-      final pool = ref.read(relayPoolProvider);
-      final auth = ref.read(authServiceProvider);
-      final groupMsgSvc = ref.read(groupMessageServiceProvider);
-      final dmSvc = DmService(db, pool);
-      final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc);
       await backfill.backfillChannel(
         channelGroupId: channel.nostrGroupId!,
         backfillDays: 30,
         privateKeyHex: auth.privateKeyHex,
       );
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[Backfill] Error backfilling ${channel.name}: $e');
+    }
   }
 
   Future<void> _sendMessage(String content) async {

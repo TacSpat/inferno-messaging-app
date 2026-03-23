@@ -22,7 +22,7 @@ class BackfillService {
     final since = DateTime.now().subtract(Duration(days: backfillDays));
     final sinceUnix = since.millisecondsSinceEpoch ~/ 1000;
 
-    // Fetch Kind 9 group messages
+    // Fetch Kind 9 group messages + deletions + pins
     final events = await _relayPool.fetch(
       NostrFilter(
         kinds: [9, 9005, 9006],
@@ -32,28 +32,31 @@ class BackfillService {
       timeout: const Duration(seconds: 15),
     );
 
-    // Filter out already-processed events
-    final eventIds = events.map((e) => e.id!).toList();
-    final processed = await _db.customSelect(
-      'SELECT event_id FROM nostr_event_logs WHERE event_id IN (${List.filled(eventIds.length, '?').join(',')})',
-      variables: eventIds.map((id) => Variable.withString(id)).toList(),
-    ).get();
-    final processedIds = processed.map((r) => r.data['event_id'] as String).toSet();
+    if (events.isEmpty) return 0;
 
     int imported = 0;
-    // Sort by created_at for chronological processing
-    final newEvents = events.where((e) => !processedIds.contains(e.id)).toList()
-      ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    // Sort chronologically
+    final sorted = events.toList()..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
-    for (final event in newEvents) {
+    for (final event in sorted) {
+      if (event.id == null) continue;
+
       if (event.kind == 9) {
+        // processInboundMessage handles dedup internally
         await _groupMessageService.processInboundMessage(event, privateKeyHex);
         imported++;
       } else if (event.kind == 9005) {
-        // Process deletion
         final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
         if (eTag != null && eTag.length > 1) {
           await (_db.delete(_db.messages)..where((m) => m.nostrEventId.equals(eTag[1]))).go();
+        }
+      } else if (event.kind == 9006) {
+        final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
+        final pinnedTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'pinned').firstOrNull;
+        if (eTag != null && eTag.length > 1) {
+          final pinned = pinnedTag != null && pinnedTag.length > 1 && pinnedTag[1] == 'true';
+          await (_db.update(_db.messages)..where((m) => m.nostrEventId.equals(eTag[1])))
+              .write(MessagesCompanion(pinned: Value(pinned), updatedAt: Value(DateTime.now())));
         }
       }
     }
@@ -91,6 +94,7 @@ class BackfillService {
       ),
       timeout: const Duration(seconds: 15),
     );
+
     // Filter outbound to only those addressed to counterparty
     final outboundFiltered = outbound.where((e) {
       final pTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'p').firstOrNull;
@@ -98,24 +102,17 @@ class BackfillService {
     });
 
     final allEvents = [...inbound, ...outboundFiltered];
-
-    // Deduplicate
-    final eventIds = allEvents.where((e) => e.id != null).map((e) => e.id!).toList();
-    if (eventIds.isEmpty) return 0;
-
-    final processed = await _db.customSelect(
-      'SELECT event_id FROM nostr_event_logs WHERE event_id IN (${List.filled(eventIds.length, '?').join(',')})',
-      variables: eventIds.map((id) => Variable.withString(id)).toList(),
-    ).get();
-    final processedIds = processed.map((r) => r.data['event_id'] as String).toSet();
+    if (allEvents.isEmpty) return 0;
 
     int imported = 0;
-    final newEvents = allEvents.where((e) => e.id != null && !processedIds.contains(e.id)).toList()
+    final sorted = allEvents.where((e) => e.id != null).toList()
       ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
 
-    for (final event in newEvents) {
-      await _dmService.processInboundDm(event, privateKeyHex, ownPubkey);
-      imported++;
+    for (final event in sorted) {
+      try {
+        await _dmService.processInboundDm(event, privateKeyHex, ownPubkey);
+        imported++;
+      } catch (_) {}
     }
 
     return imported;
