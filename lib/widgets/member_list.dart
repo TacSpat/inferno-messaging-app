@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/realtime_provider.dart';
+import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 
 class MemberList extends ConsumerWidget {
@@ -24,80 +26,119 @@ class MemberList extends ConsumerWidget {
         builder: (context, snapshot) {
           final members = snapshot.data ?? [];
 
-          // Separate online vs offline (onlineState: 0=offline, 1=online, 2=idle, 3=dnd)
-          final online = members.where((m) => m.onlineState > 0).toList();
-          final offline = members.where((m) => m.onlineState == 0).toList();
+          // Also watch contacts for profile fallback
+          return StreamBuilder<List<Contact>>(
+            stream: db.select(db.contacts).watch(),
+            builder: (context, contactSnap) {
+              final contacts = contactSnap.data ?? [];
+              final contactMap = <String, Contact>{};
+              for (final c in contacts) {
+                contactMap[c.pubkey] = c;
+              }
 
-          // If no remote members at all, show at least the local user
-          final hasLocalUser = auth.publicKeyHex != null &&
-              members.any((m) => m.pubkey == auth.publicKeyHex);
+              // Resolve names: prefer remote_member fields, fallback to contacts
+              String resolveName(RemoteMember m) {
+                if (m.displayName != null && m.displayName!.isNotEmpty) return m.displayName!;
+                if (m.username != null && m.username!.isNotEmpty) return m.username!;
+                final contact = contactMap[m.pubkey];
+                if (contact != null) {
+                  if (contact.displayName != null && contact.displayName!.isNotEmpty) return contact.displayName!;
+                  if (contact.username != null && contact.username!.isNotEmpty) return contact.username!;
+                }
+                return '${m.pubkey.substring(0, 8)}...';
+              }
 
-          return ListView(
-            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-            children: [
-              // ONLINE section
-              _SectionHeader(
-                label: 'ONLINE',
-                count: online.length + (hasLocalUser ? 0 : 1),
-                colors: c,
-              ),
-              // Show local user first if not already in remote members
-              if (!hasLocalUser && auth.publicKeyHex != null)
-                _MemberItem(
-                  name: _localUserName(auth),
-                  avatarUrl: null,
-                  statusColor: c.online,
-                  roleColor: null,
-                  statusText: 'Online',
-                  isOffline: false,
-                  colors: c,
-                ),
-              for (final m in online)
-                _MemberItem(
-                  name: m.displayName ?? m.username ?? '${m.pubkey.substring(0, 8)}...',
-                  avatarUrl: m.avatarUrl,
-                  statusColor: _statusColor(m.onlineState, c),
-                  roleColor: null,
-                  statusText: m.status,
-                  isOffline: false,
-                  colors: c,
-                ),
-              if (offline.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                _SectionHeader(
-                  label: 'OFFLINE',
-                  count: offline.length,
-                  colors: c,
-                ),
-                for (final m in offline)
-                  _MemberItem(
-                    name: m.displayName ?? m.username ?? '${m.pubkey.substring(0, 8)}...',
-                    avatarUrl: m.avatarUrl,
-                    statusColor: c.offline,
-                    roleColor: null,
-                    statusText: m.status,
-                    isOffline: true,
-                    colors: c,
-                  ),
-              ],
-            ],
+              String? resolveAvatar(RemoteMember m) {
+                if (m.avatarUrl != null && m.avatarUrl!.isNotEmpty) return m.avatarUrl;
+                return contactMap[m.pubkey]?.avatarUrl;
+              }
+
+              String? resolveStatus(RemoteMember m) {
+                if (m.status != null && m.status!.isNotEmpty) return m.status;
+                return contactMap[m.pubkey]?.status;
+              }
+
+              final presenceSvc = ref.watch(presenceServiceProvider);
+
+              // Use presence service for online state (more accurate than DB)
+              final online = members.where((m) {
+                final state = presenceSvc.getPresence(m.pubkey);
+                return state != OnlineState.offline;
+              }).toList();
+              final offline = members.where((m) {
+                final state = presenceSvc.getPresence(m.pubkey);
+                return state == OnlineState.offline;
+              }).toList();
+
+              final hasLocalUser = auth.publicKeyHex != null &&
+                  members.any((m) => m.pubkey == auth.publicKeyHex);
+
+              // Resolve local user name from contacts
+              String localUserName() {
+                if (auth.publicKeyHex == null) return 'User';
+                final contact = contactMap[auth.publicKeyHex!];
+                if (contact?.displayName != null && contact!.displayName!.isNotEmpty) return contact.displayName!;
+                if (contact?.username != null && contact!.username!.isNotEmpty) return contact.username!;
+                return '${auth.publicKeyHex!.substring(0, 8)}...';
+              }
+
+              String? localUserAvatar() {
+                if (auth.publicKeyHex == null) return null;
+                return contactMap[auth.publicKeyHex!]?.avatarUrl;
+              }
+
+              return ListView(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                children: [
+                  _SectionHeader(label: 'ONLINE', count: online.length + (hasLocalUser ? 0 : 1), colors: c),
+                  if (!hasLocalUser && auth.publicKeyHex != null)
+                    _MemberItem(
+                      name: localUserName(),
+                      avatarUrl: localUserAvatar(),
+                      statusColor: c.online,
+                      roleColor: null,
+                      statusText: 'Online',
+                      isOffline: false,
+                      colors: c,
+                    ),
+                  for (final m in online)
+                    _MemberItem(
+                      name: resolveName(m),
+                      avatarUrl: resolveAvatar(m),
+                      statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
+                      roleColor: null,
+                      statusText: resolveStatus(m),
+                      isOffline: false,
+                      colors: c,
+                    ),
+                  if (offline.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    _SectionHeader(label: 'OFFLINE', count: offline.length, colors: c),
+                    for (final m in offline)
+                      _MemberItem(
+                        name: resolveName(m),
+                        avatarUrl: resolveAvatar(m),
+                        statusColor: c.offline,
+                        roleColor: null,
+                        statusText: resolveStatus(m),
+                        isOffline: true,
+                        colors: c,
+                      ),
+                  ],
+                ],
+              );
+            },
           );
         },
       ),
     );
   }
 
-  String _localUserName(dynamic auth) {
-    final pubkey = auth.publicKeyHex as String?;
-    if (pubkey == null) return 'User';
-    return '${pubkey.substring(0, 8)}...';
-  }
-
-  Color _statusColor(int state, InfernoColors c) {
+  static Color _presenceColor(OnlineState state, InfernoColors c) {
     switch (state) {
-      case 1: return c.online;
-      case 2: return c.idle;
-      case 3: return c.dnd;
+      case OnlineState.online: return c.online;
+      case OnlineState.idle: return c.idle;
+      case OnlineState.dnd: return c.dnd;
       default: return c.offline;
     }
   }
