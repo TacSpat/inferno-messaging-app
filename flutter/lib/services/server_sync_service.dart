@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
@@ -12,42 +13,73 @@ class ServerSyncService {
   ServerSyncService(this._db, this._relayPool);
 
   /// Sync all server state from relays for a given nostr group ID.
-  /// Matches Rails NostrServerJoinJob: metadata → structure → roles → members → emojis → stickers → bans → pins
-  Future<Server?> syncServer(String nostrGroupId) async {
-    // Step 1: Metadata (Kind 31750)
-    // The d-tag IS the nostrGroupId (e.g. "inferno-00hgw34x2mn1")
-    // Also try without prefix in case the gid doesn't start with "inferno-"
-    final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
-    final metadataEvents = await _relayPool.fetch(
-      NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
-      timeout: const Duration(seconds: 10),
-    );
-    if (metadataEvents.isEmpty) return null;
+  /// Matches Rails NostrServerJoinJob: metadata → structure → roles → members → emojis → stickers → bans → messages
+  Future<Server?> syncServer(String nostrGroupId, {void Function(String step, double progress)? onProgress}) async {
+    onProgress?.call('Syncing metadata...', 0.1);
 
-    metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final metadata = metadataEvents.first;
-    final server = await _processMetadata(metadata, nostrGroupId);
+    // Check if server already exists in DB (may have been created from discovery data)
+    var server = await (_db.select(_db.servers)
+          ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+        .getSingleOrNull();
+
+    // If not in DB, try to fetch metadata from relays
+    if (server == null) {
+      final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
+      final metadataEvents = await _relayPool.fetch(
+        NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
+        timeout: const Duration(seconds: 10),
+      );
+
+      if (metadataEvents.isNotEmpty) {
+        metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        server = await _processMetadata(metadataEvents.first, nostrGroupId);
+      }
+    } else {
+      // Server exists — try to update metadata from relay (may return empty if already fetched)
+      final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
+      final metadataEvents = await _relayPool.fetch(
+        NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
+        timeout: const Duration(seconds: 5),
+      );
+      if (metadataEvents.isNotEmpty) {
+        metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        await _processMetadata(metadataEvents.first, nostrGroupId);
+        server = await (_db.select(_db.servers)
+              ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+            .getSingleOrNull();
+      }
+    }
+
     if (server == null) return null;
 
-    // Steps 2-4: Structure, roles, members in parallel
-    await Future.wait([
-      _syncStructure(nostrGroupId, server.id),
-      _syncRoles(nostrGroupId, server.id),
-      _syncMembers(nostrGroupId, server.id),
-    ]);
+    // Structure
+    onProgress?.call('Syncing channels...', 0.25);
+    await _syncStructure(nostrGroupId, server.id);
 
-    // Steps 5-7: Emojis, stickers, bans (lower priority, can fail)
+    // Roles
+    onProgress?.call('Syncing roles...', 0.4);
+    await _syncRoles(nostrGroupId, server.id);
+
+    // Members
+    onProgress?.call('Syncing members...', 0.55);
+    await _syncMembers(nostrGroupId, server.id);
+
+    // Emojis + stickers (can fail)
+    onProgress?.call('Syncing emojis & stickers...', 0.7);
     await Future.wait([
       _syncEmojis(nostrGroupId, server.id).catchError((_) {}),
       _syncStickers(nostrGroupId, server.id).catchError((_) {}),
     ]);
 
-    // Step 8: Backfill messages for all channels
+    // Backfill messages
+    onProgress?.call('Loading message history...', 0.8);
     await _backfillAllChannels(server.id);
 
-    // Step 9: Subscribe to new channels for live updates
+    // Subscribe to live events
+    onProgress?.call('Setting up live feed...', 0.95);
     _subscribeToServerChannels(server.id);
 
+    onProgress?.call('Done!', 1.0);
     return server;
   }
 
@@ -159,27 +191,60 @@ class ServerSyncService {
           categoryId = cat?.id;
         }
 
-        final channelNostrGroupId = tag.length > 8 ? tag[8] : '$nostrGroupId-${tag[1]}';
+        final channelNostrGroupId = tag.length > 8 && tag[8].isNotEmpty ? tag[8] : '$nostrGroupId-${tag[1]}';
         final encrypted = tag.length > 10 && tag[10] == 'true';
-        final channelPubKey = tag.length > 11 ? tag[11] : null;
+        final channelPubKey = tag.length > 11 && tag[11].isNotEmpty ? tag[11] : null;
+        final parentChannelPublicId = tag.length > 13 && tag[13].isNotEmpty ? tag[13] : null;
 
-        await _db.into(_db.channels).insertOnConflictUpdate(
+        // Resolve parent channel ID for voice nesting
+        int? parentChannelId;
+        if (parentChannelPublicId != null) {
+          final parent = await (_db.select(_db.channels)
+                ..where((c) => c.publicId.equals(parentChannelPublicId)))
+              .getSingleOrNull();
+          parentChannelId = parent?.id;
+        }
+
+        // Check if channel exists — update if so, insert if not
+        final existingChannel = await (_db.select(_db.channels)
+              ..where((c) => c.publicId.equals(tag[1])))
+            .getSingleOrNull();
+
+        if (existingChannel != null) {
+          await (_db.update(_db.channels)..where((c) => c.id.equals(existingChannel.id)))
+              .write(ChannelsCompanion(
+            name: Value(tag[2]),
+            channelType: Value(_parseChannelType(tag[3])),
+            position: Value(int.tryParse(tag[4]) ?? 0),
+            categoryId: Value(categoryId),
+            parentChannelId: Value(parentChannelId),
+            nostrGroupId: Value(channelNostrGroupId),
+            encrypted: Value(encrypted),
+            channelPublicKey: Value(channelPubKey),
+            topic: tag.length > 6 && tag[6].isNotEmpty ? Value(tag[6]) : const Value.absent(),
+            nsfw: tag.length > 7 ? Value(tag[7] == 'true') : const Value.absent(),
+            updatedAt: Value(DateTime.now()),
+          ));
+        } else {
+          await _db.into(_db.channels).insert(
           ChannelsCompanion.insert(
             publicId: tag[1],
             serverId: serverId,
             name: tag[2],
-            channelType: int.tryParse(tag[3]) ?? 0,
+            channelType: _parseChannelType(tag[3]),
             position: Value(int.tryParse(tag[4]) ?? 0),
             categoryId: Value(categoryId),
+            parentChannelId: Value(parentChannelId),
             nostrGroupId: Value(channelNostrGroupId),
             encrypted: Value(encrypted),
             channelPublicKey: Value(channelPubKey),
-            topic: tag.length > 6 ? Value(tag[6]) : const Value.absent(),
+            topic: tag.length > 6 && tag[6].isNotEmpty ? Value(tag[6]) : const Value.absent(),
             nsfw: tag.length > 7 ? Value(tag[7] == 'true') : const Value.absent(),
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           ),
         );
+        }
       }
     }
   }
@@ -269,6 +334,14 @@ class ServerSyncService {
     }
   }
 
+  /// Parse channel type from string or int (Rails sends "text"/"voice", not 0/1)
+  static int _parseChannelType(String value) {
+    switch (value.toLowerCase()) {
+      case 'voice': case '1': return 1;
+      default: return 0; // text
+    }
+  }
+
   /// Fetch server metadata preview (for join screen)
   Future<Map<String, String>?> fetchServerPreview(String nostrGroupId) async {
     final events = await _relayPool.fetch(
@@ -288,14 +361,34 @@ class ServerSyncService {
   /// Sync Kind 31753 members — matches Rails sync_members
   /// Member events use d-tag: "inferno-mbr-{gid}-{pubkey}"
   Future<void> _syncMembers(String nostrGroupId, int serverId) async {
-    final events = await _relayPool.fetch(
-      NostrFilter(kinds: [31753]),
-      timeout: const Duration(seconds: 10),
-    );
-
-    // Filter to our server's member events by d-tag prefix
+    // Try fetching member events with a d-tag prefix search
     final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
     final prefix = 'inferno-mbr-$baseId-';
+
+    // Try with d-tag filter first (some relays support prefix matching)
+    var events = await _relayPool.fetch(
+      NostrFilter(kinds: [31753], tags: {'#d': [prefix]}),
+      timeout: const Duration(seconds: 8),
+    );
+
+    // If empty, try without d-tag filter (broader, matches Rails approach)
+    if (events.isEmpty) {
+      events = await _relayPool.fetch(
+        NostrFilter(kinds: [31753]),
+        timeout: const Duration(seconds: 8),
+      );
+    }
+
+    debugPrint('[MemberSync] Fetched ${events.length} Kind 31753 events, prefix: $prefix');
+
+    // Also ensure the local user is always a member
+    final users = await _db.select(_db.users).get();
+    if (users.isNotEmpty) {
+      final localPubkey = users.first.nostrPublicKey;
+      if (localPubkey != null) {
+        await _ensureRemoteMember(serverId, localPubkey);
+      }
+    }
     final memberEvents = events.where((e) {
       final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
       return dTag != null && dTag.length > 1 && dTag[1].startsWith(prefix);
@@ -396,6 +489,7 @@ class ServerSyncService {
     final channels = await (_db.select(_db.channels)
           ..where((c) => c.serverId.equals(serverId)))
         .get();
+    debugPrint('[Backfill] Backfilling ${channels.length} channels for server $serverId');
 
     final since = DateTime.now().subtract(const Duration(days: 30)).millisecondsSinceEpoch ~/ 1000;
 

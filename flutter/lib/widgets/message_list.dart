@@ -9,6 +9,7 @@ import '../providers/servers_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../theme/all_themes.dart';
 import 'reaction_bar.dart';
+import 'message_content.dart';
 
 typedef MessageReplyCallback = void Function(Message message, String authorName, String preview);
 
@@ -471,7 +472,7 @@ class _ChannelMessageState extends State<_ChannelMessage> {
                             ]),
                           ),
                         if (msg.content != null && msg.content!.isNotEmpty)
-                          Text(msg.content!, style: TextStyle(color: c.gray200, fontSize: 15, height: 1.4)),
+                          MessageContent(content: msg.content!, colors: c),
                         // Reactions
                         StreamBuilder<List<Reaction>>(
                           stream: widget.db.messagesDao.watchReactions(msg.id),
