@@ -8,6 +8,7 @@ import '../providers/database_provider.dart';
 import '../providers/servers_provider.dart';
 import '../services/role_service.dart';
 import '../nostr/nostr_filter.dart';
+import '../crypto/nostr_event.dart' as nostr;
 import '../theme/all_themes.dart';
 
 // Session-level cache for discovered servers (relay only sends events once per connection)
@@ -29,6 +30,9 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
   String? _error;
   List<Map<String, dynamic>> _discoveredServers = [];
   bool _discovering = false;
+  // Pre-fetched events from discovery for use during join
+  List<nostr.NostrEvent> _structEvents = [];
+  List<nostr.NostrEvent> _roleEvents = [];
 
   @override
   void initState() {
@@ -63,12 +67,24 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         return;
       }
 
-      // Fetch from relays, or use cache if relay returns empty (relays only send events once per connection)
-      final filter = NostrFilter(kinds: [31750], limit: 50);
-      final events = await pool.fetch(filter, timeout: const Duration(seconds: 10));
-      debugPrint('[Discovery] Fetched ${events.length} Kind 31750 events');
+      // Fetch ALL server event kinds at once (31750 metadata, 31751 structure, 31752 roles)
+      // Do this upfront because relays won't re-send after first delivery
+      final allEvents = await pool.fetch(
+        NostrFilter(kinds: [31750, 31751, 31752], limit: 200),
+        timeout: const Duration(seconds: 10),
+      );
 
-      // If relay returned events, parse and cache them
+      // Separate by kind and cache for sync service
+      final events = allEvents.where((e) => e.kind == 31750).toList();
+      final structEvents = allEvents.where((e) => e.kind == 31751).toList();
+      final roleEvents = allEvents.where((e) => e.kind == 31752).toList();
+      debugPrint('[Discovery] Fetched ${events.length} metadata, ${structEvents.length} structure, ${roleEvents.length} role events');
+
+      // Store for use during join (relay won't re-send these)
+      _structEvents = structEvents;
+      _roleEvents = roleEvents;
+
+      // Parse events into server cards
       if (events.isNotEmpty) {
         final parsed = <Map<String, dynamic>>[];
         for (final event in events) {
@@ -105,10 +121,12 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         }).toList();
       }
 
-      // Filter out already-joined servers from cache (re-checked each time dialog opens)
-      final joinedServers = await db.select(db.servers).get();
-      final joinedGids = joinedServers
-          .where((s) => s.nostrGroupId != null)
+      // Filter out servers where user has an active membership
+      final memberships = await db.select(db.serverMemberships).get();
+      final memberServerIds = memberships.map((m) => m.serverId).toSet();
+      final allServers = await db.select(db.servers).get();
+      final joinedGids = allServers
+          .where((s) => s.nostrGroupId != null && memberServerIds.contains(s.id))
           .map((s) => s.nostrGroupId!)
           .toSet();
 
@@ -124,7 +142,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
 
   Future<void> _joinDiscoveredServer(Map<String, dynamic> server) async {
     final serverName = server['name'] as String;
-    final gid = server['nostr_group_id'] as String;
+    final gid = (server['nostr_group_id'] as String).replaceAll(RegExp(r'^(inferno-)+'), 'inferno-');
 
     // Show the sync progress overlay (replaces the add server dialog)
     if (!mounted) return;
@@ -136,11 +154,27 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
     final publicId = await showDialog<String>(
       context: nav.context,
       barrierDismissible: false,
-      builder: (_) => _ServerSyncOverlay(
-        serverName: serverName,
-        serverData: server,
-        gid: gid,
-      ),
+      builder: (_) {
+        // Filter pre-fetched events for this specific server
+        var baseId = gid;
+        while (baseId.startsWith('inferno-')) baseId = baseId.substring(8);
+        final structForServer = _structEvents.where((e) {
+          final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+          return dTag != null && dTag.length > 1 && dTag[1].contains(baseId);
+        }).toList();
+        final rolesForServer = _roleEvents.where((e) {
+          final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+          return dTag != null && dTag.length > 1 && dTag[1].contains(baseId);
+        }).toList();
+        debugPrint('[JoinSync] Passing ${structForServer.length} structure, ${rolesForServer.length} role events for $baseId');
+        return _ServerSyncOverlay(
+          serverName: serverName,
+          serverData: server,
+          gid: gid,
+          preloadedStructure: structForServer,
+          preloadedRoles: rolesForServer,
+        );
+      },
     );
 
     if (publicId != null) {
@@ -541,11 +575,15 @@ class _ServerSyncOverlay extends ConsumerStatefulWidget {
   final String serverName;
   final Map<String, dynamic> serverData;
   final String gid;
+  final List<nostr.NostrEvent>? preloadedStructure;
+  final List<nostr.NostrEvent>? preloadedRoles;
 
   const _ServerSyncOverlay({
     required this.serverName,
     required this.serverData,
     required this.gid,
+    this.preloadedStructure,
+    this.preloadedRoles,
   });
 
   @override
@@ -567,32 +605,77 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
     try {
       final db = ref.read(databaseProvider);
       final now = DateTime.now();
-      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+      var publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
 
       _updateStep('Creating server record...', 0.05);
-      final serverId = await db.into(db.servers).insert(ServersCompanion.insert(
-        publicId: publicId,
-        ownerId: 0,
-        name: widget.serverData['name'] as String,
-        description: Value(widget.serverData['description'] as String?),
-        iconUrl: Value(widget.serverData['icon_url'] as String?),
-        nostrGroupId: Value(widget.gid),
-        serverType: Value(widget.serverData['server_type'] as String? ?? 'community'),
-        createdAt: now,
-        updatedAt: now,
-      ));
+      final cleanGid = widget.gid.replaceAll(RegExp(r'^(inferno-)+'), 'inferno-');
+      debugPrint('[JoinSync] gid=${widget.gid} cleanGid=$cleanGid');
 
-      await db.into(db.serverMemberships).insert(ServerMembershipsCompanion.insert(
-        publicId: (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12),
-        userId: 1, serverId: serverId,
-        joinedAt: Value(now), createdAt: now, updatedAt: now,
-      ));
+      // Check if server already exists (cached from previous join)
+      var existingServer = await (db.select(db.servers)
+            ..where((s) => s.nostrGroupId.equals(cleanGid)))
+          .getSingleOrNull();
+
+      int serverId;
+      if (existingServer != null) {
+        serverId = existingServer.id;
+        publicId = existingServer.publicId;
+        debugPrint('[JoinSync] Reusing cached server id=$serverId');
+      } else {
+        serverId = await db.into(db.servers).insert(ServersCompanion.insert(
+          publicId: publicId,
+          ownerId: 0,
+          name: widget.serverData['name'] as String,
+          description: Value(widget.serverData['description'] as String?),
+          iconUrl: Value(widget.serverData['icon_url'] as String?),
+          nostrGroupId: Value(cleanGid),
+          serverType: Value(widget.serverData['server_type'] as String? ?? 'community'),
+          createdAt: now,
+          updatedAt: now,
+        ));
+        debugPrint('[JoinSync] Created new server id=$serverId');
+      }
+
+      // Create membership (may already exist)
+      try {
+        await db.into(db.serverMemberships).insert(ServerMembershipsCompanion.insert(
+          publicId: (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12),
+          userId: 1, serverId: serverId,
+          joinedAt: Value(now), createdAt: now, updatedAt: now,
+        ));
+      } catch (_) {
+        debugPrint('[JoinSync] Membership already exists');
+      }
+
+      // Step 1: Use the pre-fetched events from discovery (relay won't re-send)
+      _updateStep('Preparing...', 0.05);
+
+      // Step 2: Publish our membership so other clients see us
+      final auth = ref.read(authServiceProvider);
+      final serverPublish = ref.read(serverPublishServiceProvider);
+      if (auth.privateKeyHex != null) {
+        final newServer = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(widget.gid))).getSingleOrNull();
+        if (newServer != null) {
+          await serverPublish.publishMember(
+            privateKeyHex: auth.privateKeyHex!,
+            publicKeyHex: auth.publicKeyHex!,
+            server: newServer,
+          );
+        }
+      }
+
+      // Pass pre-loaded events from discovery to sync service
+      final syncService = ref.read(serverSyncServiceProvider);
+      if (widget.preloadedStructure != null) {
+        syncService.preloadedStructure = widget.preloadedStructure;
+      }
+      if (widget.preloadedRoles != null) {
+        syncService.preloadedRoles = widget.preloadedRoles;
+      }
 
       // Run sync with real progress callbacks
-      // The server record was already created above, so syncServer will find it and update it
-      final syncService = ref.read(serverSyncServiceProvider);
       final result = await syncService.syncServer(
-        widget.gid,
+        cleanGid,
         onProgress: (step, progress) {
           if (mounted) _updateStep(step, progress);
         },

@@ -42,22 +42,22 @@ class AppBootstrapService {
   }
 
   Future<void> bootstrap() async {
-    // 1. Ensure default relays
+    // 1. Ensure default relays + local user (fast, DB only)
     await relayConfig.ensureDefaultRelays();
-
-    // 2. Connect to relays
-    final urls = await relayConfig.getActiveRelayUrls();
-    if (urls.isNotEmpty) {
-      await relayPool.start(urls);
-    }
-
-    // 3. Ensure local user record
     await _ensureLocalUser();
 
-    // 4. Set up inbound event handlers
+    // 2. Connect to relays in parallel (don't wait sequentially)
+    final urls = await relayConfig.getActiveRelayUrls();
+    if (urls.isNotEmpty) {
+      await Future.wait(
+        urls.map((url) => relayPool.addRelay(url)),
+      ).timeout(const Duration(seconds: 3), onTimeout: () => []);
+    }
+
+    // 3. Set up inbound event handlers (instant)
     _setupEventHandlers();
 
-    // 5. Publish presence
+    // 4. Publish presence (fire and forget)
     if (authService.privateKeyHex != null && authService.publicKeyHex != null) {
       presenceService.startPeriodicPublish(
         authService.privateKeyHex!,
@@ -65,8 +65,10 @@ class AppBootstrapService {
       );
     }
 
-    // 6. Subscribe to relevant events
+    // 5. Subscribe to relevant events (instant)
     _setupSubscriptions();
+
+    // 6. Fetch own profile in background (don't block navigation)
   }
 
   Future<void> _ensureLocalUser() async {
@@ -110,6 +112,17 @@ class AppBootstrapService {
       final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
       if (eTag != null && eTag.length > 1) {
         await (db.delete(db.messages)..where((m) => m.nostrEventId.equals(eTag[1]))).go();
+      }
+    });
+
+    // Kind 9006: Message pins
+    relayPool.onKind(9006, (relayUrl, event) async {
+      final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
+      final pinnedTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'pinned').firstOrNull;
+      if (eTag != null && eTag.length > 1) {
+        final pinned = pinnedTag != null && pinnedTag.length > 1 && pinnedTag[1] == 'true';
+        await (db.update(db.messages)..where((m) => m.nostrEventId.equals(eTag[1])))
+            .write(MessagesCompanion(pinned: Value(pinned), updatedAt: Value(DateTime.now())));
       }
     });
 

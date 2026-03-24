@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import '../crypto/nostr_event.dart';
 import 'nostr_filter.dart';
 import 'relay_connection.dart' as rc;
@@ -177,6 +180,93 @@ class RelayPool {
     unsubscribe(sub.id);
 
     return events.values.toList();
+  }
+
+  /// Fetch using brand new throwaway WebSocket connections (matches Rails fetch_from_all).
+  /// This guarantees fresh data even if the persistent connections already received these events.
+  Future<List<NostrEvent>> fetchFresh(NostrFilter filter, {Duration timeout = const Duration(seconds: 15)}) async {
+    final urls = _connections.keys.toList();
+    if (urls.isEmpty) return [];
+
+    final events = <String, NostrEvent>{};
+    final completer = Completer<void>();
+    int pending = urls.length;
+    final sockets = <WebSocketChannel>[];
+
+    final subId = 'fresh-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+    final reqMsg = json.encode(['REQ', subId, filter.toJson()]);
+    final closeMsg = json.encode(['CLOSE', subId]);
+
+    for (final url in urls) {
+      try {
+        final ws = WebSocketChannel.connect(Uri.parse(url));
+        sockets.add(ws);
+
+        ws.ready.then((_) {
+          ws.sink.add(reqMsg);
+
+          ws.stream.listen((data) {
+            try {
+              final parsed = json.decode(data as String) as List<dynamic>;
+              if (parsed[0] == 'EVENT' && parsed.length >= 3) {
+                final event = NostrEvent.fromJson(parsed[2] as Map<String, dynamic>);
+                if (event.id != null) events[event.id!] = event;
+              } else if (parsed[0] == 'EOSE') {
+                ws.sink.add(closeMsg);
+                ws.sink.close();
+                pending--;
+                if (pending <= 0 && !completer.isCompleted) completer.complete();
+              }
+            } catch (_) {}
+          }, onError: (_) {
+            pending--;
+            if (pending <= 0 && !completer.isCompleted) completer.complete();
+          }, onDone: () {
+            pending--;
+            if (pending <= 0 && !completer.isCompleted) completer.complete();
+          });
+        }).catchError((_) {
+          pending--;
+          if (pending <= 0 && !completer.isCompleted) completer.complete();
+        });
+      } catch (_) {
+        pending--;
+        if (pending <= 0 && !completer.isCompleted) completer.complete();
+      }
+    }
+
+    await completer.future.timeout(timeout, onTimeout: () {});
+
+    // Clean up any remaining sockets
+    for (final ws in sockets) {
+      try { ws.sink.close(); } catch (_) {}
+    }
+
+    debugPrint('[RelayPool] fetchFresh: ${events.length} events from ${urls.length} relays');
+    return events.values.toList();
+  }
+
+  /// Reconnect all relays (forces fresh WebSocket connections).
+  /// Use before fetching data that relays may have already sent on existing connections.
+  Future<void> reconnect() async {
+    final urls = _connections.keys.toList();
+    debugPrint('[RelayPool] Reconnecting ${urls.length} relays...');
+    // Clear all existing state
+    for (final url in urls) {
+      _connections[url]?.disconnect();
+    }
+    _connections.clear();
+    _subscriptions.clear();
+    // Wait for WebSockets to fully close
+    await Future.delayed(const Duration(milliseconds: 500));
+    // Create brand new connections
+    for (final url in urls) {
+      await addRelay(url);
+    }
+    // Wait for connections to establish
+    await Future.delayed(const Duration(milliseconds: 500));
+    final connected = _connections.values.where((c) => c.isConnected).length;
+    debugPrint('[RelayPool] Reconnected: $connected/${urls.length} relays');
   }
 
   /// Register a handler for events of a specific kind
