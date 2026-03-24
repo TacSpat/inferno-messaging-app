@@ -162,4 +162,30 @@ class ServerPublishService {
     final signed = signer.sign(event);
     await _relayPool.publish(signed);
   }
+
+  /// Publish Kind 31753 member event (announce ourselves to the server)
+  Future<void> publishMember({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required Server server,
+  }) async {
+    if (server.nostrGroupId == null) return;
+    final baseId = server.nostrGroupId!;
+
+    final event = nostr.NostrEvent(
+      pubkey: publicKeyHex,
+      createdAt: nostr.NostrEvent.now(),
+      kind: 31753,
+      tags: [
+        ['d', 'inferno-mbr-$baseId-$publicKeyHex'],
+        ['p', publicKeyHex],
+        ['server', server.nostrGroupId!],
+      ],
+      content: '',
+    );
+
+    final signer = NostrSigner(privateKeyHex: privateKeyHex);
+    final signed = signer.sign(event);
+    await _relayPool.publish(signed);
+  }
 }

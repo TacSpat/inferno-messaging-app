@@ -1,123 +1,150 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../theme/all_themes.dart';
 
-/// Regex patterns for content rendering
-final _urlPattern = RegExp(r'https?://\S+', caseSensitive: false);
-final _imageExtPattern = RegExp(r'\.(png|jpg|jpeg|gif|webp|avif|svg)(\?.*)?$', caseSensitive: false);
+/// Regex patterns
+final _imageUrlPattern = RegExp(r'\.(png|jpg|jpeg|gif|webp|avif|svg)(\?.*)?$', caseSensitive: false);
 final _blossomPattern = RegExp(r'https?://blossom\.\S+', caseSensitive: false);
+final _videoUrlPattern = RegExp(r'\.(mp4|webm|mov|ogv)(\?.*)?$', caseSensitive: false);
+final _urlPattern = RegExp(r'https?://\S+', caseSensitive: false);
 final _singleEmojiPattern = RegExp(r'^[\p{Emoji_Presentation}\p{Emoji}\u200d\ufe0f]{1,7}$', unicode: true);
-final _spoilerPattern = RegExp(r'\|\|(.+?)\|\|', dotAll: true);
-final _boldPattern = RegExp(r'\*\*(.+?)\*\*');
-final _italicPattern = RegExp(r'(?<!\*)\*([^*]+)\*(?!\*)');
-final _codePattern = RegExp(r'`([^`]+)`');
 final _customEmojiPattern = RegExp(r':([a-zA-Z0-9_]+):');
 
-/// Renders message content with inline images, large emoji, spoilers, and basic markdown.
+/// Renders message content with full markdown support matching Rails Redcarpet output:
+/// - Bold, italic, strikethrough, inline code, fenced code blocks
+/// - Headers, lists, blockquotes, tables
+/// - Inline images for image URLs (Blossom, etc.)
+/// - Large emoji for emoji-only messages
+/// - Autolinked URLs
 class MessageContent extends StatelessWidget {
   final String content;
   final InfernoColors colors;
+  final bool isSpoiler;
 
-  const MessageContent({super.key, required this.content, required this.colors});
+  const MessageContent({super.key, required this.content, required this.colors, this.isSpoiler = false});
 
   @override
   Widget build(BuildContext context) {
     if (content.isEmpty) return const SizedBox.shrink();
 
-    // Check if content is a single emoji (render large)
     final trimmed = content.trim();
+
+    // Check if content is a single emoji (render large)
     if (_singleEmojiPattern.hasMatch(trimmed) && trimmed.length <= 10) {
-      return Text(trimmed, style: const TextStyle(fontSize: 48));
+      return _maybeSpoiler(Text(trimmed, style: const TextStyle(fontSize: 48)));
     }
 
     // Check if content is a single image URL
     if (_isImageUrl(trimmed) && !trimmed.contains('\n') && !trimmed.contains(' ')) {
-      return _buildImageEmbed(trimmed);
+      return _maybeSpoiler(_buildImageEmbed(trimmed));
     }
 
-    // Parse fenced code blocks first, then process remaining lines
-    final widgets = <Widget>[];
-    final codeBlockPattern = RegExp(r'```(\w*)\n([\s\S]*?)```', multiLine: true);
-    int lastEnd = 0;
-
-    for (final match in codeBlockPattern.allMatches(content)) {
-      // Process text before this code block
-      if (match.start > lastEnd) {
-        _addLinesAsWidgets(widgets, content.substring(lastEnd, match.start));
-      }
-      // Render code block
-      final lang = match.group(1) ?? '';
-      final code = match.group(2) ?? '';
-      widgets.add(_buildCodeBlock(code.trimRight(), lang));
-      lastEnd = match.end;
+    // Split content: extract image URLs on their own lines, render rest as markdown
+    final parts = _splitContent(trimmed);
+    if (parts.length == 1 && parts[0].type == 'text') {
+      // Pure text — render as markdown
+      return _maybeSpoiler(_buildMarkdown(parts[0].content));
     }
 
-    // Process remaining text after last code block
-    if (lastEnd < content.length) {
-      _addLinesAsWidgets(widgets, content.substring(lastEnd));
-    }
-
-    if (widgets.isEmpty) {
-      return Text(content, style: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4));
-    }
-
-    return Column(
+    // Mixed content — markdown blocks + inline images
+    return _maybeSpoiler(Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
-    );
+      children: parts.map((part) {
+        if (part.type == 'image') return _buildImageEmbed(part.content);
+        if (part.type == 'video') return _buildVideoPlaceholder(part.content);
+        return _buildMarkdown(part.content);
+      }).toList(),
+    ));
   }
 
-  void _addLinesAsWidgets(List<Widget> widgets, String text) {
+  Widget _maybeSpoiler(Widget child) {
+    if (!isSpoiler) return child;
+    return _SpoilerWrap(colors: colors, child: child);
+  }
+
+  List<_ContentPart> _splitContent(String text) {
+    final parts = <_ContentPart>[];
     final lines = text.split('\n');
+    final textBuffer = StringBuffer();
+
     for (final line in lines) {
-      if (line.trim().isEmpty) {
-        widgets.add(const SizedBox(height: 4));
-        continue;
-      }
       final trimmedLine = line.trim();
       if (_isImageUrl(trimmedLine)) {
-        widgets.add(_buildImageEmbed(trimmedLine));
-        continue;
+        if (textBuffer.isNotEmpty) {
+          parts.add(_ContentPart('text', textBuffer.toString().trimRight()));
+          textBuffer.clear();
+        }
+        parts.add(_ContentPart('image', trimmedLine));
+      } else if (_isVideoUrl(trimmedLine)) {
+        if (textBuffer.isNotEmpty) {
+          parts.add(_ContentPart('text', textBuffer.toString().trimRight()));
+          textBuffer.clear();
+        }
+        parts.add(_ContentPart('video', trimmedLine));
+      } else {
+        textBuffer.writeln(line);
       }
-      widgets.add(_buildRichLine(trimmedLine));
     }
-  }
 
-  Widget _buildCodeBlock(String code, String lang) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.symmetric(vertical: 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: colors.gray900,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: colors.gray700),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (lang.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Text(lang, style: TextStyle(color: colors.gray500, fontSize: 11, fontWeight: FontWeight.w600)),
-            ),
-          Text(
-            code,
-            style: TextStyle(
-              color: colors.gray200,
-              fontSize: 13,
-              fontFamily: 'monospace',
-              height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
+    if (textBuffer.isNotEmpty) {
+      final remaining = textBuffer.toString().trimRight();
+      if (remaining.isNotEmpty) parts.add(_ContentPart('text', remaining));
+    }
+
+    return parts.isEmpty ? [_ContentPart('text', text)] : parts;
   }
 
   bool _isImageUrl(String text) {
     if (!_urlPattern.hasMatch(text)) return false;
-    return _imageExtPattern.hasMatch(text) || _blossomPattern.hasMatch(text);
+    return _imageUrlPattern.hasMatch(text) || _blossomPattern.hasMatch(text);
+  }
+
+  bool _isVideoUrl(String text) {
+    return _urlPattern.hasMatch(text) && _videoUrlPattern.hasMatch(text);
+  }
+
+  Widget _buildMarkdown(String text) {
+    return MarkdownBody(
+      data: text,
+      selectable: true,
+      softLineBreak: true, // hard_wrap: true equivalent
+      styleSheet: MarkdownStyleSheet(
+        p: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4),
+        a: TextStyle(color: colors.accent, decoration: TextDecoration.underline),
+        strong: TextStyle(color: colors.gray200, fontWeight: FontWeight.bold),
+        em: TextStyle(color: colors.gray200, fontStyle: FontStyle.italic),
+        del: TextStyle(color: colors.gray400, decoration: TextDecoration.lineThrough),
+        code: TextStyle(color: colors.gray200, fontSize: 13, fontFamily: 'monospace', backgroundColor: colors.gray900),
+        codeblockDecoration: BoxDecoration(
+          color: colors.gray900,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: colors.gray700),
+        ),
+        codeblockPadding: const EdgeInsets.all(12),
+        blockquoteDecoration: BoxDecoration(
+          border: Border(left: BorderSide(color: colors.gray500, width: 3)),
+        ),
+        blockquotePadding: const EdgeInsets.only(left: 12, top: 4, bottom: 4),
+        h1: TextStyle(color: colors.gray50, fontSize: 24, fontWeight: FontWeight.bold),
+        h2: TextStyle(color: colors.gray50, fontSize: 20, fontWeight: FontWeight.bold),
+        h3: TextStyle(color: colors.gray50, fontSize: 18, fontWeight: FontWeight.bold),
+        h4: TextStyle(color: colors.gray50, fontSize: 16, fontWeight: FontWeight.bold),
+        h5: TextStyle(color: colors.gray50, fontSize: 15, fontWeight: FontWeight.bold),
+        h6: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.bold),
+        listBullet: TextStyle(color: colors.gray400),
+        tableHead: TextStyle(color: colors.gray200, fontWeight: FontWeight.bold),
+        tableBody: TextStyle(color: colors.gray200),
+        tableBorder: TableBorder.all(color: colors.gray700, width: 1),
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        horizontalRuleDecoration: BoxDecoration(border: Border(top: BorderSide(color: colors.gray700))),
+      ),
+      onTapLink: (text, href, title) {
+        if (href != null) {
+          launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
+        }
+      },
+    );
   }
 
   Widget _buildImageEmbed(String url) {
@@ -159,112 +186,60 @@ class MessageContent extends StatelessWidget {
     );
   }
 
-  Widget _buildRichLine(String text) {
-    // Build spans with formatting
-    final spans = <InlineSpan>[];
-    int lastEnd = 0;
-
-    // Find all special patterns and their positions
-    final matches = <_Match>[];
-
-    for (final match in _boldPattern.allMatches(text)) {
-      matches.add(_Match(match.start, match.end, 'bold', match.group(1)!));
-    }
-    for (final match in _spoilerPattern.allMatches(text)) {
-      matches.add(_Match(match.start, match.end, 'spoiler', match.group(1)!));
-    }
-    for (final match in _codePattern.allMatches(text)) {
-      matches.add(_Match(match.start, match.end, 'code', match.group(1)!));
-    }
-    for (final match in _urlPattern.allMatches(text)) {
-      // Skip if it's an image URL (handled separately)
-      if (!_isImageUrl(match.group(0)!)) {
-        matches.add(_Match(match.start, match.end, 'url', match.group(0)!));
-      }
-    }
-
-    // Sort by position, remove overlaps
-    matches.sort((a, b) => a.start.compareTo(b.start));
-    final filtered = <_Match>[];
-    int lastMatchEnd = 0;
-    for (final m in matches) {
-      if (m.start >= lastMatchEnd) {
-        filtered.add(m);
-        lastMatchEnd = m.end;
-      }
-    }
-
-    for (final m in filtered) {
-      if (m.start > lastEnd) {
-        spans.add(TextSpan(text: text.substring(lastEnd, m.start), style: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4)));
-      }
-      switch (m.type) {
-        case 'bold':
-          spans.add(TextSpan(text: m.content, style: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4, fontWeight: FontWeight.bold)));
-        case 'spoiler':
-          spans.add(WidgetSpan(child: _SpoilerText(text: m.content, colors: colors)));
-        case 'code':
-          spans.add(WidgetSpan(child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-            decoration: BoxDecoration(color: colors.gray900, borderRadius: BorderRadius.circular(3)),
-            child: Text(m.content, style: TextStyle(color: colors.gray200, fontSize: 14, fontFamily: 'monospace')),
-          )));
-        case 'url':
-          spans.add(TextSpan(
-            text: m.content,
-            style: TextStyle(color: colors.accent, fontSize: 15, height: 1.4, decoration: TextDecoration.underline),
-          ));
-      }
-      lastEnd = m.end;
-    }
-
-    if (lastEnd < text.length) {
-      spans.add(TextSpan(text: text.substring(lastEnd), style: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4)));
-    }
-
-    if (spans.isEmpty) {
-      return Text(text, style: TextStyle(color: colors.gray200, fontSize: 15, height: 1.4));
-    }
-
-    return RichText(text: TextSpan(children: spans));
+  Widget _buildVideoPlaceholder(String url) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: colors.gray900, borderRadius: BorderRadius.circular(8)),
+      child: Row(children: [
+        Icon(Icons.play_circle_outline, size: 24, color: colors.accent),
+        const SizedBox(width: 8),
+        Expanded(child: Text(url, style: TextStyle(color: colors.accent, fontSize: 13), overflow: TextOverflow.ellipsis)),
+      ]),
+    );
   }
 }
 
-class _Match {
-  final int start, end;
-  final String type, content;
-  _Match(this.start, this.end, this.type, this.content);
+class _ContentPart {
+  final String type; // 'text', 'image', 'video'
+  final String content;
+  _ContentPart(this.type, this.content);
 }
 
-class _SpoilerText extends StatefulWidget {
-  final String text;
+/// Spoiler wrapper — click to reveal
+class _SpoilerWrap extends StatefulWidget {
   final InfernoColors colors;
-  const _SpoilerText({required this.text, required this.colors});
+  final Widget child;
+  const _SpoilerWrap({required this.colors, required this.child});
 
   @override
-  State<_SpoilerText> createState() => _SpoilerTextState();
+  State<_SpoilerWrap> createState() => _SpoilerWrapState();
 }
 
-class _SpoilerTextState extends State<_SpoilerText> {
+class _SpoilerWrapState extends State<_SpoilerWrap> {
   bool _revealed = false;
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () => setState(() => _revealed = !_revealed),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-        decoration: BoxDecoration(
-          color: _revealed ? widget.colors.gray700 : widget.colors.gray200,
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: Text(
-          widget.text,
-          style: TextStyle(
-            color: _revealed ? widget.colors.gray200 : widget.colors.gray200,
-            fontSize: 15,
-          ),
-        ),
+      child: Stack(
+        children: [
+          widget.child,
+          if (!_revealed)
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: widget.colors.gray900,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Center(
+                  child: Text('Spoiler — click to reveal',
+                    style: TextStyle(color: widget.colors.gray500, fontSize: 13)),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

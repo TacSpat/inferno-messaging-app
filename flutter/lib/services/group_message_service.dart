@@ -105,6 +105,21 @@ class GroupMessageService {
       }
     }
 
+    // Check for edit tag — if present, update existing message instead of creating new
+    final editTag = event.tags.where((t) =>
+        t.length >= 4 && t[0] == 'e' && t[3] == 'edit').firstOrNull;
+    if (editTag != null && editTag.length >= 2) {
+      final originalEventId = editTag[1];
+      await (_db.update(_db.messages)
+            ..where((m) => m.nostrEventId.equals(originalEventId)))
+          .write(MessagesCompanion(
+        content: Value(content),
+        editedAt: Value(DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)),
+        updatedAt: Value(DateTime.now()),
+      ));
+      return; // Don't create a new message for edits
+    }
+
     // Check for reply
     final replyTag = event.tags.where((t) =>
         t.length >= 4 && t[0] == 'e' && t[3] == 'reply').firstOrNull;
@@ -115,6 +130,10 @@ class GroupMessageService {
           .getSingleOrNull();
       parentId = parent?.id;
     }
+
+    // Check for spoiler tag
+    final spoilerTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'spoiler').firstOrNull;
+    final isSpoiler = spoilerTag != null;
 
     // Skip if we already have this event (dedup relay echo)
     if (event.id != null) {
@@ -132,6 +151,7 @@ class GroupMessageService {
         publicId: publicId,
         content: Value(content),
         channelId: Value(channel.id),
+        spoiler: Value(isSpoiler),
         nostrAuthorPubkey: Value(event.pubkey),
         nostrEventId: Value(event.id),
         nostrEventJson: Value(json.encode(event.toJson())),
