@@ -569,18 +569,17 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
     if (confirmed == true) {
       final db = widget.ref.read(databaseProvider);
       final serverId = widget.server.id;
-      // Delete all messages in this server's channels first
+      // Full delete: messages, membership, channels, categories, members, server
       final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(serverId))).get();
       for (final ch in channels) {
         await (db.delete(db.messages)..where((m) => m.channelId.equals(ch.id))).go();
       }
-      // Delete membership, channels, categories, remote members, then server
       await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(serverId))).go();
       await (db.delete(db.channels)..where((ch) => ch.serverId.equals(serverId))).go();
       await (db.delete(db.categories)..where((cat) => cat.serverId.equals(serverId))).go();
       await (db.delete(db.remoteMembers)..where((m) => m.serverId.equals(serverId))).go();
       await (db.delete(db.servers)..where((s) => s.id.equals(serverId))).go();
-      // Navigate using the router passed from the server header context
+      // Navigate
       widget.router.go('/conversations');
     }
   }

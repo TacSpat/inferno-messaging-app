@@ -6,6 +6,9 @@ import '../database/database.dart';
 import '../nostr/relay_pool.dart';
 import '../nostr/nostr_filter.dart';
 
+// Session cache for relay events (relays only send events once per connection)
+final syncEventCache = <String, List<nostr.NostrEvent>>{};
+
 class ServerSyncService {
   final InfernoDatabase _db;
   final RelayPool _relayPool;
@@ -14,31 +17,60 @@ class ServerSyncService {
 
   /// Sync all server state from relays for a given nostr group ID.
   /// Matches Rails NostrServerJoinJob: metadata → structure → roles → members → emojis → stickers → bans → messages
+  /// Pre-loaded events from discovery (avoids re-fetching from relay)
+  List<nostr.NostrEvent>? preloadedStructure;
+  List<nostr.NostrEvent>? preloadedRoles;
+  List<nostr.NostrEvent>? preloadedMetadata;
+
   Future<Server?> syncServer(String nostrGroupId, {void Function(String step, double progress)? onProgress}) async {
     onProgress?.call('Syncing metadata...', 0.1);
+    debugPrint('[SyncServer] START nostrGroupId=$nostrGroupId');
 
-    // Check if server already exists in DB (may have been created from discovery data)
+    // Check if server already exists in DB — try exact match, then try cleaned version
     var server = await (_db.select(_db.servers)
           ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
         .getSingleOrNull();
 
+    // Also try with cleaned gid (handles double-prefix cases)
+    if (server == null) {
+      final cleaned = nostrGroupId.replaceAll(RegExp(r'^(inferno-)+'), 'inferno-');
+      if (cleaned != nostrGroupId) {
+        server = await (_db.select(_db.servers)
+              ..where((s) => s.nostrGroupId.equals(cleaned)))
+            .getSingleOrNull();
+      }
+    }
+
+    // Also try without any prefix
+    if (server == null) {
+      var raw = nostrGroupId;
+      while (raw.startsWith('inferno-')) raw = raw.substring(8);
+      final allServers = await _db.select(_db.servers).get();
+      server = allServers.where((s) => s.nostrGroupId != null && s.nostrGroupId!.contains(raw)).firstOrNull;
+    }
+
+    debugPrint('[SyncServer] DB lookup: server=${server?.name ?? "NOT FOUND"} (id=${server?.id})');
+
     // If not in DB, try to fetch metadata from relays
     if (server == null) {
       final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
-      final metadataEvents = await _relayPool.fetch(
+      final metadataEvents = await _fetchOrUse(
+        'metadata',
         NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
-        timeout: const Duration(seconds: 10),
+        preloaded: preloadedMetadata,
       );
 
       if (metadataEvents.isNotEmpty) {
-        metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        server = await _processMetadata(metadataEvents.first, nostrGroupId);
+        final sorted = metadataEvents.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        server = await _processMetadata(sorted.first, nostrGroupId);
       }
     } else {
-      // Server exists — try to update metadata from relay (may return empty if already fetched)
+      // Server exists — try to update metadata
       final dTag = nostrGroupId.startsWith('inferno-') ? nostrGroupId : 'inferno-$nostrGroupId';
-      final metadataEvents = await _relayPool.fetch(
+      final metadataEvents = await _fetchOrUse(
+        'metadata-update',
         NostrFilter(kinds: [31750], tags: {'#d': [dTag]}),
+        preloaded: preloadedMetadata,
         timeout: const Duration(seconds: 5),
       );
       if (metadataEvents.isNotEmpty) {
@@ -50,11 +82,17 @@ class ServerSyncService {
       }
     }
 
-    if (server == null) return null;
+    if (server == null) {
+      debugPrint('[SyncServer] FAILED: server is null after all lookups');
+      return null;
+    }
+    debugPrint('[SyncServer] Proceeding with server: ${server.name} (gid=${server.nostrGroupId})');
 
     // Structure
     onProgress?.call('Syncing channels...', 0.25);
     await _syncStructure(nostrGroupId, server.id);
+    final channelCount = await (_db.select(_db.channels)..where((c) => c.serverId.equals(server!.id))).get();
+    debugPrint('[Sync] After structure sync: ${channelCount.length} channels');
 
     // Roles
     onProgress?.call('Syncing roles...', 0.4);
@@ -154,32 +192,64 @@ class ServerSyncService {
     }
   }
 
+  /// Fetch with session cache — relays only send events once per connection
+  /// Fetch from relay using fresh connections, or use pre-loaded events if provided
+  Future<List<nostr.NostrEvent>> _fetchOrUse(String label, NostrFilter filter, {List<nostr.NostrEvent>? preloaded, Duration timeout = const Duration(seconds: 10)}) async {
+    if (preloaded != null && preloaded.isNotEmpty) {
+      debugPrint('[Sync] $label: using ${preloaded.length} pre-loaded events');
+      return preloaded;
+    }
+    // Use fetchFresh (new WebSocket connections) to bypass relay event caching
+    final events = await _relayPool.fetchFresh(filter, timeout: timeout);
+    debugPrint('[Sync] $label: fetched ${events.length} via fresh connections');
+    return events;
+  }
+
   /// Sync Kind 31751 structure (channels + categories)
   Future<void> _syncStructure(String nostrGroupId, int serverId) async {
-    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
-    final events = await _relayPool.fetch(
+    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
+    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
+    final baseId = nostrGroupId;
+    final events = await _fetchOrUse(
+      'structure',
       NostrFilter(kinds: [31751], tags: {'#d': ['inferno-struct-$baseId']}),
-      timeout: const Duration(seconds: 10),
+      preloaded: preloadedStructure,
     );
     if (events.isEmpty) return;
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final latest = events.first;
 
+    // Collect parent mappings for second pass
+    final parentMappings = <String, String>{}; // channelPublicId → parentChannelPublicId
+
+    // First pass: insert all categories and channels (without parent links)
     for (final tag in latest.tags) {
       if (tag.isEmpty) continue;
       if (tag[0] == 'cat' && tag.length >= 4) {
-        // Category: ["cat", publicId, name, position]
-        await _db.into(_db.categories).insertOnConflictUpdate(
-          CategoriesCompanion.insert(
-            publicId: tag[1],
-            serverId: serverId,
+        // Category: check-then-update-or-insert
+        final existingCat = await (_db.select(_db.categories)
+              ..where((c) => c.publicId.equals(tag[1])))
+            .getSingleOrNull();
+        if (existingCat != null) {
+          await (_db.update(_db.categories)..where((c) => c.id.equals(existingCat.id)))
+              .write(CategoriesCompanion(
             name: Value(tag[2]),
             position: Value(int.tryParse(tag[3]) ?? 0),
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
+            updatedAt: Value(DateTime.now()),
+          ));
+        } else {
+          await _db.into(_db.categories).insert(
+            CategoriesCompanion.insert(
+              publicId: tag[1],
+              serverId: serverId,
+              name: Value(tag[2]),
+              position: Value(int.tryParse(tag[3]) ?? 0),
+              createdAt: DateTime.now(),
+              updatedAt: DateTime.now(),
+            ),
+          );
+        }
       } else if (tag[0] == 'ch' && tag.length >= 5) {
         // Channel: ["ch", publicId, name, channelType, position, categoryPublicId, ...]
         final categoryPublicId = tag.length > 5 ? tag[5] : null;
@@ -196,14 +266,11 @@ class ServerSyncService {
         final channelPubKey = tag.length > 11 && tag[11].isNotEmpty ? tag[11] : null;
         final parentChannelPublicId = tag.length > 13 && tag[13].isNotEmpty ? tag[13] : null;
 
-        // Resolve parent channel ID for voice nesting
-        int? parentChannelId;
+        // Defer parent resolution to second pass
         if (parentChannelPublicId != null) {
-          final parent = await (_db.select(_db.channels)
-                ..where((c) => c.publicId.equals(parentChannelPublicId)))
-              .getSingleOrNull();
-          parentChannelId = parent?.id;
+          parentMappings[tag[1]] = parentChannelPublicId;
         }
+        int? parentChannelId; // will be set in second pass
 
         // Check if channel exists — update if so, insert if not
         final existingChannel = await (_db.select(_db.channels)
@@ -247,14 +314,32 @@ class ServerSyncService {
         }
       }
     }
+
+    // Second pass: resolve parent channel IDs now that all channels exist
+    for (final entry in parentMappings.entries) {
+      final childPublicId = entry.key;
+      final parentPublicId = entry.value;
+      final parent = await (_db.select(_db.channels)
+            ..where((c) => c.publicId.equals(parentPublicId)))
+          .getSingleOrNull();
+      if (parent != null) {
+        await (_db.update(_db.channels)
+              ..where((c) => c.publicId.equals(childPublicId)))
+            .write(ChannelsCompanion(parentChannelId: Value(parent.id)));
+      }
+    }
+    debugPrint('[StructureSync] Synced ${latest.tags.where((t) => t.isNotEmpty && t[0] == "ch").length} channels, ${parentMappings.length} with parents');
   }
 
   /// Sync Kind 31752 roles
   Future<void> _syncRoles(String nostrGroupId, int serverId) async {
-    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
-    final events = await _relayPool.fetch(
+    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
+    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
+    final baseId = nostrGroupId;
+    final events = await _fetchOrUse(
+      'roles',
       NostrFilter(kinds: [31752], tags: {'#d': ['inferno-roles-$baseId']}),
-      timeout: const Duration(seconds: 10),
+      preloaded: preloadedRoles,
     );
     if (events.isEmpty) return;
 
@@ -264,7 +349,21 @@ class ServerSyncService {
     for (final tag in latest.tags) {
       if (tag.isEmpty || tag[0] != 'role' || tag.length < 4) continue;
       // ["role", publicId, name, position, color, permissions_json, ...]
-      await _db.into(_db.roles).insertOnConflictUpdate(
+      final existingRole = await (_db.select(_db.roles)
+            ..where((r) => r.publicId.equals(tag[1])))
+          .getSingleOrNull();
+
+      if (existingRole != null) {
+        await (_db.update(_db.roles)..where((r) => r.id.equals(existingRole.id)))
+            .write(RolesCompanion(
+          name: Value(tag[2]),
+          position: Value(int.tryParse(tag[3]) ?? 0),
+          color: tag.length > 4 ? Value(tag[4]) : const Value.absent(),
+          permissions: tag.length > 5 ? Value(tag[5]) : const Value.absent(),
+          updatedAt: Value(DateTime.now()),
+        ));
+      } else {
+        await _db.into(_db.roles).insert(
         RolesCompanion.insert(
           publicId: tag[1],
           serverId: serverId,
@@ -276,13 +375,16 @@ class ServerSyncService {
           updatedAt: DateTime.now(),
         ),
       );
+      }
     }
   }
 
   /// Sync Kind 31754 emojis
   Future<void> _syncEmojis(String nostrGroupId, int serverId) async {
-    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
-    final events = await _relayPool.fetch(
+    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
+    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
+    final baseId = nostrGroupId;
+    final events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31754], tags: {'#d': ['inferno-emojis-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
@@ -292,7 +394,7 @@ class ServerSyncService {
     for (final tag in events.first.tags) {
       if (tag.isEmpty || tag[0] != 'emoji' || tag.length < 3) continue;
       final publicId = tag.length > 3 ? tag[3] : tag[1].hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
-      await _db.into(_db.serverEmojis).insertOnConflictUpdate(
+      try { await _db.into(_db.serverEmojis).insertOnConflictUpdate(
         ServerEmojisCompanion.insert(
           publicId: publicId,
           serverId: serverId,
@@ -302,14 +404,16 @@ class ServerSyncService {
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
         ),
-      );
+      ); } catch (_) {}
     }
   }
 
   /// Sync Kind 31755 stickers
   Future<void> _syncStickers(String nostrGroupId, int serverId) async {
-    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
-    final events = await _relayPool.fetch(
+    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
+    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
+    final baseId = nostrGroupId;
+    final events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31755], tags: {'#d': ['inferno-stickers-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
@@ -319,7 +423,7 @@ class ServerSyncService {
     for (final tag in events.first.tags) {
       if (tag.isEmpty || tag[0] != 'sticker' || tag.length < 3) continue;
       final publicId = tag.length > 4 ? tag[4] : tag[1].hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
-      await _db.into(_db.serverStickers).insertOnConflictUpdate(
+      try { await _db.into(_db.serverStickers).insertOnConflictUpdate(
         ServerStickersCompanion.insert(
           publicId: publicId,
           serverId: serverId,
@@ -330,7 +434,7 @@ class ServerSyncService {
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
         ),
-      );
+      ); } catch (_) {}
     }
   }
 
@@ -344,7 +448,7 @@ class ServerSyncService {
 
   /// Fetch server metadata preview (for join screen)
   Future<Map<String, String>?> fetchServerPreview(String nostrGroupId) async {
-    final events = await _relayPool.fetch(
+    final events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31750], tags: {'#d': ['inferno-$nostrGroupId']}),
       timeout: const Duration(seconds: 8),
     );
@@ -361,25 +465,28 @@ class ServerSyncService {
   /// Sync Kind 31753 members — matches Rails sync_members
   /// Member events use d-tag: "inferno-mbr-{gid}-{pubkey}"
   Future<void> _syncMembers(String nostrGroupId, int serverId) async {
-    // Try fetching member events with a d-tag prefix search
-    final baseId = nostrGroupId.startsWith('inferno-') ? nostrGroupId.substring(8) : nostrGroupId;
+    // Strip ALL "inferno-" prefixes to get the raw server ID
+    var baseId = nostrGroupId;
+    while (baseId.startsWith('inferno-')) {
+      baseId = baseId.substring(8);
+    }
     final prefix = 'inferno-mbr-$baseId-';
 
     // Try with d-tag filter first (some relays support prefix matching)
-    var events = await _relayPool.fetch(
+    var events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31753], tags: {'#d': [prefix]}),
       timeout: const Duration(seconds: 8),
     );
 
     // If empty, try without d-tag filter (broader, matches Rails approach)
     if (events.isEmpty) {
-      events = await _relayPool.fetch(
+      events = await _relayPool.fetchFresh(
         NostrFilter(kinds: [31753]),
         timeout: const Duration(seconds: 8),
       );
     }
 
-    debugPrint('[MemberSync] Fetched ${events.length} Kind 31753 events, prefix: $prefix');
+    debugPrint('[MemberSync] nostrGroupId=$nostrGroupId baseId=$baseId prefix=$prefix events=${events.length}');
 
     // Also ensure the local user is always a member
     final users = await _db.select(_db.users).get();
@@ -423,17 +530,7 @@ class ServerSyncService {
       // Get role info from tags
       final roleTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'role').firstOrNull;
 
-      final publicId = memberPubkey.substring(0, 12);
-      await _db.into(_db.remoteMembers).insertOnConflictUpdate(
-        RemoteMembersCompanion.insert(
-          publicId: Value(publicId),
-          serverId: serverId,
-          pubkey: memberPubkey,
-          joinedAt: Value(DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)),
-          createdAt: now,
-          updatedAt: now,
-        ),
-      );
+      await _ensureRemoteMember(serverId, memberPubkey);
 
       // Fetch profile for this member (Kind 0)
       _fetchMemberProfile(memberPubkey);
@@ -443,7 +540,7 @@ class ServerSyncService {
   /// Fetch a member's Kind 0 profile and update contacts + remote_members
   Future<void> _fetchMemberProfile(String pubkey) async {
     try {
-      final events = await _relayPool.fetch(
+      final events = await _relayPool.fetchFresh(
         NostrFilter(kinds: [0], authors: [pubkey], limit: 1),
         timeout: const Duration(seconds: 5),
       );
@@ -496,7 +593,7 @@ class ServerSyncService {
     for (final channel in channels) {
       if (channel.nostrGroupId == null) continue;
       try {
-        final events = await _relayPool.fetch(
+        final events = await _relayPool.fetchFresh(
           NostrFilter(
             kinds: [9, 9005, 9006],
             tags: {'#h': [channel.nostrGroupId!]},
@@ -569,16 +666,21 @@ class ServerSyncService {
     if (existing != null) return;
 
     final now = DateTime.now();
-    final publicId = pubkey.substring(0, 12);
-    await _db.into(_db.remoteMembers).insertOnConflictUpdate(
-      RemoteMembersCompanion.insert(
-        publicId: Value(publicId),
-        serverId: serverId,
-        pubkey: pubkey,
-        createdAt: now,
-        updatedAt: now,
-      ),
-    );
+    // Use serverId + pubkey hash for unique publicId across servers
+    final publicId = '${serverId.toRadixString(36)}${pubkey.substring(0, 8)}'.padLeft(12, '0').substring(0, 12);
+    try {
+      await _db.into(_db.remoteMembers).insert(
+        RemoteMembersCompanion.insert(
+          publicId: Value(publicId),
+          serverId: serverId,
+          pubkey: pubkey,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    } catch (_) {
+      // Ignore duplicate — race condition between sync and backfill
+    }
 
     // Fetch profile in background
     _fetchMemberProfile(pubkey);

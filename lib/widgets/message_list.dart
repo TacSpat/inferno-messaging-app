@@ -472,7 +472,7 @@ class _ChannelMessageState extends State<_ChannelMessage> {
                             ]),
                           ),
                         if (msg.content != null && msg.content!.isNotEmpty)
-                          MessageContent(content: msg.content!, colors: c),
+                          MessageContent(content: msg.content!, colors: c, isSpoiler: msg.spoiler),
                         // Reactions
                         StreamBuilder<List<Reaction>>(
                           stream: widget.db.messagesDao.watchReactions(msg.id),
