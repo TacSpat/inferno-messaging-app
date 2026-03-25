@@ -76,12 +76,166 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
               },
             ),
           ),
+          // Voice controls bar (shown when connected to voice)
+          // TODO: show when LiveKit is connected
+          // _VoiceControlsBar(colors: c),
           _UserPanel(auth: auth, colors: c),
         ],
       ),
     );
   }
 
+}
+
+/// Voice controls bar — shown in sidebar when connected to a voice channel.
+/// Matches Rails: green "Voice Connected" header + channel name + mute/deafen/camera/screenshare + disconnect
+class VoiceControlsBar extends StatelessWidget {
+  final String channelName;
+  final InfernoColors colors;
+  final VoidCallback? onDisconnect;
+  final VoidCallback? onToggleMute;
+  final VoidCallback? onToggleDeafen;
+  final VoidCallback? onToggleCamera;
+  final VoidCallback? onToggleScreenShare;
+  final bool isMuted;
+  final bool isDeafened;
+
+  const VoiceControlsBar({
+    super.key,
+    required this.channelName,
+    required this.colors,
+    this.onDisconnect,
+    this.onToggleMute,
+    this.onToggleDeafen,
+    this.onToggleCamera,
+    this.onToggleScreenShare,
+    this.isMuted = false,
+    this.isDeafened = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: colors.gray900,
+        border: Border(top: BorderSide(color: colors.gray700)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header: "Voice Connected" + disconnect button
+          Row(
+            children: [
+              Icon(Icons.volume_up, size: 16, color: colors.online),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Voice Connected', style: TextStyle(color: colors.online, fontSize: 13, fontWeight: FontWeight.w600)),
+                    Text(channelName, style: TextStyle(color: colors.gray400, fontSize: 11), overflow: TextOverflow.ellipsis),
+                  ],
+                ),
+              ),
+              // Disconnect button
+              GestureDetector(
+                onTap: onDisconnect,
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: colors.accent.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(Icons.call_end, size: 16, color: colors.accent),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Controls: mute, deafen, camera, screen share
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _VoiceButton(
+                icon: isMuted ? Icons.mic_off : Icons.mic,
+                isActive: isMuted,
+                colors: colors,
+                onTap: onToggleMute,
+                tooltip: isMuted ? 'Unmute' : 'Mute',
+              ),
+              const SizedBox(width: 8),
+              _VoiceButton(
+                icon: isDeafened ? Icons.headset_off : Icons.headset,
+                isActive: isDeafened,
+                colors: colors,
+                onTap: onToggleDeafen,
+                tooltip: isDeafened ? 'Undeafen' : 'Deafen',
+              ),
+              const SizedBox(width: 8),
+              _VoiceButton(
+                icon: Icons.videocam,
+                isActive: false,
+                colors: colors,
+                onTap: onToggleCamera,
+                tooltip: 'Camera',
+              ),
+              const SizedBox(width: 8),
+              _VoiceButton(
+                icon: Icons.screen_share,
+                isActive: false,
+                colors: colors,
+                onTap: onToggleScreenShare,
+                tooltip: 'Screen Share',
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _VoiceButton extends StatefulWidget {
+  final IconData icon;
+  final bool isActive;
+  final InfernoColors colors;
+  final VoidCallback? onTap;
+  final String tooltip;
+  const _VoiceButton({required this.icon, required this.isActive, required this.colors, this.onTap, required this.tooltip});
+
+  @override
+  State<_VoiceButton> createState() => _VoiceButtonState();
+}
+
+class _VoiceButtonState extends State<_VoiceButton> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: widget.isActive ? widget.colors.gray700 : (_hovering ? widget.colors.gray600 : Colors.transparent),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Icon(
+              widget.icon,
+              size: 20,
+              color: widget.isActive ? Colors.white : widget.colors.gray400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ServerHeader extends ConsumerStatefulWidget {
