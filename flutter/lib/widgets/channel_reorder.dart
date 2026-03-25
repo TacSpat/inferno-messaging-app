@@ -384,26 +384,34 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
 
     IconData icon;
     if (isAfk) {
-      icon = Icons.nightlight_round;
-    } else if (isNested && isVoice) {
-      icon = Icons.phone;
+      icon = Icons.nightlight_round;  // Moon for AFK
     } else if (isVoice) {
-      icon = Icons.cell_tower;
+      icon = Icons.volume_up;  // Speaker for voice
     } else if (ch.encrypted) {
       icon = Icons.lock;
     } else {
-      icon = Icons.tag;
+      icon = Icons.tag;  // # for text
     }
 
     return Listener(
       onPointerDown: (e) => _onPointerDown(e, item),
-      child: _ChannelItemWidget(
-        channel: ch,
-        serverId: widget.server.publicId,
-        isActive: isActive,
-        icon: icon,
-        depth: item.depth,
-        colors: c,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _ChannelItemWidget(
+            channel: ch,
+            serverId: widget.server.publicId,
+            isActive: isActive,
+            icon: icon,
+            depth: item.depth,
+            isVoice: isVoice,
+            isAfk: isAfk,
+            colors: c,
+          ),
+          // Voice channels show a "No one connected" placeholder or participants
+          if (isVoice && !isNested)
+            _VoiceParticipantsArea(colors: c),
+        ],
       ),
     );
   }
@@ -504,6 +512,8 @@ class _ChannelItemWidget extends StatefulWidget {
   final bool isActive;
   final IconData icon;
   final int depth;
+  final bool isVoice;
+  final bool isAfk;
   final InfernoColors colors;
 
   const _ChannelItemWidget({
@@ -512,6 +522,8 @@ class _ChannelItemWidget extends StatefulWidget {
     required this.isActive,
     required this.icon,
     required this.depth,
+    this.isVoice = false,
+    this.isAfk = false,
     required this.colors,
   });
 
@@ -526,47 +538,127 @@ class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
   Widget build(BuildContext context) {
     final c = widget.colors;
     final active = widget.isActive;
+    final isNested = widget.depth > 0;
+
+    // Build the channel row
+    final channelRow = Container(
+      decoration: BoxDecoration(
+        color: active ? c.gray600 : (_hovering ? c.gray700 : Colors.transparent),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          // Red accent bar for active channel
+          Container(
+            width: 3,
+            height: 28,
+            decoration: BoxDecoration(
+              color: active ? c.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          SizedBox(width: active ? 5 : 8),
+          Icon(widget.icon, size: 18, color: active ? c.gray200 : c.gray500),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              widget.channel.name,
+              style: TextStyle(
+                color: active ? Colors.white : (_hovering ? c.gray200 : c.gray500),
+                fontSize: 14,
+                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          // Chat button for voice channels (not AFK)
+          if (widget.isVoice && !widget.isAfk && _hovering)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Tooltip(
+                message: 'Open chat',
+                child: Icon(Icons.chat_bubble_outline, size: 14, color: c.gray400),
+              ),
+            ),
+        ],
+      ),
+    );
+
+    // Wrap nested channels with L-connector
+    Widget result;
+    if (isNested) {
+      result = Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // L-shaped connector line
+          SizedBox(
+            width: 26,
+            child: CustomPaint(
+              size: const Size(26, 34),
+              painter: _LConnectorPainter(color: c.accent.withValues(alpha: 0.3)),
+            ),
+          ),
+          Expanded(child: channelRow),
+        ],
+      );
+    } else {
+      result = channelRow;
+    }
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: () => context.go('/servers/${widget.serverId}/channels/${widget.channel.publicId}'),
-        child: Container(
-          margin: EdgeInsets.only(left: widget.depth * 12.0, top: 1, bottom: 1),
-          decoration: BoxDecoration(
-            color: active ? c.gray600 : (_hovering ? c.gray700 : Colors.transparent),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(
-            children: [
-              Container(
-                width: 3,
-                height: 28,
-                decoration: BoxDecoration(
-                  color: active ? c.accent : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              SizedBox(width: active ? 5 : 8),
-              Icon(widget.icon, size: 18, color: active ? c.gray200 : c.gray500),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  widget.channel.name,
-                  style: TextStyle(
-                    color: active ? Colors.white : (_hovering ? c.gray200 : c.gray500),
-                    fontSize: 14,
-                    fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 1),
+          child: result,
         ),
       ),
     );
   }
+}
+
+/// Empty participants area shown under voice channels in the sidebar
+/// Will display connected users when voice is implemented
+class _VoiceParticipantsArea extends StatelessWidget {
+  final InfernoColors colors;
+  const _VoiceParticipantsArea({required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    // Placeholder — shows nothing when no one is connected
+    // When voice is implemented, this will show participant avatars/names
+    return const SizedBox.shrink();
+  }
+}
+
+/// Paints an L-shaped connector line for nested voice channels
+class _LConnectorPainter extends CustomPainter {
+  final Color color;
+  _LConnectorPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 2
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path();
+    // Vertical line from top to middle
+    path.moveTo(10, 0);
+    path.lineTo(10, size.height / 2);
+    // Curve to horizontal
+    path.quadraticBezierTo(10, size.height / 2 + 6, 16, size.height / 2 + 6);
+    // Horizontal to right
+    path.lineTo(size.width, size.height / 2 + 6);
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(_LConnectorPainter old) => color != old.color;
 }
