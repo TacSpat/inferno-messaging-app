@@ -1,28 +1,49 @@
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/realtime_provider.dart';
+import '../providers/server_settings_provider.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 
-class MemberList extends ConsumerWidget {
+/// Validate URL is a real HTTP URL, not a Rails-local relative path
+String? _validUrl(String? url) {
+  if (url != null && url.startsWith('http')) return url;
+  return null;
+}
+
+class MemberList extends ConsumerStatefulWidget {
   final int serverId;
 
   const MemberList({super.key, required this.serverId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MemberList> createState() => _MemberListState();
+}
+
+class _MemberListState extends ConsumerState<MemberList> {
+  @override
+  Widget build(BuildContext context) {
     final db = ref.watch(databaseProvider);
     final auth = ref.watch(authServiceProvider);
     final c = Theme.of(context).extension<InfernoColors>()!;
 
+    // Watch presence updates to trigger rebuilds when any user's state changes
+    ref.watch(presenceUpdatesProvider);
+
     return Container(
       width: 240,
-      color: c.gray800,
+      decoration: BoxDecoration(
+        color: c.gray800,
+        border: Border(
+          left: BorderSide(color: c.accent.withValues(alpha: 0.10), width: 1),
+        ),
+      ),
       child: StreamBuilder<List<RemoteMember>>(
-        stream: db.serversDao.watchRemoteMembers(serverId),
+        stream: db.serversDao.watchRemoteMembers(widget.serverId),
         builder: (context, snapshot) {
           final members = snapshot.data ?? [];
 
@@ -49,8 +70,10 @@ class MemberList extends ConsumerWidget {
               }
 
               String? resolveAvatar(RemoteMember m) {
-                if (m.avatarUrl != null && m.avatarUrl!.isNotEmpty) return m.avatarUrl;
-                return contactMap[m.pubkey]?.avatarUrl;
+                final url = m.avatarUrl ?? contactMap[m.pubkey]?.avatarUrl;
+                // Only return valid HTTP URLs — filter out Rails-local relative paths
+                if (url != null && url.startsWith('http')) return url;
+                return null;
               }
 
               String? resolveStatus(RemoteMember m) {
@@ -73,7 +96,6 @@ class MemberList extends ConsumerWidget {
               final hasLocalUser = auth.publicKeyHex != null &&
                   members.any((m) => m.pubkey == auth.publicKeyHex);
 
-              // Resolve local user name from contacts
               String localUserName() {
                 if (auth.publicKeyHex == null) return 'User';
                 final contact = contactMap[auth.publicKeyHex!];
@@ -87,45 +109,55 @@ class MemberList extends ConsumerWidget {
                 return contactMap[auth.publicKeyHex!]?.avatarUrl;
               }
 
-              return ListView(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                children: [
-                  _SectionHeader(label: 'ONLINE', count: online.length + (hasLocalUser ? 0 : 1), colors: c),
-                  if (!hasLocalUser && auth.publicKeyHex != null)
-                    _MemberItem(
-                      name: localUserName(),
-                      avatarUrl: localUserAvatar(),
-                      statusColor: c.online,
-                      roleColor: null,
-                      statusText: 'Online',
-                      isOffline: false,
-                      colors: c,
-                    ),
-                  for (final m in online)
-                    _MemberItem(
-                      name: resolveName(m),
-                      avatarUrl: resolveAvatar(m),
-                      statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
-                      roleColor: null,
-                      statusText: resolveStatus(m),
-                      isOffline: false,
-                      colors: c,
-                    ),
-                  if (offline.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _SectionHeader(label: 'OFFLINE', count: offline.length, colors: c),
-                    for (final m in offline)
-                      _MemberItem(
-                        name: resolveName(m),
-                        avatarUrl: resolveAvatar(m),
-                        statusColor: c.offline,
-                        roleColor: null,
-                        statusText: resolveStatus(m),
-                        isOffline: true,
-                        colors: c,
-                      ),
-                  ],
-                ],
+              // Resolve role colors using PermissionService (matches Rails display_color)
+              return FutureBuilder<Map<int, Color?>>(
+                future: _resolveDisplayColors(members),
+                builder: (context, roleSnap) {
+                  final colorMap = roleSnap.data ?? {};
+
+                  Color? memberRoleColor(RemoteMember m) => colorMap[m.id];
+
+                  return ListView(
+                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                    children: [
+                      _SectionHeader(label: 'ONLINE', count: online.length + (hasLocalUser ? 0 : 1), colors: c),
+                      if (!hasLocalUser && auth.publicKeyHex != null)
+                        _MemberItem(
+                          name: localUserName(),
+                          avatarUrl: localUserAvatar(),
+                          statusColor: c.online,
+                          roleColor: null,
+                          statusText: 'Online',
+                          isOffline: false,
+                          colors: c,
+                        ),
+                      for (final m in online)
+                        _MemberItem(
+                          name: resolveName(m),
+                          avatarUrl: resolveAvatar(m),
+                          statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
+                          roleColor: memberRoleColor(m),
+                          statusText: resolveStatus(m),
+                          isOffline: false,
+                          colors: c,
+                        ),
+                      if (offline.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        _SectionHeader(label: 'OFFLINE', count: offline.length, colors: c),
+                        for (final m in offline)
+                          _MemberItem(
+                            name: resolveName(m),
+                            avatarUrl: resolveAvatar(m),
+                            statusColor: c.offline,
+                            roleColor: memberRoleColor(m),
+                            statusText: null, // no status for offline members
+                            isOffline: true,
+                            colors: c,
+                          ),
+                      ],
+                    ],
+                  );
+                },
               );
             },
           );
@@ -141,6 +173,25 @@ class MemberList extends ConsumerWidget {
       case OnlineState.dnd: return c.dnd;
       default: return c.offline;
     }
+  }
+
+  /// Resolve display color for each member — matches Rails: skip owner role, first non-gray color
+  Future<Map<int, Color?>> _resolveDisplayColors(List<RemoteMember> members) async {
+    final permSvc = ref.read(permissionServiceProvider);
+    final result = <int, Color?>{};
+    for (final m in members) {
+      final colorHex = await permSvc.getDisplayColor(widget.serverId, m.pubkey);
+      result[m.id] = colorHex != '#ffffff' ? _parseHexColor(colorHex) : null;
+    }
+    return result;
+  }
+
+  static Color? _parseHexColor(String hex) {
+    try {
+      final cleaned = hex.replaceFirst('#', '');
+      if (cleaned.length == 6) return Color(int.parse('FF$cleaned', radix: 16));
+    } catch (_) {}
+    return null;
   }
 }
 
@@ -201,29 +252,46 @@ class _MemberItemState extends State<_MemberItem> {
     return GestureDetector(
       onSecondaryTapDown: (details) => _showMemberContextMenu(context, details, c),
       child: MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
-          color: _hovering ? c.gray700 : Colors.transparent,
-          borderRadius: BorderRadius.circular(4),
+          gradient: _hovering ? LinearGradient(
+            colors: [c.accent.withValues(alpha: 0.1), c.accent.withValues(alpha: 0.02)],
+            begin: Alignment.centerLeft, end: Alignment.centerRight,
+          ) : null,
+          border: _hovering ? Border(left: BorderSide(color: c.accent.withValues(alpha: 0.5), width: 2)) : null,
+          borderRadius: _hovering ? null : BorderRadius.circular(4),
+          boxShadow: _hovering ? [
+            BoxShadow(color: c.accent.withValues(alpha: 0.1), blurRadius: 8, offset: const Offset(4, 0)),
+          ] : null,
         ),
         child: Opacity(
           opacity: widget.isOffline ? 0.4 : 1.0,
           child: Row(
             children: [
-              // Avatar with status dot
+              // Avatar with status dot + hover glow
               Stack(
                 children: [
-                  CircleAvatar(
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: _hovering && !widget.isOffline ? [
+                        BoxShadow(color: c.accent.withValues(alpha: 0.35), blurRadius: 8),
+                      ] : null,
+                    ),
+                    child: CircleAvatar(
                     radius: 16,
-                    backgroundColor: c.gray600,
-                    backgroundImage: widget.avatarUrl != null ? NetworkImage(widget.avatarUrl!) : null,
-                    child: widget.avatarUrl == null
+                    backgroundColor: Colors.transparent,
+                    backgroundImage: _validUrl(widget.avatarUrl) != null ? NetworkImage(_validUrl(widget.avatarUrl)!) : null,
+                    child: _validUrl(widget.avatarUrl) == null
                         ? Text(widget.name[0].toUpperCase(), style: TextStyle(color: c.gray200, fontSize: 13))
                         : null,
-                  ),
+                  )),
                   Positioned(
                     right: -1, bottom: -1,
                     child: Container(
@@ -232,6 +300,9 @@ class _MemberItemState extends State<_MemberItem> {
                         color: widget.statusColor,
                         shape: BoxShape.circle,
                         border: Border.all(color: c.gray800, width: 2),
+                        boxShadow: !widget.isOffline ? [
+                          BoxShadow(color: widget.statusColor.withValues(alpha: 0.5), blurRadius: 5, spreadRadius: 1),
+                        ] : null,
                       ),
                     ),
                   ),
@@ -274,7 +345,7 @@ class _MemberItemState extends State<_MemberItem> {
     showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
-      color: c.gray900,
+      color: c.gray800,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(8),
         side: BorderSide(color: c.gray700),

@@ -88,11 +88,18 @@ class ServerPublishService {
         categoryPublicId = cat?.publicId ?? '';
       }
 
+      // Find parent channel public ID (for nested voice channels)
+      String parentPublicId = '';
+      if (ch.parentChannelId != null) {
+        final parent = channels.where((c) => c.id == ch.parentChannelId).firstOrNull;
+        parentPublicId = parent?.publicId ?? '';
+      }
+
       tags.add([
         'ch',
         ch.publicId,
         ch.name,
-        ch.channelType.toString(),
+        ch.channelType == 1 ? 'voice' : 'text',
         (ch.position ?? 0).toString(),
         categoryPublicId,
         ch.topic ?? '',
@@ -102,7 +109,7 @@ class ServerPublishService {
         ch.encrypted.toString(),
         ch.channelPublicKey ?? '',
         '', // sidechatPublicId
-        '', // parentPublicId
+        parentPublicId,
         (ch.voiceBitrate).toString(),
         (ch.voiceUserLimit).toString(),
         ch.videoEnabled.toString(),
@@ -177,9 +184,37 @@ class ServerPublishService {
       createdAt: nostr.NostrEvent.now(),
       kind: 31753,
       tags: [
-        ['d', 'inferno-mbr-$baseId-$publicKeyHex'],
+        ['d', 'inferno-mbr-$baseId-${publicKeyHex.substring(0, 16)}'],
         ['p', publicKeyHex],
         ['server', server.nostrGroupId!],
+      ],
+      content: '',
+    );
+
+    final signer = NostrSigner(privateKeyHex: privateKeyHex);
+    final signed = signer.sign(event);
+    await _relayPool.publish(signed);
+  }
+
+  /// Publish Kind 31753 member removal event (leave server)
+  /// Matches Rails: publish_server_state(:member, removed: true)
+  Future<void> publishMemberRemoval({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required Server server,
+  }) async {
+    if (server.nostrGroupId == null) return;
+    final baseId = server.nostrGroupId!;
+
+    final event = nostr.NostrEvent(
+      pubkey: publicKeyHex,
+      createdAt: nostr.NostrEvent.now(),
+      kind: 31753,
+      tags: [
+        ['d', 'inferno-mbr-$baseId-${publicKeyHex.substring(0, 16)}'],
+        ['server', server.nostrGroupId!],
+        ['p', publicKeyHex],
+        ['removed', 'true'],
       ],
       content: '',
     );

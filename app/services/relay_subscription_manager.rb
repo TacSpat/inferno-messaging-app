@@ -509,9 +509,13 @@ class RelaySubscriptionManager
     end
 
     # Check if this is an edit (has an "e" tag with "edit" marker)
-    edit_tag = (event["tags"] || []).find { |t| t[0] == "e" && t[3] == "edit" }
+    e_tags = (event["tags"] || []).select { |t| t[0] == "e" }
+    Rails.logger.info("[RSM DEBUG] Event #{event["id"][0..7]} e_tags: #{e_tags.inspect}")
+    edit_tag = e_tags.find { |t| t[3] == "edit" || t[2] == "edit" || t.include?("edit") }
     if edit_tag
-      process_group_edit(channel, event, edit_tag[1])
+      original_id = e_tags.find { |t| t.include?("edit") }&.[](1)
+      Rails.logger.info("[RSM DEBUG] EDIT detected! original_id=#{original_id}")
+      process_group_edit(channel, event, original_id || edit_tag[1])
       return
     end
 
@@ -797,6 +801,7 @@ class RelaySubscriptionManager
 
   def process_friend_response(sender_pubkey, status, event)
     contact = Contact.find_by(pubkey: sender_pubkey)
+    Rails.logger.info("[RSM] process_friend_response: sender=#{sender_pubkey.first(12)} status=#{status.inspect} contact=#{contact&.id} current_status=#{contact&.friendship_status}")
     return unless contact
 
     owner = User.owner

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
 import '../nostr/relay_auth.dart';
@@ -12,32 +14,34 @@ import '../services/contact_service.dart';
 import '../services/reaction_service.dart';
 import '../services/presence_service.dart';
 import '../services/typing_service.dart';
+import '../services/server_sync_service.dart';
 
 class AppBootstrapService {
   final InfernoDatabase db;
   final RelayPool relayPool;
   final AuthService authService;
 
-  // Services initialized during bootstrap
-  late final DmService dmService;
-  late final GroupMessageService groupMessageService;
-  late final ContactService contactService;
-  late final ReactionService reactionService;
-  late final PresenceService presenceService;
-  late final TypingService typingService;
+  // Services — must be the SAME instances used by UI (from Riverpod providers)
+  final DmService dmService;
+  final GroupMessageService groupMessageService;
+  final ContactService contactService;
+  final ReactionService reactionService;
+  final PresenceService presenceService;
+  final TypingService typingService;
   late final RelayConfigService relayConfig;
+  Timer? _resyncTimer;
 
   AppBootstrapService({
     required this.db,
     required this.relayPool,
     required this.authService,
+    required this.presenceService,
+    required this.typingService,
+    required this.reactionService,
+    required this.groupMessageService,
+    required this.dmService,
+    required this.contactService,
   }) {
-    dmService = DmService(db, relayPool);
-    groupMessageService = GroupMessageService(db, relayPool);
-    contactService = ContactService(db, relayPool);
-    reactionService = ReactionService(db, relayPool);
-    presenceService = PresenceService(relayPool);
-    typingService = TypingService(relayPool);
     relayConfig = RelayConfigService(db);
   }
 
@@ -54,6 +58,10 @@ class AppBootstrapService {
       ).timeout(const Duration(seconds: 3), onTimeout: () => []);
     }
 
+    // 2b. Set auth credentials for fetchFresh NIP-42 support
+    relayPool.authPrivateKeyHex = authService.privateKeyHex;
+    relayPool.authPublicKeyHex = authService.publicKeyHex;
+
     // 3. Set up inbound event handlers (instant)
     _setupEventHandlers();
 
@@ -65,10 +73,38 @@ class AppBootstrapService {
       );
     }
 
-    // 5. Subscribe to relevant events (instant)
-    _setupSubscriptions();
+    // 5. Subscribe to relevant events
+    await _setupSubscriptions();
 
-    // 6. Fetch own profile in background (don't block navigation)
+    // 6. Start periodic server resync (every 60 minutes, matches Rails hourly sync)
+    _startPeriodicResync();
+  }
+
+  /// Periodically resync all joined servers from relays (structure, members, etc.)
+  void _startPeriodicResync() {
+    _resyncTimer?.cancel();
+    _resyncTimer = Timer.periodic(const Duration(minutes: 60), (_) => _resyncAllServers());
+  }
+
+  Future<void> _resyncAllServers() async {
+    final servers = await db.select(db.servers).get();
+    final syncService = ServerSyncService(db, relayPool);
+
+    for (final server in servers) {
+      if (server.nostrGroupId == null) continue;
+      try {
+        debugPrint('[Resync] Syncing server: ${server.name}');
+        await syncService.syncServer(server.nostrGroupId!);
+      } catch (e) {
+        debugPrint('[Resync] Failed to sync ${server.name}: $e');
+      }
+    }
+  }
+
+  void dispose() {
+    _resyncTimer?.cancel();
+    presenceService.dispose();
+    typingService.dispose();
   }
 
   Future<void> _ensureLocalUser() async {
@@ -139,25 +175,129 @@ class AppBootstrapService {
       }
     });
 
-    // Kind 0: Profile updates — cache in contacts
+    // Kind 0: Profile updates — cache in contacts AND update remote_members
     relayPool.onKind(0, (relayUrl, event) async {
       try {
         final profile = json.decode(event.content) as Map<String, dynamic>;
-        await db.into(db.contacts).insertOnConflictUpdate(
-          ContactsCompanion.insert(
-            pubkey: event.pubkey,
+        final now = DateTime.now();
+        // Upsert contact (check-then-insert/update to avoid unique constraint on pubkey)
+        final existingContact = await (db.select(db.contacts)
+              ..where((c) => c.pubkey.equals(event.pubkey)))
+            .getSingleOrNull();
+        if (existingContact != null) {
+          await (db.update(db.contacts)..where((c) => c.pubkey.equals(event.pubkey)))
+              .write(ContactsCompanion(
             username: Value(profile['name'] as String?),
             displayName: Value(profile['display_name'] as String?),
             bio: Value(profile['about'] as String?),
             avatarUrl: Value(profile['picture'] as String?),
             bannerUrl: Value(profile['banner'] as String?),
             nip05: Value(profile['nip05'] as String?),
-            profileFetchedAt: Value(DateTime.now()),
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
+            profileFetchedAt: Value(now),
+            updatedAt: Value(now),
+          ));
+        } else {
+          try {
+            await db.into(db.contacts).insert(ContactsCompanion.insert(
+              pubkey: event.pubkey,
+              username: Value(profile['name'] as String?),
+              displayName: Value(profile['display_name'] as String?),
+              bio: Value(profile['about'] as String?),
+              avatarUrl: Value(profile['picture'] as String?),
+              bannerUrl: Value(profile['banner'] as String?),
+              nip05: Value(profile['nip05'] as String?),
+              profileFetchedAt: Value(now),
+              createdAt: now,
+              updatedAt: now,
+            ));
+          } catch (_) {}
+        }
+        // Also update remote_members so member list shows updated profiles live
+        await (db.update(db.remoteMembers)
+              ..where((m) => m.pubkey.equals(event.pubkey)))
+            .write(RemoteMembersCompanion(
+          username: Value(profile['name'] as String?),
+          displayName: Value(profile['display_name'] as String?),
+          bio: Value(profile['about'] as String?),
+          avatarUrl: Value(profile['picture'] as String?),
+          bannerUrl: Value(profile['banner'] as String?),
+          nip05: Value(profile['nip05'] as String?),
+          profileFetchedAt: Value(now),
+          updatedAt: Value(now),
+        ));
       } catch (_) {}
+    });
+
+    // Kind 31753: Member join/leave — live updates to member list
+    relayPool.onKind(31753, (relayUrl, event) async {
+      final dTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+      if (dTag == null || dTag.length < 2) return;
+
+      // Find which server this member event belongs to
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      if (serverTag == null || serverTag.length < 2) return;
+
+      final serverGid = serverTag[1];
+      final server = await (db.select(db.servers)
+            ..where((s) => s.nostrGroupId.equals(serverGid)))
+          .getSingleOrNull();
+      if (server == null) return;
+
+      final pTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'p').firstOrNull;
+      if (pTag == null || pTag.length < 2) return;
+      final memberPubkey = pTag[1];
+
+      final removed = event.tags.where((t) => t.isNotEmpty && t[0] == 'removed').firstOrNull;
+      if (removed != null && removed.length > 1 && removed[1] == 'true') {
+        // Member left — remove from DB
+        await (db.delete(db.remoteMembers)
+              ..where((m) => m.serverId.equals(server.id) & m.pubkey.equals(memberPubkey)))
+            .go();
+        return;
+      }
+
+      // Member joined — upsert (check existing first to avoid unique constraint conflict)
+      final now = DateTime.now();
+      final existing = await (db.select(db.remoteMembers)
+            ..where((m) => m.serverId.equals(server.id) & m.pubkey.equals(memberPubkey)))
+          .getSingleOrNull();
+      if (existing == null) {
+        final publicId = '${server.id.toRadixString(36)}${memberPubkey.substring(0, 8)}'.padLeft(12, '0').substring(0, 12);
+        try {
+          await db.into(db.remoteMembers).insert(
+            RemoteMembersCompanion.insert(
+              publicId: Value(publicId),
+              serverId: server.id,
+              pubkey: memberPubkey,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+        } catch (_) {} // Race condition — another handler may have inserted
+      }
+
+      // Extract embedded profile from member event
+      String? tag(String key) {
+        final t = event.tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
+        return (t != null && t.length > 1 && t[1].isNotEmpty) ? t[1] : null;
+      }
+      final profileName = tag('profile_name');
+      final profileDisplayName = tag('profile_display_name');
+      final profilePicture = tag('profile_picture');
+      if (profileName != null || profileDisplayName != null) {
+        await (db.update(db.remoteMembers)
+              ..where((m) => m.serverId.equals(server.id) & m.pubkey.equals(memberPubkey)))
+            .write(RemoteMembersCompanion(
+          username: Value(profileName),
+          displayName: Value(profileDisplayName),
+          avatarUrl: Value(profilePicture),
+          bio: Value(tag('profile_about')),
+          bannerUrl: Value(tag('profile_banner')),
+          status: Value(tag('profile_status')),
+          statusEmoji: Value(tag('profile_status_emoji')),
+          updatedAt: Value(now),
+        ));
+      }
     });
 
     // Kind 7: Reactions
@@ -175,7 +315,7 @@ class AppBootstrapService {
       typingService.processInboundTyping(event);
     });
 
-    // NIP-42 AUTH challenges — auto-respond
+    // NIP-42 AUTH challenges — auto-respond with ["AUTH", event] to the specific relay
     relayPool.onAuthChallenge = (relayUrl, challenge) {
       if (privKey != null && pubKey != null) {
         final authEvent = RelayAuth.buildAuthEvent(
@@ -184,13 +324,13 @@ class AppBootstrapService {
           privateKeyHex: privKey,
           publicKeyHex: pubKey,
         );
-        // Send AUTH response back to the relay
-        relayPool.publish(authEvent);
+        relayPool.sendAuthToRelay(relayUrl, authEvent);
+        debugPrint('[Auth] Responded to AUTH challenge from $relayUrl');
       }
     };
   }
 
-  void _setupSubscriptions() {
+  Future<void> _setupSubscriptions() async {
     if (authService.publicKeyHex == null) return;
     final pubKey = authService.publicKeyHex!;
 
@@ -207,9 +347,20 @@ class AppBootstrapService {
       NostrFilter(kinds: [14, 1059], authors: [pubKey], since: catchupSince),
     ]);
 
-    // Subscribe to profiles and presence of contacts
+    // Subscribe to profiles and presence from server members
+    // Use persistent subscription — the onKind handlers filter relevant events
+    // Don't filter by authors here since new members are discovered during sync
+    // and we need to receive their presence events immediately
+    final knownPubkeys = await _collectKnownPubkeys(pubKey);
+    if (knownPubkeys.isNotEmpty) {
+      // Profiles: fetch from known authors only (efficient)
+      relayPool.subscribe(filters: [
+        NostrFilter(kinds: [0], authors: knownPubkeys),
+      ]);
+    }
+    // Presence + member events: subscribe broadly for live updates
     relayPool.subscribe(filters: [
-      NostrFilter(kinds: [0, 30315]),
+      NostrFilter(kinds: [30315, 31753], since: catchupSince),
     ]);
 
     // Subscribe to group messages for all joined channels
@@ -217,6 +368,32 @@ class AppBootstrapService {
 
     // Fetch own profile from relays so user panel shows resolved name
     _fetchOwnProfile(pubKey);
+  }
+
+  /// Collect all known pubkeys (contacts + remote members + own) for presence subscription.
+  /// Matches Rails: RelaySubscriptionManager collects pubkeys from contacts, DM counterparties, and remote members.
+  Future<List<String>> _collectKnownPubkeys(String ownPubkey) async {
+    final pubkeys = <String>{ownPubkey};
+
+    // Contacts
+    final contacts = await db.select(db.contacts).get();
+    for (final c in contacts) {
+      pubkeys.add(c.pubkey);
+    }
+
+    // Remote members from all servers
+    final members = await db.select(db.remoteMembers).get();
+    for (final m in members) {
+      pubkeys.add(m.pubkey);
+    }
+
+    // DM counterparties
+    final conversations = await db.select(db.conversations).get();
+    for (final c in conversations) {
+      if (c.counterpartyPubkey != null) pubkeys.add(c.counterpartyPubkey!);
+    }
+
+    return pubkeys.toList();
   }
 
   Future<void> _subscribeToChannels(int catchupSince) async {

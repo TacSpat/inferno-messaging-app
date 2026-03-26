@@ -50,12 +50,16 @@ class VoiceTokenService {
     required String serverGroupId,
     required String channelPublicId,
     required String requestId,
+    String? userDisplayName,
   }) async {
     final payload = json.encode({
       'type': 'voice_token_request',
       'request_id': requestId,
       'server_nostr_group_id': serverGroupId,
-      'channel_public_id': channelPublicId,
+      'channel_id': channelPublicId,
+      'user_pubkey': publicKeyHex,
+      'user_id': publicKeyHex.substring(0, 12),
+      'user_display_name': userDisplayName ?? publicKeyHex.substring(0, 8),
     });
 
     final convKey = Nip44Crypto.conversationKey(privateKeyHex, providerPubkey);

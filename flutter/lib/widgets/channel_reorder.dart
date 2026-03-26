@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +8,10 @@ import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
+import '../providers/realtime_provider.dart';
+import '../providers/conversations_provider.dart';
 import '../theme/all_themes.dart';
+import 'package:livekit_client/livekit_client.dart' show LocalParticipant, Participant;
 
 // Constants matching Rails channel_reorder_controller.js
 const _kDragThreshold = 5.0;
@@ -68,6 +72,43 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
   int? _dropIndex;
   Timer? _saveTimer;
   Timer? _scrollTimer;
+
+  // Unread channel tracking
+  Set<int> _unreadChannelIds = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _checkUnreads();
+  }
+
+  Future<void> _checkUnreads() async {
+    final db = ref.read(databaseProvider);
+    final unreads = <int>{};
+    for (final ch in widget.channels) {
+      if (ch.channelType == 1) continue; // Skip voice channels
+      // Check if there are messages newer than last read
+      final reads = await (db.select(db.channelReads)
+            ..where((r) => r.channelId.equals(ch.id))
+            ..limit(1))
+          .get();
+      final lastRead = reads.isNotEmpty ? reads.first.lastReadAt : null;
+      if (lastRead == null) {
+        // Never read — check if has any messages
+        final count = await (db.select(db.messages)..where((m) => m.channelId.equals(ch.id))..limit(1)).get();
+        if (count.isNotEmpty) unreads.add(ch.id);
+      } else {
+        final newer = await (db.select(db.messages)
+              ..where((m) => m.channelId.equals(ch.id) & m.createdAt.isBiggerThanValue(lastRead))
+              ..limit(1))
+            .get();
+        if (newer.isNotEmpty) unreads.add(ch.id);
+      }
+    }
+    if (mounted && unreads != _unreadChannelIds) {
+      setState(() => _unreadChannelIds = unreads);
+    }
+  }
 
   @override
   void dispose() {
@@ -238,32 +279,86 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
     final dropIdx = _dropIndex;
     if (draggedItem == null || dropIdx == null) return;
 
-    // Find current index of dragged item
     final currentIdx = items.indexWhere((i) => i.id == draggedItem.id);
     if (currentIdx == -1 || currentIdx == dropIdx) return;
 
-    // Determine what the new position should be
     final db = ref.read(databaseProvider);
     final now = DateTime.now();
 
     if (draggedItem.isCategory) {
-      // Reorder categories
+      // Reorder categories: remove from current position, insert at drop position
       final sortedCats = [...widget.categories]..sort((a, b) => (a.position ?? 0).compareTo(b.position ?? 0));
       final catIdx = sortedCats.indexWhere((c) => c.publicId == draggedItem.category!.publicId);
       if (catIdx == -1) return;
 
-      // Simple position update
+      final moved = sortedCats.removeAt(catIdx);
+
+      // Calculate target index in category list from the flat tree drop index
+      // Count how many category items appear before dropIdx in the flat tree
+      int targetCatIdx = 0;
+      for (int i = 0; i < dropIdx && i < items.length; i++) {
+        if (items[i].isCategory && items[i].id != draggedItem.id) targetCatIdx++;
+      }
+      targetCatIdx = targetCatIdx.clamp(0, sortedCats.length);
+
+      sortedCats.insert(targetCatIdx, moved);
+
+      // Write new positions
       for (int i = 0; i < sortedCats.length; i++) {
         await (db.update(db.categories)..where((c) => c.id.equals(sortedCats[i].id)))
             .write(CategoriesCompanion(position: Value(i), updatedAt: Value(now)));
       }
     } else {
-      // Reorder channels — update position based on new visual order
-      final allChannels = widget.channels.where((ch) => ch.parentChannelId == null).toList()
-        ..sort((a, b) => (a.position ?? 0).compareTo(b.position ?? 0));
+      // Reorder channels
+      final ch = draggedItem.channel!;
 
-      for (int i = 0; i < allChannels.length; i++) {
-        await (db.update(db.channels)..where((c) => c.id.equals(allChannels[i].id)))
+      // Determine which category the channel is being dropped into
+      // Walk backwards from dropIdx to find the nearest category header
+      int? newCategoryId;
+      for (int i = (dropIdx < items.length ? dropIdx : items.length) - 1; i >= 0; i--) {
+        if (items[i].isCategory) {
+          newCategoryId = items[i].category!.id;
+          break;
+        }
+      }
+
+      // Get all channels in the target category (or uncategorized), sorted
+      final siblingsQuery = db.select(db.channels)
+        ..where((c) => c.serverId.equals(widget.server.id) & c.parentChannelId.isNull());
+      if (newCategoryId != null) {
+        siblingsQuery.where((c) => c.categoryId.equals(newCategoryId!));
+      } else {
+        siblingsQuery.where((c) => c.categoryId.isNull());
+      }
+      final siblings = await (siblingsQuery..orderBy([(c) => OrderingTerm.asc(c.position)])).get();
+
+      // Remove dragged channel from the list
+      siblings.removeWhere((c) => c.id == ch.id);
+
+      // Calculate target position within the siblings
+      // Count non-category, non-dragged items before dropIdx that share the same category
+      int targetPos = 0;
+      for (int i = 0; i < dropIdx && i < items.length; i++) {
+        final item = items[i];
+        if (item.id == draggedItem.id) continue;
+        if (!item.isCategory && item.channel != null && item.depth == 0) {
+          final itemCatId = item.channel!.categoryId;
+          if (itemCatId == newCategoryId) targetPos++;
+        }
+      }
+      targetPos = targetPos.clamp(0, siblings.length);
+
+      siblings.insert(targetPos, ch);
+
+      // Update category assignment if it changed
+      if (ch.categoryId != newCategoryId) {
+        await (db.update(db.channels)..where((c) => c.id.equals(ch.id)))
+            .write(ChannelsCompanion(categoryId: Value(newCategoryId), updatedAt: Value(now)));
+      }
+
+      // Write new positions for all siblings
+      for (int i = 0; i < siblings.length; i++) {
+        await (db.update(db.channels)..where((c) => c.id.equals(siblings[i].id)))
             .write(ChannelsCompanion(position: Value(i), updatedAt: Value(now)));
       }
     }
@@ -339,22 +434,28 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
                 decoration: BoxDecoration(color: c.accent, borderRadius: BorderRadius.circular(1)),
               ),
             ),
-          // Ghost overlay
+          // Ghost overlay — convert global _currentPos to local coordinates
           if (_dragState == 'dragging' && _draggedItem != null)
-            Positioned(
-              left: 0, right: 0, top: 0, bottom: 0,
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _GhostPainter(
-                    position: _currentPos,
-                    label: _draggedItem!.isCategory
-                        ? _draggedItem!.category!.name ?? ''
-                        : _draggedItem!.channel!.name,
-                    colors: c,
+            Builder(builder: (ctx) {
+              final renderBox = context.findRenderObject() as RenderBox?;
+              final localPos = renderBox != null
+                  ? renderBox.globalToLocal(_currentPos)
+                  : _currentPos;
+              return Positioned(
+                left: 0, right: 0, top: 0, bottom: 0,
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: _GhostPainter(
+                      position: localPos,
+                      label: _draggedItem!.isCategory
+                          ? _draggedItem!.category!.name ?? ''
+                          : _draggedItem!.channel!.name,
+                      colors: c,
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            }),
         ],
       ),
     );
@@ -406,18 +507,20 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
             depth: item.depth,
             isVoice: isVoice,
             isAfk: isAfk,
+            hasUnread: _unreadChannelIds.contains(ch.id),
             colors: c,
           ),
           // Voice channels show a "No one connected" placeholder or participants
           if (isVoice && !isNested)
-            _VoiceParticipantsArea(colors: c),
+            _VoiceParticipantsArea(channel: ch, colors: c),
         ],
       ),
     );
   }
 }
 
-/// Paints a semi-transparent ghost label following the cursor during drag
+/// Paints a semi-transparent ghost label following the cursor during drag.
+/// Position is in global coordinates — paint relative to the canvas origin.
 class _GhostPainter extends CustomPainter {
   final Offset position;
   final String label;
@@ -431,8 +534,12 @@ class _GhostPainter extends CustomPainter {
       ..color = colors.gray800.withValues(alpha: 0.9)
       ..style = PaintingStyle.fill;
 
+    // Position the ghost near the cursor, offset slightly right and centered vertically
+    final ghostX = (position.dx + 12).clamp(0.0, size.width - 180);
+    final ghostY = (position.dy - 16).clamp(0.0, size.height - 32);
+
     final rect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(position.dx - size.width / 2 + 8, position.dy - 16, 180, 32),
+      Rect.fromLTWH(ghostX, ghostY, 180, 32),
       const Radius.circular(6),
     );
     canvas.drawRRect(rect, paint);
@@ -448,7 +555,7 @@ class _GhostPainter extends CustomPainter {
       style: TextStyle(color: colors.gray200, fontSize: 13, fontWeight: FontWeight.w500),
     );
     final textPainter = TextPainter(text: textSpan, textDirection: TextDirection.ltr)..layout(maxWidth: 160);
-    textPainter.paint(canvas, Offset(position.dx - size.width / 2 + 18, position.dy - 8));
+    textPainter.paint(canvas, Offset(ghostX + 10, ghostY + 8));
   }
 
   @override
@@ -474,6 +581,7 @@ class _CategoryHeaderWidgetState extends State<_CategoryHeaderWidget> {
   @override
   Widget build(BuildContext context) {
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -506,7 +614,7 @@ class _CategoryHeaderWidgetState extends State<_CategoryHeaderWidget> {
 }
 
 /// Individual channel item in the sidebar
-class _ChannelItemWidget extends StatefulWidget {
+class _ChannelItemWidget extends ConsumerStatefulWidget {
   final Channel channel;
   final String serverId;
   final bool isActive;
@@ -514,6 +622,7 @@ class _ChannelItemWidget extends StatefulWidget {
   final int depth;
   final bool isVoice;
   final bool isAfk;
+  final bool hasUnread;
   final InfernoColors colors;
 
   const _ChannelItemWidget({
@@ -524,14 +633,15 @@ class _ChannelItemWidget extends StatefulWidget {
     required this.depth,
     this.isVoice = false,
     this.isAfk = false,
+    this.hasUnread = false,
     required this.colors,
   });
 
   @override
-  State<_ChannelItemWidget> createState() => _ChannelItemWidgetState();
+  ConsumerState<_ChannelItemWidget> createState() => _ChannelItemWidgetState();
 }
 
-class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
+class _ChannelItemWidgetState extends ConsumerState<_ChannelItemWidget> {
   bool _hovering = false;
 
   @override
@@ -540,38 +650,55 @@ class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
     final active = widget.isActive;
     final isNested = widget.depth > 0;
 
-    // Build the channel row
-    final channelRow = Container(
+    final hasUnread = widget.hasUnread && !active;
+
+    // Build the channel row — matches Rails: solid left accent border + gradient fill
+    final channelRow = AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
       decoration: BoxDecoration(
-        color: active ? c.gray600 : (_hovering ? c.gray700 : Colors.transparent),
+        gradient: active ? LinearGradient(
+          colors: [c.accent.withValues(alpha: 0.12), c.accent.withValues(alpha: 0.03)],
+          begin: Alignment.centerLeft, end: Alignment.centerRight,
+        ) : (_hovering ? LinearGradient(
+          colors: [c.accent.withValues(alpha: 0.06), Colors.transparent],
+          begin: Alignment.centerLeft, end: Alignment.centerRight,
+        ) : null),
+        color: (!active && !_hovering) ? Colors.transparent : null,
         borderRadius: BorderRadius.circular(4),
+        border: active ? Border(left: BorderSide(color: c.accent.withValues(alpha: 0.8), width: 2)) : null,
+        boxShadow: active ? [
+          BoxShadow(color: c.accent.withValues(alpha: 0.15), blurRadius: 6, offset: const Offset(2, 0)),
+        ] : null,
       ),
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
         children: [
-          // Red accent bar for active channel
-          Container(
+          // Unread pill on the left for non-active channels
+          if (!active) Container(
             width: 3,
-            height: 28,
+            height: hasUnread ? 8 : 0,
             decoration: BoxDecoration(
-              color: active ? c.accent : Colors.transparent,
+              color: hasUnread ? Colors.white : Colors.transparent,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           SizedBox(width: active ? 5 : 8),
-          Icon(widget.icon, size: 18, color: active ? c.gray200 : c.gray500),
+          Icon(widget.icon, size: 18, color: active ? c.gray200 : (hasUnread ? c.gray200 : c.gray500)),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
               widget.channel.name,
               style: TextStyle(
-                color: active ? Colors.white : (_hovering ? c.gray200 : c.gray500),
+                color: active ? Colors.white : (hasUnread ? Colors.white : (_hovering ? c.gray200 : c.gray500)),
                 fontSize: 14,
-                fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+                fontWeight: (active || hasUnread) ? FontWeight.w600 : FontWeight.w500,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          // Typing indicators — show small avatar bubbles for users typing in this channel
+          if (widget.channel.nostrGroupId != null && !widget.isVoice)
+            _TypingAvatars(channelGroupId: widget.channel.nostrGroupId!, colors: c),
           // Chat button for voice channels (not AFK)
           if (widget.isVoice && !widget.isAfk && _hovering)
             Padding(
@@ -585,17 +712,17 @@ class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
       ),
     );
 
-    // Wrap nested channels with L-connector
+    // Wrap nested channels with L-connector aligned to parent icon
     Widget result;
     if (isNested) {
       result = Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // L-shaped connector line
+          // L-shaped connector — vertical aligns with parent icon center
           SizedBox(
-            width: 26,
+            width: 22,
             child: CustomPaint(
-              size: const Size(26, 34),
+              size: const Size(22, 34),
               painter: _LConnectorPainter(color: c.accent.withValues(alpha: 0.3)),
             ),
           ),
@@ -607,6 +734,7 @@ class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
     }
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -620,18 +748,116 @@ class _ChannelItemWidgetState extends State<_ChannelItemWidget> {
   }
 }
 
-/// Empty participants area shown under voice channels in the sidebar
-/// Will display connected users when voice is implemented
-class _VoiceParticipantsArea extends StatelessWidget {
+/// Shows participants connected to a voice channel in the sidebar
+class _VoiceParticipantsArea extends ConsumerWidget {
+  final Channel channel;
   final InfernoColors colors;
-  const _VoiceParticipantsArea({required this.colors});
+  const _VoiceParticipantsArea({required this.channel, required this.colors});
 
   @override
-  Widget build(BuildContext context) {
-    // Placeholder — shows nothing when no one is connected
-    // When voice is implemented, this will show participant avatars/names
-    return const SizedBox.shrink();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final livekit = ref.watch(livekitServiceProvider);
+    ref.watch(livekitConnectionProvider);
+
+    // Also watch remote voice states from DmService
+    final dmService = ref.watch(dmServiceProvider);
+    final remoteStates = dmService.remoteVoiceStates[channel.publicId] ?? [];
+
+    // Check if WE are in this channel's room
+    final roomName = livekit.room?.name ?? '';
+    final isOurRoom = livekit.isConnected && roomName.contains(channel.publicId);
+
+    // No participants at all? Hide.
+    if (!isOurRoom && remoteStates.isEmpty) return const SizedBox.shrink();
+
+    // Watch voice state stream for rebuilds on remote changes
+    final voiceStateAsync = ref.watch(StreamProvider((ref) {
+      return ref.watch(dmServiceProvider).voiceStateStream;
+    }));
+
+    // Merge LiveKit participants (when connected) with remote voice states
+    final livekitParticipants = isOurRoom ? (livekit.participants) : <dynamic>[];
+
+    // Build combined participant list
+    final allParticipants = <_VoiceParticipantInfo>[];
+
+    // From LiveKit (we're connected)
+    for (final p in livekitParticipants) {
+      final name = p.name?.isNotEmpty == true ? p.name : p.identity;
+      String? avatarUrl;
+      try {
+        if (p.metadata != null && (p.metadata as String).isNotEmpty) {
+          final meta = json.decode(p.metadata as String) as Map<String, dynamic>;
+          avatarUrl = meta['avatar_url'] as String?;
+        }
+      } catch (_) {}
+      bool isMuted;
+      try { isMuted = !(p.isMicrophoneEnabled() as bool); } catch (_) { isMuted = false; }
+      bool isSpeaking;
+      try { isSpeaking = p.isSpeaking as bool; } catch (_) { isSpeaking = false; }
+      allParticipants.add(_VoiceParticipantInfo(name: name ?? '?', avatarUrl: avatarUrl, isMuted: isMuted, isSpeaking: isSpeaking, userId: p.identity));
+    }
+
+    // From remote voice state sync (not in our LiveKit room)
+    for (final rs in remoteStates) {
+      final userId = rs['user_id'] as String? ?? '';
+      // Don't duplicate if already in LiveKit participants
+      if (allParticipants.any((p) => p.userId == userId)) continue;
+      allParticipants.add(_VoiceParticipantInfo(
+        name: rs['username'] as String? ?? userId,
+        avatarUrl: rs['avatar_url'] as String?,
+        isMuted: rs['self_mute'] == true,
+        userId: userId,
+      ));
+    }
+
+    if (allParticipants.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+          padding: const EdgeInsets.only(left: 28, bottom: 4),
+          child: Column(
+            children: allParticipants.map((p) {
+              final hasAvatar = p.avatarUrl != null && p.avatarUrl!.startsWith('http');
+
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 1),
+                child: Row(children: [
+                  // Avatar with speaking ring
+                  Container(
+                    width: 20, height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: p.isSpeaking ? [
+                        BoxShadow(color: colors.accent.withValues(alpha: 0.6), blurRadius: 4, spreadRadius: 1),
+                        BoxShadow(color: colors.accent, blurRadius: 0, spreadRadius: 1),
+                      ] : null,
+                    ),
+                    child: hasAvatar
+                        ? ClipOval(child: Image.network(p.avatarUrl!, width: 20, height: 20, fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => Center(child: Text(p.name[0].toUpperCase(), style: TextStyle(color: colors.gray400, fontSize: 9, fontWeight: FontWeight.bold)))))
+                        : Center(child: Text(p.name[0].toUpperCase(),
+                            style: TextStyle(color: colors.gray400, fontSize: 9, fontWeight: FontWeight.bold))),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(p.name, style: TextStyle(color: colors.gray200, fontSize: 12), overflow: TextOverflow.ellipsis)),
+                  if (p.isMuted)
+                    Padding(padding: const EdgeInsets.only(left: 2), child: Icon(Icons.mic_off, size: 12, color: colors.gray500)),
+                ]),
+              );
+            }).toList(),
+          ),
+        );
   }
+
+}
+
+class _VoiceParticipantInfo {
+  final String name;
+  final String? avatarUrl;
+  final bool isMuted;
+  final bool isSpeaking;
+  final String userId;
+  _VoiceParticipantInfo({required this.name, this.avatarUrl, required this.isMuted, this.isSpeaking = false, required this.userId});
 }
 
 /// Paints an L-shaped connector line for nested voice channels
@@ -643,22 +869,121 @@ class _LConnectorPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
       ..color = color
-      ..strokeWidth = 2
+      ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke
       ..strokeCap = StrokeCap.round;
 
+    final midX = 19.0;
+    final midY = size.height / 2 - 1;
+    final r = 5.0;
+
     final path = Path();
-    // Vertical line from top to middle
-    path.moveTo(10, 0);
-    path.lineTo(10, size.height / 2);
-    // Curve to horizontal
-    path.quadraticBezierTo(10, size.height / 2 + 6, 16, size.height / 2 + 6);
-    // Horizontal to right
-    path.lineTo(size.width, size.height / 2 + 6);
+    path.moveTo(midX, 0);
+    path.lineTo(midX, midY - r);
+    path.quadraticBezierTo(midX, midY, midX + r, midY);
+    path.lineTo(size.width, midY);
 
     canvas.drawPath(path, paint);
   }
 
   @override
   bool shouldRepaint(_LConnectorPainter old) => color != old.color;
+}
+
+/// Shows small avatar bubbles for users currently typing in a channel.
+/// Displayed in the channel sidebar next to the channel name.
+class _TypingAvatars extends ConsumerWidget {
+  final String channelGroupId;
+  final InfernoColors colors;
+  const _TypingAvatars({required this.channelGroupId, required this.colors});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final typingAsync = ref.watch(typingUsersProvider(channelGroupId));
+    return typingAsync.when(
+      data: (users) {
+        // Filter out own pubkey
+        final auth = ref.read(authServiceProvider);
+        final others = users.where((u) => u != auth.publicKeyHex).toList();
+        if (others.isEmpty) return const SizedBox.shrink();
+
+        final db = ref.read(databaseProvider);
+        return FutureBuilder<List<_AvatarData>>(
+          future: _resolveAvatars(db, others),
+          builder: (context, snap) {
+            final avatars = snap.data ?? [];
+            if (avatars.isEmpty) return const SizedBox.shrink();
+            return Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Stack overlapping avatars (max 3)
+                  SizedBox(
+                    width: avatars.length == 1 ? 18 : (avatars.length == 2 ? 28 : 36),
+                    height: 18,
+                    child: Stack(
+                      children: [
+                        for (int i = 0; i < avatars.length && i < 3; i++)
+                          Positioned(
+                            left: i * 10.0,
+                            child: Container(
+                              width: 18, height: 18,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: colors.gray800, width: 1.5),
+                                color: colors.gray600,
+                                image: avatars[i].avatarUrl != null
+                                    ? DecorationImage(image: NetworkImage(avatars[i].avatarUrl!), fit: BoxFit.cover)
+                                    : null,
+                              ),
+                              child: avatars[i].avatarUrl == null
+                                  ? Center(child: Text(avatars[i].initial, style: TextStyle(color: colors.gray200, fontSize: 8, fontWeight: FontWeight.bold)))
+                                  : null,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+
+  static Future<List<_AvatarData>> _resolveAvatars(InfernoDatabase db, List<String> pubkeys) async {
+    final result = <_AvatarData>[];
+    for (final pk in pubkeys) {
+      // Try contacts
+      final contact = await (db.select(db.contacts)..where((c) => c.pubkey.equals(pk))).getSingleOrNull();
+      if (contact != null) {
+        final name = contact.displayName ?? contact.username ?? pk.substring(0, 2);
+        final url = contact.avatarUrl;
+        result.add(_AvatarData(initial: name[0].toUpperCase(), avatarUrl: url != null && url.startsWith('http') ? url : null));
+        continue;
+      }
+      // Try remote members
+      final members = await (db.select(db.remoteMembers)..where((m) => m.pubkey.equals(pk))..limit(1)).get();
+      if (members.isNotEmpty) {
+        final m = members.first;
+        final name = m.displayName ?? m.username ?? pk.substring(0, 2);
+        final url = m.avatarUrl;
+        result.add(_AvatarData(initial: name[0].toUpperCase(), avatarUrl: url != null && url.startsWith('http') ? url : null));
+        continue;
+      }
+      result.add(_AvatarData(initial: pk.substring(0, 1).toUpperCase(), avatarUrl: null));
+    }
+    return result;
+  }
+}
+
+class _AvatarData {
+  final String initial;
+  final String? avatarUrl;
+  _AvatarData({required this.initial, this.avatarUrl});
 }
