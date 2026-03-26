@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../crypto/nostr_signer.dart';
 import '../crypto/nip44_crypto.dart';
@@ -10,6 +12,28 @@ import '../nostr/relay_pool.dart';
 class DmService {
   final InfernoDatabase _db;
   final RelayPool _relayPool;
+
+  /// Pending voice token responses keyed by request_id
+  final Map<String, Map<String, dynamic>> _voiceTokenResponses = {};
+
+  /// Remote voice state events stream
+  final _voiceStateController = StreamController<Map<String, dynamic>>.broadcast();
+  Stream<Map<String, dynamic>> get voiceStateStream => _voiceStateController.stream;
+
+  /// Current remote voice states: channelPublicId -> list of user states
+  final Map<String, List<Map<String, dynamic>>> remoteVoiceStates = {};
+
+  /// Wait for a voice token response with the given request_id (with timeout)
+  Future<Map<String, dynamic>?> waitForVoiceToken(String requestId, {Duration timeout = const Duration(seconds: 15)}) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (_voiceTokenResponses.containsKey(requestId)) {
+        return _voiceTokenResponses.remove(requestId);
+      }
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+    return null; // timed out
+  }
 
   DmService(this._db, this._relayPool);
 
@@ -126,7 +150,8 @@ class DmService {
     }
 
     // Handle special message types
-    if (parsed != null) {
+    if (parsed != null && parsed['type'] != null) {
+      debugPrint('[DM] Received type=${parsed['type']} from ${counterpartyPubkey.substring(0, 8)}');
       switch (parsed['type']) {
         case 'friend_request':
           if (!isOwnEvent) await _handleFriendRequest(counterpartyPubkey);
@@ -136,6 +161,16 @@ class DmService {
           return;
         case 'message_delete':
           await _handleMessageDelete(parsed);
+          return;
+        case 'voice_token_response':
+          debugPrint('[DM] Received voice_token_response request_id=${parsed['request_id']}');
+          _voiceTokenResponses[parsed['request_id'] as String] = parsed;
+          return;
+        case 'voice_token_request':
+          return;
+        case 'voice_state_sync':
+          debugPrint('[DM] Voice state: ${parsed['action']} ${parsed['username']} in ${parsed['channel_id']}');
+          _handleVoiceStateSync(parsed);
           return;
       }
     }
@@ -148,6 +183,14 @@ class DmService {
         ? json.encode(parsed['files'])
         : null;
 
+    // Dedup: skip if we already have this message
+    if (event.id != null) {
+      final existing = await (_db.select(_db.messages)
+            ..where((m) => m.nostrEventId.equals(event.id!)))
+          .getSingleOrNull();
+      if (existing != null) return;
+    }
+
     final conversation = await _getOrCreateConversation(counterpartyPubkey);
     final publicId = NostrKey.bytesToHex(
       NostrKey.hexToBytes(event.id!).sublist(0, 6),
@@ -156,6 +199,7 @@ class DmService {
     final now = DateTime.now();
     final eventTime = DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000);
 
+    try {
     await _db.into(_db.messages).insert(
       MessagesCompanion.insert(
         publicId: publicId,
@@ -169,6 +213,10 @@ class DmService {
         updatedAt: now,
       ),
     );
+    } catch (_) {
+      // Duplicate message — already exists
+      return;
+    }
 
     await (_db.update(_db.conversations)
           ..where((c) => c.id.equals(conversation.id)))
@@ -266,30 +314,116 @@ class DmService {
     return (await (_db.select(_db.conversations)..where((c) => c.id.equals(id))).getSingle());
   }
 
+  void _handleVoiceStateSync(Map<String, dynamic> data) {
+    final channelId = data['channel_id'] as String?;
+    final action = data['action'] as String?;
+    final userId = data['user_id'] as String?;
+    if (channelId == null || action == null || userId == null) return;
+
+    switch (action) {
+      case 'join':
+        remoteVoiceStates.putIfAbsent(channelId, () => []);
+        // Remove existing entry for this user (update)
+        remoteVoiceStates[channelId]!.removeWhere((s) => s['user_id'] == userId);
+        remoteVoiceStates[channelId]!.add(data);
+      case 'update':
+        final states = remoteVoiceStates[channelId];
+        if (states != null) {
+          final idx = states.indexWhere((s) => s['user_id'] == userId);
+          if (idx != -1) {
+            states[idx] = {...states[idx], ...data};
+          }
+        }
+      case 'leave':
+        remoteVoiceStates[channelId]?.removeWhere((s) => s['user_id'] == userId);
+        if (remoteVoiceStates[channelId]?.isEmpty ?? false) {
+          remoteVoiceStates.remove(channelId);
+        }
+    }
+    _voiceStateController.add(data);
+  }
+
+  /// Publish voice state sync to server's voice providers and known remote instances
+  Future<void> publishVoiceState({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String action, // 'join', 'update', 'leave'
+    required String serverGroupId,
+    required String channelPublicId,
+    required String userDisplayName,
+    String? avatarUrl,
+    bool selfMute = false,
+    bool selfDeaf = false,
+    required List<String> targetPubkeys,
+  }) async {
+    final payload = json.encode({
+      'type': 'voice_state_sync',
+      'action': action,
+      'server_nostr_group_id': serverGroupId,
+      'channel_id': channelPublicId,
+      'user_id': publicKeyHex.substring(0, 12),
+      'user_pubkey': publicKeyHex,
+      'username': userDisplayName,
+      'avatar_url': avatarUrl,
+      'self_mute': selfMute,
+      'self_deaf': selfDeaf,
+    });
+
+    for (final targetPubkey in targetPubkeys) {
+      if (targetPubkey == publicKeyHex) continue; // don't send to ourselves
+      try {
+        final convKey = Nip44Crypto.conversationKey(privateKeyHex, targetPubkey);
+        final encrypted = Nip44Crypto.encrypt(payload, convKey);
+        final event = nostr.NostrEvent(
+          pubkey: publicKeyHex,
+          createdAt: nostr.NostrEvent.now(),
+          kind: 14,
+          tags: [['p', targetPubkey]],
+          content: encrypted,
+        );
+        final signer = NostrSigner(privateKeyHex: privateKeyHex);
+        final signed = signer.sign(event);
+        await _relayPool.publish(signed);
+      } catch (_) {}
+    }
+  }
+
   Future<void> _handleFriendRequest(String senderPubkey) async {
-    await _db.into(_db.contacts).insertOnConflictUpdate(
-      ContactsCompanion.insert(
-        pubkey: senderPubkey,
+    debugPrint('[DM] Processing friend request from ${senderPubkey.substring(0, 8)}');
+    final existing = await (_db.select(_db.contacts)
+          ..where((c) => c.pubkey.equals(senderPubkey)))
+        .getSingleOrNull();
+    if (existing != null) {
+      // Don't overwrite accepted/declined/blocked status with pending
+      final currentStatus = existing.friendshipStatus;
+      if (currentStatus == 3 || currentStatus == 4 || currentStatus == 5) {
+        debugPrint('[DM] Ignoring friend request — already ${currentStatus == 3 ? "accepted" : currentStatus == 4 ? "declined" : "blocked"}');
+        return;
+      }
+      await (_db.update(_db.contacts)..where((c) => c.pubkey.equals(senderPubkey)))
+          .write(ContactsCompanion(
         friendshipStatus: const Value(2), // pending_incoming
+        updatedAt: Value(DateTime.now()),
+      ));
+    } else {
+      await _db.into(_db.contacts).insert(ContactsCompanion.insert(
+        pubkey: senderPubkey,
+        friendshipStatus: const Value(2),
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
-      ),
-    );
+      ));
+    }
+    debugPrint('[DM] Friend request saved: ${senderPubkey.substring(0, 8)} = pending_incoming');
   }
 
   Future<void> _handleFriendResponse(String senderPubkey, String? status) async {
-    if (status == 'accepted') {
+    debugPrint('[DM] Friend response from ${senderPubkey.substring(0, 8)}: $status');
+    final statusInt = status == 'accepted' ? 3 : (status == 'declined' ? 4 : null);
+    if (statusInt != null) {
       await (_db.update(_db.contacts)
             ..where((c) => c.pubkey.equals(senderPubkey)))
           .write(ContactsCompanion(
-        friendshipStatus: const Value(3), // accepted
-        updatedAt: Value(DateTime.now()),
-      ));
-    } else if (status == 'declined') {
-      await (_db.update(_db.contacts)
-            ..where((c) => c.pubkey.equals(senderPubkey)))
-          .write(ContactsCompanion(
-        friendshipStatus: const Value(4), // declined
+        friendshipStatus: Value(statusInt),
         updatedAt: Value(DateTime.now()),
       ));
     }

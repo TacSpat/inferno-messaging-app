@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -25,36 +26,12 @@ class DmSidebar extends ConsumerWidget {
 
     return Container(
       width: 240,
-      color: c.gray800,
+      decoration: BoxDecoration(
+        color: c.gray800,
+        border: Border(right: BorderSide(color: c.accent.withValues(alpha: 0.08), width: 1)),
+      ),
       child: Column(
         children: [
-          // Header
-          Container(
-            height: 48,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: c.gray900)),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text('Direct Messages',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
-                ),
-                _HeaderButton(icon: Icons.group_add, tooltip: 'New Group Chat', colors: c, onTap: () {
-                  // TODO: group chat creation dialog
-                }),
-                _HeaderButton(icon: Icons.search, tooltip: 'Find conversation', colors: c, onTap: () {
-                  // Navigate to search tab
-                  context.go('/conversations?tab=search');
-                }),
-                _HeaderButton(icon: Icons.person_add, tooltip: 'Add Friend', colors: c, onTap: () {
-                  context.go('/conversations?tab=search');
-                }),
-              ],
-            ),
-          ),
-
           // Nav + conversations
           Expanded(
             child: ListView(
@@ -110,6 +87,69 @@ class DmSidebar extends ConsumerWidget {
   }
 }
 
+void _showGroupChatDialog(BuildContext context, WidgetRef ref, InfernoColors c) {
+  final nameCtrl = TextEditingController();
+  showDialog(
+    context: context,
+    builder: (ctx) => Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 400,
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: c.gray900,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('New Group Chat', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          Text('GROUP NAME', style: TextStyle(color: c.gray400, fontSize: 12, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: nameCtrl, autofocus: true,
+            style: TextStyle(color: Colors.white, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: 'My Group Chat',
+              hintStyle: TextStyle(color: c.gray500),
+              fillColor: c.gray900, filled: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.accent)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text('You can add members after creating the group.', style: TextStyle(color: c.gray500, fontSize: 12)),
+          const SizedBox(height: 16),
+          Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+            const SizedBox(width: 8),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: c.accent),
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                if (name.isEmpty) return;
+                final db = ref.read(databaseProvider);
+                final now = DateTime.now();
+                final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+                await db.into(db.conversations).insert(ConversationsCompanion.insert(
+                  publicId: publicId,
+                  kind: const Value(1), // group_chat
+                  name: Value(name),
+                  createdAt: now,
+                  updatedAt: now,
+                ));
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Create', style: TextStyle(color: Colors.white)),
+            ),
+          ]),
+        ]),
+      ),
+    ),
+  ).then((_) => nameCtrl.dispose());
+}
+
 class _HeaderButton extends StatefulWidget {
   final IconData icon;
   final String tooltip;
@@ -129,6 +169,7 @@ class _HeaderButtonState extends State<_HeaderButton> {
     return Tooltip(
       message: widget.tooltip,
       child: MouseRegion(
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
@@ -137,7 +178,7 @@ class _HeaderButtonState extends State<_HeaderButton> {
             width: 32, height: 32,
             margin: const EdgeInsets.only(left: 2),
             decoration: BoxDecoration(
-              color: _hovering ? widget.colors.gray700 : Colors.transparent,
+              gradient: _hovering ? LinearGradient(colors: [widget.colors.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Icon(widget.icon, size: 20,
@@ -169,6 +210,7 @@ class _NavItemState extends State<_NavItem> {
     final c = widget.colors;
     final active = widget.isActive;
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -176,7 +218,7 @@ class _NavItemState extends State<_NavItem> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: active ? c.gray700 : (_hovering ? c.gray700 : Colors.transparent),
+            gradient: (active || _hovering) ? LinearGradient(colors: [c.accent.withValues(alpha: active ? 0.12 : 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
@@ -226,6 +268,7 @@ class _ConversationItemState extends State<_ConversationItem> {
     final c = widget.colors;
     final active = widget.isActive;
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -234,7 +277,7 @@ class _ConversationItemState extends State<_ConversationItem> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           margin: const EdgeInsets.symmetric(vertical: 1),
           decoration: BoxDecoration(
-            color: active ? c.gray700 : (_hovering ? c.gray700 : Colors.transparent),
+            gradient: (active || _hovering) ? LinearGradient(colors: [c.accent.withValues(alpha: active ? 0.12 : 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
@@ -243,7 +286,7 @@ class _ConversationItemState extends State<_ConversationItem> {
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: widget.isGroup ? c.accentDark.withValues(alpha: 0.3) : c.gray600,
+                    backgroundColor: widget.isGroup ? c.accentDark.withValues(alpha: 0.3) : Colors.transparent,
                     child: widget.isGroup
                         ? Icon(Icons.group, size: 16, color: c.accentLight)
                         : Text(widget.name[0].toUpperCase(),
@@ -313,7 +356,7 @@ class _UserPanel extends ConsumerWidget {
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: colors.gray600,
+                    backgroundColor: Colors.transparent,
                     backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
                     child: avatarUrl == null
                         ? Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14))

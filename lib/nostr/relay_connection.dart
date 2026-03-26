@@ -104,6 +104,11 @@ class RelayConnection {
     send(json.encode(['EVENT', event.toJson()]));
   }
 
+  /// Send NIP-42 AUTH response to this relay
+  void sendAuth(NostrEvent authEvent) {
+    send(json.encode(['AUTH', authEvent.toJson()]));
+  }
+
   /// Add a subscription to this relay
   void subscribe(Subscription sub) {
     _subscriptions[sub.id] = sub;

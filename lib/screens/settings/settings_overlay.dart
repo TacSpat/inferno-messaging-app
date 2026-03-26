@@ -10,6 +10,9 @@ import 'appearance_screen.dart';
 import 'relays_screen.dart';
 import 'storage_screen.dart';
 import 'key_export_screen.dart';
+import 'notifications_screen.dart';
+import 'voice_video_screen.dart';
+import 'safety_screen.dart';
 
 /// Show the settings overlay
 void showSettingsOverlay(BuildContext context) {
@@ -124,6 +127,12 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
         return const RelaysScreen();
       case 'storage':
         return const StorageScreen();
+      case 'voice':
+        return const VoiceVideoScreen();
+      case 'notifications':
+        return const NotificationsScreen();
+      case 'safety':
+        return const SafetyScreen();
       case 'logout':
         _handleLogout();
         return const SizedBox();

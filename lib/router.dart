@@ -10,6 +10,8 @@ import 'screens/auth/setup_wizard_screen.dart';
 import 'screens/conversations/conversations_list_screen.dart';
 import 'screens/conversations/conversation_detail_screen.dart';
 import 'screens/channels/text_channel_screen.dart';
+import 'screens/voice/voice_channel_screen.dart';
+import 'screens/channels/channel_type_router.dart';
 import 'screens/main_shell.dart';
 
 /// No-animation page — content swaps instantly like Discord
@@ -73,7 +75,7 @@ final router = GoRouter(
             GoRoute(
               path: 'channels/:channelId',
               pageBuilder: (context, state) => _noAnimationPage(
-                TextChannelScreen(
+                ChannelTypeRouter(
                   channelPublicId: state.pathParameters['channelId']!,
                   serverPublicId: state.pathParameters['serverId']!,
                 ),

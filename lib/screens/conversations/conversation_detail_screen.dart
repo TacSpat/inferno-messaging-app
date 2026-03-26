@@ -1,14 +1,20 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/conversations_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
+import '../../providers/realtime_provider.dart';
 import '../../database/database.dart';
-import '../../widgets/message_bubble.dart';
+import '../../widgets/message_list.dart';
 import '../../widgets/message_input.dart';
+import '../../widgets/typing_indicator.dart';
 import '../../services/backfill_service.dart';
+import '../../services/blossom_client.dart';
 import '../../services/dm_service.dart';
 import '../../services/group_message_service.dart';
+import '../../services/presence_service.dart';
+import '../../theme/all_themes.dart';
 
 class ConversationDetailScreen extends ConsumerStatefulWidget {
   final String conversationPublicId;
@@ -28,6 +34,14 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
     _loadConversation();
   }
 
+  @override
+  void didUpdateWidget(ConversationDetailScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationPublicId != widget.conversationPublicId) {
+      _loadConversation();
+    }
+  }
+
   Future<void> _loadConversation() async {
     final db = ref.read(databaseProvider);
     final conv = await (db.select(db.conversations)
@@ -35,7 +49,6 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
         .getSingleOrNull();
     if (mounted) setState(() => _conversation = conv);
 
-    // Trigger backfill (matches Rails: Thread.new { NostrHistoryFetcher.fetch_conversation(conv) })
     if (conv?.counterpartyPubkey != null) {
       _backfillConversation(conv!);
     }
@@ -66,16 +79,6 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
     super.dispose();
   }
 
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    }
-  }
-
   Future<void> _sendMessage(String content) async {
     if (_conversation == null) return;
     final counterpartyPubkey = _conversation!.counterpartyPubkey;
@@ -92,63 +95,152 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       recipientPubkey: counterpartyPubkey,
       content: content,
     );
-
-    _scrollToBottom();
   }
 
   @override
   Widget build(BuildContext context) {
     if (_conversation == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Center(child: CircularProgressIndicator());
     }
+
+    final c = Theme.of(context).extension<InfernoColors>()!;
+    final presenceSvc = ref.watch(presenceServiceProvider);
+    ref.watch(presenceUpdatesProvider); // Trigger rebuild on presence changes
 
     final name = _conversation!.counterpartyDisplayName
         ?? _conversation!.name
         ?? _conversation!.counterpartyPubkey?.substring(0, 12)
         ?? 'Unknown';
 
+    final presence = _conversation!.counterpartyPubkey != null
+        ? presenceSvc.getPresence(_conversation!.counterpartyPubkey!)
+        : OnlineState.offline;
+
     final messagesAsync = ref.watch(conversationMessagesProvider(_conversation!.id));
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(name),
-      ),
-      body: Column(
-        children: [
-          Expanded(
-            child: messagesAsync.when(
-              data: (messages) {
-                if (messages.isEmpty) {
-                  return const Center(
-                    child: Text(
-                      'No messages yet. Say hello!',
-                      style: TextStyle(color: Color(0xFF8899A6)),
-                    ),
-                  );
-                }
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[index];
-                    final authService = ref.read(authServiceProvider);
-                    final isOwn = message.nostrAuthorPubkey == null ||
-                        message.nostrAuthorPubkey == authService.publicKeyHex;
-                    return MessageBubble(
-                      message: message,
-                      isOwn: isOwn,
-                    );
-                  },
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (e, _) => Center(child: Text('Error: $e')),
-            ),
+    return Column(
+      children: [
+        // DM header (matches Rails conversation header style)
+        Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: c.gray700,
+            border: Border(bottom: BorderSide(color: c.gray900)),
           ),
-          MessageInput(onSend: _sendMessage),
-        ],
+          child: Row(
+            children: [
+              Icon(Icons.alternate_email, size: 20, color: c.gray400),
+              const SizedBox(width: 8),
+              Text(name, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
+              const SizedBox(width: 8),
+              // Presence dot
+              Container(
+                width: 10, height: 10,
+                decoration: BoxDecoration(
+                  color: _presenceColor(presence, c),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text(presence.value[0].toUpperCase() + presence.value.substring(1),
+                style: TextStyle(color: c.gray500, fontSize: 12)),
+              const Spacer(),
+              // Pin button placeholder
+              _HeaderAction(icon: Icons.push_pin_outlined, tooltip: 'Pinned Messages', colors: c, onTap: () {}),
+            ],
+          ),
+        ),
+        // Messages — same layout as server channels
+        Expanded(
+          child: MessageList(conversationId: _conversation!.id),
+        ),
+        // Typing indicator
+        if (_conversation!.counterpartyPubkey != null)
+          Consumer(builder: (context, ref, _) {
+            final typingAsync = ref.watch(typingUsersProvider(_conversation!.counterpartyPubkey!));
+            return typingAsync.when(
+              data: (users) {
+                final auth = ref.read(authServiceProvider);
+                final others = users.where((u) => u != auth.publicKeyHex).toList();
+                return TypingIndicator(typingUsers: others);
+              },
+              loading: () => const SizedBox.shrink(),
+              error: (_, _) => const SizedBox.shrink(),
+            );
+          }),
+        // Input with file upload
+        MessageInput(
+          onSend: _sendMessage,
+          recipientName: name,
+          onUploadFiles: (files) async {
+            final auth = ref.read(authServiceProvider);
+            if (auth.privateKeyHex == null) return [];
+            final urls = <String>[];
+            for (final file in files) {
+              final url = await BlossomClient.uploadFile(
+                filePath: file.path,
+                privateKeyHex: auth.privateKeyHex!,
+                publicKeyHex: auth.publicKeyHex!,
+              );
+              if (url != null) urls.add(url);
+            }
+            return urls;
+          },
+          onTyping: () {
+            if (_conversation?.counterpartyPubkey == null) return;
+            final auth = ref.read(authServiceProvider);
+            if (auth.privateKeyHex == null) return;
+            final typingSvc = ref.read(typingServiceProvider);
+            typingSvc.sendTyping(
+              privateKeyHex: auth.privateKeyHex!,
+              publicKeyHex: auth.publicKeyHex!,
+              channelGroupId: _conversation!.counterpartyPubkey!,
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  static Color _presenceColor(OnlineState state, InfernoColors c) {
+    switch (state) {
+      case OnlineState.online: return c.online;
+      case OnlineState.idle: return c.idle;
+      case OnlineState.dnd: return c.dnd;
+      default: return c.offline;
+    }
+  }
+}
+
+class _HeaderAction extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final InfernoColors colors;
+  final VoidCallback onTap;
+  const _HeaderAction({required this.icon, required this.tooltip, required this.colors, required this.onTap});
+  @override
+  State<_HeaderAction> createState() => _HeaderActionState();
+}
+
+class _HeaderActionState extends State<_HeaderAction> {
+  bool _hovering = false;
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Icon(widget.icon, size: 20,
+              color: _hovering ? widget.colors.gray200 : widget.colors.gray400),
+          ),
+        ),
       ),
     );
   }

@@ -57,10 +57,11 @@ class MessageBubble extends StatelessWidget {
   }
 
   String _formatTime(DateTime time) {
+    final local = time.toLocal();
     final now = DateTime.now();
-    if (now.difference(time).inDays > 0) {
-      return DateFormat('MMM d, h:mm a').format(time);
+    if (now.difference(local).inDays > 0) {
+      return DateFormat('MMM d, h:mm a').format(local);
     }
-    return DateFormat('h:mm a').format(time);
+    return DateFormat('h:mm a').format(local);
   }
 }

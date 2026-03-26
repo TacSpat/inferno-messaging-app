@@ -231,6 +231,7 @@ class _ContactItemState extends State<_ContactItem> {
     final name = contact.displayName ?? contact.username ?? '${contact.pubkey.substring(0, 12)}...';
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -238,7 +239,7 @@ class _ContactItemState extends State<_ContactItem> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           decoration: BoxDecoration(
-            color: _hovering ? c.gray600.withValues(alpha: 0.3) : Colors.transparent,
+            gradient: _hovering ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
             border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
           ),

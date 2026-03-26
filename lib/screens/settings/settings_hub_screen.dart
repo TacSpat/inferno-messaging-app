@@ -135,6 +135,7 @@ class _SettingsItemState extends State<_SettingsItem> {
   Widget build(BuildContext context) {
     final c = widget.colors;
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -143,7 +144,7 @@ class _SettingsItemState extends State<_SettingsItem> {
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: BoxDecoration(
-            color: _hovering ? c.gray600 : Colors.transparent,
+            gradient: _hovering ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../crypto/nostr_signer.dart';
 import '../crypto/nostr_key.dart';
@@ -27,7 +28,7 @@ class GroupMessageService {
 
     // Reply tag
     if (parentEventId != null) {
-      tags.add(['e', parentEventId, '', 'reply']);
+      tags.add(['e', parentEventId, 'wss://relay.damus.io', 'reply']);
     }
 
     String eventContent = content;
@@ -67,8 +68,11 @@ class GroupMessageService {
       ),
     );
 
-    // Publish
-    _relayPool.publish(signed);
+    // Publish and log results
+    final results = await _relayPool.publish(signed);
+    results.forEach((url, success) {
+      debugPrint('[GroupMessage] ${success ? "OK" : "FAIL"} $url');
+    });
 
     return (_db.select(_db.messages)..where((m) => m.id.equals(msgId))).getSingleOrNull();
   }
@@ -114,7 +118,7 @@ class GroupMessageService {
             ..where((m) => m.nostrEventId.equals(originalEventId)))
           .write(MessagesCompanion(
         content: Value(content),
-        editedAt: Value(DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000)),
+        editedAt: Value(DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000, isUtc: true)),
         updatedAt: Value(DateTime.now()),
       ));
       return; // Don't create a new message for edits
@@ -144,7 +148,7 @@ class GroupMessageService {
     }
 
     final publicId = NostrKey.bytesToHex(NostrKey.hexToBytes(event.id!).sublist(0, 6));
-    final eventTime = DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000);
+    final eventTime = DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000, isUtc: true);
 
     await _db.into(_db.messages).insert(
       MessagesCompanion.insert(
@@ -172,7 +176,9 @@ class GroupMessageService {
   }) async {
     final tags = <List<String>>[
       ['h', channel.nostrGroupId ?? ''],
-      ['e', originalEventId, '', 'edit'],
+      // Use relay hint placeholder to prevent relays from stripping the empty string
+      // which would shift "edit" from index 3 to index 2, breaking Rails' t[3] == "edit" check
+      ['e', originalEventId, 'wss://relay.damus.io', 'edit'],
     ];
 
     String eventContent = newContent;
@@ -193,7 +199,9 @@ class GroupMessageService {
 
     final signer = NostrSigner(privateKeyHex: privateKeyHex);
     final signed = signer.sign(event);
-    await _relayPool.publish(signed);
+    debugPrint('[GroupMessage] EDIT event tags: ${signed.tags}');
+    final results = await _relayPool.publish(signed);
+    results.forEach((url, ok) => debugPrint('[GroupMessage] Edit ${ok ? "OK" : "FAIL"} $url'));
 
     // Update locally
     await (_db.update(_db.messages)

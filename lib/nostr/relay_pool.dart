@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../crypto/nostr_event.dart';
 import 'nostr_filter.dart';
+import 'relay_auth.dart';
 import 'relay_connection.dart' as rc;
 import 'subscription.dart';
 
@@ -27,6 +28,13 @@ class RelayPool {
 
   // OK response completers for publish tracking
   final Map<String, Completer<bool>> _publishCompleters = {};
+
+  // Track relay failures for fetchFresh — skip after 3 consecutive failures
+  final Map<String, int> _freshFetchFailures = {};
+
+  // Auth credentials for NIP-42 (used by fetchFresh for throwaway connections)
+  String? authPrivateKeyHex;
+  String? authPublicKeyHex;
 
   bool _running = false;
   bool get isRunning => _running;
@@ -183,67 +191,97 @@ class RelayPool {
   }
 
   /// Fetch using brand new throwaway WebSocket connections (matches Rails fetch_from_all).
-  /// This guarantees fresh data even if the persistent connections already received these events.
+  /// Opens independent WebSockets, sends REQ, collects events until EOSE, then closes.
   Future<List<NostrEvent>> fetchFresh(NostrFilter filter, {Duration timeout = const Duration(seconds: 15)}) async {
     final urls = _connections.keys.toList();
     if (urls.isEmpty) return [];
 
     final events = <String, NostrEvent>{};
-    final completer = Completer<void>();
-    int pending = urls.length;
-    final sockets = <WebSocketChannel>[];
 
-    final subId = 'fresh-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
-    final reqMsg = json.encode(['REQ', subId, filter.toJson()]);
-    final closeMsg = json.encode(['CLOSE', subId]);
-
-    for (final url in urls) {
-      try {
-        final ws = WebSocketChannel.connect(Uri.parse(url));
-        sockets.add(ws);
-
-        ws.ready.then((_) {
-          ws.sink.add(reqMsg);
-
-          ws.stream.listen((data) {
-            try {
-              final parsed = json.decode(data as String) as List<dynamic>;
-              if (parsed[0] == 'EVENT' && parsed.length >= 3) {
-                final event = NostrEvent.fromJson(parsed[2] as Map<String, dynamic>);
-                if (event.id != null) events[event.id!] = event;
-              } else if (parsed[0] == 'EOSE') {
-                ws.sink.add(closeMsg);
-                ws.sink.close();
-                pending--;
-                if (pending <= 0 && !completer.isCompleted) completer.complete();
-              }
-            } catch (_) {}
-          }, onError: (_) {
-            pending--;
-            if (pending <= 0 && !completer.isCompleted) completer.complete();
-          }, onDone: () {
-            pending--;
-            if (pending <= 0 && !completer.isCompleted) completer.complete();
-          });
-        }).catchError((_) {
-          pending--;
-          if (pending <= 0 && !completer.isCompleted) completer.complete();
-        });
-      } catch (_) {
-        pending--;
-        if (pending <= 0 && !completer.isCompleted) completer.complete();
-      }
+    // Fetch from each relay independently in parallel (skip relays with 3+ consecutive failures)
+    final activeUrls = urls.where((url) => (_freshFetchFailures[url] ?? 0) < 3).toList();
+    if (activeUrls.isEmpty) {
+      // Reset all failures and try again
+      _freshFetchFailures.clear();
+      activeUrls.addAll(urls);
     }
+    final futures = activeUrls.map((url) => _fetchFromSingleRelay(url, filter, events, timeout));
+    await Future.wait(futures);
 
-    await completer.future.timeout(timeout, onTimeout: () {});
-
-    // Clean up any remaining sockets
-    for (final ws in sockets) {
-      try { ws.sink.close(); } catch (_) {}
-    }
-
-    debugPrint('[RelayPool] fetchFresh: ${events.length} events from ${urls.length} relays');
+    debugPrint('[RelayPool] fetchFresh: ${events.length} events from ${urls.length} relays (filter: kinds=${filter.kinds} tags=${filter.tags})');
     return events.values.toList();
+  }
+
+  /// Fetch from a single relay using a brand new WebSocket connection
+  Future<void> _fetchFromSingleRelay(String url, NostrFilter filter, Map<String, NostrEvent> events, Duration timeout) async {
+    final completer = Completer<void>();
+    WebSocketChannel? ws;
+
+    try {
+      ws = WebSocketChannel.connect(Uri.parse(url));
+      await ws.ready;
+
+      final subId = 'f-${DateTime.now().microsecondsSinceEpoch.toRadixString(36)}';
+      final reqMsg = json.encode(['REQ', subId, filter.toJson()]);
+      bool done = false;
+
+      ws.stream.listen((data) {
+        if (done) return;
+        try {
+          final parsed = json.decode(data as String) as List<dynamic>;
+          if (parsed[0] == 'EVENT' && parsed.length >= 3) {
+            final event = NostrEvent.fromJson(parsed[2] as Map<String, dynamic>);
+            if (event.id != null) events[event.id!] = event;
+          } else if (parsed[0] == 'EOSE') {
+            done = true;
+            try { ws?.sink.close(); } catch (_) {}
+            if (!completer.isCompleted) completer.complete();
+          } else if (parsed[0] == 'AUTH' && parsed.length >= 2) {
+            // NIP-42: relay wants auth — respond if we have credentials
+            if (authPrivateKeyHex != null && authPublicKeyHex != null) {
+              final challenge = parsed[1] as String;
+              try {
+                final authEvent = RelayAuth.buildAuthEvent(
+                  challenge: challenge,
+                  relayUrl: url,
+                  privateKeyHex: authPrivateKeyHex!,
+                  publicKeyHex: authPublicKeyHex!,
+                );
+                ws?.sink.add(json.encode(['AUTH', authEvent.toJson()]));
+                // Re-send the REQ after authenticating
+                ws?.sink.add(reqMsg);
+                debugPrint('[fetchFresh] $url: authenticated and re-sent REQ');
+              } catch (e) {
+                debugPrint('[fetchFresh] $url: AUTH failed: $e');
+              }
+            } else {
+              debugPrint('[fetchFresh] $url wants AUTH but no credentials available');
+            }
+          }
+        } catch (_) {}
+      }, onError: (_) {
+        if (!completer.isCompleted) completer.complete();
+      }, onDone: () {
+        if (!completer.isCompleted) completer.complete();
+      });
+
+      // Send the REQ
+      ws.sink.add(reqMsg);
+
+      // Wait for EOSE or timeout
+      await completer.future.timeout(timeout, onTimeout: () {
+        debugPrint('[fetchFresh] $url timed out');
+        _freshFetchFailures[url] = (_freshFetchFailures[url] ?? 0) + 1;
+      });
+
+      // Success — reset failure count
+      if (completer.isCompleted) _freshFetchFailures.remove(url);
+    } catch (e) {
+      debugPrint('[fetchFresh] $url error: $e');
+      _freshFetchFailures[url] = (_freshFetchFailures[url] ?? 0) + 1;
+    } finally {
+      try { ws?.sink.close(); } catch (_) {}
+    }
   }
 
   /// Reconnect all relays (forces fresh WebSocket connections).
@@ -366,6 +404,10 @@ class RelayPool {
     if (message.length < 3) return;
     final eventId = message[1] as String;
     final success = message[2] as bool;
+    final reason = message.length > 3 ? message[3] as String? : null;
+    if (!success) {
+      debugPrint('[RelayPool] OK:false from $relayUrl for $eventId: $reason');
+    }
     final key = '$relayUrl:$eventId';
     _publishCompleters[key]?.complete(success);
     _publishCompleters.remove(key);
@@ -375,6 +417,14 @@ class RelayPool {
     if (message.length < 2) return;
     final challenge = message[1] as String;
     onAuthChallenge?.call(relayUrl, challenge);
+  }
+
+  /// Send NIP-42 AUTH response to a specific relay (not broadcast)
+  void sendAuthToRelay(String relayUrl, NostrEvent authEvent) {
+    final conn = _connections[relayUrl];
+    if (conn != null && conn.isConnected) {
+      conn.sendAuth(authEvent);
+    }
   }
 
   void _handleStateChange(String relayUrl, rc.RelayConnectionState state) {
