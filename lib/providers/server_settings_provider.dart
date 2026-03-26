@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
 import '../services/role_service.dart';
 import '../services/member_service.dart';
+import '../services/permission_service.dart';
 import 'database_provider.dart';
 import 'auth_provider.dart';
 
@@ -29,4 +30,9 @@ final serverBansProvider = StreamProvider.family<List<Ban>, int>((ref, serverId)
 final serverMembershipsProvider = StreamProvider.family<List<ServerMembership>, int>((ref, serverId) {
   final memberService = ref.watch(memberServiceProvider);
   return memberService.watchMemberships(serverId);
+});
+
+final permissionServiceProvider = Provider<PermissionService>((ref) {
+  final db = ref.watch(databaseProvider);
+  return PermissionService(db);
 });

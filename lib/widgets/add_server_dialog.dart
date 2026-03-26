@@ -14,6 +14,32 @@ import '../theme/all_themes.dart';
 // Session-level cache for discovered servers (relay only sends events once per connection)
 List<Map<String, dynamic>>? _discoveryCache;
 
+/// Channel templates per server type — keys are category names, values are channel names.
+/// Prefix ~ means voice channel. '_root' means no category.
+const _channelTemplates = <String, Map<String, List<String>>>{
+  'community': {
+    'Text Channels': ['general', 'off-topic', 'introductions'],
+    'Voice Channels': ['~General', '~Chill'],
+  },
+  'gaming': {
+    'General': ['general', 'looking-for-group', 'clips-and-highlights'],
+    'Voice': ['~Lobby', '~Game 1', '~Game 2', '~AFK'],
+  },
+  'work_team': {
+    'General': ['general', 'announcements', 'resources'],
+    'Projects': ['project-a', 'project-b'],
+    'Voice': ['~Meeting Room', '~Water Cooler'],
+  },
+  'friends_family': {
+    '_root': ['general', 'photos', 'plans'],
+    'Voice': ['~Hangout'],
+  },
+  'adult': {
+    'General': ['general', 'introductions', 'nsfw'],
+    'Voice': ['~Lounge'],
+  },
+};
+
 class AddServerDialog extends ConsumerStatefulWidget {
   const AddServerDialog({super.key});
 
@@ -31,6 +57,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
   List<Map<String, dynamic>> _discoveredServers = [];
   bool _discovering = false;
   // Pre-fetched events from discovery for use during join
+  List<nostr.NostrEvent> _metadataEvents = [];
   List<nostr.NostrEvent> _structEvents = [];
   List<nostr.NostrEvent> _roleEvents = [];
 
@@ -81,6 +108,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
       debugPrint('[Discovery] Fetched ${events.length} metadata, ${structEvents.length} structure, ${roleEvents.length} role events');
 
       // Store for use during join (relay won't re-send these)
+      _metadataEvents = events;
       _structEvents = structEvents;
       _roleEvents = roleEvents;
 
@@ -158,6 +186,10 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         // Filter pre-fetched events for this specific server
         var baseId = gid;
         while (baseId.startsWith('inferno-')) baseId = baseId.substring(8);
+        final metadataForServer = _metadataEvents.where((e) {
+          final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+          return dTag != null && dTag.length > 1 && dTag[1].contains(baseId);
+        }).toList();
         final structForServer = _structEvents.where((e) {
           final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
           return dTag != null && dTag.length > 1 && dTag[1].contains(baseId);
@@ -166,11 +198,12 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
           final dTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
           return dTag != null && dTag.length > 1 && dTag[1].contains(baseId);
         }).toList();
-        debugPrint('[JoinSync] Passing ${structForServer.length} structure, ${rolesForServer.length} role events for $baseId');
+        debugPrint('[JoinSync] Passing ${metadataForServer.length} metadata, ${structForServer.length} structure, ${rolesForServer.length} role events for $baseId');
         return _ServerSyncOverlay(
           serverName: serverName,
           serverData: server,
           gid: gid,
+          preloadedMetadata: metadataForServer,
           preloadedStructure: structForServer,
           preloadedRoles: rolesForServer,
         );
@@ -201,19 +234,36 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         createdAt: now, updatedAt: now,
       ));
 
-      // Default channels — use unique IDs based on microseconds
-      final genId = (now.microsecondsSinceEpoch + 1).toRadixString(36).padLeft(12, '0').substring(0, 12);
-      await db.into(db.channels).insert(ChannelsCompanion.insert(
-        publicId: genId, serverId: serverId, name: 'general', channelType: 0,
-        position: const Value(0), nostrGroupId: Value('$nostrGroupId-$genId'),
-        createdAt: now, updatedAt: now,
-      ));
-      final voiId = (now.microsecondsSinceEpoch + 2).toRadixString(36).padLeft(12, '0').substring(0, 12);
-      await db.into(db.channels).insert(ChannelsCompanion.insert(
-        publicId: voiId, serverId: serverId, name: 'Voice', channelType: 1,
-        position: const Value(1), nostrGroupId: Value('$nostrGroupId-$voiId'),
-        createdAt: now, updatedAt: now,
-      ));
+      // Apply channel template based on server type (matches Rails Server.apply_server_template!)
+      final template = _channelTemplates[_serverType] ?? _channelTemplates['community']!;
+      int catPos = 0;
+      for (final catEntry in template.entries) {
+        final catName = catEntry.key;
+        int? categoryId;
+        // Create category (skip for uncategorized channels)
+        if (catName != '_root') {
+          final catPubId = (now.microsecondsSinceEpoch + catPos + 100).toRadixString(36).padLeft(12, '0').substring(0, 12);
+          categoryId = await db.into(db.categories).insert(CategoriesCompanion.insert(
+            publicId: catPubId, serverId: serverId, name: Value(catName),
+            position: Value(catPos), createdAt: now, updatedAt: now,
+          ));
+          catPos++;
+        }
+        int chPos = 0;
+        for (final ch in catEntry.value) {
+          final chPubId = (now.microsecondsSinceEpoch + catPos * 10 + chPos + 1).toRadixString(36).padLeft(12, '0').substring(0, 12);
+          final isVoice = ch.startsWith('~'); // prefix ~ = voice channel
+          final chName = isVoice ? ch.substring(1) : ch;
+          await db.into(db.channels).insert(ChannelsCompanion.insert(
+            publicId: chPubId, serverId: serverId, name: chName,
+            channelType: isVoice ? 1 : 0,
+            position: Value(chPos), categoryId: Value(categoryId),
+            nostrGroupId: Value('$nostrGroupId-$chPubId'),
+            createdAt: now, updatedAt: now,
+          ));
+          chPos++;
+        }
+      }
 
       await RoleService(db).createDefaultRoles(serverId);
       final memId = now.microsecondsSinceEpoch.toRadixString(36).padRight(12, '0').substring(0, 12);
@@ -222,21 +272,9 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         joinedAt: Value(now), createdAt: now, updatedAt: now,
       ));
 
-      // Add local user as a remote member so they appear in the member list
+      // Publish our membership and profile to relays so we appear via normal sync
+      // (no direct DB insert — let relay sync discover us like any other member)
       final auth = ref.read(authServiceProvider);
-      if (auth.publicKeyHex != null) {
-        final rmId = (now.microsecondsSinceEpoch + 3).toRadixString(36).padLeft(12, '0').substring(0, 12);
-        await db.into(db.remoteMembers).insert(RemoteMembersCompanion.insert(
-          publicId: Value(rmId),
-          serverId: serverId,
-          pubkey: auth.publicKeyHex!,
-          username: const Value('user'),
-          onlineState: const Value(1), // online
-          joinedAt: Value(now),
-          createdAt: now,
-          updatedAt: now,
-        ));
-      }
 
       // Publish to Nostr
       final serverPublish = ref.read(serverPublishServiceProvider);
@@ -508,6 +546,7 @@ class _DiscoverServerItemState extends State<_DiscoverServerItem> {
     final ageRestricted = s['age_restricted'] == true;
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -516,7 +555,7 @@ class _DiscoverServerItemState extends State<_DiscoverServerItem> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           margin: const EdgeInsets.only(bottom: 4),
           decoration: BoxDecoration(
-            color: _hovering ? c.gray700 : Colors.transparent,
+            gradient: _hovering ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
@@ -575,6 +614,7 @@ class _ServerSyncOverlay extends ConsumerStatefulWidget {
   final String serverName;
   final Map<String, dynamic> serverData;
   final String gid;
+  final List<nostr.NostrEvent>? preloadedMetadata;
   final List<nostr.NostrEvent>? preloadedStructure;
   final List<nostr.NostrEvent>? preloadedRoles;
 
@@ -582,6 +622,7 @@ class _ServerSyncOverlay extends ConsumerStatefulWidget {
     required this.serverName,
     required this.serverData,
     required this.gid,
+    this.preloadedMetadata,
     this.preloadedStructure,
     this.preloadedRoles,
   });
@@ -665,11 +706,15 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
       }
 
       // Pass pre-loaded events from discovery to sync service
+      // This is critical: relays may not re-send events that were already delivered
       final syncService = ref.read(serverSyncServiceProvider);
-      if (widget.preloadedStructure != null) {
+      if (widget.preloadedMetadata != null && widget.preloadedMetadata!.isNotEmpty) {
+        syncService.preloadedMetadata = widget.preloadedMetadata;
+      }
+      if (widget.preloadedStructure != null && widget.preloadedStructure!.isNotEmpty) {
         syncService.preloadedStructure = widget.preloadedStructure;
       }
-      if (widget.preloadedRoles != null) {
+      if (widget.preloadedRoles != null && widget.preloadedRoles!.isNotEmpty) {
         syncService.preloadedRoles = widget.preloadedRoles;
       }
 

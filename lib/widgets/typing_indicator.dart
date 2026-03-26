@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../database/database.dart';
+import '../providers/database_provider.dart';
 
-class TypingIndicator extends StatefulWidget {
+class TypingIndicator extends ConsumerStatefulWidget {
   final List<String> typingUsers;
 
   const TypingIndicator({super.key, required this.typingUsers});
 
   @override
-  State<TypingIndicator> createState() => _TypingIndicatorState();
+  ConsumerState<TypingIndicator> createState() => _TypingIndicatorState();
 }
 
-class _TypingIndicatorState extends State<TypingIndicator>
+class _TypingIndicatorState extends ConsumerState<TypingIndicator>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
+  final Map<String, String> _nameCache = {};
 
   @override
   void initState() {
@@ -20,6 +24,48 @@ class _TypingIndicatorState extends State<TypingIndicator>
       duration: const Duration(milliseconds: 1500),
       vsync: this,
     )..repeat();
+  }
+
+  InfernoDatabase? _db;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _db = ref.read(databaseProvider);
+  }
+
+  Future<void> _resolveName(String pubkey) async {
+    final db = _db;
+    if (db == null) return;
+
+    // Try contacts first
+    final contact = await (db.select(db.contacts)
+          ..where((c) => c.pubkey.equals(pubkey)))
+        .getSingleOrNull();
+    if (contact != null) {
+      final name = contact.displayName ?? contact.username;
+      if (name != null && name.isNotEmpty) {
+        if (mounted) setState(() => _nameCache[pubkey] = name);
+        return;
+      }
+    }
+
+    // Try remote members
+    final members = await (db.select(db.remoteMembers)
+          ..where((m) => m.pubkey.equals(pubkey))
+          ..limit(1))
+        .get();
+    if (members.isNotEmpty) {
+      final m = members.first;
+      final name = m.displayName ?? m.username;
+      if (name != null && name.isNotEmpty) {
+        if (mounted) setState(() => _nameCache[pubkey] = name);
+        return;
+      }
+    }
+
+    // Fallback
+    if (mounted) setState(() => _nameCache[pubkey] = '${pubkey.substring(0, 8)}...');
   }
 
   @override
@@ -32,6 +78,13 @@ class _TypingIndicatorState extends State<TypingIndicator>
   Widget build(BuildContext context) {
     if (widget.typingUsers.isEmpty) return const SizedBox.shrink();
 
+    // Resolve names on first build
+    for (final pubkey in widget.typingUsers) {
+      if (!_nameCache.containsKey(pubkey)) {
+        _resolveName(pubkey);
+      }
+    }
+
     final text = _buildText();
 
     return Container(
@@ -39,7 +92,6 @@ class _TypingIndicatorState extends State<TypingIndicator>
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          // Animated dots
           AnimatedBuilder(
             animation: _controller,
             builder: (context, child) {
@@ -80,13 +132,13 @@ class _TypingIndicatorState extends State<TypingIndicator>
   String _buildText() {
     final users = widget.typingUsers;
     if (users.length == 1) {
-      return '${_shortName(users[0])} is typing';
+      return '${_nameFor(users[0])} is typing';
     } else if (users.length == 2) {
-      return '${_shortName(users[0])} and ${_shortName(users[1])} are typing';
+      return '${_nameFor(users[0])} and ${_nameFor(users[1])} are typing';
     } else {
       return 'Several people are typing';
     }
   }
 
-  String _shortName(String pubkey) => '${pubkey.substring(0, 8)}...';
+  String _nameFor(String pubkey) => _nameCache[pubkey] ?? '${pubkey.substring(0, 8)}...';
 }

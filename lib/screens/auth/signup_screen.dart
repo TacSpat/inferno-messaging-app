@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
+import '../../providers/realtime_provider.dart';
+import '../../providers/servers_provider.dart';
 import '../../widgets/inferno_logo.dart';
 import '../../services/app_bootstrap_service.dart';
+import '../../providers/conversations_provider.dart';
 import '../../crypto/bech32_nostr.dart';
 
 class SignupScreen extends ConsumerStatefulWidget {
@@ -42,10 +45,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       setState(() => _generatedNpub = Bech32Nostr.npubEncode(key.publicKeyHex));
 
       // Bootstrap: create user record, connect relays
+      final db = ref.read(databaseProvider);
+      final pool = ref.read(relayPoolProvider);
       final bootstrap = AppBootstrapService(
-        db: ref.read(databaseProvider),
-        relayPool: ref.read(relayPoolProvider),
+        db: db,
+        relayPool: pool,
         authService: authService,
+        presenceService: ref.read(presenceServiceProvider),
+        typingService: ref.read(typingServiceProvider),
+        reactionService: ref.read(reactionServiceProvider),
+        groupMessageService: ref.read(groupMessageServiceProvider),
+        dmService: ref.read(dmServiceProvider),
+        contactService: ref.read(contactServiceProvider),
       );
       await bootstrap.bootstrap();
 

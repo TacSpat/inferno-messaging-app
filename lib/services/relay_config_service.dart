@@ -85,19 +85,29 @@ class RelayConfigService {
     ));
   }
 
-  /// Add default relays if none exist
+  /// Ensure default relays exist and remove stale ones
   Future<void> ensureDefaultRelays() async {
-    final count = await _db.select(_db.relayConnections).get();
-    if (count.isNotEmpty) return;
-
     const defaultRelays = [
       'wss://relay.damus.io',
       'wss://nos.lol',
-      'wss://relay.nostr.band',
+      'wss://relay.snort.social',
     ];
 
+    final existing = await _db.select(_db.relayConnections).get();
+    final existingUrls = existing.map((r) => r.url).toSet();
+
+    // Add missing defaults
     for (final url in defaultRelays) {
-      await addRelay(url);
+      if (!existingUrls.contains(url)) {
+        await addRelay(url);
+      }
+    }
+
+    // Remove relays not in the default set (cleanup stale entries)
+    for (final relay in existing) {
+      if (!defaultRelays.contains(relay.url)) {
+        await (_db.delete(_db.relayConnections)..where((r) => r.url.equals(relay.url))).go();
+      }
     }
   }
 

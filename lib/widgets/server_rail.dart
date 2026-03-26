@@ -18,7 +18,10 @@ class ServerRail extends ConsumerWidget {
 
     return Container(
       width: 72,
-      color: c.gray950,
+      decoration: BoxDecoration(
+        color: c.gray950,
+        border: Border(right: BorderSide(color: c.accent.withValues(alpha: 0.06), width: 1)),
+      ),
       child: Column(
         children: [
           const SizedBox(height: 12),
@@ -148,6 +151,7 @@ class _RailItemState extends State<_RailItem> {
             preferBelow: false,
             waitDuration: const Duration(milliseconds: 500),
             child: MouseRegion(
+              cursor: SystemMouseCursors.click,
               onEnter: (_) => setState(() => _hovering = true),
               onExit: (_) => setState(() => _hovering = false),
               child: GestureDetector(
@@ -166,6 +170,9 @@ class _RailItemState extends State<_RailItem> {
                     image: widget.imageUrl != null
                         ? DecorationImage(image: NetworkImage(widget.imageUrl!), fit: BoxFit.cover)
                         : null,
+                    boxShadow: _hovering || widget.isActive ? [
+                      BoxShadow(color: c.accent.withValues(alpha: _hovering ? 0.4 : 0.2), blurRadius: 8, spreadRadius: 0),
+                    ] : null,
                   ),
                   child: widget.imageUrl == null
                       ? Center(

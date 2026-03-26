@@ -12,6 +12,7 @@ import '../services/presence_service.dart';
 import '../providers/realtime_provider.dart';
 import '../theme/all_themes.dart';
 import '../screens/settings/settings_overlay.dart';
+import '../screens/server_settings/server_settings_overlay.dart';
 import 'channel_reorder.dart';
 
 class ChannelSidebar extends ConsumerStatefulWidget {
@@ -35,10 +36,14 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
 
     return Container(
       width: 240,
-      color: c.gray800,
+      decoration: BoxDecoration(
+        color: c.gray800,
+        border: Border(
+          right: BorderSide(color: c.accent.withValues(alpha: 0.08), width: 1),
+        ),
+      ),
       child: Column(
         children: [
-          _ServerHeader(server: widget.server, colors: c),
           Expanded(
             child: StreamBuilder<List<Channel>>(
               stream: db.serversDao.watchServerChannels(widget.server.id),
@@ -77,8 +82,40 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
             ),
           ),
           // Voice controls bar (shown when connected to voice)
-          // TODO: show when LiveKit is connected
-          // _VoiceControlsBar(colors: c),
+          Consumer(builder: (context, ref, _) {
+            final livekit = ref.watch(livekitServiceProvider);
+            ref.watch(livekitConnectionProvider); // rebuild on connect/disconnect
+            if (!livekit.isConnected) return const SizedBox.shrink();
+
+            // Resolve voice channel from room name
+            final roomName = livekit.room?.name ?? '';
+            final db2 = ref.read(databaseProvider);
+            // Extract channel publicId from room name (srv-{serverId}-{channelId})
+            final parts = roomName.split('-');
+            final channelPubId = parts.length >= 3 ? parts.sublist(2).join('-') : '';
+
+            return FutureBuilder<Channel?>(
+              future: channelPubId.isNotEmpty ? db2.serversDao.getChannelByPublicId(channelPubId) : Future.value(null),
+              builder: (context, chSnap) {
+            final voiceChannel = chSnap.data;
+            final voiceChannelName = voiceChannel?.name ?? 'Voice';
+            final isParent = voiceChannel != null && voiceChannel.parentChannelId == null;
+            final isChild = voiceChannel != null && voiceChannel.parentChannelId != null;
+
+            return VoiceControlsBar(
+              channelName: voiceChannelName,
+              colors: c,
+              isMuted: livekit.isMuted,
+              isDeafened: livekit.isDeafened,
+              onDisconnect: () => livekit.disconnect(),
+              onToggleMute: () => livekit.toggleMicrophone(),
+              onToggleDeafen: () => livekit.toggleDeafen(),
+              onToggleCamera: () => livekit.toggleCamera(),
+              onToggleScreenShare: () => livekit.toggleScreenShare(),
+              hierarchyLabel: isParent ? '\u2193 Broadcast' : (isChild ? '\u2191 Ask to Speak' : null),
+              onHierarchyAction: (isParent || isChild) ? () {} : null,
+            );
+          }); }),
           _UserPanel(auth: auth, colors: c),
         ],
       ),
@@ -99,6 +136,8 @@ class VoiceControlsBar extends StatelessWidget {
   final VoidCallback? onToggleScreenShare;
   final bool isMuted;
   final bool isDeafened;
+  final String? hierarchyLabel; // "↓ Broadcast" or "↑ Ask to Speak"
+  final VoidCallback? onHierarchyAction;
 
   const VoiceControlsBar({
     super.key,
@@ -111,6 +150,8 @@ class VoiceControlsBar extends StatelessWidget {
     this.onToggleScreenShare,
     this.isMuted = false,
     this.isDeafened = false,
+    this.hierarchyLabel,
+    this.onHierarchyAction,
   });
 
   @override
@@ -119,7 +160,7 @@ class VoiceControlsBar extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
         color: colors.gray900,
-        border: Border(top: BorderSide(color: colors.gray700)),
+        border: Border(top: BorderSide(color: colors.accent.withValues(alpha: 0.12))),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -152,7 +193,19 @@ class VoiceControlsBar extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          // Hierarchy button (Broadcast / Ask to Speak)
+          if (hierarchyLabel != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: MouseRegion(
+                cursor: SystemMouseCursors.click,
+                child: GestureDetector(
+                  onTap: onHierarchyAction,
+                  child: Text(hierarchyLabel!, style: TextStyle(color: colors.gray400, fontSize: 12)),
+                ),
+              ),
+            ),
+          const SizedBox(height: 2),
           // Controls: mute, deafen, camera, screen share
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -216,6 +269,7 @@ class _VoiceButtonState extends State<_VoiceButton> {
     return Tooltip(
       message: widget.tooltip,
       child: MouseRegion(
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
@@ -281,6 +335,7 @@ class _ServerHeaderState extends ConsumerState<_ServerHeader> {
   Widget build(BuildContext context) {
     final c = widget.colors;
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -289,8 +344,10 @@ class _ServerHeaderState extends ConsumerState<_ServerHeader> {
           height: 48,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: _hovering || _dropdownOpen ? c.gray700 : Colors.transparent,
-            border: Border(bottom: BorderSide(color: c.gray900)),
+            color: c.gray900,
+            gradient: (_hovering || _dropdownOpen) ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
+            border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.3))),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 4, offset: const Offset(0, 2))],
           ),
           child: Row(
             children: [
@@ -424,7 +481,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
   }
 
   void _showServerSettings(BuildContext context) {
-    // TODO: open server settings overlay
+    showServerSettingsOverlay(context, widget.server);
   }
 
   Future<void> _showInviteDialog(BuildContext ctx) async {
@@ -459,7 +516,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
           width: 400,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: c.gray800,
+            color: c.gray900,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
           ),
@@ -520,7 +577,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
           width: 400,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: c.gray800,
+            color: c.gray900,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
           ),
@@ -611,7 +668,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
           width: 400,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: c.gray800,
+            color: c.gray900,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
           ),
@@ -686,7 +743,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
           width: 400,
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: c.gray800,
+            color: c.gray900,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
           ),
@@ -723,17 +780,31 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
     if (confirmed == true) {
       final db = widget.ref.read(databaseProvider);
       final serverId = widget.server.id;
-      // Full delete: messages, membership, channels, categories, members, server
+
+      // 1. Delete membership (matches Rails)
+      await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(serverId))).go();
+
+      // 2. Publish Kind 31753 removal event (matches Rails: publish_server_state(:member, removed: true))
+      final auth = widget.ref.read(authServiceProvider);
+      if (auth.privateKeyHex != null && widget.server.nostrGroupId != null) {
+        final serverPublish = widget.ref.read(serverPublishServiceProvider);
+        await serverPublish.publishMemberRemoval(
+          privateKeyHex: auth.privateKeyHex!,
+          publicKeyHex: auth.publicKeyHex!,
+          server: widget.server,
+        );
+      }
+
+      // 3. Full cleanup — remove ALL data for this server (no caching deleted servers)
       final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(serverId))).get();
       for (final ch in channels) {
         await (db.delete(db.messages)..where((m) => m.channelId.equals(ch.id))).go();
       }
-      await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(serverId))).go();
       await (db.delete(db.channels)..where((ch) => ch.serverId.equals(serverId))).go();
       await (db.delete(db.categories)..where((cat) => cat.serverId.equals(serverId))).go();
       await (db.delete(db.remoteMembers)..where((m) => m.serverId.equals(serverId))).go();
       await (db.delete(db.servers)..where((s) => s.id.equals(serverId))).go();
-      // Navigate
+
       widget.router.go('/conversations');
     }
   }
@@ -769,6 +840,7 @@ class _DropdownItemState extends State<_DropdownItem> {
         : (_hovering ? Colors.white : c.gray400);
 
     return MouseRegion(
+      cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
@@ -776,7 +848,7 @@ class _DropdownItemState extends State<_DropdownItem> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
-            color: _hovering ? c.gray700 : Colors.transparent,
+            gradient: _hovering ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
           ),
           child: Row(
@@ -824,7 +896,7 @@ class _UserPanel extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: colors.gray950,
-        border: Border(top: BorderSide(color: colors.gray900)),
+        border: Border(top: BorderSide(color: colors.accent.withValues(alpha: 0.10))),
       ),
       child: Row(
         children: [
@@ -833,9 +905,9 @@ class _UserPanel extends ConsumerWidget {
             children: [
               CircleAvatar(
                 radius: 16,
-                backgroundColor: colors.gray600,
-                backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                child: avatarUrl == null
+                backgroundColor: Colors.transparent,
+                backgroundImage: avatarUrl != null && avatarUrl.startsWith('http') ? NetworkImage(avatarUrl) : null,
+                child: (avatarUrl == null || !avatarUrl.startsWith('http'))
                     ? Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14))
                     : null,
               ),

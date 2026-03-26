@@ -43,3 +43,21 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Prebuilt native libraries (built from source or downloaded in CI)
+native/deepfilter/*.so
+native/deepfilter/*.dylib
+native/deepfilter/*.dll
+native/deepfilter/DeepFilterNet/
+
+# RNNoise source (fetched by script)
+native/rnnoise/src/
+native/rnnoise/include/
+native/rnnoise/.tmp/
+
+# ML models (downloaded by setup script)
+assets/models/*.tar.gz
+assets/models/*.onnx
+
+# Screenshots / temp images
+flutter_01.png

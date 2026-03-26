@@ -10,6 +10,7 @@ import '../../widgets/message_input.dart';
 import '../../widgets/typing_indicator.dart';
 import '../../providers/realtime_provider.dart';
 import '../../services/backfill_service.dart';
+import '../../services/blossom_client.dart';
 import '../../services/dm_service.dart';
 import '../main_shell.dart';
 
@@ -35,6 +36,10 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
   String? _replyAuthorName;
   String? _replyPreview;
 
+  // Edit state — when editing, the message input is pre-filled and sends an edit instead of new message
+  String? _editMessageEventId;
+  String? _editOriginalContent;
+
   @override
   void initState() {
     super.initState();
@@ -46,28 +51,34 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.channelPublicId != widget.channelPublicId) {
       _loadChannel();
-      // Clear reply when switching channels
+      // Clear reply/edit when switching channels
       setState(() {
         _replyMessageId = null;
         _replyAuthorName = null;
         _replyPreview = null;
+        _editMessageEventId = null;
+        _editOriginalContent = null;
       });
     }
   }
+
+  // Track which channels have been backfilled this session to avoid redundant fetches
+  static final Set<String> _backfilledChannels = {};
 
   Future<void> _loadChannel() async {
     final db = ref.read(databaseProvider);
     final ch = await db.serversDao.getChannelByPublicId(widget.channelPublicId);
     if (mounted) setState(() => _channel = ch);
 
-    // Trigger backfill from relays (matches Rails: Thread.new { NostrHistoryFetcher.fetch_channel(channel) })
-    if (ch?.nostrGroupId != null) {
-      _backfillChannel(ch!);
+    // Only backfill once per channel per session — live subscription handles new messages after that
+    if (ch?.nostrGroupId != null && !_backfilledChannels.contains(ch!.nostrGroupId)) {
+      _backfilledChannels.add(ch.nostrGroupId!);
+      _backfillChannel(ch);
     }
   }
 
   Future<void> _backfillChannel(Channel channel) async {
-    if (channel.nostrGroupId == null) return;
+    if (channel.nostrGroupId == null || !mounted) return;
     final db = ref.read(databaseProvider);
     final pool = ref.read(relayPoolProvider);
     final auth = ref.read(authServiceProvider);
@@ -91,20 +102,36 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
     if (authService.privateKeyHex == null) return;
 
     final groupMsgService = ref.read(groupMessageServiceProvider);
-    await groupMsgService.sendMessage(
-      privateKeyHex: authService.privateKeyHex!,
-      publicKeyHex: authService.publicKeyHex!,
-      channel: _channel!,
-      content: content,
-      parentEventId: _replyMessageId,
-    );
 
-    // Clear reply after sending
+    if (_editMessageEventId != null) {
+      // Edit mode — send edit instead of new message
+      debugPrint('[Edit] Editing message $_editMessageEventId with new content: $content');
+      await groupMsgService.editMessage(
+        privateKeyHex: authService.privateKeyHex!,
+        publicKeyHex: authService.publicKeyHex!,
+        channel: _channel!,
+        originalEventId: _editMessageEventId!,
+        newContent: content,
+      );
+    } else {
+      // Normal send
+      await groupMsgService.sendMessage(
+        privateKeyHex: authService.privateKeyHex!,
+        publicKeyHex: authService.publicKeyHex!,
+        channel: _channel!,
+        content: content,
+        parentEventId: _replyMessageId,
+      );
+    }
+
+    // Clear reply/edit after sending
     if (mounted) {
       setState(() {
         _replyMessageId = null;
         _replyAuthorName = null;
         _replyPreview = null;
+        _editMessageEventId = null;
+        _editOriginalContent = null;
       });
     }
   }
@@ -114,6 +141,27 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
       _replyMessageId = message.nostrEventId;
       _replyAuthorName = authorName;
       _replyPreview = preview;
+      // Cancel any active edit
+      _editMessageEventId = null;
+      _editOriginalContent = null;
+    });
+  }
+
+  void _setEdit(Message message) {
+    setState(() {
+      _editMessageEventId = message.nostrEventId;
+      _editOriginalContent = message.content;
+      // Cancel any active reply
+      _replyMessageId = null;
+      _replyAuthorName = null;
+      _replyPreview = null;
+    });
+  }
+
+  void _cancelEdit() {
+    setState(() {
+      _editMessageEventId = null;
+      _editOriginalContent = null;
     });
   }
 
@@ -127,77 +175,13 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
 
     return Column(
       children: [
-        // Channel header
-        Container(
-          height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: c.gray700,
-            border: Border(bottom: BorderSide(color: c.gray900)),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                _channel!.encrypted ? Icons.lock : Icons.tag,
-                size: 20,
-                color: c.gray400,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _channel!.name,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                ),
-              ),
-              if (_channel!.topic != null && _channel!.topic!.isNotEmpty) ...[
-                const SizedBox(width: 12),
-                Container(width: 1, height: 24, color: c.gray600),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _channel!.topic!,
-                    style: TextStyle(color: c.gray400, fontSize: 13),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ] else
-                const Spacer(),
-              // Header action buttons
-              _HeaderAction(icon: Icons.push_pin_outlined, tooltip: 'Pinned Messages', colors: c, onTap: () {
-                _showPinnedMessages(context, c);
-              }),
-              _HeaderAction(icon: Icons.people_outline, tooltip: 'Member List', colors: c, onTap: () {
-                // Toggle member list via MainShell
-                _toggleMemberList(context);
-              }),
-              const SizedBox(width: 4),
-              // Search field
-              Container(
-                width: 160,
-                height: 28,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: c.gray900,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(child: Text('Search', style: TextStyle(color: c.gray500, fontSize: 13))),
-                    Icon(Icons.search, size: 16, color: c.gray500),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
         // Messages
         Expanded(
           child: MessageList(
             channelId: _channel!.id,
             channel: _channel,
             onReply: _setReply,
+            onEdit: _setEdit,
           ),
         ),
         // Typing indicator
@@ -248,10 +232,54 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
               ],
             ),
           ),
+        // Edit bar (like reply bar, shows what message is being edited)
+        if (_editMessageEventId != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: BoxDecoration(
+              color: c.gray700,
+              border: Border(top: BorderSide(color: c.gray600)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.edit, size: 16, color: c.accent),
+                const SizedBox(width: 8),
+                Text('Editing message', style: TextStyle(color: c.accent, fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _editOriginalContent ?? '',
+                    style: TextStyle(color: c.gray500, fontSize: 13),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: _cancelEdit,
+                  child: Icon(Icons.close, size: 16, color: c.gray400),
+                ),
+              ],
+            ),
+          ),
         // Input
         MessageInput(
           onSend: _sendMessage,
           channelName: _channel!.name,
+          editContent: _editOriginalContent,
+          onEditCancel: _editMessageEventId != null ? _cancelEdit : null,
+          onUploadFiles: (files) async {
+            final auth = ref.read(authServiceProvider);
+            if (auth.privateKeyHex == null) return [];
+            final urls = <String>[];
+            for (final file in files) {
+              final url = await BlossomClient.uploadFile(
+                filePath: file.path,
+                privateKeyHex: auth.privateKeyHex!,
+                publicKeyHex: auth.publicKeyHex!,
+              );
+              if (url != null) urls.add(url);
+            }
+            return urls;
+          },
           onTyping: () {
             if (_channel?.nostrGroupId == null) return;
             final auth = ref.read(authServiceProvider);
@@ -387,6 +415,7 @@ class _HeaderActionState extends State<_HeaderAction> {
     return Tooltip(
       message: widget.tooltip,
       child: MouseRegion(
+        cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hovering = true),
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
