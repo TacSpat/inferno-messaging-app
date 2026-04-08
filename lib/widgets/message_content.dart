@@ -2386,20 +2386,26 @@ class _NsfwBlurWrapState extends State<_NsfwBlurWrap> {
               child: GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: () => setState(() => _revealed = true),
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: Colors.black54,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.visibility_off, color: Colors.white70, size: 16),
-                        const SizedBox(width: 6),
-                        Text('${widget.label} — click to reveal', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      ],
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: const Color(0xF01a1a1a),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.visibility_off, color: Colors.white70, size: 16),
+                          const SizedBox(width: 6),
+                          Text('${widget.label} — click to reveal', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                        ],
+                      ),
                     ),
                   ),
                 ),

@@ -700,7 +700,29 @@ class _VoicePanelState extends ConsumerState<_VoicePanel> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('No voice providers', style: TextStyle(color: c.gray400, fontSize: 14)),
                 const SizedBox(height: 8),
-                _SmallButton(label: 'Volunteer as Provider', colors: c, onTap: () {}),
+                _SmallButton(label: 'Volunteer as Provider', colors: c, onTap: () async {
+                  final auth = ref.read(authServiceProvider);
+                  if (auth.publicKeyHex == null || auth.privateKeyHex == null) return;
+                  final now = DateTime.now();
+                  try {
+                    await db.into(db.serverVoiceProviders).insert(ServerVoiceProvidersCompanion.insert(
+                      serverId: widget.server.id,
+                      providerPubkey: Value(auth.publicKeyHex!),
+                      active: const Value(true),
+                      createdAt: now, updatedAt: now,
+                    ));
+                  } catch (_) {
+                    // Already exists — activate it
+                    await (db.update(db.serverVoiceProviders)
+                      ..where((p) => p.serverId.equals(widget.server.id) & p.providerPubkey.equals(auth.publicKeyHex!)))
+                      .write(ServerVoiceProvidersCompanion(active: const Value(true), updatedAt: Value(now)));
+                  }
+                  // Republish server metadata so other clients discover this provider
+                  final updatedServer = await (db.select(db.servers)..where((s) => s.id.equals(widget.server.id))).getSingle();
+                  final publishSvc = ref.read(serverPublishServiceProvider);
+                  await publishSvc.publishMetadata(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: updatedServer);
+                  if (mounted) setState(() {});
+                }),
               ]),
             );
           }
@@ -725,7 +747,18 @@ class _VoicePanelState extends ConsumerState<_VoicePanel> {
                           _badge('Voice Provider', c.accent),
                         ]),
                       ])),
-                      _SmallButton(label: 'Stop Providing Voice', colors: c, danger: true, onTap: () {}),
+                      _SmallButton(label: 'Stop Providing Voice', colors: c, danger: true, onTap: () async {
+                        final auth = ref.read(authServiceProvider);
+                        if (auth.privateKeyHex == null) return;
+                        await (db.update(db.serverVoiceProviders)
+                          ..where((vp) => vp.id.equals(p.id)))
+                          .write(ServerVoiceProvidersCompanion(active: const Value(false), updatedAt: Value(DateTime.now())));
+                        // Republish metadata without this provider
+                        final updatedServer = await (db.select(db.servers)..where((s) => s.id.equals(widget.server.id))).getSingle();
+                        final publishSvc = ref.read(serverPublishServiceProvider);
+                        await publishSvc.publishMetadata(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: updatedServer);
+                        if (mounted) setState(() {});
+                      }),
                     ]),
                   );
                 },

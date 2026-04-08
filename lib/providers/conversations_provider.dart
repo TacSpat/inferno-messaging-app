@@ -35,6 +35,17 @@ final pendingRequestsStreamProvider = StreamProvider<List<Contact>>((ref) {
   return contactService.watchPendingIncoming();
 });
 
+final pendingOutgoingStreamProvider = StreamProvider<List<Contact>>((ref) {
+  final contactService = ref.watch(contactServiceProvider);
+  return contactService.watchPendingOutgoing();
+});
+
+/// Stream that emits on every remote voice state change — watch it to trigger rebuilds.
+final voiceStateChangeProvider = StreamProvider<Map<String, dynamic>>((ref) {
+  final dmService = ref.watch(dmServiceProvider);
+  return dmService.voiceStateStream;
+});
+
 final blockedContactsStreamProvider = StreamProvider<List<Contact>>((ref) {
   final contactService = ref.watch(contactServiceProvider);
   return contactService.watchBlocked();

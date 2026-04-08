@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:drift/drift.dart' show Value;
 import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
@@ -9,6 +10,7 @@ import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
 import '../utils/url_utils.dart';
+import 'package:go_router/go_router.dart';
 
 const _months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -278,7 +280,7 @@ class _CardContent extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
                 child: Row(children: [
-                  _CardButton(label: 'Message', icon: Icons.message_outlined, colors: c, onTap: onDismiss),
+                  _CardButton(label: 'Message', icon: Icons.message_outlined, colors: c, onTap: () => _openDm(context)),
                   const SizedBox(width: 8),
                   _CardButton(label: 'Copy ID', icon: Icons.copy, colors: c, onTap: () {
                     Clipboard.setData(ClipboardData(text: pubkey));
@@ -291,6 +293,28 @@ class _CardContent extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _openDm(BuildContext context) async {
+    var conv = await db.contactsDao.getConversationByPubkey(pubkey);
+    if (conv == null) {
+      final now = DateTime.now();
+      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+      final contact = await db.contactsDao.getByPubkey(pubkey);
+      await db.contactsDao.insertConversation(ConversationsCompanion.insert(
+        publicId: publicId,
+        kind: const Value(0),
+        counterpartyPubkey: Value(pubkey),
+        counterpartyDisplayName: Value(contact?.displayName ?? contact?.username),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      conv = await db.contactsDao.getConversationByPubkey(pubkey);
+    }
+    if (conv != null && context.mounted) {
+      onDismiss();
+      GoRouter.of(context).go('/conversations/${conv.publicId}');
+    }
   }
 
   Future<_ProfileData> _loadProfile() async {

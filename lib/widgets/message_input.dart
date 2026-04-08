@@ -783,19 +783,21 @@ class _MessageInputState extends ConsumerState<MessageInput> {
                   ),
                   // Text input
                   Expanded(
-                    child: KeyboardListener(
-                      focusNode: FocusNode(),
-                      onKeyEvent: (event) {
+                    child: Focus(
+                      onKeyEvent: (node, event) {
                         // Let mention autocomplete handle keys first
-                        if (_handleMentionKey(event)) return;
-                        if (event is! KeyDownEvent) return;
+                        if (_handleMentionKey(event)) return KeyEventResult.handled;
+                        if (event is! KeyDownEvent) return KeyEventResult.ignored;
                         if (event.logicalKey == LogicalKeyboardKey.enter &&
                             !HardwareKeyboard.instance.isShiftPressed) {
                           _send();
+                          return KeyEventResult.handled;
                         } else if (event.logicalKey == LogicalKeyboardKey.escape &&
                             widget.onEditCancel != null) {
                           widget.onEditCancel!();
+                          return KeyEventResult.handled;
                         }
+                        return KeyEventResult.ignored;
                       },
                       child: TextField(
                         controller: _controller,

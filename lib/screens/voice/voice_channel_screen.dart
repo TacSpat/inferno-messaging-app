@@ -10,6 +10,8 @@ import '../../providers/realtime_provider.dart';
 import '../../services/voice_token_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../providers/conversations_provider.dart';
+import '../../crypto/nostr_event.dart' as nostr;
+import '../../crypto/nostr_signer.dart';
 import '../../widgets/participant_tile.dart';
 import '../../models/permission.dart';
 import '../../providers/server_settings_provider.dart';
@@ -168,6 +170,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
       final noiseSuppression = (await storage.read(key: 'voice_noise_suppression')) != 'false';
       final echoCancellation = (await storage.read(key: 'voice_echo_cancellation')) != 'false';
       final autoGainControl = (await storage.read(key: 'voice_auto_gain_control')) != 'false';
+      final suppressionLevel = (await storage.read(key: 'voice_suppression_level')) ?? 'moderate';
 
       // Connect to LiveKit with audio processing options
       if (mounted) setState(() => _error = 'Connecting...');
@@ -176,6 +179,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         noiseSuppression: noiseSuppression,
         echoCancellation: echoCancellation,
         autoGainControl: autoGainControl,
+        suppressionLevel: suppressionLevel,
       );
       await livekit.setMicrophoneEnabled(_canSpeak);
 
@@ -220,35 +224,43 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   Future<void> _publishVoiceState(String action) async {
     if (_channel == null) return;
     final auth = ref.read(authServiceProvider);
-    final dmService = ref.read(dmServiceProvider);
     final db = ref.read(databaseProvider);
+    final relayPool = ref.read(relayPoolProvider);
     final livekit = ref.read(livekitServiceProvider);
     if (auth.privateKeyHex == null) return;
 
     final server = await (db.select(db.servers)..where((s) => s.id.equals(_channel!.serverId))).getSingleOrNull();
-    if (server == null) return;
-
-    // Get target pubkeys: voice providers + server owner
-    final providers = await (db.select(db.serverVoiceProviders)
-          ..where((p) => p.serverId.equals(server.id) & p.active.equals(true)))
-        .get();
-    final targets = providers.where((p) => p.providerPubkey != null).map((p) => p.providerPubkey!).toList();
+    if (server == null || server.nostrGroupId == null) return;
 
     final contact = await (db.select(db.contacts)..where((c) => c.pubkey.equals(auth.publicKeyHex!))..limit(1)).getSingleOrNull();
     final displayName = contact?.displayName ?? contact?.username ?? auth.publicKeyHex!.substring(0, 8);
 
-    await dmService.publishVoiceState(
-      privateKeyHex: auth.privateKeyHex!,
-      publicKeyHex: auth.publicKeyHex!,
-      action: action,
-      serverGroupId: server.nostrGroupId ?? '',
-      channelPublicId: widget.channelPublicId,
-      userDisplayName: displayName,
-      avatarUrl: contact?.avatarUrl,
-      selfMute: livekit.isMuted,
-      selfDeaf: livekit.isDeafened,
-      targetPubkeys: targets,
+    // Publish as a public event with #h tag on the server group — all subscribers see it.
+    // One event instead of N encrypted DMs.
+    final payload = json.encode({
+      'type': 'voice_state_sync',
+      'action': action,
+      'server_nostr_group_id': server.nostrGroupId,
+      'channel_id': widget.channelPublicId,
+      'user_id': auth.publicKeyHex!.substring(0, 12),
+      'user_pubkey': auth.publicKeyHex,
+      'username': displayName,
+      'avatar_url': contact?.avatarUrl,
+      'self_mute': livekit.isMuted,
+      'self_deaf': livekit.isDeafened,
+    });
+
+    final event = nostr.NostrEvent(
+      pubkey: auth.publicKeyHex!,
+      createdAt: nostr.NostrEvent.now(),
+      kind: 10070,
+      tags: [['h', server.nostrGroupId!]],
+      content: payload,
     );
+
+    final signer = NostrSigner(privateKeyHex: auth.privateKeyHex!);
+    final signed = signer.sign(event);
+    await relayPool.publish(signed);
   }
 
   @override
@@ -405,14 +417,27 @@ class _ParticipantCard extends ConsumerWidget {
         // Priority: resolved DB profile > LiveKit metadata > displayName > identity
         final name = resolved?.name ?? displayName ?? identity;
         final avatarUrl = avatarUrlOverride ?? resolved?.avatarUrl;
-        final profile = _ProfileData(name: name, avatarUrl: avatarUrl);
+        final profileColor = resolved?.profileColor;
+        final profile = _ProfileData(name: name, avatarUrl: avatarUrl, profileColor: profileColor);
+
+        // Parse profile color hex → Color, fallback to gray800
+        Color cardColor = c.gray800;
+        Color avatarBg = c.gray700;
+        if (profile.profileColor != null && profile.profileColor!.isNotEmpty) {
+          try {
+            final hex = profile.profileColor!.replaceFirst('#', '');
+            cardColor = Color(int.parse('FF$hex', radix: 16));
+            // Lighter variant for avatar bg: mix with white ~20%
+            avatarBg = Color.lerp(cardColor, Colors.white, 0.2) ?? cardColor;
+          } catch (_) {}
+        }
 
         return _SpeakingCard(
           isSpeaking: isSpeaking,
           accentColor: c.accent,
           child: Container(
           decoration: BoxDecoration(
-            color: c.gray800,
+            color: cardColor,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: isSpeaking ? c.accent : c.gray700, width: isSpeaking ? 2 : 1),
           ),
@@ -422,7 +447,7 @@ class _ParticipantCard extends ConsumerWidget {
               // Avatar
               CircleAvatar(
                 radius: 40,
-                backgroundColor: c.gray700,
+                backgroundColor: avatarBg,
                 backgroundImage: profile.avatarUrl != null && profile.avatarUrl!.startsWith('http')
                     ? NetworkImage(profile.avatarUrl!) : null,
                 child: profile.avatarUrl == null || !profile.avatarUrl!.startsWith('http')
@@ -456,23 +481,23 @@ class _ParticipantCard extends ConsumerWidget {
 
   static Future<_ProfileData> _resolveProfile(InfernoDatabase db, String identity) async {
     // Identity could be: full pubkey, truncated pubkey (first 12-16 chars), or public_id
-    // Try exact pubkey match first
+    // Try remote member first (has profileColor)
+    var member = await (db.select(db.remoteMembers)..where((m) => m.pubkey.equals(identity) | m.publicId.equals(identity))..limit(1)).getSingleOrNull();
+    if (member != null) return _ProfileData(name: member.displayName ?? member.username ?? identity, avatarUrl: member.avatarUrl, profileColor: member.profileColor);
+
+    // Try exact pubkey match in contacts
     var contact = await (db.select(db.contacts)..where((c) => c.pubkey.equals(identity))..limit(1)).getSingleOrNull();
     if (contact != null) return _ProfileData(name: contact.displayName ?? contact.username ?? identity, avatarUrl: contact.avatarUrl);
 
-    // Try remote member by pubkey or publicId
-    var member = await (db.select(db.remoteMembers)..where((m) => m.pubkey.equals(identity) | m.publicId.equals(identity))..limit(1)).getSingleOrNull();
-    if (member != null) return _ProfileData(name: member.displayName ?? member.username ?? identity, avatarUrl: member.avatarUrl);
-
     // Try prefix match — identity might be first 12-16 chars of a pubkey
     if (identity.length >= 8 && identity.length <= 16) {
+      final members = await db.select(db.remoteMembers).get();
+      member = members.where((m) => m.pubkey != null && m.pubkey!.startsWith(identity)).firstOrNull;
+      if (member != null) return _ProfileData(name: member.displayName ?? member.username ?? identity, avatarUrl: member.avatarUrl, profileColor: member.profileColor);
+
       final contacts = await db.select(db.contacts).get();
       contact = contacts.where((c) => c.pubkey.startsWith(identity)).firstOrNull;
       if (contact != null) return _ProfileData(name: contact.displayName ?? contact.username ?? identity, avatarUrl: contact.avatarUrl);
-
-      final members = await db.select(db.remoteMembers).get();
-      member = members.where((m) => m.pubkey.startsWith(identity)).firstOrNull;
-      if (member != null) return _ProfileData(name: member.displayName ?? member.username ?? identity, avatarUrl: member.avatarUrl);
     }
 
     return _ProfileData(name: identity.length > 12 ? '${identity.substring(0, 8)}...' : identity, avatarUrl: null);
@@ -482,7 +507,8 @@ class _ParticipantCard extends ConsumerWidget {
 class _ProfileData {
   final String name;
   final String? avatarUrl;
-  _ProfileData({required this.name, this.avatarUrl});
+  final String? profileColor;
+  _ProfileData({required this.name, this.avatarUrl, this.profileColor});
 }
 
 /// Pulsing glow wrapper for speaking participants — matches Rails audio-level responsive ring

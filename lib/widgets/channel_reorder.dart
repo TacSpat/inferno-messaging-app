@@ -853,8 +853,11 @@ class _VoiceParticipantsArea extends ConsumerWidget {
     final livekit = ref.watch(livekitServiceProvider);
     ref.watch(livekitConnectionProvider);
 
-    // Also watch remote voice states from DmService
+    // Watch voice state stream so widget rebuilds on remote join/leave
     final dmService = ref.watch(dmServiceProvider);
+    ref.watch(voiceStateChangeProvider);
+
+    // Read remote voice states after stream subscription triggers rebuild
     final remoteStates = dmService.remoteVoiceStates[channel.publicId] ?? [];
 
     // Check if WE are in this channel's room
@@ -863,11 +866,6 @@ class _VoiceParticipantsArea extends ConsumerWidget {
 
     // No participants at all? Hide.
     if (!isOurRoom && remoteStates.isEmpty) return const SizedBox.shrink();
-
-    // Watch voice state stream for rebuilds on remote changes
-    final voiceStateAsync = ref.watch(StreamProvider((ref) {
-      return ref.watch(dmServiceProvider).voiceStateStream;
-    }));
 
     // Merge LiveKit participants (when connected) with remote voice states
     final livekitParticipants = isOurRoom ? (livekit.participants) : <dynamic>[];
