@@ -3,7 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../database/database.dart';
 import '../providers/database_provider.dart';
-import '../theme/all_themes.dart';
+import '../providers/unread_provider.dart';
+import '../theme/theme_provider.dart';
 import 'add_server_dialog.dart';
 import 'inferno_logo.dart';
 
@@ -14,7 +15,7 @@ class ServerRail extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final db = ref.watch(databaseProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Container(
       width: 72,
@@ -55,11 +56,13 @@ class ServerRail extends ConsumerWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 8),
                   itemBuilder: (context, index) {
                     final server = servers[index];
+                    final hasUnreads = ref.watch(serverHasUnreadsProvider(server.id)).valueOrNull ?? false;
                     return _RailItem(
                       text: server.name.isNotEmpty ? server.name[0].toUpperCase() : '?',
                       imageUrl: server.iconUrl,
                       tooltip: server.name,
                       isActive: activeServerId == server.publicId,
+                      hasUnread: hasUnreads,
                       onTap: () => context.go('/servers/${server.publicId}'),
                     );
                   },
@@ -95,11 +98,12 @@ class _RailItem extends StatefulWidget {
   final String? imageUrl;
   final String? tooltip;
   final bool isActive;
+  final bool hasUnread;
   final Color? color;
   final VoidCallback? onTap;
   final Widget? customChild;
 
-  const _RailItem({this.icon, this.text, this.imageUrl, this.tooltip, this.isActive = false, this.color, this.onTap, this.customChild});
+  const _RailItem({this.icon, this.text, this.imageUrl, this.tooltip, this.isActive = false, this.hasUnread = false, this.color, this.onTap, this.customChild});
 
   @override
   State<_RailItem> createState() => _RailItemState();
@@ -110,7 +114,7 @@ class _RailItemState extends State<_RailItem> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ProviderScope.containerOf(context).read(infernoColorsProvider);
 
     return Stack(
       clipBehavior: Clip.none,
@@ -141,6 +145,17 @@ class _RailItemState extends State<_RailItem> {
                   topRight: Radius.circular(4),
                   bottomRight: Radius.circular(4),
                 ),
+              ),
+            ),
+          )
+        else if (widget.hasUnread)
+          Positioned(
+            left: 0, top: 20,
+            child: Container(
+              width: 8, height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
               ),
             ),
           ),

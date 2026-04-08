@@ -38,6 +38,9 @@ import 'tables/app_settings.dart';
 import 'tables/content_hashes.dart';
 import 'tables/gif_collections.dart';
 import 'tables/gif_favorites.dart';
+import 'tables/media_cache.dart';
+import 'tables/csam_hash_entries.dart';
+import 'tables/hidden_attachment_records.dart';
 
 // DAO imports
 import 'daos/messages_dao.dart';
@@ -81,6 +84,9 @@ part 'database.g.dart';
     ContentHashes,
     GifCollections,
     GifFavorites,
+    MediaCache,
+    CsamHashEntries,
+    HiddenAttachmentRecords,
   ],
   daos: [
     MessagesDao,
@@ -94,7 +100,7 @@ class InfernoDatabase extends _$InfernoDatabase {
   InfernoDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration {
@@ -106,6 +112,41 @@ class InfernoDatabase extends _$InfernoDatabase {
           createdAt: DateTime.now(),
           updatedAt: DateTime.now(),
         ));
+      },
+      onUpgrade: (Migrator m, int from, int to) async {
+        if (from < 2) {
+          await m.addColumn(channels, channels.lastBackfilledAt);
+          await m.addColumn(conversations, conversations.lastBackfilledAt);
+        }
+        if (from < 3) {
+          await m.createTable(mediaCache);
+        }
+        if (from < 4) {
+          await m.addColumn(serverEmojis, serverEmojis.creatorPubkey);
+          await m.addColumn(serverStickers, serverStickers.creatorPubkey);
+        }
+        if (from < 5) {
+          await m.addColumn(reactions, reactions.reactorPubkey);
+        }
+        if (from < 6) {
+          await m.addColumn(conversations, conversations.lastReadAt);
+        }
+        if (from < 7) {
+          await m.createTable(csamHashEntries);
+          await m.createTable(hiddenAttachmentRecords);
+          await m.addColumn(appSettings, appSettings.safetyProtectionLevel);
+          await m.addColumn(appSettings, appSettings.safetySharedHashesEnabled);
+          await m.addColumn(appSettings, appSettings.safetyPublishHashes);
+          await m.addColumn(appSettings, appSettings.safetyBlockPhoneNumbers);
+          await m.addColumn(appSettings, appSettings.safetyBlockAllCaps);
+          await m.addColumn(appSettings, appSettings.safetyBlockSpamChars);
+          await m.addColumn(appSettings, appSettings.safetyReportThreshold);
+          await m.addColumn(appSettings, appSettings.safetyReputationEnabled);
+          await m.addColumn(appSettings, appSettings.safetyReputationSensitivity);
+          await m.addColumn(appSettings, appSettings.safetyReputationThreshold);
+          await m.addColumn(appSettings, appSettings.safetySharedHashMinReporters);
+          await m.addColumn(appSettings, appSettings.safetySharedHashTrustFriends);
+        }
       },
     );
   }

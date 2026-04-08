@@ -8,6 +8,7 @@ import '../../providers/realtime_provider.dart';
 import '../../providers/servers_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/app_bootstrap_service.dart';
+import '../../services/media_cache_service.dart';
 import '../../widgets/inferno_logo.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -47,6 +48,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           groupMessageService: ref.read(groupMessageServiceProvider),
           dmService: ref.read(dmServiceProvider),
           contactService: ref.read(contactServiceProvider),
+          inviteService: ref.read(inviteServiceProvider),
+          mediaCacheService: ref.read(mediaCacheServiceProvider),
         );
         await bootstrap.bootstrap();
         if (!mounted) return;

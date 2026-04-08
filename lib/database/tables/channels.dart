@@ -25,6 +25,7 @@ class Channels extends Table {
   IntColumn get voiceUserLimit => integer().withDefault(const Constant(0))();
   BoolColumn get videoEnabled => boolean().withDefault(const Constant(false))();
   IntColumn get sidechatChannelId => integer().nullable()();
+  DateTimeColumn get lastBackfilledAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 }

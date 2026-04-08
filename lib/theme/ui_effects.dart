@@ -662,8 +662,11 @@ class _BarFireState extends State<BarFire> with TickerProviderStateMixin {
       children: [
         widget.child,
         // Flames wrap around the top and corners of the child
-        Positioned.fill(
+        Positioned(
+          left: 10,
+          right: 10,
           top: -widget.maxFlameHeight,
+          bottom: 0,
           child: IgnorePointer(
             child: CustomPaint(
               painter: _BarFirePainter(
@@ -886,4 +889,441 @@ class _Spark {
     required this.x, required this.y, required this.vx, required this.vy,
     required this.life, required this.age, required this.size,
   });
+}
+
+// ═══════════════════════════════════════════════════════════
+// BarElectric — Lightning arcs wrapping the input bar perimeter
+// Two layers: steady "power supply" hum + sporadic discharge arcs
+// ═══════════════════════════════════════════════════════════
+
+class BarElectric extends StatefulWidget {
+  final Widget child;
+  final bool lit;
+  final Color color;
+  final Color? colorLight;
+  final double fuel;
+
+  const BarElectric({
+    super.key, required this.child, required this.lit,
+    required this.color, this.colorLight, this.fuel = 0.0,
+  });
+
+  @override
+  State<BarElectric> createState() => _BarElectricState();
+}
+
+class _BarElectricState extends State<BarElectric> with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  final _rng = Random();
+
+  // Hum — jagged energy ring wrapping the perimeter
+  List<double> _humJitter = List.filled(200, 0);
+  double _humIntensity = 0;
+
+  // Circuit arcs — two points pathfind to each other along the perimeter
+  final List<_CircuitArc> _circuits = [];
+  // Shower sparks — small glowing particles that spray outward with gravity
+  final List<_SparkParticle> _particles = [];
+  double _glow = 0;
+  bool _wasLit = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(seconds: 1))
+      ..repeat()..addListener(_tick);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.removeListener(_tick);
+    _ctrl.stop();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  void _tick() {
+    if (!mounted) return;
+    try { setState(() {
+      final dt = 0.016;
+
+      // Detect focus gain → init circuit + spark shower
+      if (widget.lit && !_wasLit) _onPowerOn();
+      _wasLit = widget.lit;
+
+      if (widget.lit) {
+        final targetGlow = 0.15 + widget.fuel * 0.3;
+        _glow += (targetGlow - _glow) * 0.06;
+        _humIntensity += (1.0 - _humIntensity) * 0.04;
+
+        // Hum jitter
+        for (int i = 0; i < _humJitter.length; i++) {
+          _humJitter[i] += (_rng.nextDouble() - 0.5) * (2.0 + widget.fuel * 4.0);
+          _humJitter[i] *= 0.75;
+        }
+
+        // Spawn circuit arcs — two random perimeter points connected by jagged bolt
+        final circuitRate = widget.fuel > 0.05 ? 0.08 + widget.fuel * 0.25 : 0.015;
+        if (_rng.nextDouble() < circuitRate) _spawnCircuit();
+
+        // Spawn spark particles from random perimeter points
+        final sparkRate = (2 + widget.fuel * 12).round();
+        for (int i = 0; i < sparkRate; i++) {
+          if (_rng.nextDouble() < 0.3 + widget.fuel * 0.5) _spawnParticle();
+        }
+      } else {
+        // Lightbulb fade
+        _glow *= 0.96;
+        _humIntensity *= 0.97;
+        for (int i = 0; i < _humJitter.length; i++) _humJitter[i] *= 0.92;
+      }
+
+      // Age circuits
+      for (final c in _circuits) c.age += dt;
+      _circuits.removeWhere((c) => c.age > c.life);
+
+      // Age particles — strong gravity, minimal drag (welding sparks)
+      for (final p in _particles) {
+        p.age += dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy += 200 * dt; // heavy gravity — sparks arc down fast
+        p.vx *= 0.995; // minimal air drag — they fly far
+        p.vy *= 0.995;
+      }
+      _particles.removeWhere((p) => p.age > p.life);
+    }); } catch (_) {}
+  }
+
+  void _onPowerOn() {
+    _glow = 0.35;
+    _humIntensity = 0.2;
+    // Welding spark shower from corners
+    for (int i = 0; i < 40 + _rng.nextInt(30); i++) {
+      _spawnParticle(burst: true);
+    }
+    // Initial circuit connections
+    for (int i = 0; i < 2 + _rng.nextInt(2); i++) {
+      _spawnCircuit();
+    }
+  }
+
+  /// Two random points on the perimeter connected by a jagged bolt
+  void _spawnCircuit() {
+    final startT = _rng.nextDouble() * 4.0;
+    // End point is 0.3..1.5 perimeter distance away
+    final endT = (startT + 0.3 + _rng.nextDouble() * 1.2) % 4.0;
+    final segs = 5 + _rng.nextInt(6) + (widget.fuel * 4).round();
+
+    final positions = <double>[];
+    final jitter = <double>[];
+    for (int i = 0; i <= segs; i++) {
+      final t = startT + (endT - startT + (endT < startT ? 4 : 0)) * (i / segs);
+      positions.add(t % 4.0);
+      // Jitter perpendicular to the path — more in the middle, less at endpoints
+      final midFactor = sin(i / segs * pi); // 0 at ends, 1 in middle
+      jitter.add((_rng.nextDouble() - 0.5) * midFactor * (4 + widget.fuel * 8));
+    }
+
+    _circuits.add(_CircuitArc(
+      positions: positions, jitter: jitter,
+      life: 0.08 + _rng.nextDouble() * 0.15,
+      age: 0,
+      width: 0.8 + _rng.nextDouble() * (1.5 + widget.fuel * 1.5),
+      brightness: 0.6 + _rng.nextDouble() * 0.4,
+    ));
+  }
+
+  /// Spawn a welding-style spark — shoots outward from the perimeter normal.
+  /// Computes the actual outward normal by sampling two nearby perimeter points.
+  void _spawnParticle({bool burst = false}) {
+    final perimT = _rng.nextDouble() * 4.0;
+
+    // Store normal direction — will be resolved in the painter using _perimToXY.
+    // We store nx/ny on the particle so the painter can compute velocity in screen space.
+    _particles.add(_SparkParticle(
+      perimT: perimT,
+      x: 0, y: 0,
+      // vx/vy will be set to screen-space velocity by the painter on first frame.
+      // For now, store speed + spread as raw values.
+      vx: burst ? 150 + _rng.nextDouble() * 250 : 80 + _rng.nextDouble() * 150 + widget.fuel * 100, // speed
+      vy: (_rng.nextDouble() - 0.5) * 1.4, // spread angle
+      life: 0.1 + _rng.nextDouble() * (burst ? 0.3 : 0.2),
+      age: 0,
+      size: 0.4 + _rng.nextDouble() * 0.6,
+      brightness: 0.7 + _rng.nextDouble() * 0.3,
+      needsInit: true,
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isActive = _glow > 0.005 || _circuits.isNotEmpty || _particles.isNotEmpty;
+    return Stack(clipBehavior: Clip.none, children: [
+      widget.child,
+      if (isActive)
+        Positioned(left: -30, right: -30, top: -30, bottom: -30,
+          child: IgnorePointer(child: CustomPaint(
+            painter: _ElectricPainter(
+              color: widget.color,
+              colorLight: widget.colorLight ?? Color.lerp(widget.color, Colors.white, 0.6)!,
+              glow: _glow,
+              humJitter: _humJitter,
+              humIntensity: _humIntensity,
+              circuits: _circuits,
+              particles: _particles,
+              fuel: widget.fuel,
+              radius: 22,
+              overflow: 30,
+            ),
+          ))),
+    ]);
+  }
+}
+
+class _CircuitArc {
+  final List<double> positions; // perimeter positions 0..4
+  final List<double> jitter; // perpendicular offset
+  final double life, width, brightness;
+  double age;
+  _CircuitArc({required this.positions, required this.jitter, required this.life,
+    required this.age, required this.width, required this.brightness});
+}
+
+class _SparkParticle {
+  final double perimT;
+  double x, y;
+  double vx, vy;
+  final double life, size, brightness;
+  double age;
+  bool needsInit;
+  _SparkParticle({required this.perimT, required this.x, required this.y,
+    required this.vx, required this.vy, required this.life,
+    required this.age, required this.size, required this.brightness,
+    this.needsInit = false});
+}
+
+class _ElectricPainter extends CustomPainter {
+  final Color color, colorLight;
+  final double glow, fuel, radius, overflow, humIntensity;
+  final List<double> humJitter;
+  final List<_CircuitArc> circuits;
+  final List<_SparkParticle> particles;
+
+  _ElectricPainter({required this.color, required this.colorLight, required this.glow,
+    required this.humJitter, required this.humIntensity, required this.circuits,
+    required this.particles, required this.fuel, required this.radius, required this.overflow});
+
+  /// Convert perimeter position (0..1 normalized around full perimeter) to canvas XY.
+  /// Properly follows the rounded rectangle path including corner arcs.
+  Offset _perimToXY(double t, double perpJitter, Size size) {
+    final r = radius;
+    final w = size.width, h = size.height;
+    t = t % 4.0;
+    if (t < 0) t += 4.0;
+
+    // Perimeter segments: each edge has a straight part + a corner arc.
+    // Layout (clockwise from top-left corner):
+    //   0.0       → corner TL arc
+    //   ...       → top straight edge
+    //   ~1.0      → corner TR arc
+    //   ...       → right straight edge
+    //   ~2.0      → corner BR arc
+    //   ...       → bottom straight edge
+    //   ~3.0      → corner BL arc
+    //   ...       → left straight edge
+    //   4.0       → back to start
+
+    // Total perimeter length for proportional mapping
+    final cornerArc = r * pi / 2; // quarter circle arc length
+    final topLen = w - 2 * r;
+    final rightLen = h - 2 * r;
+    final bottomLen = w - 2 * r;
+    final leftLen = h - 2 * r;
+    final totalPerim = topLen + rightLen + bottomLen + leftLen + 4 * cornerArc;
+
+    // Map t (0..4) to distance along perimeter
+    double dist = (t / 4.0) * totalPerim;
+
+    double x, y, nx, ny;
+
+    // Segment boundaries
+    final seg0 = cornerArc;             // TL corner done
+    final seg1 = seg0 + topLen;         // top edge done
+    final seg2 = seg1 + cornerArc;      // TR corner done
+    final seg3 = seg2 + rightLen;       // right edge done
+    final seg4 = seg3 + cornerArc;      // BR corner done
+    final seg5 = seg4 + bottomLen;      // bottom edge done
+    final seg6 = seg5 + cornerArc;      // BL corner done
+    // seg6..totalPerim = left edge
+
+    if (dist < seg0) {
+      // TL corner arc
+      final angle = pi + (dist / cornerArc) * (pi / 2); // pi to 3pi/2
+      x = r + r * cos(angle);
+      y = r + r * sin(angle);
+      nx = cos(angle); ny = sin(angle);
+    } else if (dist < seg1) {
+      // Top straight edge
+      final s = (dist - seg0) / topLen;
+      x = r + s * topLen; y = 0; nx = 0; ny = -1;
+    } else if (dist < seg2) {
+      // TR corner arc
+      final angle = -pi / 2 + ((dist - seg1) / cornerArc) * (pi / 2); // -pi/2 to 0
+      x = w - r + r * cos(angle);
+      y = r + r * sin(angle);
+      nx = cos(angle); ny = sin(angle);
+    } else if (dist < seg3) {
+      // Right straight edge
+      final s = (dist - seg2) / rightLen;
+      x = w; y = r + s * rightLen; nx = 1; ny = 0;
+    } else if (dist < seg4) {
+      // BR corner arc
+      final angle = 0 + ((dist - seg3) / cornerArc) * (pi / 2); // 0 to pi/2
+      x = w - r + r * cos(angle);
+      y = h - r + r * sin(angle);
+      nx = cos(angle); ny = sin(angle);
+    } else if (dist < seg5) {
+      // Bottom straight edge
+      final s = (dist - seg4) / bottomLen;
+      x = w - r - s * bottomLen; y = h; nx = 0; ny = 1;
+    } else if (dist < seg6) {
+      // BL corner arc
+      final angle = pi / 2 + ((dist - seg5) / cornerArc) * (pi / 2); // pi/2 to pi
+      x = r + r * cos(angle);
+      y = h - r + r * sin(angle);
+      nx = cos(angle); ny = sin(angle);
+    } else {
+      // Left straight edge
+      final s = (dist - seg6) / leftLen;
+      x = 0; y = h - r - s * leftLen; nx = -1; ny = 0;
+    }
+
+    return Offset(x + nx * perpJitter, y + ny * perpJitter);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final barSize = Size(size.width - overflow * 2, size.height - overflow * 2);
+    canvas.save();
+    canvas.translate(overflow, overflow);
+
+    final hi = humIntensity;
+
+    // Layer 1: Ambient glow
+    if (glow > 0.01) {
+      final glowRect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(0, 0, barSize.width, barSize.height), Radius.circular(radius));
+      canvas.drawRRect(glowRect, Paint()
+        ..color = color.withValues(alpha: glow * hi * 0.5)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 4 + fuel * 6
+        ..maskFilter = MaskFilter.blur(BlurStyle.normal, 8 + fuel * 6));
+    }
+
+    // Layer 2: Energy hum ring
+    if (hi > 0.01) {
+      final n = humJitter.length;
+      final humPath = Path();
+      for (int i = 0; i <= n; i++) {
+        final t = (i / n) * 4.0;
+        final ji = humJitter[i % n] * (1.5 + fuel * 3.0);
+        final pt = _perimToXY(t, ji, barSize);
+        if (i == 0) { humPath.moveTo(pt.dx, pt.dy); } else { humPath.lineTo(pt.dx, pt.dy); }
+      }
+      humPath.close();
+
+      canvas.drawPath(humPath, Paint()
+        ..color = color.withValues(alpha: ((0.3 + fuel * 0.3) * hi).clamp(0.0, 0.7))
+        ..strokeWidth = 4 + fuel * 4..style = PaintingStyle.stroke
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6));
+      canvas.drawPath(humPath, Paint()
+        ..color = colorLight.withValues(alpha: ((0.4 + fuel * 0.3) * hi).clamp(0.0, 0.8))
+        ..strokeWidth = 2 + fuel * 2..style = PaintingStyle.stroke
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2));
+      canvas.drawPath(humPath, Paint()
+        ..color = colorLight.withValues(alpha: ((0.6 + fuel * 0.3) * hi).clamp(0.0, 1.0))
+        ..strokeWidth = 1.0 + fuel * 1.0..style = PaintingStyle.stroke);
+    }
+
+    // Layer 3: Circuit arcs — two points pathfinding to each other
+    for (final arc in circuits) {
+      final alpha = ((1.0 - arc.age / arc.life) * arc.brightness).clamp(0.0, 1.0);
+      if (alpha < 0.01 || arc.positions.length < 2) continue;
+
+      final path = Path();
+      for (int i = 0; i < arc.positions.length; i++) {
+        final pt = _perimToXY(arc.positions[i], arc.jitter[i], barSize);
+        if (i == 0) { path.moveTo(pt.dx, pt.dy); } else { path.lineTo(pt.dx, pt.dy); }
+      }
+
+      canvas.drawPath(path, Paint()
+        ..color = color.withValues(alpha: alpha * 0.4)
+        ..strokeWidth = arc.width * 5..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5));
+      canvas.drawPath(path, Paint()
+        ..color = colorLight.withValues(alpha: alpha)
+        ..strokeWidth = arc.width * 1.5..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke);
+    }
+
+    // Layer 4: Welding sparks — init velocities from perimeter normals, then draw
+    for (final p in particles) {
+      if (p.needsInit) {
+        // Compute outward normal by sampling two nearby points
+        final p1 = _perimToXY(p.perimT - 0.01, 0, barSize);
+        final p2 = _perimToXY(p.perimT + 0.01, 0, barSize);
+        // Tangent direction
+        var tx = p2.dx - p1.dx;
+        var ty = p2.dy - p1.dy;
+        final tLen = sqrt(tx * tx + ty * ty);
+        if (tLen > 0) { tx /= tLen; ty /= tLen; }
+        // Normal = perpendicular to tangent, pointing outward
+        // For clockwise perimeter: outward normal is (-ty, tx)
+        final nx = -ty;
+        final ny = tx;
+        final speed = p.vx; // stored speed
+        final spread = p.vy; // stored spread angle
+        p.vx = nx * speed + tx * spread * speed * 0.4;
+        p.vy = ny * speed - tx * spread * speed * 0.4;
+        p.needsInit = false;
+      }
+      final alpha = ((1.0 - p.age / p.life) * p.brightness).clamp(0.0, 1.0);
+      if (alpha < 0.01) continue;
+
+      final origin = _perimToXY(p.perimT, 0, barSize);
+      final px = origin.dx + p.x;
+      final py = origin.dy + p.y;
+
+      final speed = sqrt(p.vx * p.vx + p.vy * p.vy);
+      if (speed < 1) continue;
+      // Long streak trailing behind the spark
+      final trailLen = (speed * 0.03).clamp(2.0, 18.0);
+      final dx = p.vx / speed;
+      final dy = p.vy / speed;
+      final tailX = px - dx * trailLen;
+      final tailY = py - dy * trailLen;
+
+      // Glow trail
+      canvas.drawLine(Offset(tailX, tailY), Offset(px, py), Paint()
+        ..color = color.withValues(alpha: alpha * 0.4)
+        ..strokeWidth = p.size * 3
+        ..strokeCap = StrokeCap.round
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2));
+      // Bright core streak
+      canvas.drawLine(Offset(tailX, tailY), Offset(px, py), Paint()
+        ..color = colorLight.withValues(alpha: alpha)
+        ..strokeWidth = p.size
+        ..strokeCap = StrokeCap.round);
+      // Hot white head
+      canvas.drawCircle(Offset(px, py), p.size * 0.5, Paint()
+        ..color = Colors.white.withValues(alpha: alpha * 0.8));
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_ElectricPainter old) => true;
 }

@@ -6,6 +6,7 @@ import '../providers/conversations_provider.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 
 /// Top bar showing pending incoming friend requests with accept/decline/dismiss carousel.
 /// Matches Rails _friend_request_bar.html.erb — gradient background with fire shimmer.
@@ -22,7 +23,7 @@ class _FriendRequestBarState extends ConsumerState<FriendRequestBar> {
   @override
   Widget build(BuildContext context) {
     final pendingAsync = ref.watch(pendingRequestsStreamProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return pendingAsync.when(
       data: (pending) {

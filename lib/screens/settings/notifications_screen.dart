@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),

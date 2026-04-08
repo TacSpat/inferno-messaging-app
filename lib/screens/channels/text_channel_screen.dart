@@ -1,9 +1,13 @@
+import 'dart:async';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../database/database.dart';
 import '../../providers/database_provider.dart';
 import '../../providers/servers_provider.dart';
+import '../../providers/unread_provider.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../widgets/message_list.dart';
 import '../../widgets/message_input.dart';
@@ -11,17 +15,20 @@ import '../../widgets/typing_indicator.dart';
 import '../../providers/realtime_provider.dart';
 import '../../services/backfill_service.dart';
 import '../../services/blossom_client.dart';
+import '../../services/content_safety_service.dart';
 import '../../services/dm_service.dart';
 import '../main_shell.dart';
 
 class TextChannelScreen extends ConsumerStatefulWidget {
   final String channelPublicId;
   final String serverPublicId;
+  final bool isActive;
 
   const TextChannelScreen({
     super.key,
     required this.channelPublicId,
     required this.serverPublicId,
+    this.isActive = true,
   });
 
   @override
@@ -30,6 +37,8 @@ class TextChannelScreen extends ConsumerStatefulWidget {
 
 class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
   Channel? _channel;
+  StreamSubscription<Channel?>? _channelSub;
+  bool _initialLoadDone = false;
 
   // Reply state
   String? _replyMessageId;
@@ -40,17 +49,25 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
   String? _editMessageEventId;
   String? _editOriginalContent;
 
+  // Custom emoji map for this server: name -> url
+  Map<String, String> _customEmojis = {};
+
+  // NSFW gate: track which channels the user has acknowledged
+  static final Set<String> _nsfwAcceptedChannels = {};
+  bool get _isNsfwGated => _channel?.nsfw == true && !_nsfwAcceptedChannels.contains(_channel!.publicId);
+
   @override
   void initState() {
     super.initState();
-    _loadChannel();
+    _watchChannel();
   }
 
   @override
   void didUpdateWidget(TextChannelScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.channelPublicId != widget.channelPublicId) {
-      _loadChannel();
+      _initialLoadDone = false;
+      _watchChannel();
       // Clear reply/edit when switching channels
       setState(() {
         _replyMessageId = null;
@@ -62,18 +79,54 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
     }
   }
 
-  // Track which channels have been backfilled this session to avoid redundant fetches
-  static final Set<String> _backfilledChannels = {};
+  @override
+  void dispose() {
+    _channelSub?.cancel();
+    super.dispose();
+  }
 
-  Future<void> _loadChannel() async {
+  static const _backfillInterval = Duration(minutes: 10);
+
+  void _watchChannel() {
+    _channelSub?.cancel();
     final db = ref.read(databaseProvider);
-    final ch = await db.serversDao.getChannelByPublicId(widget.channelPublicId);
-    if (mounted) setState(() => _channel = ch);
+    final query = db.select(db.channels)..where((c) => c.publicId.equals(widget.channelPublicId));
+    _channelSub = query.watchSingleOrNull().listen((ch) {
+      if (!mounted) return;
+      setState(() => _channel = ch);
+      // Run one-time setup only on first emission (or channel switch)
+      if (ch != null && !_initialLoadDone) {
+        _initialLoadDone = true;
+        _onChannelFirstLoad(ch);
+      }
+    });
+  }
 
-    // Only backfill once per channel per session — live subscription handles new messages after that
-    if (ch?.nostrGroupId != null && !_backfilledChannels.contains(ch!.nostrGroupId)) {
-      _backfilledChannels.add(ch.nostrGroupId!);
-      _backfillChannel(ch);
+  Future<void> _onChannelFirstLoad(Channel ch) async {
+    final db = ref.read(databaseProvider);
+
+    // Mark channel as read and set as active (clear DM active)
+    ref.read(activeChannelIdProvider.notifier).state = ch.id;
+    ref.read(activeConversationIdProvider.notifier).state = null;
+    await db.messagesDao.upsertChannelRead(ch.id, localUserId);
+
+    // Load custom emojis for this server
+    final emojis = await (db.select(db.serverEmojis)
+      ..where((e) => e.serverId.equals(ch.serverId)))
+      .get();
+    if (mounted) {
+      setState(() {
+        _customEmojis = {for (final e in emojis) if (e.url != null) e.name: e.url!};
+      });
+    }
+
+    // Backfill only if not recently backfilled (persisted across restarts)
+    if (ch.nostrGroupId != null) {
+      final shouldBackfill = ch.lastBackfilledAt == null ||
+          DateTime.now().difference(ch.lastBackfilledAt!) > _backfillInterval;
+      if (shouldBackfill) {
+        _backfillChannel(ch);
+      }
     }
   }
 
@@ -84,19 +137,25 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
     final auth = ref.read(authServiceProvider);
     final groupMsgSvc = ref.read(groupMessageServiceProvider);
     final dmSvc = DmService(db, pool);
-    final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc);
+    final contentSafety = ContentSafetyService(db);
+    final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc, contentSafety);
     try {
       await backfill.backfillChannel(
         channelGroupId: channel.nostrGroupId!,
         backfillDays: 30,
         privateKeyHex: auth.privateKeyHex,
       );
+      // Stamp last backfill time in DB so we don't re-backfill on restart
+      await (db.update(db.channels)..where((c) => c.id.equals(channel.id)))
+          .write(ChannelsCompanion(lastBackfilledAt: Value(DateTime.now())));
+      // Re-mark as read after backfill (user is viewing, so backfilled messages are "read")
+      await db.messagesDao.upsertChannelRead(channel.id, localUserId);
     } catch (e) {
       debugPrint('[Backfill] Error backfilling ${channel.name}: $e');
     }
   }
 
-  Future<void> _sendMessage(String content) async {
+  Future<void> _sendMessage(String content, {bool spoiler = false, List<String>? fileUrls}) async {
     if (_channel == null) return;
     final authService = ref.read(authServiceProvider);
     if (authService.privateKeyHex == null) return;
@@ -121,6 +180,7 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
         channel: _channel!,
         content: content,
         parentEventId: _replyMessageId,
+        spoiler: spoiler,
       );
     }
 
@@ -171,26 +231,18 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
-    return Column(
+    // Bottom bar: typing + reply/edit + input — measured so messages get matching bottom padding
+    final bottomBar = Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        // Messages
-        Expanded(
-          child: MessageList(
-            channelId: _channel!.id,
-            channel: _channel,
-            onReply: _setReply,
-            onEdit: _setEdit,
-          ),
-        ),
         // Typing indicator
         if (_channel!.nostrGroupId != null)
           Consumer(builder: (context, ref, _) {
             final typingAsync = ref.watch(typingUsersProvider(_channel!.nostrGroupId!));
             return typingAsync.when(
               data: (users) {
-                // Filter out own pubkey
                 final auth = ref.read(authServiceProvider);
                 final others = users.where((u) => u != auth.publicKeyHex).toList();
                 return TypingIndicator(typingUsers: others);
@@ -262,10 +314,15 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
           ),
         // Input
         MessageInput(
+          isActive: widget.isActive,
           onSend: _sendMessage,
+          onSendWithMeta: (content, {spoiler = false, fileUrls}) =>
+              _sendMessage(content, spoiler: spoiler, fileUrls: fileUrls),
           channelName: _channel!.name,
           editContent: _editOriginalContent,
           onEditCancel: _editMessageEventId != null ? _cancelEdit : null,
+          customEmojis: _customEmojis,
+          serverId: _channel!.serverId,
           onUploadFiles: (files) async {
             final auth = ref.read(authServiceProvider);
             if (auth.privateKeyHex == null) return [];
@@ -292,6 +349,58 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
             );
           },
         ),
+      ],
+    );
+
+    return Stack(
+      children: [
+        Column(
+          children: [
+            Expanded(
+              child: MessageList(
+                channelId: _channel!.id,
+                channel: _channel,
+                onReply: _setReply,
+                onEdit: _setEdit,
+              ),
+            ),
+            bottomBar,
+          ],
+        ),
+        // NSFW gate overlay — shown once per channel per session
+        if (_isNsfwGated)
+          Positioned.fill(
+            child: Container(
+              color: c.gray900.withValues(alpha: 0.95),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.warning_amber_rounded, size: 48, color: Colors.red.shade300),
+                    const SizedBox(height: 12),
+                    const Text('NSFW Channel', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Text('This channel may contain content not suitable\nfor all audiences.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: c.gray400, fontSize: 14)),
+                    const SizedBox(height: 20),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: c.accent,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {
+                        setState(() => _nsfwAcceptedChannels.add(_channel!.publicId));
+                      },
+                      child: const Text('I understand, show channel'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
       ],
     );
   }

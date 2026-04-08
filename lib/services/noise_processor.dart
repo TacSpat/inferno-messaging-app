@@ -104,12 +104,13 @@ class _DeepFilterState {
     _            => 80.0,
   };
 
-  /// Extract model asset to app support directory and initialize DeepFilterNet.
+  /// Copy model asset to app support directory and initialize DeepFilterNet.
+  /// df_create reads the .tar.gz directly — no extraction needed.
   Future<void> init(String level) async {
-    final modelDir = await _extractModel();
+    final modelPath = await _ensureModelFile();
     final attenLim = _attenLimForLevel(level);
 
-    final pathPtr = modelDir.toNativeUtf8();
+    final pathPtr = modelPath.toNativeUtf8();
     final logLevelPtr = 'warn'.toNativeUtf8();
 
     try {
@@ -169,54 +170,30 @@ class _DeepFilterState {
     }
   }
 
-  /// Extract the bundled model .tar.gz to application support directory.
-  /// Returns the path to the extracted model directory.
-  Future<String> _extractModel() async {
+  /// Copy the bundled .tar.gz model to app support directory.
+  /// df_create reads the tar.gz directly — no extraction needed.
+  /// Returns the file path to pass to df_create.
+  Future<String> _ensureModelFile() async {
     final appSupport = await getApplicationSupportDirectory();
-    final modelDir = p.join(appSupport.path, 'deepfilter_model');
-    final markerFile = File(p.join(modelDir, '.extracted'));
+    final modelFile = File(p.join(appSupport.path, 'DeepFilterNet3_onnx.tar.gz'));
 
-    // Skip extraction if already done
-    if (await markerFile.exists()) {
-      return modelDir;
+    // Clean up old extracted directory from previous versions
+    final oldDir = Directory(p.join(appSupport.path, 'deepfilter_model'));
+    if (await oldDir.exists()) {
+      await oldDir.delete(recursive: true);
     }
 
-    debugPrint('[DeepFilter] Extracting model to $modelDir');
+    if (await modelFile.exists()) {
+      return modelFile.path;
+    }
 
-    // Load asset bytes
+    debugPrint('[DeepFilter] Copying model to ${modelFile.path}');
     final data = await rootBundle.load(_modelAsset);
-
-    // Decompress gzip
-    final gzBytes = data.buffer.asUint8List(
-      data.offsetInBytes,
-      data.lengthInBytes,
+    await modelFile.writeAsBytes(
+      data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
     );
-    final tarBytes = gzip.decode(gzBytes);
 
-    // Write tar to temp file and extract
-    final dir = Directory(modelDir);
-    if (await dir.exists()) {
-      await dir.delete(recursive: true);
-    }
-    await dir.create(recursive: true);
-
-    final tarFile = File(p.join(appSupport.path, 'deepfilter_model.tar'));
-    await tarFile.writeAsBytes(tarBytes);
-
-    // Extract tar using system tar command
-    final result = await Process.run(
-      'tar',
-      ['xf', tarFile.path, '-C', modelDir, '--strip-components=1'],
-    );
-    if (result.exitCode != 0) {
-      throw Exception('tar extraction failed: ${result.stderr}');
-    }
-    await tarFile.delete();
-
-    // Write marker so we skip extraction next time
-    await markerFile.writeAsString(DateTime.now().toIso8601String());
-
-    debugPrint('[DeepFilter] Model extracted successfully');
-    return modelDir;
+    debugPrint('[DeepFilter] Model ready (${await modelFile.length()} bytes)');
+    return modelFile.path;
   }
 }

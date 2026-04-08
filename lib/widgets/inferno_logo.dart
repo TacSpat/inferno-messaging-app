@@ -1,20 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 
 /// Inferno flame logo.
 /// Uses the multicolor SVG for the inferno theme, mono SVG for all others.
 /// The mono version is tinted with `color` (defaults to white).
-class InfernoLogo extends StatelessWidget {
+class InfernoLogo extends ConsumerWidget {
   final double size;
   final Color? color;
 
   const InfernoLogo({super.key, this.size = 48, this.color});
 
   @override
-  Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>();
-    final isInfernoTheme = c?.accent == const Color(0xFFDC2626); // inferno accent
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.watch(infernoColorsProvider);
+    final isInfernoTheme = c.accent == const Color(0xFFDC2626); // inferno accent
 
     if (isInfernoTheme) {
       // Multicolor logo for inferno theme

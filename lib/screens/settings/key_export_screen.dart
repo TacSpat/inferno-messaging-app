@@ -5,6 +5,7 @@ import '../../providers/auth_provider.dart';
 import '../../crypto/bech32_nostr.dart';
 import '../../crypto/nip49_crypto.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class KeyExportScreen extends ConsumerStatefulWidget {
   const KeyExportScreen({super.key});
@@ -65,7 +66,7 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authServiceProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../database/database.dart';
@@ -10,7 +11,9 @@ import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../providers/conversations_provider.dart';
+import '../providers/unread_provider.dart';
 import '../theme/all_themes.dart';
+import 'context_menu.dart';
 import 'package:livekit_client/livekit_client.dart' show LocalParticipant, Participant;
 
 // Constants matching Rails channel_reorder_controller.js
@@ -45,6 +48,12 @@ class ChannelReorderList extends ConsumerStatefulWidget {
   final InfernoColors colors;
   final Set<String> collapsedCategories;
   final void Function(String catId) onToggleCategory;
+  final void Function(Channel)? onEditChannel;
+  final void Function(Channel)? onDeleteChannel;
+  final void Function(Category)? onEditCategory;
+  final void Function(Category)? onDeleteCategory;
+  final void Function(Category? category, {int? position})? onCreateChannel;
+  final void Function({int? position})? onCreateCategory;
 
   const ChannelReorderList({
     super.key,
@@ -55,6 +64,12 @@ class ChannelReorderList extends ConsumerStatefulWidget {
     required this.colors,
     required this.collapsedCategories,
     required this.onToggleCategory,
+    this.onEditChannel,
+    this.onDeleteChannel,
+    this.onEditCategory,
+    this.onDeleteCategory,
+    this.onCreateChannel,
+    this.onCreateCategory,
   });
 
   @override
@@ -73,41 +88,9 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
   Timer? _saveTimer;
   Timer? _scrollTimer;
 
-  // Unread channel tracking
-  Set<int> _unreadChannelIds = {};
-
   @override
   void initState() {
     super.initState();
-    _checkUnreads();
-  }
-
-  Future<void> _checkUnreads() async {
-    final db = ref.read(databaseProvider);
-    final unreads = <int>{};
-    for (final ch in widget.channels) {
-      if (ch.channelType == 1) continue; // Skip voice channels
-      // Check if there are messages newer than last read
-      final reads = await (db.select(db.channelReads)
-            ..where((r) => r.channelId.equals(ch.id))
-            ..limit(1))
-          .get();
-      final lastRead = reads.isNotEmpty ? reads.first.lastReadAt : null;
-      if (lastRead == null) {
-        // Never read — check if has any messages
-        final count = await (db.select(db.messages)..where((m) => m.channelId.equals(ch.id))..limit(1)).get();
-        if (count.isNotEmpty) unreads.add(ch.id);
-      } else {
-        final newer = await (db.select(db.messages)
-              ..where((m) => m.channelId.equals(ch.id) & m.createdAt.isBiggerThanValue(lastRead))
-              ..limit(1))
-            .get();
-        if (newer.isNotEmpty) unreads.add(ch.id);
-      }
-    }
-    if (mounted && unreads != _unreadChannelIds) {
-      setState(() => _unreadChannelIds = unreads);
-    }
   }
 
   @override
@@ -391,7 +374,10 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
       onPointerUp: _onPointerUp,
       child: Stack(
         children: [
-          ListView.builder(
+          GestureDetector(
+            onSecondaryTapUp: (details) => _showSidebarContextMenu(details.globalPosition, details.localPosition, items),
+            behavior: HitTestBehavior.translucent,
+            child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
             itemCount: items.length,
@@ -422,7 +408,7 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
                 ],
               );
             },
-          ),
+          )),
           // Drop line at end
           if (_dragState == 'dragging' && _dropIndex == items.length)
             Positioned(
@@ -461,6 +447,56 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
     );
   }
 
+  /// Right-click on sidebar blank space — "Create Channel" + "Create Category" with position context.
+  /// Matches Rails channel_sidebar_controller.js _handleContextMenu().
+  void _showSidebarContextMenu(Offset globalPos, Offset localPos, List<_TreeItem> items) {
+    if (widget.onCreateChannel == null && widget.onCreateCategory == null) return;
+
+    // Calculate insertion point from click position (matching Rails _getInsertionPoint)
+    final scrollOffset = _scrollController.offset;
+    final y = localPos.dy + scrollOffset;
+    const itemHeight = 34.0;
+    const catHeight = 36.0;
+    double accumulatedY = 8; // top padding
+
+    int? categoryId;
+    int position = 0;
+    int categoryPosition = 0;
+
+    for (final item in items) {
+      final h = item.isCategory ? catHeight : itemHeight;
+      if (accumulatedY + h > y) break;
+      accumulatedY += h;
+
+      if (item.isCategory) {
+        categoryId = item.category!.id;
+        categoryPosition = (item.category!.position ?? 0) + 1;
+        position = 0; // reset for channels within new category
+      } else if (item.channel != null) {
+        position = (item.channel!.position ?? 0) + 1;
+        categoryId = item.channel!.categoryId;
+      }
+    }
+
+    showStyledMenu(
+      context: context,
+      position: globalPos,
+      items: [
+        if (widget.onCreateChannel != null)
+          CtxItem('Create Channel', Icons.add, () {
+            final cat = categoryId != null
+                ? widget.categories.cast<Category?>().firstWhere((c) => c!.id == categoryId, orElse: () => null)
+                : null;
+            widget.onCreateChannel!(cat, position: position);
+          }),
+        if (widget.onCreateCategory != null)
+          CtxItem('Create Category', Icons.create_new_folder_outlined, () {
+            widget.onCreateCategory!(position: categoryPosition);
+          }),
+      ],
+    );
+  }
+
   Widget _buildCategoryItem(_TreeItem item, InfernoColors c) {
     final cat = item.category!;
     final isCollapsed = widget.collapsedCategories.contains(cat.publicId);
@@ -472,6 +508,10 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
         colors: c,
         isCollapsed: isCollapsed,
         onToggle: () => widget.onToggleCategory(cat.publicId),
+        onEdit: widget.onEditCategory != null ? () => widget.onEditCategory!(cat) : null,
+        onDelete: widget.onDeleteCategory != null ? () => widget.onDeleteCategory!(cat) : null,
+        onCreateChannel: widget.onCreateChannel != null ? () => widget.onCreateChannel!(cat) : null,
+        onCreateCategory: widget.onCreateCategory,
       ),
     );
   }
@@ -507,8 +547,9 @@ class _ChannelReorderListState extends ConsumerState<ChannelReorderList> {
             depth: item.depth,
             isVoice: isVoice,
             isAfk: isAfk,
-            hasUnread: _unreadChannelIds.contains(ch.id),
             colors: c,
+            onEdit: widget.onEditChannel != null ? () => widget.onEditChannel!(ch) : null,
+            onDelete: widget.onDeleteChannel != null ? () => widget.onDeleteChannel!(ch) : null,
           ),
           // Voice channels show a "No one connected" placeholder or participants
           if (isVoice && !isNested)
@@ -568,8 +609,12 @@ class _CategoryHeaderWidget extends StatefulWidget {
   final InfernoColors colors;
   final bool isCollapsed;
   final VoidCallback onToggle;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final VoidCallback? onCreateChannel;
+  final void Function({int? position})? onCreateCategory;
 
-  const _CategoryHeaderWidget({required this.name, required this.colors, required this.isCollapsed, required this.onToggle});
+  const _CategoryHeaderWidget({required this.name, required this.colors, required this.isCollapsed, required this.onToggle, this.onEdit, this.onDelete, this.onCreateChannel, this.onCreateCategory});
 
   @override
   State<_CategoryHeaderWidget> createState() => _CategoryHeaderWidgetState();
@@ -586,6 +631,25 @@ class _CategoryHeaderWidgetState extends State<_CategoryHeaderWidget> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: widget.onToggle,
+        onSecondaryTapUp: (details) {
+          if (widget.onEdit == null && widget.onDelete == null && widget.onCreateChannel == null && widget.onCreateCategory == null) return;
+          showStyledMenu(
+            context: context,
+            position: details.globalPosition,
+            items: [
+              if (widget.onCreateChannel != null)
+                CtxItem('Create Channel', Icons.add, widget.onCreateChannel!),
+              if (widget.onCreateCategory != null)
+                CtxItem('Create Category', Icons.create_new_folder_outlined, () => widget.onCreateCategory!()),
+              if (widget.onEdit != null || widget.onDelete != null)
+                CtxDivider(),
+              if (widget.onEdit != null)
+                CtxItem('Edit Category', Icons.edit_outlined, widget.onEdit!),
+              if (widget.onDelete != null)
+                CtxItem('Delete Category', Icons.delete_outline, widget.onDelete!, danger: true),
+            ],
+          );
+        },
         child: Padding(
           padding: const EdgeInsets.only(top: 16, bottom: 4, left: 4, right: 4),
           child: Row(
@@ -603,7 +667,12 @@ class _CategoryHeaderWidgetState extends State<_CategoryHeaderWidget> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (_hovering)
+              if (_hovering && widget.onCreateChannel != null)
+                GestureDetector(
+                  onTap: widget.onCreateChannel,
+                  child: Icon(Icons.add, size: 14, color: widget.colors.gray500),
+                ),
+              if (_hovering && widget.onCreateChannel == null)
                 Icon(Icons.add, size: 14, color: widget.colors.gray500),
             ],
           ),
@@ -622,8 +691,9 @@ class _ChannelItemWidget extends ConsumerStatefulWidget {
   final int depth;
   final bool isVoice;
   final bool isAfk;
-  final bool hasUnread;
   final InfernoColors colors;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
   const _ChannelItemWidget({
     required this.channel,
@@ -633,8 +703,9 @@ class _ChannelItemWidget extends ConsumerStatefulWidget {
     required this.depth,
     this.isVoice = false,
     this.isAfk = false,
-    this.hasUnread = false,
     required this.colors,
+    this.onEdit,
+    this.onDelete,
   });
 
   @override
@@ -650,7 +721,9 @@ class _ChannelItemWidgetState extends ConsumerState<_ChannelItemWidget> {
     final active = widget.isActive;
     final isNested = widget.depth > 0;
 
-    final hasUnread = widget.hasUnread && !active;
+    // Reactive unread from provider (skip voice channels)
+    final unreadAsync = widget.isVoice ? null : ref.watch(channelUnreadCountProvider(widget.channel.id));
+    final hasUnread = !active && (unreadAsync?.valueOrNull ?? 0) > 0;
 
     // Build the channel row — matches Rails: solid left accent border + gradient fill
     final channelRow = AnimatedContainer(
@@ -739,6 +812,27 @@ class _ChannelItemWidgetState extends ConsumerState<_ChannelItemWidget> {
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
         onTap: () => context.go('/servers/${widget.serverId}/channels/${widget.channel.publicId}'),
+        onSecondaryTapUp: (details) {
+          showStyledMenu(
+            context: context,
+            position: details.globalPosition,
+            items: [
+              CtxItem('Mark as Read', Icons.done_all, () {
+                final db = ref.read(databaseProvider);
+                db.messagesDao.upsertChannelRead(widget.channel.id, 0);
+              }),
+              CtxItem('Copy Channel ID', Icons.copy, () {
+                Clipboard.setData(ClipboardData(text: widget.channel.publicId));
+              }),
+              if (widget.onEdit != null || widget.onDelete != null)
+                CtxDivider(),
+              if (widget.onEdit != null)
+                CtxItem('Edit Channel', Icons.edit_outlined, widget.onEdit!),
+              if (widget.onDelete != null)
+                CtxItem('Delete Channel', Icons.delete_outline, widget.onDelete!, danger: true),
+            ],
+          );
+        },
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 1),
           child: result,

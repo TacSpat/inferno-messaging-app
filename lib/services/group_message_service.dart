@@ -21,6 +21,7 @@ class GroupMessageService {
     required Channel channel,
     required String content,
     String? parentEventId,
+    bool spoiler = false,
   }) async {
     final tags = <List<String>>[
       ['h', channel.nostrGroupId ?? ''],
@@ -30,6 +31,15 @@ class GroupMessageService {
     if (parentEventId != null) {
       tags.add(['e', parentEventId, 'wss://relay.damus.io', 'reply']);
     }
+
+    // Spoiler tag (matching Rails NostrGroupPublishJob)
+    if (spoiler) {
+      tags.add(['spoiler']);
+    }
+
+    // Extract @mention p-tags
+    final mentionTags = await _extractMentionTags(content, channel.serverId);
+    tags.addAll(mentionTags);
 
     String eventContent = content;
 
@@ -60,6 +70,7 @@ class GroupMessageService {
         publicId: publicId,
         content: Value(content),
         channelId: Value(channel.id),
+        spoiler: Value(spoiler),
         nostrAuthorPubkey: Value(publicKeyHex),
         nostrEventId: Value(signed.id),
         nostrEventJson: Value(json.encode(signed.toJson())),
@@ -265,5 +276,55 @@ class GroupMessageService {
 
     await (_db.update(_db.messages)..where((m) => m.id.equals(message.id)))
         .write(MessagesCompanion(pinned: Value(newPinned), updatedAt: Value(DateTime.now())));
+  }
+
+  static final _atMentionRegex = RegExp(r'(?:^|\s)@(\w+)');
+
+  /// Extract Nostr p-tags for @mentioned users and roles in content
+  Future<List<List<String>>> _extractMentionTags(String content, int serverId) async {
+    final matches = _atMentionRegex.allMatches(content);
+    if (matches.isEmpty) return [];
+
+    final members = await (_db.select(_db.remoteMembers)
+          ..where((m) => m.serverId.equals(serverId)))
+        .get();
+    final roles = await (_db.select(_db.roles)
+          ..where((r) => r.serverId.equals(serverId)))
+        .get();
+
+    final tags = <List<String>>[];
+    final seen = <String>{};
+    for (final match in matches) {
+      final username = match.group(1)!.toLowerCase();
+      // Skip special mentions
+      if (username == 'everyone' || username == 'here') continue;
+
+      // Check if it's a role mention
+      final role = roles.where((r) => r.name?.toLowerCase() == username).firstOrNull;
+      if (role != null) {
+        // Find all members with this role and add p-tags for each
+        final memberRoles = await (_db.select(_db.remoteMembershipRoles)
+              ..where((mr) => mr.roleId.equals(role.id)))
+            .get();
+        for (final mr in memberRoles) {
+          final member = members.where((m) => m.id == mr.remoteMemberId).firstOrNull;
+          if (member != null && !seen.contains(member.pubkey)) {
+            tags.add(['p', member.pubkey]);
+            seen.add(member.pubkey);
+          }
+        }
+        continue;
+      }
+
+      // Find member by username or display name
+      final member = members.where((m) =>
+          (m.username?.toLowerCase() == username) ||
+          (m.displayName?.toLowerCase() == username)).firstOrNull;
+      if (member != null && !seen.contains(member.pubkey)) {
+        tags.add(['p', member.pubkey]);
+        seen.add(member.pubkey);
+      }
+    }
+    return tags;
   }
 }

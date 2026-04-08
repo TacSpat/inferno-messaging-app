@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import '../database/database.dart';
-import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends ConsumerWidget {
   final Message message;
   final bool isOwn;
 
   const MessageBubble({super.key, required this.message, required this.isOwn});
 
   @override
-  Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.watch(infernoColorsProvider);
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),

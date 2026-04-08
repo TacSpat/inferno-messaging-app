@@ -220,16 +220,29 @@ class InfernoThemes {
     );
   }
 
+  static final Map<String, ThemeData> _cache = {};
+
   static ThemeData forName(String name) {
-    switch (name) {
-      case 'frostfire': return frostfire();
-      case 'boron': return boron();
-      case 'brimstone': return brimstone();
-      case 'plasma': return plasma();
-      case 'pulsar': return pulsar();
-      case 'obsidian': return obsidian();
-      default: return inferno();
-    }
+    return _cache.putIfAbsent(name, () {
+      switch (name) {
+        case 'frostfire': return frostfire();
+        case 'boron': return boron();
+        case 'brimstone': return brimstone();
+        case 'plasma': return plasma();
+        case 'pulsar': return pulsar();
+        case 'obsidian': return obsidian();
+        default: return inferno();
+      }
+    });
+  }
+
+  /// Returns just the InfernoColors for a theme name — used by infernoColorsProvider.
+  static final Map<String, InfernoColors> _colorsCache = {};
+
+  static InfernoColors colorsForName(String name) {
+    return _colorsCache.putIfAbsent(name, () {
+      return forName(name).extension<InfernoColors>()!;
+    });
   }
 
   static const themeNames = ['inferno', 'frostfire', 'boron', 'brimstone', 'plasma', 'pulsar', 'obsidian'];

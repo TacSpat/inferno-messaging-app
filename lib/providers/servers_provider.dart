@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
 import '../services/server_sync_service.dart';
 import '../services/server_publish_service.dart';
+import '../services/relay_config_service.dart';
 import '../services/group_message_service.dart';
 import '../services/invite_service.dart';
 import 'auth_provider.dart';
@@ -16,7 +17,7 @@ final serverSyncServiceProvider = Provider<ServerSyncService>((ref) {
 final serverPublishServiceProvider = Provider<ServerPublishService>((ref) {
   final db = ref.watch(databaseProvider);
   final pool = ref.watch(relayPoolProvider);
-  return ServerPublishService(db, pool);
+  return ServerPublishService(db, pool, RelayConfigService(db));
 });
 
 final groupMessageServiceProvider = Provider<GroupMessageService>((ref) {

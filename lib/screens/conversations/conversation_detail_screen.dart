@@ -1,20 +1,24 @@
 import 'dart:io';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/conversations_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
 import '../../providers/realtime_provider.dart';
+import '../../providers/unread_provider.dart';
 import '../../database/database.dart';
 import '../../widgets/message_list.dart';
 import '../../widgets/message_input.dart';
 import '../../widgets/typing_indicator.dart';
 import '../../services/backfill_service.dart';
 import '../../services/blossom_client.dart';
+import '../../services/content_safety_service.dart';
 import '../../services/dm_service.dart';
 import '../../services/group_message_service.dart';
 import '../../services/presence_service.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class ConversationDetailScreen extends ConsumerStatefulWidget {
   final String conversationPublicId;
@@ -49,8 +53,19 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
         .getSingleOrNull();
     if (mounted) setState(() => _conversation = conv);
 
+    // Mark conversation as read and set as active (clear channel active)
+    if (conv != null) {
+      ref.read(activeConversationIdProvider.notifier).state = conv.id;
+      ref.read(activeChannelIdProvider.notifier).state = null;
+      await db.messagesDao.markConversationRead(conv.id);
+    }
+
     if (conv?.counterpartyPubkey != null) {
-      _backfillConversation(conv!);
+      final shouldBackfill = conv!.lastBackfilledAt == null ||
+          DateTime.now().difference(conv.lastBackfilledAt!) > const Duration(minutes: 10);
+      if (shouldBackfill) {
+        _backfillConversation(conv);
+      }
     }
   }
 
@@ -63,13 +78,19 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       final pool = ref.read(relayPoolProvider);
       final groupMsgSvc = GroupMessageService(db, pool);
       final dmSvc = DmService(db, pool);
-      final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc);
+      final contentSafety = ContentSafetyService(db);
+      final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc, contentSafety);
       await backfill.backfillConversation(
         ownPubkey: auth.publicKeyHex!,
         counterpartyPubkey: conv.counterpartyPubkey!,
         backfillDays: 30,
         privateKeyHex: auth.privateKeyHex!,
       );
+      // Stamp last backfill time in DB so we don't re-backfill on restart
+      await (db.update(db.conversations)..where((c) => c.id.equals(conv.id)))
+          .write(ConversationsCompanion(lastBackfilledAt: Value(DateTime.now())));
+      // Re-mark as read after backfill (user is viewing)
+      await db.messagesDao.markConversationRead(conv.id);
     } catch (_) {}
   }
 
@@ -79,7 +100,7 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
     super.dispose();
   }
 
-  Future<void> _sendMessage(String content) async {
+  Future<void> _sendMessage(String content, {bool spoiler = false, List<String>? fileUrls}) async {
     if (_conversation == null) return;
     final counterpartyPubkey = _conversation!.counterpartyPubkey;
     if (counterpartyPubkey == null) return;
@@ -94,6 +115,8 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       publicKeyHex: authService.publicKeyHex!,
       recipientPubkey: counterpartyPubkey,
       content: content,
+      fileUrls: fileUrls,
+      spoiler: spoiler,
     );
   }
 
@@ -103,7 +126,7 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       return const Center(child: CircularProgressIndicator());
     }
 
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
     final presenceSvc = ref.watch(presenceServiceProvider);
     ref.watch(presenceUpdatesProvider); // Trigger rebuild on presence changes
 
@@ -172,6 +195,8 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
         // Input with file upload
         MessageInput(
           onSend: _sendMessage,
+          onSendWithMeta: (content, {spoiler = false, fileUrls}) =>
+              _sendMessage(content, spoiler: spoiler, fileUrls: fileUrls),
           recipientName: name,
           onUploadFiles: (files) async {
             final auth = ref.read(authServiceProvider);

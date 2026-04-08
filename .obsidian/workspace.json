@@ -1,0 +1,233 @@
+{
+  "main": {
+    "id": "282292cd44fa5bfa",
+    "type": "split",
+    "children": [
+      {
+        "id": "957529b9243bc00d",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c9fd122b474c5612",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "TODO.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "TODO"
+            }
+          },
+          {
+            "id": "2b7702360017fdde",
+            "type": "leaf",
+            "state": {
+              "type": "release-notes",
+              "state": {
+                "currentVersion": "1.12.7"
+              },
+              "icon": "lucide-book-up",
+              "title": "Release Notes 1.12.7"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "2201e5461b20a13f",
+    "type": "split",
+    "children": [
+      {
+        "id": "d6d23029b8146831",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "33cbcf61d421c6fb",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "e14518688ddb72cb",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "c2687239b2da0bef",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "52ea4e291db12fcc",
+    "type": "split",
+    "children": [
+      {
+        "id": "aa6cc72b8ddd9fd3",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "54dff087296ead26",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "TODO.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for TODO"
+            }
+          },
+          {
+            "id": "9a883376faad9dce",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "TODO.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from TODO"
+            }
+          },
+          {
+            "id": "59ba0dea6c85bda1",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "3d5b5178c8b3ea45",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "fd636c535e088bde",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "TODO.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of TODO"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "c9fd122b474c5612",
+  "lastOpenFiles": [
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_peerconnection.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_webrtc.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_media_stream.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_secure_storage_linux/CMakeFiles/flutter_secure_storage_linux_plugin.dir/flutter_secure_storage_linux_plugin.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_frame_cryptor.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_screen_capture.cc.o.d",
+    "build/linux/x64/release/plugins/livekit_client/CMakeFiles/livekit_client_plugin.dir/livekit_plugin.cpp.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_video_renderer.cc.o.d",
+    "build/linux/x64/release/plugins/volume_controller/CMakeFiles/volume_controller_plugin.dir/volume_controller_plugin.cc.o.d",
+    "build/linux/x64/release/plugins/volume_controller/CMakeFiles/volume_controller_plugin.dir/volume_controller.cc.o.d",
+    "build/linux/x64/release/plugins/flutter_webrtc/CMakeFiles/flutter_webrtc_plugin.dir/__/common/cpp/src/flutter_webrtc_base.cc.o.d",
+    "build/linux/x64/debug/bundle/data/flutter_assets/assets/icons/inferno_mono.svg",
+    "build/linux/x64/debug/bundle/data/flutter_assets/assets/icons/inferno_icon.png",
+    "build/linux/x64/debug/bundle/data/flutter_assets/assets/icons/inferno_color.svg",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/test/readme.md",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/src/prim/windows/readme.md",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/src/prim/readme.md",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/readme.md",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/search/search_r.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/search/search_m.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/search/search_l.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/search/mag_sel.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/search/close.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/tab_s.png",
+    "build/linux/x64/debug/mimalloc/mimalloc-2.1.2/docs/tab_h.png",
+    "build/linux/x64/debug/_deps/ex-sqlite3-populate1234/sqlite-autoconf-3520000/autosetup/README.md",
+    "build/linux/x64/release/mimalloc/mimalloc-2.1.2/test/readme.md",
+    "build/linux/x64/release/mimalloc/mimalloc-2.1.2/src/prim/windows/readme.md",
+    "build/linux/x64/release/mimalloc/mimalloc-2.1.2/src/prim/readme.md",
+    "build/linux/x64/release/mimalloc/mimalloc-2.1.2/readme.md",
+    "build/linux/x64/release/_deps/ex-sqlite3-populate1234/sqlite-autoconf-3520000/autosetup/README.md",
+    "README.md"
+  ]
+}

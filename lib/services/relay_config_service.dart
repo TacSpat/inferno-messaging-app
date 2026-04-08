@@ -128,6 +128,7 @@ class RelayConfigService {
     int? channelId,
     int? serverId,
     int? messageId,
+    DateTime? eventCreatedAt,
   }) async {
     await _db.into(_db.nostrEventLogs).insert(
       NostrEventLogsCompanion.insert(
@@ -138,10 +139,11 @@ class RelayConfigService {
         channelId: Value(channelId),
         serverId: Value(serverId),
         messageId: Value(messageId),
-        eventCreatedAt: Value(DateTime.now()),
+        eventCreatedAt: Value(eventCreatedAt ?? DateTime.now()),
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       ),
+      onConflict: DoNothing(),
     );
   }
 
