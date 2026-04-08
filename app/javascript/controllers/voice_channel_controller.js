@@ -42,6 +42,7 @@ export default class extends Controller {
     this.currentServerId = null
     this.voiceStateId = null
     this.currentProviderId = null
+    this._tokenRefreshTimer = null
     this._muted = false
     this._deafened = false
     this._screenSharing = false
@@ -357,6 +358,91 @@ export default class extends Controller {
     }
   }
 
+  // Schedule token renewal 30 minutes before the JWT expires.
+  // Requests a new token from the backend and reconnects seamlessly.
+  _scheduleTokenRefresh(token, serverId, channelId) {
+    if (this._tokenRefreshTimer) clearTimeout(this._tokenRefreshTimer)
+    this._currentToken = token
+    try {
+      const parts = token.split(".")
+      if (parts.length !== 3) return
+      const payload = JSON.parse(atob(parts[1]))
+      const exp = payload.exp
+      if (!exp) return
+
+      this._tokenExpiresAt = exp * 1000
+      const renewAt = this._tokenExpiresAt - (30 * 60 * 1000) // 30 min before expiry
+      const delay = renewAt - Date.now()
+
+      if (delay <= 0) {
+        console.warn("[VoiceChannel] Token already near expiry, renewing now")
+        this._renewToken(serverId, channelId)
+        return
+      }
+
+      const delayMin = Math.round(delay / 60000)
+      console.log(`[VoiceChannel] Token renewal scheduled in ${delayMin}m`)
+      this._tokenRefreshTimer = setTimeout(() => this._renewToken(serverId, channelId), delay)
+    } catch (e) {
+      console.warn("[VoiceChannel] Could not parse token expiry:", e)
+    }
+  }
+
+  async _renewToken(serverId, channelId) {
+    if (!this.room) return
+
+    // Skip renewal if token still has >30 min left
+    if (this._tokenExpiresAt && (this._tokenExpiresAt - Date.now()) > 30 * 60 * 1000) {
+      console.log("[VoiceChannel] Token still valid, skipping renewal")
+      this._scheduleTokenRefresh(this._currentToken, serverId, channelId)
+      return
+    }
+
+    console.log("[VoiceChannel] Token expiring, requesting renewal...")
+    try {
+      const csrfToken = document.querySelector("meta[name='csrf-token']")?.content
+      const response = await fetch(`/servers/${serverId}/voice/join/${channelId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        credentials: "same-origin"
+      })
+      if (!response.ok) {
+        console.error("[VoiceChannel] Token renewal request failed:", response.status)
+        return
+      }
+      const data = await response.json()
+      if (!data.token || !data.livekit_url) {
+        console.error("[VoiceChannel] Invalid renewal response")
+        return
+      }
+
+      // Disconnect and reconnect with new token
+      const wasMuted = this._muted
+      const wasDeafened = this._deafened
+      this.room.disconnect()
+
+      this.room = new Room({
+        adaptiveStream: true,
+        dynacast: true,
+        audioCaptureDefaults: this._audioCaptureOptions()
+      })
+      this._setupRoomEvents()
+      await this.room.connect(data.livekit_url, data.token)
+
+      // Restore audio state
+      if (!wasMuted) {
+        await this.room.localParticipant.setMicrophoneEnabled(true, this._audioCaptureOptions())
+      }
+      if (wasDeafened) this._deafened = true
+
+      await this._syncNoiseProcessor()
+      this._scheduleTokenRefresh(data.token, serverId, channelId)
+      console.log("[VoiceChannel] Token renewed, reconnected")
+    } catch (e) {
+      console.error("[VoiceChannel] Token renewal failed:", e)
+    }
+  }
+
   // Attach or detach the RNNoise processor based on stored preference.
   // When the suppression level changes, we tear down and rebuild the processor
   // so the new high-pass / gate settings take effect.
@@ -560,6 +646,9 @@ export default class extends Controller {
     // Persist session for reconnect on refresh
     this._saveSession()
 
+    // Schedule token renewal 30 minutes before expiry
+    this._scheduleTokenRefresh(data.token, serverId, channelId)
+
     // Show controls bar
     this._showControlsBar(data.channel_name || "Voice")
     this._updateVoicePanelStatus("connected")
@@ -576,6 +665,10 @@ export default class extends Controller {
     this._stopLevelLoop()
     this._cleanupLocalLevelMeter()
     this._noiseProcessor = null
+    if (this._tokenRefreshTimer) {
+      clearTimeout(this._tokenRefreshTimer)
+      this._tokenRefreshTimer = null
+    }
 
     // Clear persisted session — explicit disconnect should not auto-rejoin
     this._clearSession()

@@ -9,6 +9,7 @@ import '../../providers/auth_provider.dart';
 import '../../database/database.dart';
 import '../../providers/database_provider.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 import '../../providers/realtime_provider.dart';
 import '../../services/presence_service.dart';
 import '../../nostr/nostr_filter.dart';
@@ -29,7 +30,7 @@ class _ConversationsListScreenState extends ConsumerState<ConversationsListScree
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Material(
       color: c.gray700,

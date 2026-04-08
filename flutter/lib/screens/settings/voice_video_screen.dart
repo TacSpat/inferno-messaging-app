@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class VoiceVideoScreen extends ConsumerStatefulWidget {
   const VoiceVideoScreen({super.key});
@@ -77,7 +78,7 @@ class _VoiceVideoScreenState extends ConsumerState<VoiceVideoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),

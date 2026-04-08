@@ -2,19 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 import '../../providers/auth_provider.dart';
 import 'profile_screen.dart';
 import 'appearance_screen.dart';
 import 'relays_screen.dart';
 import 'storage_screen.dart';
 import 'key_export_screen.dart';
+import 'update_screen.dart';
 
 class SettingsHubScreen extends ConsumerWidget {
   const SettingsHubScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Column(
       children: [
@@ -61,6 +63,8 @@ class SettingsHubScreen extends ConsumerWidget {
                 onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StorageScreen()))),
               _SettingsItem(icon: Icons.shield_outlined, title: 'Safety', subtitle: 'Content filters, blocking', colors: c,
                 onTap: () {}),
+              _SettingsItem(icon: Icons.system_update, title: 'Updates', subtitle: 'Check for new versions', colors: c,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UpdateScreen()))),
               const SizedBox(height: 8),
               _SectionLabel('ACCOUNT', c),
               _SettingsItem(icon: Icons.key, title: 'Key Export', subtitle: 'Backup your Nostr identity', colors: c,

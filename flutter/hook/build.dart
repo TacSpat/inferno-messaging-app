@@ -20,13 +20,34 @@ void main(List<String> args) async {
 
     final packageRoot = input.packageRoot;
 
-    // Check for prebuilt library first (CI or manual build)
+    // ── DeepFilterNet ──
     final prebuilt = _findPrebuilt(packageRoot, input.config.code.targetOS);
     if (prebuilt != null) {
-      _registerAsset(output, input, prebuilt);
+      _registerAsset(output, input, prebuilt, 'src/deepfilter_bindings.dart');
       stderr.writeln('[hook/build.dart] Using prebuilt DeepFilterNet: $prebuilt');
-      return;
     }
+
+    // ── NSFW Bridge (ONNX Runtime) ──
+    final nsfwLib = _findNsfwBridge(packageRoot, input.config.code.targetOS);
+    if (nsfwLib != null) {
+      // Also bundle the ONNX Runtime shared library (transitive dependency).
+      // libnsfw_bridge.so has RPATH=$ORIGIN so it finds libonnxruntime in the same dir.
+      final ortLib = _findOnnxRuntime(packageRoot, input.config.code.targetOS);
+      if (ortLib != null) {
+        _registerAsset(output, input, ortLib, 'src/onnxruntime_lib.dart');
+        stderr.writeln('[hook/build.dart] Bundling ONNX Runtime: $ortLib');
+      }
+
+      _registerAsset(output, input, nsfwLib, 'src/onnxruntime_bindings.dart');
+      stderr.writeln('[hook/build.dart] Using prebuilt NSFW bridge: $nsfwLib');
+    } else {
+      stderr.writeln(
+        '[hook/build.dart] NSFW bridge not found.\n'
+        'NSFW detection disabled. To enable: place libnsfw_bridge.so in native/onnxruntime/',
+      );
+    }
+
+    if (prebuilt != null) return; // skip source build if prebuilt found
 
     // Try to build from source
     final srcDir = _findSource(packageRoot);
@@ -83,23 +104,55 @@ void main(List<String> args) async {
       await Process.run('strip', ['--strip-unneeded', outFile.path]);
     }
 
-    _registerAsset(output, input, outFile);
+    _registerAsset(output, input, outFile, 'src/deepfilter_bindings.dart');
     stderr.writeln('[hook/build.dart] DeepFilterNet built: ${outFile.path}');
   });
 }
 
 /// Register the native library as a code asset.
-void _registerAsset(BuildOutputBuilder output, BuildInput input, File lib) {
+void _registerAsset(BuildOutputBuilder output, BuildInput input, File lib, String assetName) {
   output.assets.code.add(
     CodeAsset(
       package: input.packageName,
-      name: 'src/deepfilter_bindings.dart',
+      name: assetName,
       file: lib.uri,
       linkMode: DynamicLoadingBundled(),
     ),
   );
   output.addDependency(lib.uri);
 }
+
+/// Look for prebuilt ONNX Runtime shared library in native/onnxruntime/
+File? _findOnnxRuntime(Uri packageRoot, OS os) {
+  final name = _ortLibName(os);
+  final lib = File.fromUri(packageRoot.resolve('native/onnxruntime/$name'));
+  return lib.existsSync() ? lib : null;
+}
+
+String _ortLibName(OS os) => switch (os) {
+  OS.linux   => 'libonnxruntime.so.1',
+  OS.macOS   => 'libonnxruntime.dylib',
+  OS.windows => 'onnxruntime.dll',
+  OS.android => 'libonnxruntime.so',
+  OS.iOS     => 'libonnxruntime.dylib',
+  _          => 'libonnxruntime.so.1',
+};
+
+/// Look for prebuilt NSFW bridge library in native/onnxruntime/
+File? _findNsfwBridge(Uri packageRoot, OS os) {
+  final name = _nsfwLibName(os);
+  final prebuilt = File.fromUri(packageRoot.resolve('native/onnxruntime/$name'));
+  return prebuilt.existsSync() ? prebuilt : null;
+}
+
+String _nsfwLibName(OS os) => switch (os) {
+  OS.linux   => 'libnsfw_bridge.so',
+  OS.macOS   => 'libnsfw_bridge.dylib',
+  OS.windows => 'nsfw_bridge.dll',
+  OS.android => 'libnsfw_bridge.so',
+  OS.iOS     => 'libnsfw_bridge.dylib',
+  _          => 'libnsfw_bridge.so',
+};
 
 /// Look for a prebuilt library in native/deepfilter/
 File? _findPrebuilt(Uri packageRoot, OS os) {

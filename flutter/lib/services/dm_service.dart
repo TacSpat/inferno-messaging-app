@@ -44,14 +44,16 @@ class DmService {
     required String recipientPubkey,
     required String content,
     List<String>? fileUrls,
+    bool spoiler = false,
   }) async {
-    // Build payload — structured JSON if files, plain text otherwise
+    // Build payload — structured JSON if files or spoiler, plain text otherwise
     String payload;
-    if (fileUrls != null && fileUrls.isNotEmpty) {
+    if ((fileUrls != null && fileUrls.isNotEmpty) || spoiler) {
       payload = json.encode({
         'type': 'message',
         'content': content,
-        'files': fileUrls,
+        if (fileUrls != null && fileUrls.isNotEmpty) 'files': fileUrls,
+        if (spoiler) 'spoiler': true,
       });
     } else {
       payload = content;
@@ -175,6 +177,13 @@ class DmService {
       }
     }
 
+    // Any parsed JSON with a type that isn't 'message' is a system DM — drop it.
+    // This catches unknown system types and prevents them from being stored as
+    // visible messages (e.g. voice handshakes with non-friend providers).
+    if (parsed != null && parsed['type'] != null && parsed['type'] != 'message') {
+      return;
+    }
+
     // Regular message
     final content = parsed != null && parsed['type'] == 'message'
         ? parsed['content'] as String? ?? ''
@@ -182,6 +191,7 @@ class DmService {
     final fileUrls = parsed != null && parsed['files'] is List
         ? json.encode(parsed['files'])
         : null;
+    final isSpoiler = parsed != null && parsed['spoiler'] == true;
 
     // Dedup: skip if we already have this message
     if (event.id != null) {
@@ -205,6 +215,7 @@ class DmService {
         publicId: publicId,
         content: Value(content),
         conversationId: Value(conversation.id),
+        spoiler: Value(isSpoiler),
         nostrAuthorPubkey: Value(senderPubkey),
         nostrEventId: Value(event.id),
         nostrEventJson: Value(json.encode(event.toJson())),

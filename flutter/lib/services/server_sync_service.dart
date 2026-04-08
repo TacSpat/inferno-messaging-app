@@ -5,12 +5,26 @@ import '../crypto/nostr_event.dart' as nostr;
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
 import '../nostr/nostr_filter.dart';
+import 'relay_config_service.dart';
 
 class ServerSyncService {
   final InfernoDatabase _db;
   final RelayPool _relayPool;
+  late final RelayConfigService _relayConfig;
 
-  ServerSyncService(this._db, this._relayPool);
+  ServerSyncService(this._db, this._relayPool) {
+    _relayConfig = RelayConfigService(_db);
+  }
+
+  Future<void> _logSyncEvent(nostr.NostrEvent event, int kind, int serverId) async {
+    if (event.id == null) return;
+    if (await _relayConfig.isEventProcessed(event.id!)) return;
+    await _relayConfig.markEventProcessed(
+      eventId: event.id!, direction: 'inbound',
+      kind: kind, pubkey: event.pubkey, serverId: serverId,
+      eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+    );
+  }
 
   /// Sync all server state from relays for a given nostr group ID.
   /// Matches Rails NostrServerJoinJob: metadata → structure → roles → members → emojis → stickers → bans → messages
@@ -23,7 +37,13 @@ class ServerSyncService {
   String? _afkChannelPublicId;
   List<String> _voiceProviderPubkeys = [];
 
-  Future<Server?> syncServer(String nostrGroupId, {void Function(String step, double progress)? onProgress}) async {
+  /// Sync a server from relays. If [force] is false (default), skips sync if
+  /// the server was synced within [minInterval] (default 5 minutes).
+  Future<Server?> syncServer(String nostrGroupId, {
+    void Function(String step, double progress)? onProgress,
+    bool force = false,
+    Duration minInterval = const Duration(minutes: 5),
+  }) async {
     onProgress?.call('Syncing metadata...', 0.1);
     debugPrint('[SyncServer] START nostrGroupId=$nostrGroupId');
 
@@ -56,6 +76,16 @@ class ServerSyncService {
 
     debugPrint('[SyncServer] DB lookup: server=${server?.name ?? "NOT FOUND"} (id=${server?.id})');
 
+    // Throttle: skip sync if recently synced (unless forced or new server)
+    if (!force && server != null && server.lastSyncedAt != null) {
+      final elapsed = DateTime.now().difference(server.lastSyncedAt!);
+      if (elapsed < minInterval) {
+        debugPrint('[SyncServer] SKIP — synced ${elapsed.inSeconds}s ago (min ${minInterval.inSeconds}s)');
+        onProgress?.call('Up to date', 1.0);
+        return server;
+      }
+    }
+
     // If not in DB, try to fetch metadata from relays
     // Rails metadata d-tag = "inferno-{nostr_group_id}" where nostr_group_id = "inferno-{public_id}"
     // So the full d-tag is "inferno-inferno-{public_id}" — always prepend "inferno-"
@@ -71,6 +101,7 @@ class ServerSyncService {
       if (metadataEvents.isNotEmpty) {
         final sorted = metadataEvents.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
         server = await _processMetadata(sorted.first, nostrGroupId);
+        if (server != null) await _logSyncEvent(sorted.first, 31750, server.id);
       }
     } else {
       // Server exists — try to update metadata
@@ -85,6 +116,7 @@ class ServerSyncService {
       if (metadataEvents.isNotEmpty) {
         metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
         await _processMetadata(metadataEvents.first, nostrGroupId);
+        await _logSyncEvent(metadataEvents.first, 31750, server.id);
         server = await (_db.select(_db.servers)
               ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
             .getSingleOrNull();
@@ -132,9 +164,19 @@ class ServerSyncService {
     // Emojis + stickers (can fail)
     onProgress?.call('Syncing emojis & stickers...', 0.7);
     await Future.wait([
-      _syncEmojis(nostrGroupId, server.id).catchError((_) {}),
-      _syncStickers(nostrGroupId, server.id).catchError((_) {}),
+      _syncEmojis(nostrGroupId, server.id).catchError((e) {
+        debugPrint('[Sync] Emoji sync failed: $e');
+      }),
+      _syncStickers(nostrGroupId, server.id).catchError((e) {
+        debugPrint('[Sync] Sticker sync failed: $e');
+      }),
     ]);
+
+    // Invites
+    onProgress?.call('Syncing invites...', 0.8);
+    await _syncInvites(nostrGroupId, server.id).catchError((e) {
+      debugPrint('[Sync] Invite sync failed: $e');
+    });
 
     // Don't backfill messages during join — only backfill when opening a channel
     // (matches Rails: Thread.new { NostrHistoryFetcher.fetch_channel(channel) } on channel open)
@@ -146,13 +188,19 @@ class ServerSyncService {
     // Clear preloaded events so stale data doesn't persist to next sync
     clearPreloaded();
 
+    // Always stamp lastSyncedAt at the end of a successful sync
+    final now = DateTime.now();
+    await (_db.update(_db.servers)..where((s) => s.id.equals(server!.id)))
+        .write(ServersCompanion(lastSyncedAt: Value(now), updatedAt: Value(now)));
+
     onProgress?.call('Done!', 1.0);
     return server;
   }
 
   /// Process Kind 31750 server metadata
   Future<Server?> _processMetadata(nostr.NostrEvent event, String nostrGroupId) async {
-    String? name, description, iconUrl, bannerUrl, afkChannelPublicId;
+    String? name, description, iconUrl, bannerUrl, afkChannelPublicId, afkAction;
+    int? afkTimeout;
     final relayUrls = <String>[];
     final voiceProviderPubkeys = <String>[];
     bool discoverable = false;
@@ -170,6 +218,8 @@ class ServerSyncService {
         case 'discoverable': discoverable = tag.length > 1 && tag[1] == 'true'; break;
         case 'voice_enabled': voiceEnabled = tag.length > 1 && tag[1] == 'true'; break;
         case 'afk_channel': afkChannelPublicId = tag.length > 1 ? tag[1] : null; break;
+        case 'afk_timeout': afkTimeout = tag.length > 1 ? int.tryParse(tag[1]) : null; break;
+        case 'afk_action': afkAction = tag.length > 1 ? tag[1] : null; break;
         case 'voice_provider': if (tag.length > 1) voiceProviderPubkeys.add(tag[1]); break;
       }
     }
@@ -198,6 +248,8 @@ class ServerSyncService {
         relayUrls: Value(json.encode(relayUrls)),
         discoverable: Value(discoverable),
         voiceEnabled: Value(voiceEnabled),
+        afkTimeout: afkTimeout != null ? Value(afkTimeout) : const Value.absent(),
+        afkAction: afkAction != null ? Value(afkAction) : const Value.absent(),
         lastSyncedAt: Value(now),
         updatedAt: Value(now),
       ));
@@ -218,6 +270,8 @@ class ServerSyncService {
         relayUrls: Value(json.encode(relayUrls)),
         discoverable: Value(discoverable),
         voiceEnabled: Value(voiceEnabled),
+        afkTimeout: afkTimeout != null ? Value(afkTimeout) : const Value.absent(),
+        afkAction: afkAction != null ? Value(afkAction) : const Value.absent(),
         lastSyncedAt: Value(now),
         createdAt: now,
         updatedAt: now,
@@ -280,8 +334,11 @@ class ServerSyncService {
     final parentMappings = <String, String>{}; // channelPublicId → parentChannelPublicId
 
     // First pass: insert all categories and channels (without parent links)
+    int structIdx = 0;
     for (final tag in latest.tags) {
       if (tag.isEmpty) continue;
+      // Yield to UI every 10 tags
+      if (++structIdx % 10 == 0) await Future.delayed(Duration.zero);
       if (tag[0] == 'cat' && tag.length >= 4) {
         // Category: check-then-update-or-insert
         final existingCat = await (_db.select(_db.categories)
@@ -357,7 +414,7 @@ class ServerSyncService {
           ));
         } else {
           try {
-          await _db.into(_db.channels).insert(
+          final channelRowId = await _db.into(_db.channels).insert(
           ChannelsCompanion.insert(
             publicId: tag[1],
             serverId: serverId,
@@ -375,6 +432,12 @@ class ServerSyncService {
             updatedAt: DateTime.now(),
           ),
         );
+          // Seed channel_reads so this channel doesn't appear as unread
+          final seedNow = DateTime.now();
+          await _db.into(_db.channelReads).insert(ChannelReadsCompanion.insert(
+            channelId: channelRowId, userId: 0,
+            lastReadAt: seedNow, createdAt: seedNow, updatedAt: seedNow,
+          ), onConflict: DoNothing());
           debugPrint('[StructureSync] Inserted channel: ${tag[2]} (${tag[1]}) type=${tag[3]} serverId=$serverId');
           } catch (e, st) {
             debugPrint('[StructureSync] FAILED to insert channel ${tag[2]} (${tag[1]}): $e');
@@ -431,6 +494,7 @@ class ServerSyncService {
     }
 
     debugPrint('[StructureSync] Synced ${syncedChannelIds.length} channels, deleted ${existingChannels.length - syncedChannelIds.length} stale, ${parentMappings.length} with parents');
+    await _logSyncEvent(latest, 31751, serverId);
   }
 
   /// Resolve AFK channel ID from metadata
@@ -492,9 +556,14 @@ class ServerSyncService {
       if (tag.isEmpty || tag[0] != 'role' || tag.length < 3) continue;
       // Rails format: ["role", publicId, name, color, position, hoist, mentionable, permissions_json, role_type]
       //                 t[0]    t[1]      t[2]  t[3]   t[4]     t[5]   t[6]         t[7]              t[8]
+      // Rails format: ["role", publicId, name, color, position, hoist, mentionable, permissions_json, role_type]
+      //                 t[0]    t[1]      t[2]  t[3]   t[4]     t[5]   t[6]         t[7]              t[8]
       final color = tag.length > 3 && tag[3].isNotEmpty ? tag[3] : null;
       final position = tag.length > 4 ? int.tryParse(tag[4]) ?? 0 : 0;
+      final hoist = tag.length > 5 && tag[5] == 'true';
+      final mentionable = tag.length > 6 && tag[6] == 'true';
       final permissions = tag.length > 7 && tag[7].isNotEmpty ? tag[7] : null;
+      final roleType = tag.length > 8 && tag[8].isNotEmpty ? tag[8] : null;
 
       final existingRole = await (_db.select(_db.roles)
             ..where((r) => r.publicId.equals(tag[1])))
@@ -507,7 +576,10 @@ class ServerSyncService {
           name: Value(tag[2]),
           color: Value(color),
           position: Value(position),
+          hoist: Value(hoist),
+          mentionable: Value(mentionable),
           permissions: Value(permissions),
+          roleType: Value(roleType),
           updatedAt: Value(DateTime.now()),
         ));
       } else {
@@ -518,71 +590,184 @@ class ServerSyncService {
             name: Value(tag[2]),
             color: Value(color),
             position: Value(position),
+            hoist: Value(hoist),
+            mentionable: Value(mentionable),
             permissions: Value(permissions),
+            roleType: Value(roleType),
             createdAt: DateTime.now(),
             updatedAt: DateTime.now(),
           ));
         } catch (_) {} // duplicate
       }
     }
+    await _logSyncEvent(latest, 31752, serverId);
   }
 
   /// Sync Kind 31754 emojis
   Future<void> _syncEmojis(String nostrGroupId, int serverId) async {
-    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
-    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
     final baseId = nostrGroupId;
+    debugPrint('[Sync] Fetching emojis with d-tag: inferno-emojis-$baseId');
     final events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31754], tags: {'#d': ['inferno-emojis-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
+    debugPrint('[Sync] Emoji events received: ${events.length}');
     if (events.isEmpty) return;
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    debugPrint('[Sync] Emoji event has ${events.first.tags.length} tags');
     for (final tag in events.first.tags) {
+      debugPrint('[Sync] Emoji tag: $tag');
+      // Rails: ["emoji", name, blossom_url, creator_pubkey]
       if (tag.isEmpty || tag[0] != 'emoji' || tag.length < 3) continue;
-      final publicId = tag.length > 3 ? tag[3] : tag[1].hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
-      try { await _db.into(_db.serverEmojis).insertOnConflictUpdate(
-        ServerEmojisCompanion.insert(
-          publicId: publicId,
-          serverId: serverId,
-          name: tag[1],
-          creatorId: 0,
-          url: Value(tag[2]),
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      ); } catch (_) {}
+      final emojiName = tag[1];
+      final emojiUrl = tag[2];
+      final publicId = emojiName.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
+      debugPrint('[Sync] Saving emoji: $emojiName -> $emojiUrl');
+      try {
+        final existing = await (_db.select(_db.serverEmojis)
+          ..where((e) => e.serverId.equals(serverId) & e.name.equals(emojiName))).getSingleOrNull();
+        if (existing != null) {
+          await (_db.update(_db.serverEmojis)..where((e) => e.id.equals(existing.id)))
+            .write(ServerEmojisCompanion(url: Value(emojiUrl), updatedAt: Value(DateTime.now())));
+        } else {
+          await _db.into(_db.serverEmojis).insert(ServerEmojisCompanion.insert(
+            publicId: publicId, serverId: serverId, name: emojiName, creatorId: 0,
+            url: Value(emojiUrl), createdAt: DateTime.now(), updatedAt: DateTime.now(),
+          ));
+        }
+      } catch (_) {}
     }
+    await _logSyncEvent(events.first, 31754, serverId);
   }
 
   /// Sync Kind 31755 stickers
   Future<void> _syncStickers(String nostrGroupId, int serverId) async {
-    // Use nostrGroupId as-is — Rails stores it WITH the inferno- prefix
-    // d-tags are: inferno-struct-{gid}, inferno-roles-{gid}, inferno-mbr-{gid}-{pubkey}
     final baseId = nostrGroupId;
     final events = await _relayPool.fetchFresh(
       NostrFilter(kinds: [31755], tags: {'#d': ['inferno-stickers-$baseId']}),
       timeout: const Duration(seconds: 10),
     );
+    debugPrint('[Sync] Sticker events received: ${events.length}');
     if (events.isEmpty) return;
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    debugPrint('[Sync] Sticker event has ${events.first.tags.length} tags');
     for (final tag in events.first.tags) {
-      if (tag.isEmpty || tag[0] != 'sticker' || tag.length < 3) continue;
-      final publicId = tag.length > 4 ? tag[4] : tag[1].hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
-      try { await _db.into(_db.serverStickers).insertOnConflictUpdate(
-        ServerStickersCompanion.insert(
-          publicId: publicId,
+      debugPrint('[Sync] Sticker tag: $tag');
+      // Rails: ["sticker", name, description, blossom_url, creator_pubkey]
+      if (tag.isEmpty || tag[0] != 'sticker' || tag.length < 4) continue;
+      final stickerName = tag[1];
+      final stickerDescription = tag[2];
+      final stickerUrl = tag[3]; // URL is at index 3, not 2
+      final publicId = stickerName.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
+      debugPrint('[Sync] Saving sticker: $stickerName -> $stickerUrl');
+      try {
+        final existing = await (_db.select(_db.serverStickers)
+          ..where((s) => s.serverId.equals(serverId) & s.name.equals(stickerName))).getSingleOrNull();
+        if (existing != null) {
+          await (_db.update(_db.serverStickers)..where((s) => s.id.equals(existing.id)))
+            .write(ServerStickersCompanion(
+              url: Value(stickerUrl),
+              description: Value(stickerDescription.isNotEmpty ? stickerDescription : null),
+              updatedAt: Value(DateTime.now()),
+            ));
+        } else {
+          await _db.into(_db.serverStickers).insert(ServerStickersCompanion.insert(
+            publicId: publicId, serverId: serverId, name: stickerName, creatorId: 0,
+            url: Value(stickerUrl),
+            description: Value(stickerDescription.isNotEmpty ? stickerDescription : null),
+            createdAt: DateTime.now(), updatedAt: DateTime.now(),
+          ));
+        }
+      } catch (_) {}
+    }
+    await _logSyncEvent(events.first, 31755, serverId);
+  }
+
+  /// Sync invites from relays (Kind 31757)
+  Future<void> _syncInvites(String nostrGroupId, int serverId) async {
+    // Fetch all Kind 31757 events and filter locally by 'server' tag
+    // (NIP-01 only supports single-letter tag filters like #d, #p, #e)
+    final allEvents = await _relayPool.fetchFresh(
+      NostrFilter(kinds: [31757]),
+      timeout: const Duration(seconds: 8),
+    );
+    // Filter to invites for this server
+    final events = allEvents.where((e) {
+      final serverTag = e.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      return serverTag != null && serverTag.length > 1 && serverTag[1] == nostrGroupId;
+    }).toList();
+    debugPrint('[Sync] Invite events received: ${allEvents.length} total, ${events.length} for $nostrGroupId');
+
+    for (final event in events) {
+      String? getTag(String key) {
+        final tag = event.tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
+        return tag != null && tag.length > 1 ? tag[1] : null;
+      }
+
+      final code = getTag('code');
+      if (code == null || code.isEmpty) continue;
+
+      final revoked = getTag('revoked') == 'true';
+      final maxUsesStr = getTag('max_uses');
+      final usesStr = getTag('uses');
+      final expiresStr = getTag('expires_at') ?? getTag('expires');
+      final createdBy = getTag('created_by');
+
+      final maxUses = maxUsesStr != null ? int.tryParse(maxUsesStr) : null;
+      final usesCount = usesStr != null ? int.tryParse(usesStr) : null;
+      final expiresUnix = expiresStr != null ? int.tryParse(expiresStr) : null;
+      final expiresAt = (expiresUnix != null && expiresUnix > 0)
+          ? DateTime.fromMillisecondsSinceEpoch(expiresUnix * 1000)
+          : null;
+
+      // Resolve creator ID
+      int creatorId = 0;
+      if (createdBy != null && createdBy.isNotEmpty) {
+        final creator = await (_db.select(_db.users)
+              ..where((u) => u.nostrPublicKey.equals(createdBy)))
+            .getSingleOrNull();
+        if (creator != null) creatorId = creator.id;
+      }
+
+      final existing = await (_db.select(_db.invites)
+            ..where((i) => i.code.equals(code)))
+          .getSingleOrNull();
+      final now = DateTime.now();
+
+      if (revoked) {
+        if (existing != null) {
+          await (_db.update(_db.invites)..where((i) => i.id.equals(existing.id)))
+              .write(InvitesCompanion(active: const Value(false), updatedAt: Value(now)));
+        }
+        continue;
+      }
+
+      if (existing != null) {
+        await (_db.update(_db.invites)..where((i) => i.id.equals(existing.id))).write(InvitesCompanion(
+          maxUses: Value((maxUses != null && maxUses > 0) ? maxUses : null),
+          usesCount: Value(usesCount ?? existing.usesCount),
+          expiresAt: Value(expiresAt),
+          active: const Value(true),
+          updatedAt: Value(now),
+        ));
+      } else {
+        await _db.into(_db.invites).insert(InvitesCompanion.insert(
           serverId: serverId,
-          name: tag[1],
-          creatorId: 0,
-          url: Value(tag[2]),
-          description: tag.length > 3 ? Value(tag[3]) : const Value.absent(),
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
-        ),
-      ); } catch (_) {}
+          creatorId: creatorId,
+          code: code,
+          maxUses: Value((maxUses != null && maxUses > 0) ? maxUses : null),
+          expiresAt: Value(expiresAt),
+          createdAt: now,
+          updatedAt: now,
+        ));
+        if (usesCount != null && usesCount > 0) {
+          await (_db.update(_db.invites)..where((i) => i.code.equals(code)))
+              .write(InvitesCompanion(usesCount: Value(usesCount)));
+        }
+      }
+      await _logSyncEvent(event, 31757, serverId);
     }
   }
 
@@ -653,7 +838,11 @@ class ServerSyncService {
 
     debugPrint('[MemberSync] Unique members: ${grouped.length}');
 
+    int memberIdx = 0;
     for (final event in grouped.values) {
+      // Yield to UI every 5 members so frames aren't starved
+      if (++memberIdx % 5 == 0) await Future.delayed(Duration.zero);
+
       // Get member pubkey from p tag
       final pTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'p').firstOrNull;
       if (pTag == null || pTag.length < 2) continue;
@@ -718,13 +907,22 @@ class ServerSyncService {
       final profilePicture = getTagValue('profile_picture');
       final profileBanner = getTagValue('profile_banner');
       final profileColor = getTagValue('profile_color');
+      final profileColor2 = getTagValue('profile_color_2');
       final profileStatus = getTagValue('profile_status');
       final profileStatusEmoji = getTagValue('profile_status_emoji');
+      if (memberPubkey.startsWith('8eda')) {
+        debugPrint('[MemberSync] Tacspat tags: status=$profileStatus emoji=$profileStatusEmoji color=$profileColor');
+        for (final t in event.tags) {
+          if (t.isNotEmpty && (t[0].contains('status') || t[0].contains('color'))) {
+            debugPrint('[MemberSync]   tag: $t');
+          }
+        }
+      }
       final nickname = getTagValue('nickname');
       final joinedAtStr = getTagValue('joined_at');
 
       // Update remote_member with embedded profile data
-      if (profileName != null || profileDisplayName != null || profilePicture != null) {
+      if (profileName != null || profileDisplayName != null || profilePicture != null || profileColor != null || nickname != null) {
         await (_db.update(_db.remoteMembers)
               ..where((m) => m.serverId.equals(serverId) & m.pubkey.equals(memberPubkey)))
             .write(RemoteMembersCompanion(
@@ -734,6 +932,7 @@ class ServerSyncService {
           avatarUrl: profilePicture != null ? Value(profilePicture) : const Value.absent(),
           bannerUrl: profileBanner != null ? Value(profileBanner) : const Value.absent(),
           profileColor: profileColor != null ? Value(profileColor) : const Value.absent(),
+          profileColor2: profileColor2 != null ? Value(profileColor2) : const Value.absent(),
           status: profileStatus != null ? Value(profileStatus) : const Value.absent(),
           statusEmoji: profileStatusEmoji != null ? Value(profileStatusEmoji) : const Value.absent(),
           nickname: nickname != null ? Value(nickname) : const Value.absent(),
@@ -758,6 +957,8 @@ class ServerSyncService {
       if (profileName == null && profileDisplayName == null) {
         _fetchMemberProfile(memberPubkey);
       }
+
+      await _logSyncEvent(event, 31753, serverId);
     }
 
     // Batch fetch all queued profiles in a single relay request
@@ -795,7 +996,9 @@ class ServerSyncService {
       }
 
       final now = DateTime.now();
+      int profIdx = 0;
       for (final entry in byPubkey.entries) {
+        if (++profIdx % 5 == 0) await Future.delayed(Duration.zero);
         try {
           final profile = json.decode(entry.value.content) as Map<String, dynamic>;
           await _upsertContact(entry.key, profile, now);

@@ -6,10 +6,13 @@ import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart';
 import '../providers/database_provider.dart';
 import '../providers/realtime_provider.dart';
+import '../providers/unread_provider.dart';
+import '../providers/app_update_provider.dart';
 import '../database/database.dart';
 import '../services/auth_service.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 import '../screens/settings/settings_overlay.dart';
 
 class DmSidebar extends ConsumerWidget {
@@ -19,7 +22,7 @@ class DmSidebar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authServiceProvider);
     final conversationsAsync = ref.watch(conversationsStreamProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
     final currentPath = GoRouterState.of(context).uri.toString();
     final isFriendsActive = currentPath == '/conversations';
     final presenceSvc = ref.watch(presenceServiceProvider);
@@ -62,6 +65,7 @@ class DmSidebar extends ConsumerWidget {
                             ? presenceSvc.getPresence(conv.counterpartyPubkey!)
                             : OnlineState.offline;
                         return _ConversationItem(
+                          conversationId: conv.id,
                           name: name,
                           isGroup: conv.kind == 1,
                           isActive: isActive,
@@ -237,20 +241,21 @@ class _NavItemState extends State<_NavItem> {
   }
 }
 
-class _ConversationItem extends StatefulWidget {
+class _ConversationItem extends ConsumerStatefulWidget {
+  final int conversationId;
   final String name;
   final bool isGroup;
   final bool isActive;
   final OnlineState presenceState;
   final InfernoColors colors;
   final VoidCallback onTap;
-  const _ConversationItem({required this.name, required this.isGroup, required this.isActive, required this.presenceState, required this.colors, required this.onTap});
+  const _ConversationItem({required this.conversationId, required this.name, required this.isGroup, required this.isActive, required this.presenceState, required this.colors, required this.onTap});
 
   @override
-  State<_ConversationItem> createState() => _ConversationItemState();
+  ConsumerState<_ConversationItem> createState() => _ConversationItemState();
 }
 
-class _ConversationItemState extends State<_ConversationItem> {
+class _ConversationItemState extends ConsumerState<_ConversationItem> {
   bool _hovering = false;
 
   Color _statusColor() {
@@ -267,6 +272,8 @@ class _ConversationItemState extends State<_ConversationItem> {
   Widget build(BuildContext context) {
     final c = widget.colors;
     final active = widget.isActive;
+    final unreadCount = ref.watch(conversationUnreadCountProvider(widget.conversationId)).valueOrNull ?? 0;
+    final hasUnread = !active && unreadCount > 0;
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
@@ -309,10 +316,22 @@ class _ConversationItemState extends State<_ConversationItem> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(widget.name, style: TextStyle(
-                  color: active ? Colors.white : (_hovering ? c.gray200 : c.gray400),
-                  fontSize: 14, fontWeight: FontWeight.w500,
+                  color: active ? Colors.white : (hasUnread ? Colors.white : (_hovering ? c.gray200 : c.gray400)),
+                  fontSize: 14, fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
                 ), overflow: TextOverflow.ellipsis),
               ),
+              // Unread badge
+              if (hasUnread)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: c.gray600,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text('$unreadCount', style: const TextStyle(
+                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600,
+                  )),
+                ),
             ],
           ),
         ),
@@ -387,6 +406,12 @@ class _UserPanel extends ConsumerWidget {
                   ],
                 ),
               ),
+              ref.watch(appVersionProvider).when(
+                data: (v) => Text('v$v', style: TextStyle(color: colors.gray500, fontSize: 10)),
+                loading: () => const SizedBox.shrink(),
+                error: (_, __) => const SizedBox.shrink(),
+              ),
+              const SizedBox(width: 6),
               GestureDetector(
                 onTap: () => showSettingsOverlay(context),
                 child: Icon(Icons.settings, color: colors.gray400, size: 16),

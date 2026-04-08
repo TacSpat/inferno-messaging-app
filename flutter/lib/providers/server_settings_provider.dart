@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
 import '../services/role_service.dart';
 import '../services/member_service.dart';
+import '../services/relay_config_service.dart';
 import '../services/permission_service.dart';
 import 'database_provider.dart';
 import 'auth_provider.dart';
@@ -14,7 +15,7 @@ final roleServiceProvider = Provider<RoleService>((ref) {
 final memberServiceProvider = Provider<MemberService>((ref) {
   final db = ref.watch(databaseProvider);
   final pool = ref.watch(relayPoolProvider);
-  return MemberService(db, pool);
+  return MemberService(db, pool, RelayConfigService(db));
 });
 
 final serverRolesProvider = StreamProvider.family<List<Role>, int>((ref, serverId) {

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 
 /// Banner shown at the top of a DM conversation when the message is from a non-friend.
 /// Matches Rails: message_request_for?(user) — shows Accept/Decline buttons.
-class DmRequestBanner extends StatelessWidget {
+class DmRequestBanner extends ConsumerWidget {
   final String senderName;
   final VoidCallback onAccept;
   final VoidCallback onDecline;
@@ -16,8 +18,8 @@ class DmRequestBanner extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = ref.watch(infernoColorsProvider);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),

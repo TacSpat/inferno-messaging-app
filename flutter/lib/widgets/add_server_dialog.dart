@@ -7,9 +7,11 @@ import '../providers/auth_provider.dart';
 import '../providers/database_provider.dart';
 import '../providers/servers_provider.dart';
 import '../services/role_service.dart';
+import '../services/invite_service.dart';
 import '../nostr/nostr_filter.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 
 // Session-level cache for discovered servers (relay only sends events once per connection)
 List<Map<String, dynamic>>? _discoveryCache;
@@ -56,6 +58,10 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
   String? _error;
   List<Map<String, dynamic>> _discoveredServers = [];
   bool _discovering = false;
+  // Invite resolution
+  InviteResolution? _inviteResolution;
+  bool _resolving = false;
+
   // Pre-fetched events from discovery for use during join
   List<nostr.NostrEvent> _metadataEvents = [];
   List<nostr.NostrEvent> _structEvents = [];
@@ -168,6 +174,78 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
     }
   }
 
+  Future<void> _resolveInvite() async {
+    final text = _inviteController.text.trim();
+    if (text.isEmpty) return;
+    setState(() { _resolving = true; _inviteResolution = null; _error = null; });
+
+    try {
+      final inviteService = ref.read(inviteServiceProvider);
+      final resolution = await inviteService.resolveInviteFromUri(text);
+      if (!mounted) return;
+      if (resolution == null) {
+        setState(() { _resolving = false; _error = 'Could not find invite'; });
+      } else {
+        // Try to fetch server name from metadata if not in resolution
+        String? serverName = resolution.serverName;
+        String? iconUrl = resolution.iconUrl;
+        if (serverName == null && resolution.nostrGroupId.isNotEmpty) {
+          final server = await (ref.read(databaseProvider).select(ref.read(databaseProvider).servers)
+                ..where((s) => s.nostrGroupId.equals(resolution.nostrGroupId)))
+              .getSingleOrNull();
+          serverName = server?.name;
+          iconUrl = server?.iconUrl;
+        }
+        setState(() {
+          _resolving = false;
+          _inviteResolution = InviteResolution(
+            code: resolution.code,
+            nostrGroupId: resolution.nostrGroupId,
+            serverName: serverName ?? resolution.serverName,
+            description: resolution.description,
+            iconUrl: iconUrl ?? resolution.iconUrl,
+            naddr: resolution.naddr,
+            state: resolution.state,
+            maxUses: resolution.maxUses,
+            usesCount: resolution.usesCount,
+            expiresAt: resolution.expiresAt,
+          );
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() { _resolving = false; _error = 'Failed to resolve invite: $e'; });
+    }
+  }
+
+  Future<void> _acceptResolvedInvite() async {
+    final res = _inviteResolution;
+    if (res == null || res.state != InviteState.valid) return;
+
+    final nav = Navigator.of(context);
+    final router = GoRouter.of(context);
+    nav.pop(); // close dialog
+
+    final publicId = await showDialog<String>(
+      context: nav.context,
+      barrierDismissible: false,
+      builder: (_) => _ServerSyncOverlay(
+        serverName: res.serverName ?? 'Server',
+        serverData: {
+          'name': res.serverName ?? 'Server',
+          'description': res.description,
+          'icon_url': res.iconUrl,
+          'nostr_group_id': res.nostrGroupId,
+        },
+        gid: res.nostrGroupId,
+      ),
+    );
+
+    if (publicId != null) {
+      router.go('/servers/$publicId');
+    }
+  }
+
   Future<void> _joinDiscoveredServer(Map<String, dynamic> server) async {
     final serverName = server['name'] as String;
     final gid = (server['nostr_group_id'] as String).replaceAll(RegExp(r'^(inferno-)+'), 'inferno-');
@@ -254,13 +332,18 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
           final chPubId = (now.microsecondsSinceEpoch + catPos * 10 + chPos + 1).toRadixString(36).padLeft(12, '0').substring(0, 12);
           final isVoice = ch.startsWith('~'); // prefix ~ = voice channel
           final chName = isVoice ? ch.substring(1) : ch;
-          await db.into(db.channels).insert(ChannelsCompanion.insert(
+          final chRowId = await db.into(db.channels).insert(ChannelsCompanion.insert(
             publicId: chPubId, serverId: serverId, name: chName,
             channelType: isVoice ? 1 : 0,
             position: Value(chPos), categoryId: Value(categoryId),
             nostrGroupId: Value('$nostrGroupId-$chPubId'),
             createdAt: now, updatedAt: now,
           ));
+          // Seed channel_reads so new channels don't appear as unread
+          await db.into(db.channelReads).insert(ChannelReadsCompanion.insert(
+            channelId: chRowId, userId: 0,
+            lastReadAt: now, createdAt: now, updatedAt: now,
+          ), onConflict: DoNothing());
           chPos++;
         }
       }
@@ -300,7 +383,7 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -339,18 +422,45 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
                 // === JOIN ===
                 Text('Enter an invite link or server ID to join', style: TextStyle(color: c.gray400, fontSize: 14)),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: _inviteController,
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'Paste invite link or server ID...',
-                    hintStyle: TextStyle(color: c.gray500),
-                    fillColor: c.gray900,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _inviteController,
+                        style: TextStyle(color: Colors.white, fontSize: 14),
+                        onSubmitted: (_) => _resolveInvite(),
+                        decoration: InputDecoration(
+                          hintText: 'Paste invite link or code...',
+                          hintStyle: TextStyle(color: c.gray500),
+                          fillColor: c.gray900,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton(
+                        onPressed: _resolving ? null : _resolveInvite,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: c.accent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: _resolving
+                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Join', style: TextStyle(fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                  ],
                 ),
+                // Invite preview card
+                if (_inviteResolution != null) ...[
+                  const SizedBox(height: 12),
+                  _InvitePreviewCard(resolution: _inviteResolution!, colors: c, onJoin: _acceptResolvedInvite),
+                ],
                 const SizedBox(height: 20),
 
                 // === DISCOVER ===
@@ -755,7 +865,7 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -812,6 +922,99 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Preview card shown after resolving an invite link.
+class _InvitePreviewCard extends StatelessWidget {
+  final InviteResolution resolution;
+  final InfernoColors colors;
+  final VoidCallback onJoin;
+  const _InvitePreviewCard({required this.resolution, required this.colors, required this.onJoin});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = colors;
+    final name = resolution.serverName ?? 'Unknown Server';
+    final isValid = resolution.state == InviteState.valid;
+
+    String stateLabel;
+    Color stateColor;
+    switch (resolution.state) {
+      case InviteState.valid:
+        stateLabel = 'Valid Invite';
+        stateColor = const Color(0xFF16A34A);
+      case InviteState.expired:
+        stateLabel = 'Invite Expired';
+        stateColor = c.accent;
+      case InviteState.revoked:
+        stateLabel = 'Invite Revoked';
+        stateColor = c.accent;
+      case InviteState.maxedOut:
+        stateLabel = 'Invite Reached Max Uses';
+        stateColor = c.accent;
+      case InviteState.notFound:
+        stateLabel = 'Invite Not Found';
+        stateColor = c.gray500;
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: c.gray900,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          // Server icon
+          Container(
+            width: 44, height: 44,
+            decoration: BoxDecoration(
+              color: c.gray700,
+              borderRadius: BorderRadius.circular(10),
+              image: resolution.iconUrl != null
+                  ? DecorationImage(image: NetworkImage(resolution.iconUrl!), fit: BoxFit.cover)
+                  : null,
+            ),
+            child: resolution.iconUrl == null
+                ? Center(child: Text(name[0].toUpperCase(), style: TextStyle(color: c.gray200, fontWeight: FontWeight.bold, fontSize: 18)))
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+                if (resolution.description != null && resolution.description!.isNotEmpty)
+                  Text(resolution.description!, style: TextStyle(color: c.gray400, fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: stateColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(stateLabel, style: TextStyle(color: stateColor, fontSize: 11, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ),
+          if (isValid)
+            ElevatedButton(
+              onPressed: onJoin,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: c.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text('Join', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            ),
+        ],
       ),
     );
   }

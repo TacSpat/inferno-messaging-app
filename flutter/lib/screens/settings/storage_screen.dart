@@ -4,6 +4,7 @@ import '../../providers/database_provider.dart';
 import '../../services/prune_service.dart';
 import '../../services/asset_cache_service.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class StorageScreen extends ConsumerStatefulWidget {
   const StorageScreen({super.key});
@@ -35,7 +36,7 @@ class _StorageScreenState extends ConsumerState<StorageScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),

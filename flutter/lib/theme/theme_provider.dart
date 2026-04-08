@@ -24,17 +24,21 @@ class ThemeNameNotifier extends StateNotifier<String> {
     }
   }
 
-  Future<void> setTheme(String name) async {
-    if (InfernoThemes.themeNames.contains(name)) {
-      state = name;
-      await _storage.write(key: _key, value: name);
-    }
+  void setTheme(String name) {
+    if (!InfernoThemes.themeNames.contains(name) || name == state) return;
+    state = name;
+    _storage.write(key: _key, value: name);
   }
 }
 
-final themeDataProvider = Provider<ThemeData>((ref) {
+/// True while theme is swapping — shows spinner overlay in app.dart
+final themeTransitionProvider = StateProvider<bool>((ref) => false);
+
+/// Direct color provider — widgets watch THIS instead of Theme.of(context).
+/// Changing theme only rebuilds widgets that ref.watch this, NOT the entire tree.
+final infernoColorsProvider = Provider<InfernoColors>((ref) {
   final name = ref.watch(themeNameProvider);
-  return InfernoThemes.forName(name);
+  return InfernoThemes.colorsForName(name);
 });
 
 /// UI effects theme — separate from color theme
@@ -57,11 +61,10 @@ class EffectThemeNotifier extends StateNotifier<String> {
     }
   }
 
-  Future<void> setEffect(String name) async {
-    if (UiEffectTheme.names.contains(name)) {
-      state = name;
-      await _storage.write(key: _key, value: name);
-    }
+  void setEffect(String name) {
+    if (!UiEffectTheme.names.contains(name) || name == state) return;
+    state = name;
+    _storage.write(key: _key, value: name);
   }
 }
 

@@ -15,7 +15,7 @@ class DmReactionsController < ApplicationController
       @message.reactions.create!(user: current_user, emoji: emoji)
     end
 
-    html = render_to_string(partial: "messages/reactions", locals: { message: @message.reload, reaction_controller: "dm-message-form" })
+    html = render_to_string(partial: "messages/reactions", locals: { message: @message.reload, reaction_controller: "dm-message-form", current_user: current_user })
     ConversationChannel.broadcast_to(
       @conversation,
       { type: "update_reactions", message_id: @message.public_id, html: html }

@@ -428,6 +428,11 @@ class RelaySubscriptionManager
     kind = event["kind"]
     pubkey = event["pubkey"]
 
+    # Log all server state events for debugging cross-client sync
+    if SERVER_STATE_KINDS.include?(kind)
+      Rails.logger.info("[RelaySubscriptionManager] Inbound Kind #{kind} event_id=#{event_id[0..15]} from=#{pubkey&.[](0..15)}")
+    end
+
     # Log all Kind 14 events for voice RPC debugging
     if kind == KIND_DM
       Rails.logger.info("[RelaySubscriptionManager] Inbound Kind 14 event_id=#{event_id[0..15]} from=#{pubkey&.[](0..15)}")
@@ -480,6 +485,7 @@ class RelaySubscriptionManager
     when KIND_TYPING
       process_typing_event(event)
     when KIND_REACTION
+      Rails.logger.info("[RelaySubscriptionManager] Received Kind 7 reaction event: id=#{event['id']&.slice(0,16)} content=#{event['content']} pubkey=#{event['pubkey']&.slice(0,16)}")
       process_reaction_event(event)
     when KIND_REPORT
       process_report_hashes(event)
@@ -1751,8 +1757,14 @@ class RelaySubscriptionManager
 
   def process_server_structure(event)
     server = find_server_from_event(event)
-    return unless server
-    return unless NostrServerAuth.authorized_for_event?(server, event)
+    unless server
+      Rails.logger.warn("[RelaySubscriptionManager] server_structure: no server found for event #{event["id"]&.[](0..15)}")
+      return
+    end
+    unless NostrServerAuth.authorized_for_event?(server, event)
+      Rails.logger.warn("[RelaySubscriptionManager] server_structure: UNAUTHORIZED pubkey=#{event["pubkey"]&.[](0..15)} server=#{server.name}")
+      return
+    end
 
     # Skip self-echoes — we already have the correct state locally
     # (but not during bootstrap sync, where we need to import our own events)
@@ -2276,30 +2288,43 @@ class RelaySubscriptionManager
     tags = event["tags"] || []
     e_tag = tags.find { |t| t[0] == "e" }
     h_tag = tags.find { |t| t[0] == "h" }
-    return unless e_tag && h_tag
+    unless e_tag && h_tag
+      Rails.logger.debug("[RelaySubscriptionManager] Reaction missing required tags: e_tag=#{e_tag.inspect} h_tag=#{h_tag.inspect}")
+      return
+    end
 
     target_event_id = e_tag[1]
     channel = Channel.find_by(nostr_group_id: h_tag[1])
-    return unless channel
+    unless channel
+      Rails.logger.debug("[RelaySubscriptionManager] Reaction: no channel for nostr_group_id=#{h_tag[1]}")
+      return
+    end
 
     message = Message.find_by(nostr_event_id: target_event_id, channel: channel)
-    return unless message
+    unless message
+      Rails.logger.debug("[RelaySubscriptionManager] Reaction: no message for event_id=#{target_event_id} in channel=#{channel.id}")
+      return
+    end
 
     emoji = event["content"]
     reactor_pubkey = event["pubkey"]
 
-    # Find or create a local user proxy for the reactor
+    # Resolve reactor: local User first, fall back to pubkey-based reactions
     reactor_user = User.find_by(nostr_public_key: reactor_pubkey)
 
     if emoji == "-"
-      # Remove reaction
+      # Remove reaction — match by user OR pubkey
       if reactor_user
         message.reactions.where(user: reactor_user).destroy_all
       end
+      message.reactions.where(reactor_pubkey: reactor_pubkey).destroy_all
     else
       return if emoji.blank?
       if reactor_user
         message.reactions.find_or_create_by!(user: reactor_user, emoji: emoji)
+      else
+        # Store with pubkey only (no local user)
+        message.reactions.find_or_create_by!(reactor_pubkey: reactor_pubkey, emoji: emoji)
       end
     end
 
@@ -2314,7 +2339,7 @@ class RelaySubscriptionManager
       html: html
     })
 
-    log_server_event(event, server: server)
+    log_server_event(event, server: channel.server)
     Rails.logger.debug("[RelaySubscriptionManager] Processed reaction from #{reactor_pubkey[0..15]} on #{target_event_id[0..15]}")
   rescue ActiveRecord::RecordNotUnique
     nil

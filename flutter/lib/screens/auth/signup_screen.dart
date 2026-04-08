@@ -7,6 +7,7 @@ import '../../providers/realtime_provider.dart';
 import '../../providers/servers_provider.dart';
 import '../../widgets/inferno_logo.dart';
 import '../../services/app_bootstrap_service.dart';
+import '../../services/media_cache_service.dart';
 import '../../providers/conversations_provider.dart';
 import '../../crypto/bech32_nostr.dart';
 
@@ -57,6 +58,8 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         groupMessageService: ref.read(groupMessageServiceProvider),
         dmService: ref.read(dmServiceProvider),
         contactService: ref.read(contactServiceProvider),
+        inviteService: ref.read(inviteServiceProvider),
+        mediaCacheService: ref.read(mediaCacheServiceProvider),
       );
       await bootstrap.bootstrap();
 

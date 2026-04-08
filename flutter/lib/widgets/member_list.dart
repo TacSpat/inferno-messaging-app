@@ -1,13 +1,18 @@
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/database.dart';
+import '../models/permission.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../providers/server_settings_provider.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
+import 'context_menu.dart';
+import 'user_profile_card.dart';
 
 /// Validate URL is a real HTTP URL, not a Rails-local relative path
 String? _validUrl(String? url) {
@@ -29,7 +34,7 @@ class _MemberListState extends ConsumerState<MemberList> {
   Widget build(BuildContext context) {
     final db = ref.watch(databaseProvider);
     final auth = ref.watch(authServiceProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     // Watch presence updates to trigger rebuilds when any user's state changes
     ref.watch(presenceUpdatesProvider);
@@ -109,53 +114,138 @@ class _MemberListState extends ConsumerState<MemberList> {
                 return contactMap[auth.publicKeyHex!]?.avatarUrl;
               }
 
-              // Resolve role colors using PermissionService (matches Rails display_color)
-              return FutureBuilder<Map<int, Color?>>(
-                future: _resolveDisplayColors(members),
-                builder: (context, roleSnap) {
-                  final colorMap = roleSnap.data ?? {};
+              // Watch roles + role assignments reactively for hoisted groups
+              return StreamBuilder<List<Role>>(
+                stream: (db.select(db.roles)
+                  ..where((r) => r.serverId.equals(widget.serverId))
+                  ..orderBy([(r) => OrderingTerm.desc(r.position)])).watch(),
+                builder: (context, rolesSnap) {
+                  return StreamBuilder<List<RemoteMembershipRole>>(
+                    stream: db.select(db.remoteMembershipRoles).watch(),
+                    builder: (context, assignSnap) {
+                      final allRoles = rolesSnap.data ?? [];
+                      final allAssignments = assignSnap.data ?? [];
 
-                  Color? memberRoleColor(RemoteMember m) => colorMap[m.id];
+                      // Build member->roleIds map
+                      final memberRoleMap = <int, Set<int>>{};
+                      for (final a in allAssignments) {
+                        memberRoleMap.putIfAbsent(a.remoteMemberId, () => {}).add(a.roleId);
+                      }
 
-                  return ListView(
-                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-                    children: [
-                      _SectionHeader(label: 'ONLINE', count: online.length + (hasLocalUser ? 0 : 1), colors: c),
-                      if (!hasLocalUser && auth.publicKeyHex != null)
-                        _MemberItem(
-                          name: localUserName(),
-                          avatarUrl: localUserAvatar(),
-                          statusColor: c.online,
-                          roleColor: null,
-                          statusText: 'Online',
-                          isOffline: false,
-                          colors: c,
-                        ),
-                      for (final m in online)
-                        _MemberItem(
-                          name: resolveName(m),
-                          avatarUrl: resolveAvatar(m),
-                          statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
-                          roleColor: memberRoleColor(m),
-                          statusText: resolveStatus(m),
-                          isOffline: false,
-                          colors: c,
-                        ),
-                      if (offline.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        _SectionHeader(label: 'OFFLINE', count: offline.length, colors: c),
-                        for (final m in offline)
-                          _MemberItem(
-                            name: resolveName(m),
-                            avatarUrl: resolveAvatar(m),
-                            statusColor: c.offline,
-                            roleColor: memberRoleColor(m),
-                            statusText: null, // no status for offline members
-                            isOffline: true,
-                            colors: c,
-                          ),
-                      ],
-                    ],
+                      // Resolve display color: highest-positioned non-gray role color
+                      Color? memberRoleColor(RemoteMember m) {
+                        final roleIds = memberRoleMap[m.id] ?? {};
+                        final memberRoles = allRoles.where((r) => roleIds.contains(r.id)).toList()
+                          ..sort((a, b) => (b.position ?? 0).compareTo(a.position ?? 0));
+                        for (final r in memberRoles) {
+                          if (r.name?.toLowerCase() == 'owner') continue;
+                          final color = _parseHexColor(r.color);
+                          if (color != null && r.color != '#9E9E9E' && r.color != '#ffffff') return color;
+                        }
+                        return null;
+                      }
+
+                      // Hoisted roles sorted by position desc (excluding Owner)
+                      final hoistedRoles = allRoles.where((r) => r.hoist && r.name?.toLowerCase() != 'owner').toList();
+
+                      // Group online members by their highest hoisted role
+                      final hoistedMembers = <int, List<RemoteMember>>{}; // roleId -> members
+                      final unhoistedOnline = <RemoteMember>[];
+                      final placed = <int>{};
+
+                      for (final m in online) {
+                        final roleIds = memberRoleMap[m.id] ?? {};
+                        // Find highest hoisted role this member has
+                        Role? highestHoisted;
+                        for (final r in hoistedRoles) {
+                          if (roleIds.contains(r.id)) { highestHoisted = r; break; }
+                        }
+                        if (highestHoisted != null) {
+                          hoistedMembers.putIfAbsent(highestHoisted.id, () => []).add(m);
+                          placed.add(m.id);
+                        } else {
+                          unhoistedOnline.add(m);
+                        }
+                      }
+
+                      return ListView(
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                        children: [
+                          // Hoisted role sections (by hierarchy position)
+                          for (final role in hoistedRoles) ...[
+                            if (hoistedMembers.containsKey(role.id) && hoistedMembers[role.id]!.isNotEmpty) ...[
+                              _SectionHeader(
+                                label: (role.name ?? 'ROLE').toUpperCase(),
+                                count: hoistedMembers[role.id]!.length,
+                                colors: c,
+                                color: _parseHexColor(role.color),
+                              ),
+                              for (final m in hoistedMembers[role.id]!)
+                                _MemberItem(
+                                  name: resolveName(m),
+                                  avatarUrl: resolveAvatar(m),
+                                  pubkey: m.pubkey,
+                                  statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
+                                  roleColor: memberRoleColor(m),
+                                  statusText: resolveStatus(m),
+                                  isOffline: false,
+                                  colors: c,
+                                  onTap: (pos, size) => showUserProfileCard(context, ref, m.pubkey, anchor: pos, anchorSize: size),
+                                  serverId: widget.serverId,
+                                ),
+                              const SizedBox(height: 8),
+                            ],
+                          ],
+                          // Non-hoisted online members
+                          if (unhoistedOnline.isNotEmpty || (!hasLocalUser && auth.publicKeyHex != null)) ...[
+                            _SectionHeader(label: 'ONLINE', count: unhoistedOnline.length + (hasLocalUser ? 0 : 1), colors: c),
+                            if (!hasLocalUser && auth.publicKeyHex != null)
+                              _MemberItem(
+                                name: localUserName(),
+                                avatarUrl: localUserAvatar(),
+                                pubkey: auth.publicKeyHex,
+                                statusColor: c.online,
+                                roleColor: null,
+                                statusText: 'Online',
+                                isOffline: false,
+                                colors: c,
+                                serverId: widget.serverId,
+                              ),
+                            for (final m in unhoistedOnline)
+                              _MemberItem(
+                                name: resolveName(m),
+                                avatarUrl: resolveAvatar(m),
+                                pubkey: m.pubkey,
+                                statusColor: _presenceColor(presenceSvc.getPresence(m.pubkey), c),
+                                roleColor: memberRoleColor(m),
+                                statusText: resolveStatus(m),
+                                isOffline: false,
+                                colors: c,
+                                onTap: (pos, size) => showUserProfileCard(context, ref, m.pubkey, anchor: pos, anchorSize: size),
+                                serverId: widget.serverId,
+                              ),
+                          ],
+                          // Offline
+                          if (offline.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            _SectionHeader(label: 'OFFLINE', count: offline.length, colors: c),
+                            for (final m in offline)
+                              _MemberItem(
+                                name: resolveName(m),
+                                avatarUrl: resolveAvatar(m),
+                                pubkey: m.pubkey,
+                                statusColor: c.offline,
+                                roleColor: memberRoleColor(m),
+                                statusText: null,
+                                onTap: (pos, size) => showUserProfileCard(context, ref, m.pubkey, anchor: pos, anchorSize: size),
+                                isOffline: true,
+                                colors: c,
+                                serverId: widget.serverId,
+                              ),
+                          ],
+                        ],
+                      );
+                    },
                   );
                 },
               );
@@ -175,18 +265,8 @@ class _MemberListState extends ConsumerState<MemberList> {
     }
   }
 
-  /// Resolve display color for each member — matches Rails: skip owner role, first non-gray color
-  Future<Map<int, Color?>> _resolveDisplayColors(List<RemoteMember> members) async {
-    final permSvc = ref.read(permissionServiceProvider);
-    final result = <int, Color?>{};
-    for (final m in members) {
-      final colorHex = await permSvc.getDisplayColor(widget.serverId, m.pubkey);
-      result[m.id] = colorHex != '#ffffff' ? _parseHexColor(colorHex) : null;
-    }
-    return result;
-  }
-
-  static Color? _parseHexColor(String hex) {
+  static Color? _parseHexColor(String? hex) {
+    if (hex == null || hex.isEmpty) return null;
     try {
       final cleaned = hex.replaceFirst('#', '');
       if (cleaned.length == 6) return Color(int.parse('FF$cleaned', radix: 16));
@@ -199,8 +279,9 @@ class _SectionHeader extends StatelessWidget {
   final String label;
   final int count;
   final InfernoColors colors;
+  final Color? color;
 
-  const _SectionHeader({required this.label, required this.count, required this.colors});
+  const _SectionHeader({required this.label, required this.count, required this.colors, this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -209,7 +290,7 @@ class _SectionHeader extends StatelessWidget {
       child: Text(
         '$label \u2014 $count',
         style: TextStyle(
-          color: colors.gray500,
+          color: color ?? colors.gray500,
           fontSize: 11,
           fontWeight: FontWeight.w700,
           letterSpacing: 0.5,
@@ -219,30 +300,36 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-class _MemberItem extends StatefulWidget {
+class _MemberItem extends ConsumerStatefulWidget {
   final String name;
   final String? avatarUrl;
+  final String? pubkey;
   final Color statusColor;
   final Color? roleColor;
   final String? statusText;
   final bool isOffline;
   final InfernoColors colors;
+  final void Function(Offset position, Size size)? onTap;
+  final int serverId;
 
   const _MemberItem({
     required this.name,
     this.avatarUrl,
+    this.pubkey,
     required this.statusColor,
     this.roleColor,
     this.statusText,
     required this.isOffline,
     required this.colors,
+    this.onTap,
+    required this.serverId,
   });
 
   @override
-  State<_MemberItem> createState() => _MemberItemState();
+  ConsumerState<_MemberItem> createState() => _MemberItemState();
 }
 
-class _MemberItemState extends State<_MemberItem> {
+class _MemberItemState extends ConsumerState<_MemberItem> {
   bool _hovering = false;
 
   @override
@@ -250,6 +337,12 @@ class _MemberItemState extends State<_MemberItem> {
     final c = widget.colors;
 
     return GestureDetector(
+      onTap: () {
+        final box = context.findRenderObject() as RenderBox?;
+        if (box != null) {
+          widget.onTap?.call(box.localToGlobal(Offset.zero), box.size);
+        }
+      },
       onSecondaryTapDown: (details) => _showMemberContextMenu(context, details, c),
       child: MouseRegion(
       cursor: SystemMouseCursors.click,
@@ -340,60 +433,264 @@ class _MemberItemState extends State<_MemberItem> {
     );
   }
 
-  void _showMemberContextMenu(BuildContext context, TapDownDetails details, InfernoColors c) {
-    final pos = details.globalPosition;
-    showMenu<String>(
+  void _showMemberContextMenu(BuildContext context, TapDownDetails details, InfernoColors c) async {
+    final auth = ref.read(authServiceProvider);
+    final pubkey = auth.publicKeyHex;
+    if (pubkey == null) return;
+
+    final isSelf = widget.pubkey == pubkey;
+    final permSvc = ref.read(permissionServiceProvider);
+
+    // Check permissions
+    final canKick = !isSelf && await permSvc.hasPermission(widget.serverId, pubkey, Permission.kickMembers);
+    final canBan = !isSelf && await permSvc.hasPermission(widget.serverId, pubkey, Permission.banMembers);
+    final canChangeNickname = isSelf
+        ? await permSvc.hasPermission(widget.serverId, pubkey, Permission.changeNickname)
+        : await permSvc.hasPermission(widget.serverId, pubkey, Permission.manageRoles);
+
+    // Check if target is the server owner (can't moderate the owner)
+    bool isTargetOwner = false;
+    if (widget.pubkey != null) {
+      isTargetOwner = await _isServerOwner(widget.serverId, widget.pubkey!);
+    }
+
+    if (!mounted) return;
+
+    final timeoutSubmenu = <CtxEntry>[
+      CtxItem('60 seconds', null, () => _doTimeout(context, c, const Duration(seconds: 60))),
+      CtxItem('5 minutes', null, () => _doTimeout(context, c, const Duration(minutes: 5))),
+      CtxItem('10 minutes', null, () => _doTimeout(context, c, const Duration(minutes: 10))),
+      CtxItem('1 hour', null, () => _doTimeout(context, c, const Duration(hours: 1))),
+      CtxItem('1 day', null, () => _doTimeout(context, c, const Duration(days: 1))),
+      CtxItem('1 week', null, () => _doTimeout(context, c, const Duration(days: 7))),
+    ];
+
+    showStyledMenu(
       context: context,
-      position: RelativeRect.fromLTRB(pos.dx, pos.dy, pos.dx, pos.dy),
-      color: c.gray800,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: c.gray700),
-      ),
+      position: details.globalPosition,
       items: [
-        PopupMenuItem(value: 'profile', child: Row(children: [
-          Icon(Icons.person_outline, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Profile', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        PopupMenuItem(value: 'mention', child: Row(children: [
-          Icon(Icons.alternate_email, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Mention', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        PopupMenuItem(value: 'message', child: Row(children: [
-          Icon(Icons.message_outlined, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Message', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'add_friend', child: Row(children: [
-          Icon(Icons.person_add_outlined, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Add Friend', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        PopupMenuItem(value: 'roles', child: Row(children: [
-          Icon(Icons.shield_outlined, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Roles', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        PopupMenuItem(value: 'nickname', child: Row(children: [
-          Icon(Icons.edit_outlined, size: 16, color: c.gray400),
-          const SizedBox(width: 10),
-          Text('Change Nickname', style: TextStyle(color: c.gray200, fontSize: 14)),
-        ])),
-        const PopupMenuDivider(),
-        PopupMenuItem(value: 'kick', child: Row(children: [
-          Icon(Icons.logout, size: 16, color: c.accent),
-          const SizedBox(width: 10),
-          Text('Kick', style: TextStyle(color: c.accent, fontSize: 14)),
-        ])),
-        PopupMenuItem(value: 'ban', child: Row(children: [
-          Icon(Icons.block, size: 16, color: c.accent),
-          const SizedBox(width: 10),
-          Text('Ban', style: TextStyle(color: c.accent, fontSize: 14)),
-        ])),
+        CtxItem('Profile', Icons.person_outline, () {
+          if (widget.pubkey != null) {
+            final box = context.findRenderObject() as RenderBox?;
+            if (box != null) {
+              final pos = box.localToGlobal(Offset.zero);
+              showUserProfileCard(context, ref, widget.pubkey!, anchor: pos, anchorSize: box.size);
+            }
+          }
+        }),
+        CtxItem('Mention', Icons.alternate_email, () {}),
+        CtxItem('Message', Icons.message_outlined, () {}),
+        if (canChangeNickname)
+          CtxItem('Change Nickname', Icons.edit_outlined, () => _showNicknameDialog(context, c)),
+        CtxDivider(),
+        CtxItem('Copy User ID', Icons.copy, () {
+          Clipboard.setData(ClipboardData(text: widget.pubkey ?? widget.name));
+        }),
+        if (!isSelf && !isTargetOwner && (canKick || canBan)) ...[
+          CtxDivider(),
+          if (canKick)
+            CtxItem('Timeout', Icons.timer_outlined, () {}, submenu: timeoutSubmenu),
+          if (canKick)
+            CtxItem('Kick', Icons.logout, () => _confirmKick(context, c), danger: true),
+          if (canBan)
+            CtxItem('Ban', Icons.block, () => _confirmBan(context, c), danger: true),
+        ],
       ],
+    );
+  }
+
+  Future<bool> _isServerOwner(int serverId, String targetPubkey) async {
+    final db = ref.read(databaseProvider);
+    final server = await (db.select(db.servers)..where((s) => s.id.equals(serverId))).getSingleOrNull();
+    if (server == null || server.ownerId == null) return false;
+    final owner = await (db.select(db.users)..where((u) => u.id.equals(server.ownerId!))).getSingleOrNull();
+    return owner?.nostrPublicKey == targetPubkey;
+  }
+
+  void _showNicknameDialog(BuildContext context, InfernoColors c) {
+    final controller = TextEditingController(text: widget.name);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.gray800,
+        title: Text('Change Nickname', style: TextStyle(color: Colors.white, fontSize: 16)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'Nickname',
+            hintStyle: TextStyle(color: c.gray500),
+            fillColor: c.gray900,
+            filled: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text('Cancel', style: TextStyle(color: c.gray400)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: c.accent),
+            onPressed: () {
+              // TODO: Publish nickname change via Nostr event
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _doTimeout(BuildContext context, InfernoColors c, Duration duration) {
+    if (widget.pubkey == null) return;
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex == null) return;
+    final memberSvc = ref.read(memberServiceProvider);
+    memberSvc.timeoutRemoteMember(
+      serverId: widget.serverId,
+      targetPubkey: widget.pubkey!,
+      duration: duration,
+      privateKeyHex: auth.privateKeyHex!,
+      publicKeyHex: auth.publicKeyHex!,
+    );
+  }
+
+  void _confirmKick(BuildContext context, InfernoColors c) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: c.gray800,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Kick ${widget.name}', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Text('Are you sure you want to kick this member from the server? They can rejoin with an invite.',
+                style: TextStyle(color: c.gray400, fontSize: 14)),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: c.accent),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _doKick();
+                    },
+                    child: const Text('Kick', style: TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _doKick() {
+    if (widget.pubkey == null) return;
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex == null) return;
+    final memberSvc = ref.read(memberServiceProvider);
+    memberSvc.kickRemoteMember(
+      serverId: widget.serverId,
+      targetPubkey: widget.pubkey!,
+      privateKeyHex: auth.privateKeyHex!,
+      publicKeyHex: auth.publicKeyHex!,
+    );
+  }
+
+  void _confirmBan(BuildContext context, InfernoColors c) {
+    final reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400,
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: c.gray800,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Ban ${widget.name}', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              Text('Are you sure you want to ban this member? They will not be able to rejoin.',
+                style: TextStyle(color: c.gray400, fontSize: 14)),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                style: TextStyle(color: c.gray200, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Reason (optional)',
+                  hintStyle: TextStyle(color: c.gray500),
+                  filled: true,
+                  fillColor: c.gray900,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: c.gray700),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(color: c.gray700),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFED4245)),
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _doBan(reasonController.text.trim());
+                    },
+                    child: const Text('Ban', style: TextStyle(color: Colors.white)),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _doBan(String reason) {
+    if (widget.pubkey == null) return;
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex == null) return;
+    final memberSvc = ref.read(memberServiceProvider);
+    memberSvc.banRemoteMember(
+      serverId: widget.serverId,
+      targetPubkey: widget.pubkey!,
+      privateKeyHex: auth.privateKeyHex!,
+      publicKeyHex: auth.publicKeyHex!,
+      reason: reason.isNotEmpty ? reason : null,
     );
   }
 }

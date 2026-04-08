@@ -4,16 +4,63 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../database/database.dart';
+import '../models/permission.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
+import '../providers/server_settings_provider.dart';
 import '../services/auth_service.dart';
+import '../services/invite_service.dart';
 import '../services/presence_service.dart';
 import '../providers/realtime_provider.dart';
+import '../providers/app_update_provider.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 import '../screens/settings/settings_overlay.dart';
 import '../screens/server_settings/server_settings_overlay.dart';
 import 'channel_reorder.dart';
+
+// Voice permission state for sidebar controls
+class _VoicePerms {
+  final bool canSpeak;
+  final bool canVideo;
+  final bool canScreenShare;
+  const _VoicePerms({this.canSpeak = true, this.canVideo = true, this.canScreenShare = true});
+}
+
+final _voicePermsProvider = FutureProvider.family<_VoicePerms, int>((ref, serverId) async {
+  final auth = ref.read(authServiceProvider);
+  if (auth.publicKeyHex == null) return const _VoicePerms();
+  final permSvc = ref.read(permissionServiceProvider);
+  final pk = auth.publicKeyHex!;
+  final results = await Future.wait([
+    permSvc.hasPermission(serverId, pk, Permission.speak),
+    permSvc.hasPermission(serverId, pk, Permission.video),
+    permSvc.hasPermission(serverId, pk, Permission.screenShare),
+  ]);
+  return _VoicePerms(canSpeak: results[0], canVideo: results[1], canScreenShare: results[2]);
+});
+
+/// Show the invite dialog for a server. Callable from anywhere.
+void showInviteDialog({
+  required BuildContext context,
+  required Server server,
+  required InfernoColors colors,
+  required String privateKeyHex,
+  required String publicKeyHex,
+  required InviteService inviteService,
+}) {
+  showDialog(
+    context: context,
+    builder: (ctx) => _InviteGenerateDialog(
+      server: server,
+      colors: colors,
+      authPrivateKeyHex: privateKeyHex,
+      authPublicKeyHex: publicKeyHex,
+      inviteService: inviteService,
+    ),
+  );
+}
 
 class ChannelSidebar extends ConsumerStatefulWidget {
   final Server server;
@@ -27,12 +74,33 @@ class ChannelSidebar extends ConsumerStatefulWidget {
 
 class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
   final Set<String> _collapsedCategories = {};
+  bool _canManageChannels = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPermissions();
+  }
+
+  @override
+  void didUpdateWidget(ChannelSidebar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.server.id != widget.server.id) _loadPermissions();
+  }
+
+  Future<void> _loadPermissions() async {
+    final auth = ref.read(authServiceProvider);
+    if (auth.publicKeyHex == null) return;
+    final permSvc = ref.read(permissionServiceProvider);
+    final can = await permSvc.hasPermission(widget.server.id, auth.publicKeyHex!, Permission.manageChannels);
+    if (mounted) setState(() => _canManageChannels = can);
+  }
 
   @override
   Widget build(BuildContext context) {
     final db = ref.watch(databaseProvider);
     final auth = ref.watch(authServiceProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Container(
       width: 240,
@@ -75,6 +143,12 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
                           }
                         });
                       },
+                      onEditChannel: _canManageChannels ? (ch) => _editChannelInline(context, ch) : null,
+                      onDeleteChannel: _canManageChannels ? (ch) => _deleteChannelInline(context, ch) : null,
+                      onEditCategory: _canManageChannels ? (cat) => _editCategoryInline(context, cat) : null,
+                      onDeleteCategory: _canManageChannels ? (cat) => _deleteCategoryInline(context, cat) : null,
+                      onCreateChannel: _canManageChannels ? (cat, {int? position}) => _createChannelInCategory(context, categoryId: cat?.id, position: position) : null,
+                      onCreateCategory: _canManageChannels ? ({int? position}) => _createCategoryInline(context, position: position) : null,
                     );
                   },
                 );
@@ -102,19 +176,27 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
             final isParent = voiceChannel != null && voiceChannel.parentChannelId == null;
             final isChild = voiceChannel != null && voiceChannel.parentChannelId != null;
 
-            return VoiceControlsBar(
-              channelName: voiceChannelName,
-              colors: c,
-              isMuted: livekit.isMuted,
-              isDeafened: livekit.isDeafened,
-              onDisconnect: () => livekit.disconnect(),
-              onToggleMute: () => livekit.toggleMicrophone(),
-              onToggleDeafen: () => livekit.toggleDeafen(),
-              onToggleCamera: () => livekit.toggleCamera(),
-              onToggleScreenShare: () => livekit.toggleScreenShare(),
-              hierarchyLabel: isParent ? '\u2193 Broadcast' : (isChild ? '\u2191 Ask to Speak' : null),
-              onHierarchyAction: (isParent || isChild) ? () {} : null,
-            );
+            // Permission-gate voice controls
+            final voicePermsAsync = voiceChannel != null
+                ? ref.watch(_voicePermsProvider(voiceChannel.serverId)).valueOrNull ?? const _VoicePerms()
+                : const _VoicePerms();
+
+            return Column(mainAxisSize: MainAxisSize.min, children: [
+              VoiceControlsBar(
+                channelName: voiceChannelName,
+                colors: c,
+                isMuted: livekit.isMuted,
+                isDeafened: livekit.isDeafened,
+                onDisconnect: () => livekit.disconnect(),
+                onToggleMute: voicePermsAsync.canSpeak ? () => livekit.toggleMicrophone() : null,
+                onToggleDeafen: () => livekit.toggleDeafen(),
+                onToggleCamera: voicePermsAsync.canVideo ? () => livekit.toggleCamera() : null,
+                onToggleScreenShare: voicePermsAsync.canScreenShare ? () => livekit.toggleScreenShare() : null,
+                hierarchyLabel: isParent ? '\u2193 Broadcast' : (isChild ? '\u2191 Ask to Speak' : null),
+                onHierarchyAction: (isParent || isChild) ? () {} : null,
+              ),
+              Container(height: 1, color: c.gray700.withValues(alpha: 0.5)),
+            ]);
           }); }),
           _UserPanel(auth: auth, colors: c),
         ],
@@ -122,6 +204,218 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
     );
   }
 
+  Future<void> _editChannelInline(BuildContext ctx, Channel ch) async {
+    final c = ref.read(infernoColorsProvider);
+    await showChannelDialog(ctx, ref, server: widget.server, colors: c, editing: ch);
+  }
+
+  Future<void> _deleteChannelInline(BuildContext ctx, Channel ch) async {
+    final c = ref.read(infernoColorsProvider);
+    await confirmDeleteChannel(ctx, ref, server: widget.server, colors: c, channel: ch);
+  }
+
+  Future<void> _editCategoryInline(BuildContext ctx, Category cat) async {
+    final c = ref.read(infernoColorsProvider);
+    final nameCtrl = TextEditingController(text: cat.name ?? '');
+    final result = await showDialog<String>(
+      context: ctx,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400, padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Edit Category', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(controller: nameCtrl, autofocus: true, style: TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(hintText: 'Category name', hintStyle: TextStyle(color: c.gray500),
+                fillColor: c.gray900, filled: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent)))),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: () => Navigator.pop(context, nameCtrl.text.trim()), child: const Text('Save')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    if (result == null || result.isEmpty) return;
+    final db = ref.read(databaseProvider);
+    await (db.update(db.categories)..where((c) => c.id.equals(cat.id)))
+        .write(CategoriesCompanion(name: Value(result), updatedAt: Value(DateTime.now())));
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex != null) {
+      final publishSvc = ref.read(serverPublishServiceProvider);
+      await publishSvc.publishStructure(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: widget.server);
+    }
+  }
+
+  Future<void> _deleteCategoryInline(BuildContext ctx, Category cat) async {
+    final c = ref.read(infernoColorsProvider);
+    final confirmed = await showDialog<bool>(
+      context: ctx,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400, padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.gray800, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Delete "${cat.name}"?', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Text('Channels in this category will be moved to uncategorized.', style: TextStyle(color: c.gray400, fontSize: 14)),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+              const SizedBox(width: 8),
+              ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                onPressed: () => Navigator.pop(context, true), child: const Text('Delete', style: TextStyle(color: Colors.white))),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    final db = ref.read(databaseProvider);
+    await (db.update(db.channels)..where((ch) => ch.categoryId.equals(cat.id)))
+        .write(ChannelsCompanion(categoryId: const Value(null), updatedAt: Value(DateTime.now())));
+    await (db.delete(db.categories)..where((c) => c.id.equals(cat.id))).go();
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex != null) {
+      final publishSvc = ref.read(serverPublishServiceProvider);
+      await publishSvc.publishStructure(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: widget.server);
+    }
+  }
+
+  Future<void> _createCategoryInline(BuildContext ctx, {int? position}) async {
+    final c = ref.read(infernoColorsProvider);
+    final nameCtrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: ctx,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400, padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Create Category', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(controller: nameCtrl, autofocus: true, style: TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(hintText: 'Category name', hintStyle: TextStyle(color: c.gray500),
+                fillColor: c.gray900, filled: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent)))),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: () => Navigator.pop(context, nameCtrl.text.trim()), child: const Text('Create')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    if (result == null || result.isEmpty) return;
+    final db = ref.read(databaseProvider);
+    final now = DateTime.now();
+    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+    final categories = await (db.select(db.categories)..where((c) => c.serverId.equals(widget.server.id))).get();
+    final maxPos = categories.fold<int>(0, (max, cat) => (cat.position ?? 0) > max ? (cat.position ?? 0) : max);
+    final insertPosition = position ?? (maxPos + 1);
+    // If inserting at a specific position, shift existing categories down
+    if (position != null) {
+      final toShift = categories.where((cat) => (cat.position ?? 0) >= position).toList();
+      for (final cat in toShift) {
+        await (db.update(db.categories)..where((c) => c.id.equals(cat.id)))
+            .write(CategoriesCompanion(position: Value((cat.position ?? 0) + 1)));
+      }
+    }
+    await db.into(db.categories).insert(CategoriesCompanion.insert(
+      publicId: publicId, serverId: widget.server.id,
+      name: Value(result), position: Value(insertPosition),
+      createdAt: now, updatedAt: now,
+    ));
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex != null) {
+      final publishSvc = ref.read(serverPublishServiceProvider);
+      await publishSvc.publishStructure(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: widget.server);
+    }
+  }
+
+  Future<void> _createChannelInCategory(BuildContext ctx, {int? categoryId, int? position}) async {
+    final c = ref.read(infernoColorsProvider);
+    final nameCtrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: ctx,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400, padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Create Channel', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(controller: nameCtrl, autofocus: true, style: TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(hintText: 'channel-name', hintStyle: TextStyle(color: c.gray500),
+                fillColor: c.gray900, filled: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent)))),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(context), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: () => Navigator.pop(context, nameCtrl.text.trim()), child: const Text('Create')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    if (result == null || result.isEmpty) return;
+    final db = ref.read(databaseProvider);
+    final now = DateTime.now();
+    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+    final nostrGroupId = widget.server.nostrGroupId != null ? '${widget.server.nostrGroupId}-$publicId' : null;
+    final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(widget.server.id))).get();
+    final maxPos = channels.fold<int>(0, (max, ch) => (ch.position ?? 0) > max ? (ch.position ?? 0) : max);
+    final insertPosition = position ?? (maxPos + 1);
+    // If inserting at a specific position, shift existing channels down
+    if (position != null) {
+      final toShift = channels.where((ch) =>
+          ch.categoryId == categoryId && (ch.position ?? 0) >= position).toList();
+      for (final ch in toShift) {
+        await (db.update(db.channels)..where((c) => c.id.equals(ch.id)))
+            .write(ChannelsCompanion(position: Value((ch.position ?? 0) + 1)));
+      }
+    }
+    final chRowId = await db.into(db.channels).insert(ChannelsCompanion.insert(
+      publicId: publicId, serverId: widget.server.id,
+      name: result.toLowerCase().replaceAll(' ', '-'), channelType: 0,
+      position: Value(insertPosition), categoryId: Value(categoryId),
+      nostrGroupId: Value(nostrGroupId), createdAt: now, updatedAt: now,
+    ));
+    // Seed channel_reads so new channel doesn't appear as unread
+    await db.into(db.channelReads).insert(ChannelReadsCompanion.insert(
+      channelId: chRowId, userId: 0,
+      lastReadAt: now, createdAt: now, updatedAt: now,
+    ), onConflict: DoNothing());
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex != null) {
+      final publishSvc = ref.read(serverPublishServiceProvider);
+      await publishSvc.publishStructure(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: widget.server);
+    }
+  }
 }
 
 /// Voice controls bar — shown in sidebar when connected to a voice channel.
@@ -304,269 +598,132 @@ class _ServerHeader extends ConsumerStatefulWidget {
 class _ServerHeaderState extends ConsumerState<_ServerHeader> {
   bool _hovering = false;
   bool _dropdownOpen = false;
+  bool _canManageServer = false;
+  bool _canManageChannels = false;
+  bool _canInvite = false;
 
-  void _toggleDropdown() {
+  @override
+  void initState() {
+    super.initState();
+    _loadPerms();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ServerHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.server.id != widget.server.id) _loadPerms();
+  }
+
+  Future<void> _loadPerms() async {
+    final auth = ref.read(authServiceProvider);
+    if (auth.publicKeyHex == null) return;
+    final permSvc = ref.read(permissionServiceProvider);
+    final manage = await permSvc.hasPermission(widget.server.id, auth.publicKeyHex!, Permission.manageServer);
+    final channels = await permSvc.hasPermission(widget.server.id, auth.publicKeyHex!, Permission.manageChannels);
+    final invite = await permSvc.hasPermission(widget.server.id, auth.publicKeyHex!, Permission.createInvite);
+    if (mounted) {
+      setState(() {
+        _canManageServer = manage;
+        _canManageChannels = channels;
+        _canInvite = invite;
+      });
+    }
+  }
+
+  void _toggleDropdown() async {
     if (_dropdownOpen) return;
     setState(() => _dropdownOpen = true);
 
-    final overlay = Overlay.of(context);
     final renderBox = context.findRenderObject() as RenderBox;
     final offset = renderBox.localToGlobal(Offset.zero);
     final c = widget.colors;
+    final menuTop = offset.dy + renderBox.size.height + 4;
+    final menuLeft = offset.dx + 8;
+    final menuWidth = renderBox.size.width - 16;
 
-    late OverlayEntry entry;
-    entry = OverlayEntry(
-      builder: (context) => _ServerDropdownOverlay(
-        server: widget.server,
-        colors: c,
-        anchor: Rect.fromLTWH(offset.dx, offset.dy + renderBox.size.height, renderBox.size.width, 0),
-        onDismiss: () {
-          entry.remove();
-          if (mounted) setState(() => _dropdownOpen = false);
-        },
-        ref: ref,
-        router: GoRouter.of(this.context),
-      ),
-    );
-    overlay.insert(entry);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.colors;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTap: _toggleDropdown,
-        child: Container(
-          height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: c.gray900,
-            gradient: (_hovering || _dropdownOpen) ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
-            border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.3))),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 4, offset: const Offset(0, 2))],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  widget.server.name,
-                  style: TextStyle(color: c.gray50, fontWeight: FontWeight.w600, fontSize: 15),
-                  overflow: TextOverflow.ellipsis,
+    final action = await showDialog<String>(
+      context: context,
+      barrierColor: Colors.transparent,
+      barrierDismissible: true,
+      builder: (ctx) => Stack(
+        children: [
+          Positioned(
+            left: menuLeft,
+            top: menuTop,
+            width: menuWidth,
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: c.gray900,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: c.gray700),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
                 ),
-              ),
-              Icon(Icons.keyboard_arrow_down, color: c.gray400, size: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ServerDropdownOverlay extends StatefulWidget {
-  final Server server;
-  final InfernoColors colors;
-  final Rect anchor;
-  final VoidCallback onDismiss;
-  final WidgetRef ref;
-  final GoRouter router;
-
-  const _ServerDropdownOverlay({
-    required this.server,
-    required this.colors,
-    required this.anchor,
-    required this.onDismiss,
-    required this.ref,
-    required this.router,
-  });
-
-  @override
-  State<_ServerDropdownOverlay> createState() => _ServerDropdownOverlayState();
-}
-
-class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
-  @override
-  Widget build(BuildContext context) {
-    final c = widget.colors;
-
-    return Stack(
-      children: [
-        // Dismiss layer
-        Positioned.fill(
-          child: GestureDetector(
-            onTap: widget.onDismiss,
-            behavior: HitTestBehavior.opaque,
-            child: Container(color: Colors.transparent),
-          ),
-        ),
-        // Dropdown menu
-        Positioned(
-          left: widget.anchor.left + 8,
-          top: widget.anchor.top + 4,
-          width: widget.anchor.width - 16,
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              decoration: BoxDecoration(
-                color: c.gray900,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: c.gray700),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _DropdownItem(
-                    icon: Icons.link,
-                    label: 'Invite People',
-                    colors: c,
-                    onTap: () {
-                      widget.onDismiss();
-                      _showInviteDialog(context);
-                    },
-                  ),
-                  _DropdownItem(
-                    icon: Icons.settings,
-                    label: 'Server Settings',
-                    colors: c,
-                    onTap: () {
-                      widget.onDismiss();
-                      _showServerSettings(context);
-                    },
-                  ),
-                  _DropdownItem(
-                    icon: Icons.add,
-                    label: 'Create Channel',
-                    colors: c,
-                    onTap: () {
-                      widget.onDismiss();
-                      _showCreateChannel(context);
-                    },
-                  ),
-                  _DropdownItem(
-                    icon: Icons.create_new_folder_outlined,
-                    label: 'Create Category',
-                    colors: c,
-                    onTap: () {
-                      widget.onDismiss();
-                      _showCreateCategory(context);
-                    },
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Container(height: 1, color: c.gray700),
-                  ),
-                  _DropdownItem(
-                    icon: null,
-                    label: 'Leave Server',
-                    colors: c,
-                    danger: true,
-                    onTap: () {
-                      widget.onDismiss();
-                      _leaveServer(context);
-                    },
-                  ),
-                ],
+                padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_canInvite)
+                      _DropdownItem(icon: Icons.link, label: 'Invite People', colors: c,
+                        onTap: () => Navigator.pop(ctx, 'invite')),
+                    if (_canManageServer)
+                      _DropdownItem(icon: Icons.settings, label: 'Server Settings', colors: c,
+                        onTap: () => Navigator.pop(ctx, 'settings')),
+                    if (_canManageChannels)
+                      _DropdownItem(icon: Icons.add, label: 'Create Channel', colors: c,
+                        onTap: () => Navigator.pop(ctx, 'createChannel')),
+                    if (_canManageChannels)
+                      _DropdownItem(icon: Icons.create_new_folder_outlined, label: 'Create Category', colors: c,
+                        onTap: () => Navigator.pop(ctx, 'createCategory')),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Container(height: 1, color: c.gray700),
+                    ),
+                    _DropdownItem(icon: null, label: 'Leave Server', colors: c, danger: true,
+                      onTap: () => Navigator.pop(ctx, 'leave')),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
-  }
 
-  void _showServerSettings(BuildContext context) {
-    showServerSettingsOverlay(context, widget.server);
-  }
+    if (mounted) setState(() => _dropdownOpen = false);
 
-  Future<void> _showInviteDialog(BuildContext ctx) async {
-    final c = widget.colors;
-    final auth = widget.ref.read(authServiceProvider);
-    final inviteService = widget.ref.read(inviteServiceProvider);
-
-    if (auth.privateKeyHex == null) return;
-
-    // Create invite
-    String? inviteCode;
-    String? error;
-    try {
-      final invite = await inviteService.createInvite(
-        privateKeyHex: auth.privateKeyHex!,
-        publicKeyHex: auth.publicKeyHex!,
-        server: widget.server,
-        creatorId: 1,
-      );
-      inviteCode = invite.code;
-    } catch (e) {
-      error = e.toString();
+    if (action == null) return;
+    switch (action) {
+      case 'invite': _showInviteDialog(); break;
+      case 'settings': _showServerSettings(context); break;
+      case 'createChannel': _showCreateChannel(context); break;
+      case 'createCategory': _showCreateCategory(context); break;
+      case 'leave': _leaveServer(context); break;
     }
+  }
 
-    if (!ctx.mounted) return;
-
+  void _showInviteDialog() {
+    final auth = ref.read(authServiceProvider);
+    final inviteService = ref.read(inviteServiceProvider);
+    if (auth.privateKeyHex == null) return;
     showDialog(
-      context: ctx,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          width: 400,
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: c.gray900,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Invite People', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 12),
-              Text('Share this invite link with others:', style: TextStyle(color: c.gray400, fontSize: 14)),
-              const SizedBox(height: 12),
-              if (error != null)
-                Text(error, style: TextStyle(color: c.accent, fontSize: 13))
-              else if (inviteCode != null)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(8)),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: SelectableText(
-                          'inferno://invite/${widget.server.nostrGroupId ?? widget.server.publicId}/$inviteCode',
-                          style: TextStyle(color: c.gray200, fontSize: 13, fontFamily: 'monospace'),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: () {
-                          Clipboard.setData(ClipboardData(
-                            text: 'inferno://invite/${widget.server.nostrGroupId ?? widget.server.publicId}/$inviteCode',
-                          ));
-                        },
-                        child: Icon(Icons.copy, size: 16, color: c.gray400),
-                      ),
-                    ],
-                  ),
-                ),
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: Text('Done', style: TextStyle(color: c.gray400)),
-              ),
-            ],
-          ),
-        ),
+      context: context,
+      builder: (ctx) => _InviteGenerateDialog(
+        server: widget.server,
+        colors: widget.colors,
+        authPrivateKeyHex: auth.privateKeyHex!,
+        authPublicKeyHex: auth.publicKeyHex!,
+        inviteService: inviteService,
       ),
     );
   }
 
-  Future<void> _showCreateChannel(BuildContext ctx) async {
+  void _showServerSettings(BuildContext ctx) {
+    showServerSettingsOverlay(ctx, widget.server);
+  }
+
+  Future<void> _showCreateChannel(BuildContext ctx, {int? categoryId}) async {
     final c = widget.colors;
     final nameController = TextEditingController();
     final result = await showDialog<String>(
@@ -623,29 +780,33 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
     );
 
     if (result != null && result.isNotEmpty) {
-      final db = widget.ref.read(databaseProvider);
+      final db = ref.read(databaseProvider);
       final now = DateTime.now();
       final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
       final nostrGroupId = widget.server.nostrGroupId != null ? '${widget.server.nostrGroupId}-$publicId' : null;
 
-      // Get current max position
       final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(widget.server.id))).get();
       final maxPos = channels.fold<int>(0, (max, ch) => (ch.position ?? 0) > max ? (ch.position ?? 0) : max);
 
-      await db.into(db.channels).insert(ChannelsCompanion.insert(
+      final chRowId2 = await db.into(db.channels).insert(ChannelsCompanion.insert(
         publicId: publicId,
         serverId: widget.server.id,
         name: result.toLowerCase().replaceAll(' ', '-'),
         channelType: 0,
         position: Value(maxPos + 1),
+        categoryId: Value(categoryId),
         nostrGroupId: Value(nostrGroupId),
         createdAt: now,
         updatedAt: now,
       ));
+      // Seed channel_reads so new channel doesn't appear as unread
+      await db.into(db.channelReads).insert(ChannelReadsCompanion.insert(
+        channelId: chRowId2, userId: 0,
+        lastReadAt: now, createdAt: now, updatedAt: now,
+      ), onConflict: DoNothing());
 
-      // Publish structure update to relays
-      final auth = widget.ref.read(authServiceProvider);
-      final serverPublish = widget.ref.read(serverPublishServiceProvider);
+      final auth = ref.read(authServiceProvider);
+      final serverPublish = ref.read(serverPublishServiceProvider);
       if (auth.privateKeyHex != null) {
         await serverPublish.publishStructure(
           privateKeyHex: auth.privateKeyHex!,
@@ -714,7 +875,7 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
     );
 
     if (result != null && result.isNotEmpty) {
-      final db = widget.ref.read(databaseProvider);
+      final db = ref.read(databaseProvider);
       final now = DateTime.now();
       final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
 
@@ -778,24 +939,22 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
     );
 
     if (confirmed == true) {
-      final db = widget.ref.read(databaseProvider);
+      final db = ref.read(databaseProvider);
       final serverId = widget.server.id;
 
-      // 1. Delete membership (matches Rails)
       await (db.delete(db.serverMemberships)..where((m) => m.serverId.equals(serverId))).go();
 
-      // 2. Publish Kind 31753 removal event (matches Rails: publish_server_state(:member, removed: true))
-      final auth = widget.ref.read(authServiceProvider);
+      final auth = ref.read(authServiceProvider);
       if (auth.privateKeyHex != null && widget.server.nostrGroupId != null) {
-        final serverPublish = widget.ref.read(serverPublishServiceProvider);
+        final serverPublish = ref.read(serverPublishServiceProvider);
         await serverPublish.publishMemberRemoval(
           privateKeyHex: auth.privateKeyHex!,
           publicKeyHex: auth.publicKeyHex!,
           server: widget.server,
+          targetPubkey: auth.publicKeyHex!,
         );
       }
 
-      // 3. Full cleanup — remove ALL data for this server (no caching deleted servers)
       final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(serverId))).get();
       for (final ch in channels) {
         await (db.delete(db.messages)..where((m) => m.channelId.equals(ch.id))).go();
@@ -805,10 +964,46 @@ class _ServerDropdownOverlayState extends State<_ServerDropdownOverlay> {
       await (db.delete(db.remoteMembers)..where((m) => m.serverId.equals(serverId))).go();
       await (db.delete(db.servers)..where((s) => s.id.equals(serverId))).go();
 
-      widget.router.go('/conversations');
+      GoRouter.of(context).go('/conversations');
     }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: _toggleDropdown,
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: c.gray900,
+            gradient: (_hovering || _dropdownOpen) ? LinearGradient(colors: [c.accent.withValues(alpha: 0.08), Colors.transparent]) : null,
+            border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.3))),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 4, offset: const Offset(0, 2))],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  widget.server.name,
+                  style: TextStyle(color: c.gray50, fontWeight: FontWeight.w600, fontSize: 15),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(Icons.keyboard_arrow_down, color: c.gray400, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
+
 
 class _DropdownItem extends StatefulWidget {
   final IconData? icon;
@@ -844,6 +1039,7 @@ class _DropdownItemState extends State<_DropdownItem> {
       onEnter: (_) => setState(() => _hovering = true),
       onExit: (_) => setState(() => _hovering = false),
       child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
         onTap: widget.onTap,
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
@@ -892,61 +1088,71 @@ class _UserPanel extends ConsumerWidget {
         final displayName = contact?.displayName ?? contact?.username ?? (pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User');
         final avatarUrl = contact?.avatarUrl;
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: BoxDecoration(
-        color: colors.gray950,
-        border: Border(top: BorderSide(color: colors.accent.withValues(alpha: 0.10))),
-      ),
-      child: Row(
-        children: [
-          // Avatar with status dot
-          Stack(
-            children: [
-              CircleAvatar(
-                radius: 16,
-                backgroundColor: Colors.transparent,
-                backgroundImage: avatarUrl != null && avatarUrl.startsWith('http') ? NetworkImage(avatarUrl) : null,
-                child: (avatarUrl == null || !avatarUrl.startsWith('http'))
-                    ? Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14))
-                    : null,
-              ),
-              Positioned(
-                right: -1, bottom: -1,
-                child: Container(
-                  width: 14, height: 14,
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: colors.gray950, width: 2),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 2, 2, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: colors.gray950,
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Row(
+          children: [
+            Stack(
               children: [
-                Text(
-                  displayName,
-                  style: TextStyle(color: colors.gray200, fontSize: 13, fontWeight: FontWeight.w500),
-                  overflow: TextOverflow.ellipsis,
+                Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: avatarUrl != null && avatarUrl.startsWith('http') ? Colors.transparent : colors.gray700,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: avatarUrl != null && avatarUrl.startsWith('http')
+                      ? Image.network(avatarUrl, fit: BoxFit.cover, width: 32, height: 32)
+                      : Center(child: Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.w600))),
                 ),
-                Text(
-                  statusText,
-                  style: TextStyle(color: colors.gray500, fontSize: 11),
+                Positioned(
+                  right: 0, bottom: 0,
+                  child: Container(
+                    width: 12, height: 12,
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: colors.gray600, width: 2),
+                    ),
+                  ),
                 ),
               ],
             ),
-          ),
-          GestureDetector(
-            onTap: () => showSettingsOverlay(context),
-            child: Icon(Icons.settings, color: colors.gray400, size: 18),
-          ),
-        ],
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(displayName,
+                    style: TextStyle(color: colors.gray200, fontSize: 13, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis),
+                  Text(statusText,
+                    style: TextStyle(color: colors.gray500, fontSize: 11)),
+                ],
+              ),
+            ),
+            ref.watch(appVersionProvider).when(
+              data: (v) => Text('v$v', style: TextStyle(color: colors.gray500, fontSize: 10)),
+              loading: () => const SizedBox.shrink(),
+              error: (_, __) => const SizedBox.shrink(),
+            ),
+            const SizedBox(width: 6),
+            MouseRegion(
+              cursor: SystemMouseCursors.click,
+              child: GestureDetector(
+                onTap: () => showSettingsOverlay(context),
+                child: Icon(Icons.settings, color: colors.gray400, size: 18),
+              ),
+            ),
+          ],
+        ),
       ),
     );
       },
@@ -960,5 +1166,455 @@ class _UserPanel extends ConsumerWidget {
       case OnlineState.dnd: return c.dnd;
       default: return c.offline;
     }
+  }
+}
+
+/// Discord-style invite dialog with member list and auto-generated link.
+class _InviteGenerateDialog extends StatefulWidget {
+  final Server server;
+  final InfernoColors colors;
+  final String authPrivateKeyHex;
+  final String authPublicKeyHex;
+  final InviteService inviteService;
+
+  const _InviteGenerateDialog({
+    required this.server,
+    required this.colors,
+    required this.authPrivateKeyHex,
+    required this.authPublicKeyHex,
+    required this.inviteService,
+  });
+
+  @override
+  State<_InviteGenerateDialog> createState() => _InviteGenerateDialogState();
+}
+
+class _InviteGenerateDialogState extends State<_InviteGenerateDialog> {
+  final _searchController = TextEditingController();
+  String _searchQuery = '';
+  String? _inviteLink;
+  bool _generating = false;
+  bool _editingLink = false;
+  String _expiry = '7d';
+  String _maxUses = 'unlimited';
+  bool _copied = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _generateDefaultLink();
+    _searchController.addListener(() {
+      setState(() => _searchQuery = _searchController.text.toLowerCase());
+    });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  DateTime? _parseExpiry(String value) {
+    final now = DateTime.now();
+    switch (value) {
+      case '30m': return now.add(const Duration(minutes: 30));
+      case '1h': return now.add(const Duration(hours: 1));
+      case '6h': return now.add(const Duration(hours: 6));
+      case '12h': return now.add(const Duration(hours: 12));
+      case '1d': return now.add(const Duration(days: 1));
+      case '7d': return now.add(const Duration(days: 7));
+      default: return null;
+    }
+  }
+
+  int? _parseMaxUses(String value) {
+    if (value == 'unlimited') return null;
+    return int.tryParse(value);
+  }
+
+  String _expiryLabel(String value) {
+    switch (value) {
+      case '30m': return '30 minutes';
+      case '1h': return '1 hour';
+      case '6h': return '6 hours';
+      case '12h': return '12 hours';
+      case '1d': return '1 day';
+      case '7d': return '7 days';
+      case 'never': return 'never';
+      default: return value;
+    }
+  }
+
+  Future<void> _generateDefaultLink() async {
+    setState(() => _generating = true);
+    try {
+      final invite = await widget.inviteService.createInvite(
+        privateKeyHex: widget.authPrivateKeyHex,
+        publicKeyHex: widget.authPublicKeyHex,
+        server: widget.server,
+        creatorId: 1,
+        maxUses: _parseMaxUses(_maxUses),
+        expiresAt: _parseExpiry(_expiry),
+      );
+      final link = widget.inviteService.generateInviteLink(
+        invite: invite,
+        server: widget.server,
+        creatorPubkey: widget.authPublicKeyHex,
+      );
+      if (mounted) setState(() { _inviteLink = link; _generating = false; });
+    } catch (e) {
+      if (mounted) setState(() { _generating = false; });
+    }
+  }
+
+  Future<void> _regenerateLink() async {
+    setState(() { _editingLink = false; _generating = true; _inviteLink = null; _copied = false; });
+    await _generateDefaultLink();
+  }
+
+  void _copyLink() {
+    if (_inviteLink == null) return;
+    Clipboard.setData(ClipboardData(text: _inviteLink!));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      child: Container(
+        width: 440,
+        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
+        decoration: BoxDecoration(
+          color: c.gray800,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+              child: Row(children: [
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Invite friends to ${widget.server.name}',
+                      style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                ])),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Container(
+                      width: 28, height: 28,
+                      decoration: BoxDecoration(color: c.gray700, shape: BoxShape.circle),
+                      child: Icon(Icons.close, size: 14, color: c.gray400),
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+            const SizedBox(height: 16),
+
+            // Search bar
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: _searchController,
+                style: TextStyle(color: Colors.white, fontSize: 14),
+                decoration: InputDecoration(
+                  hintText: 'Search for friends',
+                  hintStyle: TextStyle(color: c.gray500, fontSize: 14),
+                  prefixIcon: Icon(Icons.search, size: 18, color: c.gray500),
+                  filled: true, fillColor: c.gray900,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Member list header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text('Server Members', style: TextStyle(color: c.gray500, fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: 8),
+
+            // Member list
+            Flexible(
+              child: _MemberInviteList(
+                serverId: widget.server.id,
+                colors: c,
+                searchQuery: _searchQuery,
+              ),
+            ),
+
+            // Bottom: invite link section
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border(top: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Or, send a server invite link to a friend',
+                      style: TextStyle(color: c.gray400, fontSize: 13)),
+                  const SizedBox(height: 10),
+                  // Link row
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: c.gray900,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(children: [
+                      Expanded(
+                        child: _generating
+                            ? Text('Generating...', style: TextStyle(color: c.gray500, fontSize: 13))
+                            : Text(
+                                _inviteLink ?? '',
+                                style: TextStyle(color: c.gray200, fontSize: 13),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                      ),
+                      const SizedBox(width: 8),
+                      SizedBox(
+                        height: 36,
+                        child: ElevatedButton(
+                          onPressed: _inviteLink != null ? _copyLink : null,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: c.accent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          child: Text(_copied ? 'Copied!' : 'Copy', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ]),
+                  ),
+                  const SizedBox(height: 8),
+                  // Expiry info + edit link
+                  if (!_editingLink)
+                    Row(children: [
+                      Text(
+                        _expiry == 'never'
+                            ? 'Your invite link never expires.'
+                            : 'Your invite link expires in ${_expiryLabel(_expiry)}.',
+                        style: TextStyle(color: c.gray500, fontSize: 12),
+                      ),
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: () => setState(() => _editingLink = true),
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: Text('Edit invite link.', style: TextStyle(color: c.accent, fontSize: 12)),
+                        ),
+                      ),
+                    ])
+                  else ...[
+                    const SizedBox(height: 4),
+                    Row(children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('EXPIRE AFTER', style: TextStyle(color: c.gray500, fontSize: 10, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        DropdownButtonFormField<String>(
+                          initialValue: _expiry, dropdownColor: c.gray900,
+                          style: TextStyle(color: c.gray200, fontSize: 13),
+                          decoration: InputDecoration(
+                            isDense: true, filled: true, fillColor: c.gray900,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: '30m', child: Text('30 minutes')),
+                            DropdownMenuItem(value: '1h', child: Text('1 hour')),
+                            DropdownMenuItem(value: '6h', child: Text('6 hours')),
+                            DropdownMenuItem(value: '12h', child: Text('12 hours')),
+                            DropdownMenuItem(value: '1d', child: Text('1 day')),
+                            DropdownMenuItem(value: '7d', child: Text('7 days')),
+                            DropdownMenuItem(value: 'never', child: Text('Never')),
+                          ],
+                          onChanged: (v) => setState(() => _expiry = v!),
+                        ),
+                      ])),
+                      const SizedBox(width: 8),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('MAX USES', style: TextStyle(color: c.gray500, fontSize: 10, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 4),
+                        DropdownButtonFormField<String>(
+                          initialValue: _maxUses, dropdownColor: c.gray900,
+                          style: TextStyle(color: c.gray200, fontSize: 13),
+                          decoration: InputDecoration(
+                            isDense: true, filled: true, fillColor: c.gray900,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'unlimited', child: Text('Unlimited')),
+                            DropdownMenuItem(value: '1', child: Text('1 use')),
+                            DropdownMenuItem(value: '5', child: Text('5 uses')),
+                            DropdownMenuItem(value: '10', child: Text('10 uses')),
+                            DropdownMenuItem(value: '25', child: Text('25 uses')),
+                            DropdownMenuItem(value: '50', child: Text('50 uses')),
+                            DropdownMenuItem(value: '100', child: Text('100 uses')),
+                          ],
+                          onChanged: (v) => setState(() => _maxUses = v!),
+                        ),
+                      ])),
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(top: 16),
+                        child: SizedBox(
+                          height: 36,
+                          child: ElevatedButton(
+                            onPressed: _generating ? null : _regenerateLink,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: c.accent,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            child: const Text('Generate', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      ),
+                    ]),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Scrollable member list inside the invite dialog.
+class _MemberInviteList extends ConsumerWidget {
+  final int serverId;
+  final InfernoColors colors;
+  final String searchQuery;
+  const _MemberInviteList({required this.serverId, required this.colors, required this.searchQuery});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final db = ref.watch(databaseProvider);
+    return StreamBuilder<List<RemoteMember>>(
+      stream: (db.select(db.remoteMembers)..where((m) => m.serverId.equals(serverId))).watch(),
+      builder: (context, snapshot) {
+        final members = snapshot.data ?? [];
+        final filtered = searchQuery.isEmpty
+            ? members
+            : members.where((m) {
+                final name = (m.displayName ?? m.username ?? m.pubkey).toLowerCase();
+                return name.contains(searchQuery);
+              }).toList();
+
+        if (filtered.isEmpty) {
+          return Padding(
+            padding: const EdgeInsets.all(24),
+            child: Center(child: Text(
+              searchQuery.isEmpty ? 'No members found' : 'No matches for "$searchQuery"',
+              style: TextStyle(color: colors.gray500, fontSize: 13),
+            )),
+          );
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: filtered.length,
+          itemBuilder: (context, index) => _MemberInviteRow(member: filtered[index], colors: colors),
+        );
+      },
+    );
+  }
+}
+
+class _MemberInviteRow extends StatefulWidget {
+  final RemoteMember member;
+  final InfernoColors colors;
+  const _MemberInviteRow({required this.member, required this.colors});
+  @override
+  State<_MemberInviteRow> createState() => _MemberInviteRowState();
+}
+
+class _MemberInviteRowState extends State<_MemberInviteRow> {
+  bool _hovering = false;
+  bool _invited = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    final m = widget.member;
+    final displayName = m.displayName ?? m.username ?? m.pubkey.substring(0, 12);
+    final subtitle = m.status ?? m.username ?? m.pubkey.substring(0, 16);
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        margin: const EdgeInsets.only(bottom: 2),
+        decoration: BoxDecoration(
+          color: _hovering ? c.gray700.withValues(alpha: 0.3) : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Row(children: [
+          // Avatar
+          Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: c.gray600,
+              image: m.avatarUrl != null
+                  ? DecorationImage(image: NetworkImage(m.avatarUrl!), fit: BoxFit.cover)
+                  : null,
+            ),
+            child: m.avatarUrl == null
+                ? Center(child: Text(displayName[0].toUpperCase(), style: TextStyle(color: c.gray200, fontWeight: FontWeight.bold, fontSize: 14)))
+                : null,
+          ),
+          const SizedBox(width: 10),
+          // Name + status
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(displayName, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+            if (subtitle != displayName)
+              Text(subtitle, style: TextStyle(color: c.gray500, fontSize: 12), overflow: TextOverflow.ellipsis),
+          ])),
+          // Invite button
+          SizedBox(
+            height: 32,
+            child: ElevatedButton(
+              onPressed: _invited ? null : () {
+                // For now, mark as invited (visual feedback). DM invite sending can be added later.
+                setState(() => _invited = true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _invited ? c.gray700 : c.accent,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                elevation: 0,
+              ),
+              child: Text(_invited ? 'Sent' : 'Invite', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+      ),
+    );
   }
 }

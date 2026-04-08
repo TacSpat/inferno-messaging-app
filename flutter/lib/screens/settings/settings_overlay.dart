@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 import '../../providers/auth_provider.dart';
 import 'package:go_router/go_router.dart';
 
@@ -9,7 +10,8 @@ import 'profile_screen.dart';
 import 'appearance_screen.dart';
 import 'relays_screen.dart';
 import 'storage_screen.dart';
-import 'key_export_screen.dart';
+import 'my_account_screen.dart';
+import 'password_screen.dart';
 import 'notifications_screen.dart';
 import 'voice_video_screen.dart';
 import 'safety_screen.dart';
@@ -42,7 +44,7 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Scaffold(
       backgroundColor: c.gray950.withValues(alpha: 0.95),
@@ -59,6 +61,7 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
                 _NavItem('My Account', 'account', c),
                 _NavItem('Profile', 'profile', c),
                 _NavItem('Appearance', 'appearance', c),
+                _NavItem('Password', 'password', c),
                 const SizedBox(height: 12),
                 _SectionLabel('APP SETTINGS', c),
                 _NavItem('Voice & Video', 'voice', c),
@@ -118,7 +121,9 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
   Widget _buildContent() {
     switch (_selectedPage) {
       case 'account':
-        return const KeyExportScreen();
+        return MyAccountScreen(onNavigate: (p) => setState(() => _selectedPage = p));
+      case 'password':
+        return const PasswordScreen();
       case 'profile':
         return const ProfileScreen();
       case 'appearance':
@@ -140,7 +145,7 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
         return Center(
           child: Text(
             'Coming soon',
-            style: TextStyle(color: Theme.of(context).extension<InfernoColors>()!.gray500),
+            style: TextStyle(color: ref.read(infernoColorsProvider).gray500),
           ),
         );
     }
@@ -153,7 +158,7 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (ctx) {
-          final c = Theme.of(ctx).extension<InfernoColors>()!;
+          final c = ref.read(infernoColorsProvider);
           return AlertDialog(
             title: const Text('Log Out?'),
             content: const Text('This will remove your key from this device. Make sure you have a backup.'),

@@ -12,6 +12,7 @@ class TypingService {
   // Debounce our own typing events
   Timer? _typingTimer;
   String? _lastTypingChannel;
+  DateTime? _lastTypingSent;
 
   final _typingController = StreamController<TypingUpdate>.broadcast();
   Stream<TypingUpdate> get typingUpdates => _typingController.stream;
@@ -24,11 +25,15 @@ class TypingService {
     required String publicKeyHex,
     required String channelGroupId,
   }) {
-    // Debounce: only send every 3 seconds
-    if (_lastTypingChannel == channelGroupId && _typingTimer?.isActive == true) return;
+    // Rate limit: at most one typing event every 7 seconds per channel
+    final now = DateTime.now();
+    if (_lastTypingChannel == channelGroupId &&
+        _lastTypingSent != null &&
+        now.difference(_lastTypingSent!).inSeconds < 7) return;
     _lastTypingChannel = channelGroupId;
+    _lastTypingSent = now;
     _typingTimer?.cancel();
-    _typingTimer = Timer(const Duration(seconds: 3), () {});
+    _typingTimer = Timer(const Duration(seconds: 7), () {});
 
     final event = nostr.NostrEvent(
       pubkey: publicKeyHex,

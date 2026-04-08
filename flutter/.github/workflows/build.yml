@@ -1,0 +1,225 @@
+name: Build Desktop & Mobile
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.41.5'
+
+jobs:
+  # ─── Windows ───────────────────────────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Download ONNX Runtime & compile NSFW bridge
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          $ortVersion = "1.20.1"
+          $url = "https://github.com/microsoft/onnxruntime/releases/download/v${ortVersion}/onnxruntime-win-x64-${ortVersion}.zip"
+          Invoke-WebRequest -Uri $url -OutFile ort.zip
+          Expand-Archive ort.zip -DestinationPath ort
+          $ortDir = "ort\onnxruntime-win-x64-${ortVersion}"
+          # Copy ORT DLL to native dir so build hook finds it
+          Copy-Item "$ortDir\lib\onnxruntime.dll" "native\onnxruntime\onnxruntime.dll"
+          # Compile NSFW bridge DLL
+          cl /LD /O2 /I "$ortDir\include" "native\onnxruntime\nsfw_bridge.c" `
+            /Fe:"native\onnxruntime\nsfw_bridge.dll" `
+            /link /LIBPATH:"$ortDir\lib" onnxruntime.lib
+
+      - name: Build Windows release
+        working-directory: flutter
+        run: flutter build windows --release
+
+      - name: Bundle ONNX Runtime DLL
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          $ortVersion = "1.20.1"
+          Copy-Item "ort/onnxruntime-win-x64-${ortVersion}/lib/onnxruntime.dll" "build/windows/x64/runner/Release/"
+
+      - name: Package Windows zip
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path pubspec.yaml -Pattern '^version:\s+(.+)\+' | ForEach-Object { $_.Matches.Groups[1].Value })
+          Compress-Archive -Path "build/windows/x64/runner/Release/*" -DestinationPath "Inferno-Windows-x64-v${version}.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: flutter/Inferno-Windows-x64-*.zip
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: flutter/Inferno-Windows-x64-*.zip
+
+  # ─── Linux ─────────────────────────────────────────────────
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libmpv-dev mpv patchelf
+
+      - name: Download ONNX Runtime & compile NSFW bridge
+        working-directory: flutter
+        run: |
+          ORT_VERSION="1.20.1"
+          wget -q "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-linux-x64-${ORT_VERSION}.tgz"
+          tar xzf onnxruntime-linux-x64-${ORT_VERSION}.tgz
+          ORT_DIR="onnxruntime-linux-x64-${ORT_VERSION}"
+          # Copy ORT libs to native dir
+          cp ${ORT_DIR}/lib/libonnxruntime.so.${ORT_VERSION} native/onnxruntime/libonnxruntime.so.1
+          cp ${ORT_DIR}/lib/libonnxruntime.so.${ORT_VERSION} native/onnxruntime/libonnxruntime.so
+          # Compile NSFW bridge
+          gcc -shared -fPIC -O2 -o native/onnxruntime/libnsfw_bridge.so \
+            native/onnxruntime/nsfw_bridge.c \
+            -I${ORT_DIR}/include -L${ORT_DIR}/lib -lonnxruntime \
+            -Wl,-rpath,'$ORIGIN'
+          patchelf --set-rpath '$ORIGIN' native/onnxruntime/libnsfw_bridge.so
+
+      - name: Build Linux release
+        working-directory: flutter
+        run: flutter build linux --release
+
+      - name: Package Linux tar.gz
+        working-directory: flutter
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: \(.*\)+.*/\1/')
+          cd build/linux/x64/release
+          tar czf "../../../../Inferno-Linux-x64-v${VERSION}.tar.gz" bundle/
+          cd ../../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: flutter/Inferno-Linux-x64-*.tar.gz
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: flutter/Inferno-Linux-x64-*.tar.gz
+
+  # ─── macOS ─────────────────────────────────────────────────
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Download ONNX Runtime & compile NSFW bridge
+        working-directory: flutter
+        run: |
+          ORT_VERSION="1.20.1"
+          curl -sLO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz"
+          tar xzf onnxruntime-osx-arm64-${ORT_VERSION}.tgz
+          ORT_DIR="onnxruntime-osx-arm64-${ORT_VERSION}"
+          cp ${ORT_DIR}/lib/libonnxruntime.dylib native/onnxruntime/libonnxruntime.dylib
+          clang -shared -fPIC -O2 -o native/onnxruntime/libnsfw_bridge.dylib \
+            native/onnxruntime/nsfw_bridge.c \
+            -I${ORT_DIR}/include -L${ORT_DIR}/lib -lonnxruntime \
+            -install_name @rpath/libnsfw_bridge.dylib \
+            -Wl,-rpath,@loader_path
+
+      - name: Build macOS release
+        working-directory: flutter
+        run: flutter build macos --release
+
+      - name: Package macOS dmg
+        working-directory: flutter
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: \(.*\)+.*/\1/')
+          APP_PATH="build/macos/Build/Products/Release/inferno.app"
+          DMG_NAME="Inferno-macOS-v${VERSION}.dmg"
+          # Create DMG
+          hdiutil create -volname "Inferno" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-build
+          path: flutter/Inferno-macOS-*.dmg
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: flutter/Inferno-macOS-*.dmg
+
+  # ─── Android ───────────────────────────────────────────────
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build Android APK
+        working-directory: flutter
+        run: flutter build apk --release
+
+      - name: Rename APK
+        working-directory: flutter
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: \(.*\)+.*/\1/')
+          cp build/app/outputs/flutter-apk/app-release.apk "Inferno-Android-v${VERSION}.apk"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-build
+          path: flutter/Inferno-Android-*.apk
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: flutter/Inferno-Android-*.apk

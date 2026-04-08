@@ -7,6 +7,7 @@ import '../crypto/nip44_crypto.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
 import '../nostr/nostr_filter.dart';
+import 'content_safety_service.dart';
 import 'group_message_service.dart';
 import 'dm_service.dart';
 
@@ -15,8 +16,9 @@ class BackfillService {
   final RelayPool _relayPool;
   final GroupMessageService _groupMessageService;
   final DmService _dmService;
+  final ContentSafetyService? _contentSafety;
 
-  BackfillService(this._db, this._relayPool, this._groupMessageService, this._dmService);
+  BackfillService(this._db, this._relayPool, this._groupMessageService, this._dmService, [this._contentSafety]);
 
   /// Backfill channel messages from relays.
   /// Fetches all events, diffs against existing DB state, and applies only new/changed data
@@ -182,6 +184,23 @@ class BackfillService {
       }
     });
 
+    // Run content safety checks on newly backfilled messages (fire-and-forget)
+    if (_contentSafety != null && newMessages.isNotEmpty) {
+      () async {
+        for (final event in newMessages) {
+          if (event.id == null) continue;
+          try {
+            final msg = await (_db.select(_db.messages)
+                  ..where((m) => m.nostrEventId.equals(event.id!)))
+                .getSingleOrNull();
+            if (msg != null) await _contentSafety!.check(msg.id);
+          } catch (e) {
+            debugPrint('[Backfill] Safety check failed for ${event.id}: $e');
+          }
+        }
+      }();
+    }
+
     return newMessages.length;
   }
 
@@ -252,6 +271,13 @@ class BackfillService {
       try {
         await _dmService.processInboundDm(event, privateKeyHex, ownPubkey);
         imported++;
+        // Run safety check on newly imported DM
+        if (_contentSafety != null && event.id != null) {
+          final msg = await (_db.select(_db.messages)
+                ..where((m) => m.nostrEventId.equals(event.id!)))
+              .getSingleOrNull();
+          if (msg != null) await _contentSafety!.check(msg.id);
+        }
       } catch (_) {}
     }
 

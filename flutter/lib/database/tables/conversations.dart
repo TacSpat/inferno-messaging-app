@@ -8,6 +8,8 @@ class Conversations extends Table {
   TextColumn get counterpartyPubkey => text().nullable()();
   TextColumn get counterpartyDisplayName => text().nullable()();
   TextColumn get iconUrl => text().nullable()();
+  DateTimeColumn get lastBackfilledAt => dateTime().nullable()();
+  DateTimeColumn get lastReadAt => dateTime().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 }

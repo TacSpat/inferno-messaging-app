@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,11 +14,17 @@ import '../providers/servers_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../theme/all_themes.dart';
+import '../theme/theme_provider.dart';
 import '../widgets/message_content.dart';
 import '../widgets/message_list.dart';
 import '../screens/server_settings/server_settings_overlay.dart';
+import '../screens/channels/search_panel.dart';
+import '../screens/channels/channel_type_router.dart';
+import '../widgets/context_menu.dart';
+import '../widgets/update_banner.dart';
 import '../providers/server_settings_provider.dart';
 import '../models/permission.dart';
+import '../services/invite_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
@@ -39,13 +46,60 @@ class MainShell extends ConsumerStatefulWidget {
 
 class MainShellState extends ConsumerState<MainShell> {
   Server? _activeServer;
+  Channel? _channel;
   bool _showMembers = true;
+  bool _showSearch = false;
+  StreamSubscription<Channel?>? _channelSub;
 
   /// Saved scroll offsets per channel publicId — persists across channel navigation
   final Map<String, double> _channelScrollOffsets = {};
 
+  /// Cached channel entries for IndexedStack — keeps visited channels alive in memory.
+  /// Most-recently-used at the end. Capped at 10 to limit memory.
+  static const _maxCachedChannels = 10;
+  final List<({String channelId, String serverId})> _visitedChannels = [];
+  String? _cachedServerId; // tracks which server the cache belongs to
+
+  int get _activeChannelIndex {
+    final idx = _visitedChannels.indexWhere((e) => e.channelId == widget.activeChannelId);
+    return idx >= 0 ? idx : 0;
+  }
+
+  void _updateChannelCache() {
+    final chId = widget.activeChannelId;
+    final srvId = widget.activeServerId;
+    if (chId == null || srvId == null) return;
+
+    // Clear cache when switching servers
+    if (_cachedServerId != null && _cachedServerId != srvId) {
+      _visitedChannels.clear();
+    }
+    _cachedServerId = srvId;
+
+    // Promote existing entry or add new one
+    final existing = _visitedChannels.indexWhere((e) => e.channelId == chId);
+    if (existing >= 0) {
+      // Already cached — no reorder needed, IndexedStack just changes index
+      return;
+    }
+
+    // Evict LRU if at capacity
+    if (_visitedChannels.length >= _maxCachedChannels) {
+      _visitedChannels.removeAt(0);
+    }
+
+    _visitedChannels.add((channelId: chId, serverId: srvId));
+  }
+
   void toggleMemberList() {
     setState(() => _showMembers = !_showMembers);
+  }
+
+  void toggleSearch() {
+    setState(() {
+      _showSearch = !_showSearch;
+      if (_showSearch) _showMembers = false; // search replaces member list
+    });
   }
 
   /// Save scroll offset for a channel
@@ -64,12 +118,20 @@ class MainShellState extends ConsumerState<MainShell> {
     if (oldWidget.activeServerId != widget.activeServerId) {
       _loadServer();
     }
+    if (oldWidget.activeChannelId != widget.activeChannelId) {
+      _loadChannel();
+      _updateChannelCache();
+      // Close search when switching channels
+      if (_showSearch) setState(() => _showSearch = false);
+    }
   }
 
   @override
   void initState() {
     super.initState();
     _loadServer();
+    _loadChannel();
+    _updateChannelCache();
     _startIdleDetection();
   }
 
@@ -85,8 +147,27 @@ class MainShellState extends ConsumerState<MainShell> {
     }
   }
 
+  @override
+  void dispose() {
+    _channelSub?.cancel();
+    super.dispose();
+  }
+
   void _onUserActivity() {
     ref.read(idleDetectionProvider).onActivity();
+  }
+
+  void _loadChannel() {
+    _channelSub?.cancel();
+    if (widget.activeChannelId == null) {
+      if (mounted) setState(() => _channel = null);
+      return;
+    }
+    final db = ref.read(databaseProvider);
+    final query = db.select(db.channels)..where((c) => c.publicId.equals(widget.activeChannelId!));
+    _channelSub = query.watchSingleOrNull().listen((ch) {
+      if (mounted) setState(() => _channel = ch);
+    });
   }
 
   Future<void> _loadServer() async {
@@ -155,8 +236,10 @@ class MainShellState extends ConsumerState<MainShell> {
                 server: _activeServer,
                 activeChannelId: widget.activeChannelId,
                 onToggleMembers: toggleMemberList,
+                onToggleSearch: toggleSearch,
               ),
               const FriendRequestBar(),
+              const UpdateBanner(),
               // ── Content row: sidebar + main + member list ──
               Expanded(child: Row(
                 children: [
@@ -167,8 +250,31 @@ class MainShellState extends ConsumerState<MainShell> {
                     )
                   else
                     const DmSidebar(),
-                  Expanded(child: widget.child),
-                  if (_activeServer != null && widget.activeChannelId != null && _showMembers)
+                  // Channel content: use IndexedStack cache for server channels,
+                  // GoRouter child for everything else (conversations, etc.)
+                  if (widget.activeServerId != null && widget.activeChannelId != null && _visitedChannels.isNotEmpty)
+                    Expanded(
+                      child: IndexedStack(
+                        index: _activeChannelIndex,
+                        children: _visitedChannels.map((entry) =>
+                          ChannelTypeRouter(
+                            key: ValueKey('cached-${entry.channelId}'),
+                            channelPublicId: entry.channelId,
+                            serverPublicId: entry.serverId,
+                            isActive: entry.channelId == widget.activeChannelId,
+                          ),
+                        ).toList(),
+                      ),
+                    )
+                  else
+                    Expanded(child: widget.child),
+                  if (_activeServer != null && widget.activeChannelId != null && _showSearch)
+                    SearchPanel(
+                      channelId: _channel?.id,
+                      serverId: _activeServer!.id,
+                      onClose: () => setState(() => _showSearch = false),
+                    )
+                  else if (_activeServer != null && widget.activeChannelId != null && _showMembers)
                     MemberList(serverId: _activeServer!.id),
                 ],
               )),
@@ -187,7 +293,8 @@ class _UnifiedHeader extends ConsumerStatefulWidget {
   final Server? server;
   final String? activeChannelId;
   final VoidCallback onToggleMembers;
-  const _UnifiedHeader({this.server, this.activeChannelId, required this.onToggleMembers});
+  final VoidCallback onToggleSearch;
+  const _UnifiedHeader({this.server, this.activeChannelId, required this.onToggleMembers, required this.onToggleSearch});
 
   @override
   ConsumerState<_UnifiedHeader> createState() => _UnifiedHeaderState();
@@ -195,6 +302,7 @@ class _UnifiedHeader extends ConsumerStatefulWidget {
 
 class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
   Channel? _channel;
+  StreamSubscription<Channel?>? _channelSub;
 
   @override
   void initState() {
@@ -208,19 +316,28 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
     if (old.activeChannelId != widget.activeChannelId) _loadChannel();
   }
 
-  Future<void> _loadChannel() async {
+  @override
+  void dispose() {
+    _channelSub?.cancel();
+    super.dispose();
+  }
+
+  void _loadChannel() {
+    _channelSub?.cancel();
     if (widget.activeChannelId == null) {
       if (mounted) setState(() => _channel = null);
       return;
     }
     final db = ref.read(databaseProvider);
-    final ch = await db.serversDao.getChannelByPublicId(widget.activeChannelId!);
-    if (mounted) setState(() => _channel = ch);
+    final query = db.select(db.channels)..where((c) => c.publicId.equals(widget.activeChannelId!));
+    _channelSub = query.watchSingleOrNull().listen((ch) {
+      if (mounted) setState(() => _channel = ch);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return Container(
       height: 48,
@@ -263,6 +380,25 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
             Icon(_channel!.encrypted ? Icons.lock : Icons.tag, size: 18, color: c.gray400),
             const SizedBox(width: 6),
             Text(_channel!.name, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15)),
+            if (_channel!.nsfw == true) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(3),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                ),
+                child: const Text('NSFW', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+              ),
+            ],
+            if (_channel!.encrypted) ...[
+              const SizedBox(width: 8),
+              Tooltip(
+                message: 'End-to-end encrypted',
+                child: Icon(Icons.lock, size: 14, color: Colors.green.withValues(alpha: 0.7)),
+              ),
+            ],
             if (_channel!.topic != null && _channel!.topic!.isNotEmpty) ...[
               const SizedBox(width: 12),
               Container(width: 1, height: 24, color: c.gray600),
@@ -281,15 +417,7 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
           _HeaderBtn(icon: Icons.people_outline, tooltip: 'Member List', colors: c, onTap: widget.onToggleMembers),
           const SizedBox(width: 4),
           // Search
-          Container(
-            width: 160, height: 28,
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(4)),
-            child: Row(children: [
-              Expanded(child: Text('Search', style: TextStyle(color: c.gray500, fontSize: 13))),
-              Icon(Icons.search, size: 16, color: c.gray500),
-            ]),
-          ),
+          _HeaderBtn(icon: Icons.search, tooltip: 'Search', colors: c, onTap: widget.onToggleSearch),
           const SizedBox(width: 12),
         ],
       ),
@@ -319,7 +447,7 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
   }
 
   void _showGroupChatDialog(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.read(infernoColorsProvider);
     final nameCtrl = TextEditingController();
     showDialog(
       context: context,
@@ -405,39 +533,81 @@ class _ServerNameDropdownState extends ConsumerState<_ServerNameDropdown> {
 
     if (!context.mounted) return;
 
-    showMenu<String>(
+    final menuPos = Offset(offset.dx + 8, offset.dy + box.size.height + 4);
+    showStyledMenu(
       context: context,
-      position: RelativeRect.fromLTRB(offset.dx + 8, offset.dy + box.size.height, offset.dx + 232, 0),
-      color: c.gray900,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: BorderSide(color: c.gray700)),
+      position: menuPos,
       items: [
-        if (canInvite) _menuItem('invite', 'Invite People', Icons.link, c),
-        if (canManage) _menuItem('settings', 'Server Settings', Icons.settings, c),
-        if (canManageChannels) _menuItem('create_channel', 'Create Channel', Icons.add, c),
-        if (canManageChannels) _menuItem('create_category', 'Create Category', Icons.create_new_folder_outlined, c),
-        const PopupMenuDivider(),
-        _menuItem('leave', 'Leave Server', null, c, danger: true),
+        if (canInvite) CtxItem('Invite People', Icons.link, () {
+          final inviteService = ref.read(inviteServiceProvider);
+          showInviteDialog(
+            context: context,
+            server: widget.server,
+            colors: c,
+            privateKeyHex: auth.privateKeyHex!,
+            publicKeyHex: auth.publicKeyHex!,
+            inviteService: inviteService,
+          );
+        }),
+        if (canManage) CtxItem('Server Settings', Icons.settings, () => showServerSettingsOverlay(context, widget.server)),
+        if (canManageChannels) CtxItem('Create Channel', Icons.add, () {
+          showChannelDialog(context, ref, server: widget.server, colors: c);
+        }),
+        if (canManageChannels) CtxItem('Create Category', Icons.create_new_folder_outlined, () {
+          _createCategory(context, c);
+        }),
+        CtxDivider(),
+        CtxItem('Leave Server', null, () => _leaveServer(context), danger: true),
       ],
-    ).then((value) {
-      if (value == null) return;
-      switch (value) {
-        case 'settings':
-          showServerSettingsOverlay(context, widget.server);
-        case 'leave':
-          _leaveServer(context);
-        // invite, create_channel, create_category can be wired later
-      }
-    });
+    );
   }
 
-  PopupMenuItem<String> _menuItem(String value, String label, IconData? icon, InfernoColors c, {bool danger = false}) {
-    return PopupMenuItem(value: value, child: Row(children: [
-      if (icon != null) ...[
-        Icon(icon, size: 18, color: danger ? c.accent : c.gray400),
-        const SizedBox(width: 10),
-      ],
-      Text(label, style: TextStyle(color: danger ? c.accent : c.gray200, fontSize: 14, fontWeight: FontWeight.w500)),
-    ]));
+  Future<void> _createCategory(BuildContext context, InfernoColors c) async {
+    final nameCtrl = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 400, padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: c.gray900, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray700.withValues(alpha: 0.5))),
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Text('Create Category', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(controller: nameCtrl, autofocus: true, style: TextStyle(color: Colors.white, fontSize: 14),
+              decoration: InputDecoration(hintText: 'Category name', hintStyle: TextStyle(color: c.gray500),
+                fillColor: c.gray900, filled: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent)))),
+            const SizedBox(height: 16),
+            Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.gray400))),
+              const SizedBox(width: 8),
+              ElevatedButton(onPressed: () => Navigator.pop(ctx, nameCtrl.text.trim()), child: const Text('Create')),
+            ]),
+          ]),
+        ),
+      ),
+    );
+    nameCtrl.dispose();
+    if (result == null || result.isEmpty) return;
+    final db = ref.read(databaseProvider);
+    final now = DateTime.now();
+    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+    final categories = await (db.select(db.categories)..where((c) => c.serverId.equals(widget.server.id))).get();
+    final maxPos = categories.fold<int>(0, (max, cat) => (cat.position ?? 0) > max ? (cat.position ?? 0) : max);
+    await db.into(db.categories).insert(CategoriesCompanion.insert(
+      publicId: publicId, serverId: widget.server.id,
+      name: Value(result), position: Value(maxPos + 1),
+      createdAt: now, updatedAt: now,
+    ));
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex != null) {
+      final publishSvc = ref.read(serverPublishServiceProvider);
+      await publishSvc.publishStructure(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: widget.server);
+    }
   }
 
   Future<void> _leaveServer(BuildContext context) async {

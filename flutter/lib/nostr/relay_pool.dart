@@ -8,12 +8,21 @@ import 'relay_auth.dart';
 import 'relay_connection.dart' as rc;
 import 'subscription.dart';
 
+/// Top-level function for compute() — parses NostrEvent JSON on a background isolate.
+List<NostrEvent> _parseEventsInBackground(List<Map<String, dynamic>> jsons) {
+  return jsons.map((j) => NostrEvent.fromJson(j)).toList();
+}
+
 typedef EventHandler = void Function(String relayUrl, NostrEvent event);
 typedef EoseHandler = void Function(String relayUrl, String subscriptionId);
 
 class RelayPool {
   final Map<String, rc.RelayConnection> _connections = {};
   final Map<String, Subscription> _subscriptions = {};
+
+  /// URLs of currently connected relays
+  List<String> get connectedRelayUrls =>
+      _connections.values.where((c) => c.isConnected).map((c) => c.url).toList();
 
   // Event handlers by kind
   final Map<int, List<EventHandler>> _kindHandlers = {};
@@ -212,10 +221,13 @@ class RelayPool {
     return events.values.toList();
   }
 
-  /// Fetch from a single relay using a brand new WebSocket connection
+  /// Fetch from a single relay using a brand new WebSocket connection.
+  /// Collects raw JSON strings and parses them on a background isolate to
+  /// keep the UI thread free during large fetches.
   Future<void> _fetchFromSingleRelay(String url, NostrFilter filter, Map<String, NostrEvent> events, Duration timeout) async {
     final completer = Completer<void>();
     WebSocketChannel? ws;
+    final rawEventJsons = <Map<String, dynamic>>[];
 
     try {
       ws = WebSocketChannel.connect(Uri.parse(url));
@@ -230,8 +242,8 @@ class RelayPool {
         try {
           final parsed = json.decode(data as String) as List<dynamic>;
           if (parsed[0] == 'EVENT' && parsed.length >= 3) {
-            final event = NostrEvent.fromJson(parsed[2] as Map<String, dynamic>);
-            if (event.id != null) events[event.id!] = event;
+            // Collect raw JSON — parse on background isolate later
+            rawEventJsons.add(Map<String, dynamic>.from(parsed[2] as Map));
           } else if (parsed[0] == 'EOSE') {
             done = true;
             try { ws?.sink.close(); } catch (_) {}
@@ -248,7 +260,6 @@ class RelayPool {
                   publicKeyHex: authPublicKeyHex!,
                 );
                 ws?.sink.add(json.encode(['AUTH', authEvent.toJson()]));
-                // Re-send the REQ after authenticating
                 ws?.sink.add(reqMsg);
                 debugPrint('[fetchFresh] $url: authenticated and re-sent REQ');
               } catch (e) {
@@ -265,17 +276,24 @@ class RelayPool {
         if (!completer.isCompleted) completer.complete();
       });
 
-      // Send the REQ
       ws.sink.add(reqMsg);
 
-      // Wait for EOSE or timeout
       await completer.future.timeout(timeout, onTimeout: () {
         debugPrint('[fetchFresh] $url timed out');
         _freshFetchFailures[url] = (_freshFetchFailures[url] ?? 0) + 1;
       });
 
-      // Success — reset failure count
       if (completer.isCompleted) _freshFetchFailures.remove(url);
+
+      // Parse collected events on a background isolate for large batches
+      if (rawEventJsons.isNotEmpty) {
+        final parsed = rawEventJsons.length > 20
+            ? await compute(_parseEventsInBackground, rawEventJsons)
+            : rawEventJsons.map((j) => NostrEvent.fromJson(j)).toList();
+        for (final event in parsed) {
+          if (event.id != null) events[event.id!] = event;
+        }
+      }
     } catch (e) {
       debugPrint('[fetchFresh] $url error: $e');
       _freshFetchFailures[url] = (_freshFetchFailures[url] ?? 0) + 1;
@@ -377,17 +395,17 @@ class RelayPool {
       final sub = _subscriptions[subId];
       sub?.onEvent?.call(event);
 
-      // Kind-specific handlers
+      // Dispatch handlers asynchronously — don't block the relay stream
+      // This lets the WebSocket listener return immediately and process more
+      // messages while DB-heavy handlers run in the background.
       final handlers = _kindHandlers[event.kind];
       if (handlers != null) {
         for (final handler in handlers) {
-          handler(relayUrl, event);
+          Future.microtask(() => handler(relayUrl, event));
         }
       }
-
-      // Global handlers
       for (final handler in _globalHandlers) {
-        handler(relayUrl, event);
+        Future.microtask(() => handler(relayUrl, event));
       }
     } catch (_) {}
   }

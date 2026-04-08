@@ -167,7 +167,7 @@
     <% end %>
 
     <!-- Reactions -->
-    <%= render partial: "messages/reactions", locals: { message: message, reaction_controller: "dm-message-form" } %>
+    <%= render partial: "messages/reactions", locals: { message: message, reaction_controller: "dm-message-form", current_user: current_user } %>
   </div>
 
   <!-- Action buttons (hover) -->

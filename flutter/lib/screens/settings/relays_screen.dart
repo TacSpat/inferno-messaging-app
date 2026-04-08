@@ -4,7 +4,7 @@ import '../../database/database.dart';
 import '../../providers/database_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/relay_config_service.dart';
-import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class RelaysScreen extends ConsumerStatefulWidget {
   const RelaysScreen({super.key});
@@ -24,7 +24,7 @@ class _RelaysScreenState extends ConsumerState<RelaysScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return StreamBuilder<List<RelayConnection>>(
       stream: _relayConfig.watchAllRelays(),
@@ -70,7 +70,7 @@ class _RelaysScreenState extends ConsumerState<RelaysScreen> {
 
   void _showAddRelayDialog(BuildContext context) {
     final controller = TextEditingController(text: 'wss://');
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.read(infernoColorsProvider);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
