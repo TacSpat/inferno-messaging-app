@@ -179,18 +179,22 @@ class AppUpdateService {
   }
 
   /// Platform-specific update application.
+  /// Downloads are archives (.zip on Windows, .tar.gz on Linux, .dmg on macOS).
+  /// We extract them and replace the entire app directory, then relaunch.
   Future<void> _applyUpdate(String downloadedFile, String updateDir) async {
     final currentExe = Platform.resolvedExecutable;
+    // The app bundle dir is the parent of the exe (Windows/Linux)
+    final appDir = p.dirname(currentExe);
 
     if (Platform.isWindows) {
-      // Write a batch script that waits for this process to exit,
-      // replaces the exe, and relaunches.
+      final extractDir = p.join(updateDir, 'extracted');
       final script = p.join(updateDir, 'update.bat');
       await File(script).writeAsString('''
 @echo off
 echo Updating Inferno...
 timeout /t 2 /nobreak >nul
-copy /y "$downloadedFile" "$currentExe"
+powershell -Command "Expand-Archive -Force '$downloadedFile' '$extractDir'"
+xcopy /s /y /q "$extractDir\\*" "$appDir\\"
 start "" "$currentExe"
 del "%~f0"
 ''');
@@ -198,41 +202,57 @@ del "%~f0"
           mode: ProcessStartMode.detached);
       exit(0);
     } else if (Platform.isLinux) {
+      // Linux bundle structure: bundle/inferno, bundle/lib/, bundle/data/
+      // currentExe = /path/to/bundle/inferno
+      final bundleDir = appDir;
       final script = p.join(updateDir, 'update.sh');
       await File(script).writeAsString('''
 #!/bin/bash
 sleep 2
-cp "$downloadedFile" "$currentExe"
+EXTRACT_DIR="$updateDir/extracted"
+mkdir -p "\$EXTRACT_DIR"
+tar xzf "$downloadedFile" -C "\$EXTRACT_DIR"
+# The tar.gz contains bundle/ directory
+if [ -d "\$EXTRACT_DIR/bundle" ]; then
+  cp -rf "\$EXTRACT_DIR/bundle/"* "$bundleDir/"
+fi
 chmod +x "$currentExe"
 "$currentExe" &
+rm -rf "\$EXTRACT_DIR"
 rm "\$0"
 ''');
+      await File(script).writeAsString(
+        await File(script).readAsString(),
+      );
+      await Process.run('chmod', ['+x', script]);
       await Process.start('bash', [script],
           mode: ProcessStartMode.detached);
       exit(0);
     } else if (Platform.isMacOS) {
-      // For .dmg, open it and let the user drag-install.
-      // For .zip, extract and replace.
       if (downloadedFile.endsWith('.dmg')) {
         await Process.start('open', [downloadedFile],
             mode: ProcessStartMode.detached);
       } else {
-        final script = p.join(updateDir, 'update.sh');
         final appBundle = '${currentExe.split('.app/').first}.app';
+        final script = p.join(updateDir, 'update.sh');
         await File(script).writeAsString('''
 #!/bin/bash
 sleep 2
+EXTRACT_DIR="$updateDir/extracted"
+mkdir -p "\$EXTRACT_DIR"
 if [[ "$downloadedFile" == *.zip ]]; then
-  unzip -o "$downloadedFile" -d "$updateDir/extracted"
-  extracted_app=\$(find "$updateDir/extracted" -name "*.app" -maxdepth 2 | head -1)
-  if [ -n "\$extracted_app" ]; then
-    rm -rf "$appBundle"
-    mv "\$extracted_app" "$appBundle"
-  fi
+  unzip -o "$downloadedFile" -d "\$EXTRACT_DIR"
+fi
+extracted_app=\$(find "\$EXTRACT_DIR" -name "*.app" -maxdepth 2 | head -1)
+if [ -n "\$extracted_app" ]; then
+  rm -rf "$appBundle"
+  mv "\$extracted_app" "$appBundle"
 fi
 open "$appBundle"
+rm -rf "\$EXTRACT_DIR"
 rm "\$0"
 ''');
+        await Process.run('chmod', ['+x', script]);
         await Process.start('bash', [script],
             mode: ProcessStartMode.detached);
         exit(0);
