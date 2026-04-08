@@ -178,13 +178,63 @@ class AppUpdateService {
     return null;
   }
 
+  /// Resolve the actual app executable and bundle directory.
+  /// In debug mode, Platform.resolvedExecutable points to the Flutter engine,
+  /// not the app binary — detect this and find the real build output.
+  (String exe, String bundleDir) _resolveAppPaths() {
+    final currentExe = Platform.resolvedExecutable;
+    final appDir = p.dirname(currentExe);
+
+    if (Platform.isLinux) {
+      // Release: /path/to/bundle/inferno → bundleDir = /path/to/bundle
+      // Debug (flutter run): resolvedExecutable = flutter engine binary
+      // Check if we're in a Flutter build output
+      if (currentExe.contains('flutter') && currentExe.contains('cache')) {
+        // Debug mode — find the build output
+        final cwd = Directory.current.path;
+        // Try build/linux/x64/debug/bundle or build/linux/x64/release/bundle
+        for (final mode in ['debug', 'release']) {
+          final bundlePath = p.join(cwd, 'build', 'linux', 'x64', mode, 'bundle');
+          final exePath = p.join(bundlePath, 'inferno');
+          if (File(exePath).existsSync()) {
+            debugPrint('[Update] Debug mode: using build output at $bundlePath');
+            return (exePath, bundlePath);
+          }
+        }
+        // Fallback: look in flutter subdir
+        final flutterCwd = p.join(cwd, 'flutter');
+        for (final mode in ['debug', 'release']) {
+          final bundlePath = p.join(flutterCwd, 'build', 'linux', 'x64', mode, 'bundle');
+          final exePath = p.join(bundlePath, 'inferno');
+          if (File(exePath).existsSync()) {
+            debugPrint('[Update] Debug mode: using build output at $bundlePath');
+            return (exePath, bundlePath);
+          }
+        }
+      }
+      return (currentExe, appDir);
+    } else if (Platform.isWindows) {
+      if (currentExe.contains('flutter') && currentExe.contains('cache')) {
+        final cwd = Directory.current.path;
+        for (final mode in ['Debug', 'Release']) {
+          final runnerPath = p.join(cwd, 'build', 'windows', 'x64', 'runner', mode);
+          final exePath = p.join(runnerPath, 'inferno.exe');
+          if (File(exePath).existsSync()) return (exePath, runnerPath);
+        }
+      }
+      return (currentExe, appDir);
+    } else {
+      return (currentExe, appDir);
+    }
+  }
+
   /// Platform-specific update application.
   /// Downloads are archives (.zip on Windows, .tar.gz on Linux, .dmg on macOS).
   /// We extract them and replace the entire app directory, then relaunch.
   Future<void> _applyUpdate(String downloadedFile, String updateDir) async {
-    final currentExe = Platform.resolvedExecutable;
-    // The app bundle dir is the parent of the exe (Windows/Linux)
-    final appDir = p.dirname(currentExe);
+    final (appExe, bundleDir) = _resolveAppPaths();
+    debugPrint('[Update] App exe: $appExe');
+    debugPrint('[Update] Bundle dir: $bundleDir');
 
     if (Platform.isWindows) {
       final extractDir = p.join(updateDir, 'extracted');
@@ -192,39 +242,50 @@ class AppUpdateService {
       await File(script).writeAsString('''
 @echo off
 echo Updating Inferno...
-timeout /t 2 /nobreak >nul
+timeout /t 3 /nobreak >nul
 powershell -Command "Expand-Archive -Force '$downloadedFile' '$extractDir'"
-xcopy /s /y /q "$extractDir\\*" "$appDir\\"
-start "" "$currentExe"
+xcopy /s /y /q "$extractDir\\*" "$bundleDir\\"
+start "" "$appExe"
 del "%~f0"
 ''');
       await Process.start('cmd', ['/c', script],
           mode: ProcessStartMode.detached);
       exit(0);
     } else if (Platform.isLinux) {
-      // Linux bundle structure: bundle/inferno, bundle/lib/, bundle/data/
-      // currentExe = /path/to/bundle/inferno
-      final bundleDir = appDir;
       final script = p.join(updateDir, 'update.sh');
+      final logFile = p.join(updateDir, 'update.log');
       await File(script).writeAsString('''
 #!/bin/bash
-sleep 2
+exec > "$logFile" 2>&1
+echo "Update script started at \$(date)"
+echo "Waiting for app to exit..."
+sleep 3
 EXTRACT_DIR="$updateDir/extracted"
 mkdir -p "\$EXTRACT_DIR"
+echo "Extracting $downloadedFile..."
 tar xzf "$downloadedFile" -C "\$EXTRACT_DIR"
+echo "Extract result: \$?"
+ls -la "\$EXTRACT_DIR/"
 # The tar.gz contains bundle/ directory
 if [ -d "\$EXTRACT_DIR/bundle" ]; then
+  echo "Copying bundle to $bundleDir..."
   cp -rf "\$EXTRACT_DIR/bundle/"* "$bundleDir/"
+  echo "Copy result: \$?"
+else
+  echo "ERROR: No bundle/ directory found in archive"
+  ls -laR "\$EXTRACT_DIR/"
 fi
-chmod +x "$currentExe"
-"$currentExe" &
+chmod +x "$appExe"
+echo "Relaunching $appExe..."
+nohup "$appExe" > /dev/null 2>&1 &
+echo "Launched with PID \$!"
+sleep 1
 rm -rf "\$EXTRACT_DIR"
-rm "\$0"
+echo "Cleanup done"
 ''');
-      await File(script).writeAsString(
-        await File(script).readAsString(),
-      );
       await Process.run('chmod', ['+x', script]);
+      debugPrint('[Update] Running update script: $script');
+      debugPrint('[Update] Log file: $logFile');
       await Process.start('bash', [script],
           mode: ProcessStartMode.detached);
       exit(0);
@@ -233,7 +294,7 @@ rm "\$0"
         await Process.start('open', [downloadedFile],
             mode: ProcessStartMode.detached);
       } else {
-        final appBundle = '${currentExe.split('.app/').first}.app';
+        final appBundle = '${appExe.split('.app/').first}.app';
         final script = p.join(updateDir, 'update.sh');
         await File(script).writeAsString('''
 #!/bin/bash
