@@ -805,7 +805,7 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
       final auth = ref.read(authServiceProvider);
       final serverPublish = ref.read(serverPublishServiceProvider);
       if (auth.privateKeyHex != null) {
-        final newServer = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(widget.gid))).getSingleOrNull();
+        final newServer = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(cleanGid))).getSingleOrNull();
         if (newServer != null) {
           await serverPublish.publishMember(
             privateKeyHex: auth.privateKeyHex!,
@@ -842,7 +842,7 @@ class _ServerSyncOverlayState extends ConsumerState<_ServerSyncOverlay> {
       if (result == null) {
         // Server record exists from the insert above, try to load it
         final existingServer = await (db.select(db.servers)
-              ..where((s) => s.nostrGroupId.equals(widget.gid)))
+              ..where((s) => s.nostrGroupId.equals(cleanGid)))
             .getSingleOrNull();
         if (existingServer == null) {
           if (mounted) setState(() { _error = 'Could not find server on relays'; _step = 'Failed'; });

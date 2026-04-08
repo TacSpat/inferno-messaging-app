@@ -240,6 +240,8 @@ class AppBootstrapService {
             avatarUrl: Value(profile['picture'] as String?),
             bannerUrl: Value(profile['banner'] as String?),
             nip05: Value(profile['nip05'] as String?),
+            status: Value(profile['status'] as String?),
+            statusEmoji: Value(profile['status_emoji'] as String?),
             profileFetchedAt: Value(now),
             updatedAt: Value(now),
           ));
@@ -253,6 +255,8 @@ class AppBootstrapService {
               avatarUrl: Value(profile['picture'] as String?),
               bannerUrl: Value(profile['banner'] as String?),
               nip05: Value(profile['nip05'] as String?),
+              status: Value(profile['status'] as String?),
+              statusEmoji: Value(profile['status_emoji'] as String?),
               profileFetchedAt: Value(now),
               createdAt: now,
               updatedAt: now,
@@ -269,10 +273,69 @@ class AppBootstrapService {
           avatarUrl: Value(profile['picture'] as String?),
           bannerUrl: Value(profile['banner'] as String?),
           nip05: Value(profile['nip05'] as String?),
+          status: Value(profile['status'] as String?),
+          statusEmoji: Value(profile['status_emoji'] as String?),
           profileFetchedAt: Value(now),
           updatedAt: Value(now),
         ));
       } catch (_) {}
+    });
+
+    // Kind 3: Contact list (follow list) — auto-accept friends, detect unfollows
+    // Matches Rails relay_subscription_manager.rb#process_follow_list
+    relayPool.onKind(3, (relayUrl, event) async {
+      try {
+        final senderPubkey = event.pubkey;
+        // Don't process our own follow list
+        if (senderPubkey == authService.publicKeyHex) return;
+
+        final tags = event.tags;
+        final followedPubkeys = tags
+            .where((t) => t.isNotEmpty && t[0] == 'p')
+            .map((t) => t.length > 1 ? t[1] : '')
+            .where((p) => p.isNotEmpty)
+            .toSet();
+        final followsUs = authService.publicKeyHex != null &&
+            followedPubkeys.contains(authService.publicKeyHex);
+
+        final contact = await (db.select(db.contacts)
+              ..where((c) => c.pubkey.equals(senderPubkey)))
+            .getSingleOrNull();
+        if (contact == null) return;
+        if (contact.friendshipStatus == 5) return; // blocked
+
+        if (followsUs) {
+          if (contact.friendshipStatus == 1) {
+            // pending_outgoing → they followed us back → auto-accept
+            await (db.update(db.contacts)..where((c) => c.pubkey.equals(senderPubkey)))
+                .write(ContactsCompanion(
+              friendshipStatus: const Value(3),
+              updatedAt: Value(DateTime.now()),
+            ));
+            debugPrint('[Kind3] Auto-accepted friend via follow list from ${senderPubkey.substring(0, 12)}');
+          } else if (contact.friendshipStatus == 0 || contact.friendshipStatus == 4) {
+            // not_friend or declined → treat as incoming request
+            await (db.update(db.contacts)..where((c) => c.pubkey.equals(senderPubkey)))
+                .write(ContactsCompanion(
+              friendshipStatus: const Value(2),
+              updatedAt: Value(DateTime.now()),
+            ));
+            debugPrint('[Kind3] Incoming follow (Kind 3) from ${senderPubkey.substring(0, 12)}');
+          }
+        } else {
+          // They unfollowed us
+          if (contact.friendshipStatus == 3) {
+            await (db.update(db.contacts)..where((c) => c.pubkey.equals(senderPubkey)))
+                .write(ContactsCompanion(
+              friendshipStatus: const Value(0),
+              updatedAt: Value(DateTime.now()),
+            ));
+            debugPrint('[Kind3] Unfollowed by ${senderPubkey.substring(0, 12)}');
+          }
+        }
+      } catch (e) {
+        debugPrint('[Kind3] Error processing follow list: $e');
+      }
     });
 
     // Kind 31753: Member join/leave — live updates to member list
@@ -456,6 +519,18 @@ class AppBootstrapService {
     // Kind 25050: Typing indicators
     relayPool.onKind(25050, (relayUrl, event) {
       typingService.processInboundTyping(event);
+    });
+
+    // Kind 10070: Public voice state events (join/leave/update)
+    relayPool.onKind(10070, (relayUrl, event) {
+      // Don't process our own voice state events
+      if (event.pubkey == authService.publicKeyHex) return;
+      try {
+        final parsed = json.decode(event.content) as Map<String, dynamic>;
+        if (parsed['type'] == 'voice_state_sync') {
+          dmService.handleVoiceStateSync(parsed);
+        }
+      } catch (_) {}
     });
 
     // Kind 31754: Server emoji updates (live)
@@ -690,9 +765,9 @@ class AppBootstrapService {
     // and we need to receive their presence events immediately
     final knownPubkeys = await _collectKnownPubkeys(pubKey);
     if (knownPubkeys.isNotEmpty) {
-      // Profiles: fetch from known authors only (efficient)
+      // Profiles + contact lists: fetch from known authors only (efficient)
       relayPool.subscribe(filters: [
-        NostrFilter(kinds: [0], authors: knownPubkeys),
+        NostrFilter(kinds: [0, 3], authors: knownPubkeys),
       ]);
     }
     // Presence + member events: subscribe broadly for live updates
@@ -741,8 +816,17 @@ class AppBootstrapService {
         .toList();
     if (groupIds.isEmpty) return;
 
+    // Server-level group IDs for voice state events
+    final servers = await db.select(db.servers).get();
+    final serverGroupIds = servers
+        .where((s) => s.nostrGroupId != null)
+        .map((s) => s.nostrGroupId!)
+        .toList();
+
     relayPool.subscribe(filters: [
       NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: catchupSince),
+      if (serverGroupIds.isNotEmpty)
+        NostrFilter(kinds: [10070], tags: {'#h': serverGroupIds}, since: catchupSince),
     ]);
   }
 

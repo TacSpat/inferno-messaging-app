@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:drift/drift.dart' show Value;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -91,12 +92,27 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     setState(() {});
   }
 
+  String _colorToHex(Color c) => '#${c.toARGB32().toRadixString(16).substring(2)}';
+
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
       final auth = ref.read(authServiceProvider);
+      final db = ref.read(databaseProvider);
       final profileService = ref.read(profileServiceProvider);
       if (auth.privateKeyHex != null) {
+        // Persist profile colors to all remoteMembers rows for this user
+        // (colors are server-specific, stored in remoteMembers, published in Kind 31753)
+        final colorHex1 = _colorToHex(_color1);
+        final colorHex2 = _colorToHex(_color2);
+        await (db.update(db.remoteMembers)
+              ..where((m) => m.pubkey.equals(auth.publicKeyHex!)))
+            .write(RemoteMembersCompanion(
+          profileColor: Value(colorHex1),
+          profileColor2: Value(colorHex2),
+          updatedAt: Value(DateTime.now()),
+        ));
+
         final results = await profileService.publishProfile(
           privateKeyHex: auth.privateKeyHex!,
           publicKeyHex: auth.publicKeyHex!,

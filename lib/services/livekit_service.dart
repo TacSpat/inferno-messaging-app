@@ -39,6 +39,7 @@ class LiveKitService {
     bool noiseSuppression = true,
     bool echoCancellation = true,
     bool autoGainControl = true,
+    String suppressionLevel = 'moderate',
   }) async {
     _room = Room(
       roomOptions: RoomOptions(
@@ -68,7 +69,7 @@ class LiveKitService {
     if (noiseSuppression) {
       try {
         final processor = NoiseProcessor.instance;
-        await processor.init(level: 'moderate');
+        await processor.init(level: suppressionLevel);
         debugPrint('[LiveKit] Noise processor active: ${processor.activeProcessor}');
       } catch (e) {
         debugPrint('[LiveKit] Noise processor init failed: $e (using WebRTC built-in)');

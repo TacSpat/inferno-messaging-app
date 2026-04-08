@@ -172,7 +172,7 @@ class DmService {
           return;
         case 'voice_state_sync':
           debugPrint('[DM] Voice state: ${parsed['action']} ${parsed['username']} in ${parsed['channel_id']}');
-          _handleVoiceStateSync(parsed);
+          handleVoiceStateSync(parsed);
           return;
       }
     }
@@ -256,15 +256,25 @@ class DmService {
     final signed = signer.sign(event);
     await _relayPool.publish(signed);
 
-    // Update local contact status
-    await _db.into(_db.contacts).insertOnConflictUpdate(
-      ContactsCompanion.insert(
+    // Update local contact status (use check-then-update — insertOnConflictUpdate
+    // doesn't work for non-PK unique constraints like pubkey)
+    final existing = await (_db.select(_db.contacts)
+          ..where((c) => c.pubkey.equals(recipientPubkey)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await (_db.update(_db.contacts)..where((c) => c.pubkey.equals(recipientPubkey)))
+          .write(ContactsCompanion(friendshipStatus: const Value(1), updatedAt: Value(DateTime.now())));
+    } else {
+      await _db.into(_db.contacts).insert(ContactsCompanion.insert(
         pubkey: recipientPubkey,
-        friendshipStatus: const Value(1), // pending_outgoing
+        friendshipStatus: const Value(1),
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
-      ),
-    );
+      ));
+    }
+
+    // Publish Kind 3 contact list so recipient can detect follow via standard Nostr
+    _publishContactList(privateKeyHex: privateKeyHex, publicKeyHex: publicKeyHex);
   }
 
   /// Send a friend response (accept/decline)
@@ -298,6 +308,37 @@ class DmService {
       friendshipStatus: Value(newStatus),
       updatedAt: Value(DateTime.now()),
     ));
+
+    // Publish updated Kind 3 contact list (matches Rails: NostrPublishJob.perform_later(:contacts))
+    if (status == 'accepted') {
+      _publishContactList(privateKeyHex: privateKeyHex, publicKeyHex: publicKeyHex);
+    }
+  }
+
+  /// Publish Kind 3 contact list with all accepted friends.
+  /// Matches Rails NostrPublishJob#build_contacts_event.
+  void _publishContactList({required String privateKeyHex, required String publicKeyHex}) async {
+    try {
+      final friends = await (_db.select(_db.contacts)
+            ..where((c) => c.friendshipStatus.isIn([1, 3]))) // pending_outgoing + accepted
+          .get();
+      final tags = friends.map((f) => [
+        'p', f.pubkey, '', f.displayName ?? f.username ?? '',
+      ]).toList();
+      final event = nostr.NostrEvent(
+        pubkey: publicKeyHex,
+        createdAt: nostr.NostrEvent.now(),
+        kind: 3,
+        tags: tags,
+        content: '',
+      );
+      final signer = NostrSigner(privateKeyHex: privateKeyHex);
+      final signed = signer.sign(event);
+      await _relayPool.publish(signed);
+      debugPrint('[DM] Published Kind 3 contact list with ${friends.length} friends');
+    } catch (e) {
+      debugPrint('[DM] Failed to publish Kind 3: $e');
+    }
   }
 
   // --- Private helpers ---
@@ -325,7 +366,7 @@ class DmService {
     return (await (_db.select(_db.conversations)..where((c) => c.id.equals(id))).getSingle());
   }
 
-  void _handleVoiceStateSync(Map<String, dynamic> data) {
+  void handleVoiceStateSync(Map<String, dynamic> data) {
     final channelId = data['channel_id'] as String?;
     final action = data['action'] as String?;
     final userId = data['user_id'] as String?;

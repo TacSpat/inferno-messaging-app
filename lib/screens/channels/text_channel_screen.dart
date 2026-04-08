@@ -80,6 +80,25 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
   }
 
   @override
+  void deactivate() {
+    // Update read timestamp on leave so messages seen during this session are marked read
+    // and clear active channel so unread badges reappear when navigating away
+    // Must happen in deactivate() — ref is unavailable in dispose()
+    if (_channel != null) {
+      final db = ref.read(databaseProvider);
+      db.messagesDao.upsertChannelRead(_channel!.id, localUserId);
+      final channelId = _channel!.id;
+      final activeId = ref.read(activeChannelIdProvider);
+      final notifier = ref.read(activeChannelIdProvider.notifier);
+      // Defer provider modification to avoid "modified during build" error
+      if (activeId == channelId) {
+        Future(() => notifier.state = null);
+      }
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _channelSub?.cancel();
     super.dispose();
@@ -371,7 +390,7 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
         if (_isNsfwGated)
           Positioned.fill(
             child: Container(
-              color: c.gray900.withValues(alpha: 0.95),
+              color: c.gray900,
               child: Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -478,19 +497,32 @@ class _PinnedMessagesDialog extends ConsumerWidget {
                       final author = msg.nostrAuthorPubkey != null
                           ? '${msg.nostrAuthorPubkey!.substring(0, 8)}...'
                           : 'Unknown';
-                      return Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: colors.gray900,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(author, style: TextStyle(color: colors.accent, fontWeight: FontWeight.w600, fontSize: 13)),
-                            const SizedBox(height: 4),
-                            Text(msg.content ?? '', style: TextStyle(color: colors.gray200, fontSize: 14)),
-                          ],
+                      return GestureDetector(
+                        onTap: () {
+                          Navigator.pop(context);
+                          if (msg.nostrEventId != null) {
+                            Future.delayed(const Duration(milliseconds: 250), () {
+                              MessageList.scrollToMessage(msg.nostrEventId!);
+                            });
+                          }
+                        },
+                        child: MouseRegion(
+                          cursor: SystemMouseCursors.click,
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: colors.gray900,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(author, style: TextStyle(color: colors.accent, fontWeight: FontWeight.w600, fontSize: 13)),
+                                const SizedBox(height: 4),
+                                Text(msg.content ?? '', style: TextStyle(color: colors.gray200, fontSize: 14)),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     },
