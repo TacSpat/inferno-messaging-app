@@ -2,27 +2,27 @@
 
 **Blazing fast. Hot to the touch.**
 
-Inferno is a chat app that looks and feels like the platforms you already know — servers, channels, voice chat, roles, DMs, all of it — but with one difference: nobody can take it away from you.
+Inferno is a chat app that looks and feels like the platforms you already know - servers, channels, voice chat, roles, DMs, all of it - but with one difference: nobody can take it away from you.
 
-Centralized platforms can change their terms whenever they want — require ID verification, harvest your data, ban your community, or shut down entirely. You have no say and no recourse. Inferno exists because your community shouldn't be at the mercy of someone else's policy decisions.
+Centralized platforms can change their terms whenever they want - require ID verification, harvest your data, ban your community, or shut down entirely. You have no say and no recourse. Inferno exists because your community shouldn't be at the mercy of someone else's policy decisions.
 
-There is no server component. No backend. No account database. Inferno is a standalone native app that connects directly to Nostr relays. Your identity is a cryptographic keypair generated on your device. Your messages, servers, profiles, and relationships all live on relays you choose. The local SQLite database is a cache — delete it and everything rebuilds from the network.
+There is no server component. No backend. No account database. Inferno is a standalone native app that connects directly to Nostr relays. Your identity is a cryptographic keypair generated on your device. Your messages, servers, profiles, and relationships all live on relays you choose. The local SQLite database is a cache - delete it and everything rebuilds from the network.
 
 ## Features
 
-- **Messaging** — text channels, direct messages, file sharing, reactions, custom emoji/stickers, GIF search, link previews, @mentions, markdown rendering
-- **Voice & Video** — voice channels, screen sharing, mute/deafen, noise suppression (DeepFilterNet), moderation controls (LiveKit)
-- **Servers** — organize channels into categories, invite links, custom icons, channel reordering, nested channels
-- **Roles** — fine-grained permissions (30+), role hierarchy, per-channel overrides, role editor
-- **Social** — friend requests, blocking, user profile cards, online/idle/DnD/invisible status, typing indicators
-- **Identity** — Nostr secp256k1 keypair generated on signup, NIP-05 verification, key export (NIP-49 ncryptsec only), portable across any Nostr client
-- **Relay-Bound** — all server state, messages, DMs, and profiles sync through Nostr relays — no direct peer-to-peer or client-to-server communication
-- **Encrypted DMs** — NIP-44 (XChaCha20-Poly1305) encryption, pure Dart implementation
-- **Key Security** — private keys stored in platform keychain via flutter_secure_storage, never displayed in the UI, export only via NIP-49 encrypted format
-- **File Hosting** — Blossom servers for content-addressable file storage (BUD-01)
-- **Content Safety** — on-device NSFW detection via ONNX Runtime (native FFI), no cloud API calls
-- **Cross-Platform** — native on Windows, Linux, macOS, Android, iOS
-- **Auto-Updates** — GitHub Releases for desktop, app stores for mobile
+- **Messaging** - text channels, direct messages, file sharing, reactions, custom emoji/stickers, GIF search, link previews, @mentions, markdown rendering
+- **Voice & Video** - voice channels, screen sharing, mute/deafen, noise suppression (DeepFilterNet), moderation controls (LiveKit)
+- **Servers** - organize channels into categories, invite links, custom icons, channel reordering, nested channels
+- **Roles** - fine-grained permissions (30+), role hierarchy, per-channel overrides, role editor
+- **Social** - friend requests, blocking, user profile cards, online/idle/DnD/invisible status, typing indicators
+- **Identity** - Nostr secp256k1 keypair generated on signup, NIP-05 verification, key export (NIP-49 ncryptsec only), portable across any Nostr client
+- **Relay-Bound** - all server state, messages, DMs, and profiles sync through Nostr relays - no direct peer-to-peer or client-to-server communication
+- **Encrypted DMs** - NIP-44 (XChaCha20-Poly1305) encryption, pure Dart implementation
+- **Key Security** - private keys stored in platform keychain via flutter_secure_storage, never displayed in the UI, export only via NIP-49 encrypted format
+- **File Hosting** - Blossom servers for content-addressable file storage (BUD-01)
+- **Content Safety** - on-device NSFW detection via ONNX Runtime (native FFI), no cloud API calls
+- **Cross-Platform** - native on Windows, Linux, macOS, Android, iOS
+- **Auto-Updates** - GitHub Releases for desktop, app stores for mobile
 
 ## Stack
 
@@ -159,10 +159,10 @@ Desktop releases are distributed via GitHub Releases with auto-update support. M
 
 Inferno generates a Nostr secp256k1 keypair on signup. The private key is stored in the platform's secure keychain (Keychain on macOS/iOS, Keystore on Android, libsecret on Linux, Windows Credential Manager on Windows) via `flutter_secure_storage`. The key is never displayed in the UI.
 
-To move your identity to another device or client, use the key export screen in Settings. Keys are exported exclusively in NIP-49 `ncryptsec` format — encrypted with a passphrase you choose. There is no plaintext nsec export.
+To move your identity to another device or client, use the key export screen in Settings. Keys are exported exclusively in NIP-49 `ncryptsec` format - encrypted with a passphrase you choose. There is no plaintext nsec export.
 
 To import an existing Nostr identity, use the key import screen at login. Inferno accepts both `nsec` (plaintext) and `ncryptsec` (encrypted) formats.
 
 ## License
 
-Elastic License 2.0 — see [LICENSE](LICENSE) for details.
+Elastic License 2.0 - see [LICENSE](LICENSE) for details.
