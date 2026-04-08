@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:livekit_client/livekit_client.dart';
 import 'noise_processor.dart';
@@ -6,6 +7,14 @@ import 'noise_processor.dart';
 class LiveKitService {
   Room? _room;
   EventsListener<RoomEvent>? _listener;
+  Timer? _tokenRefreshTimer;
+  String? _connectedUrl;
+  String? _currentToken;
+  DateTime? _tokenExpiresAt;
+
+  /// Set by the voice channel screen — called when the token needs renewal.
+  /// Should request a new token from the voice provider and return it.
+  Future<String?> Function()? onTokenRefreshNeeded;
 
   final _participantsController = StreamController<List<Participant>>.broadcast();
   Stream<List<Participant>> get participantsStream => _participantsController.stream;
@@ -52,6 +61,8 @@ class LiveKitService {
       ..on<RoomDisconnectedEvent>((e) => _onDisconnected());
 
     await _room!.connect(url, token);
+    _connectedUrl = url;
+    _currentToken = token;
 
     // Initialize noise processor (DeepFilterNet → RNNoise → WebRTC fallback)
     if (noiseSuppression) {
@@ -64,11 +75,101 @@ class LiveKitService {
       }
     }
 
+    // Schedule token renewal before expiry
+    _scheduleTokenRefresh(token);
+
     _emitParticipants();
     _connectionController.add(true);
   }
 
+  /// Parse JWT expiry and schedule renewal 30 minutes before it expires.
+  void _scheduleTokenRefresh(String token) {
+    _tokenRefreshTimer?.cancel();
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return;
+      final payload = utf8.decode(
+        base64Url.decode(base64Url.normalize(parts[1])),
+      );
+      final claims = json.decode(payload) as Map<String, dynamic>;
+      final exp = claims['exp'] as int?;
+      if (exp == null) return;
+
+      _tokenExpiresAt = DateTime.fromMillisecondsSinceEpoch(exp * 1000);
+      final renewAt = _tokenExpiresAt!.subtract(const Duration(minutes: 30));
+      final delay = renewAt.difference(DateTime.now());
+
+      if (delay.isNegative) {
+        debugPrint('[LiveKit] Token already near expiry, renewing now');
+        _renewToken();
+        return;
+      }
+
+      debugPrint('[LiveKit] Token expires at $_tokenExpiresAt, renewal in ${delay.inMinutes}m');
+      _tokenRefreshTimer = Timer(delay, _renewToken);
+    } catch (e) {
+      debugPrint('[LiveKit] Could not parse token expiry: $e');
+    }
+  }
+
+  /// Whether the current token still has more than 30 minutes of life.
+  bool get _tokenStillValid {
+    if (_tokenExpiresAt == null) return false;
+    return _tokenExpiresAt!.difference(DateTime.now()) > const Duration(minutes: 30);
+  }
+
+  /// Request a new token and reconnect only if the current token is near expiry.
+  Future<void> _renewToken() async {
+    if (_room == null || onTokenRefreshNeeded == null) return;
+
+    // Don't renew if token still has plenty of time
+    if (_tokenStillValid) {
+      debugPrint('[LiveKit] Token still valid until $_tokenExpiresAt, skipping renewal');
+      _scheduleTokenRefresh(_currentToken!);
+      return;
+    }
+
+    debugPrint('[LiveKit] Token expiring, requesting renewal...');
+    try {
+      final newToken = await onTokenRefreshNeeded!();
+      if (newToken == null || _room == null) {
+        debugPrint('[LiveKit] Token renewal failed — no token returned');
+        return;
+      }
+
+      // Reconnect with the new token
+      final url = _connectedUrl ?? '';
+      final roomOptions = _room!.roomOptions;
+      final wasMuted = isMuted;
+      _listener?.dispose();
+      try { await _room!.disconnect(); } catch (_) {}
+
+      _room = Room(roomOptions: roomOptions);
+      _listener = _room!.createListener();
+      _listener!
+        ..on<ParticipantConnectedEvent>((e) => _emitParticipants())
+        ..on<ParticipantDisconnectedEvent>((e) => _emitParticipants())
+        ..on<TrackPublishedEvent>((e) => _emitParticipants())
+        ..on<TrackUnpublishedEvent>((e) => _emitParticipants())
+        ..on<TrackMutedEvent>((e) => _emitParticipants())
+        ..on<TrackUnmutedEvent>((e) => _emitParticipants())
+        ..on<RoomDisconnectedEvent>((e) => _onDisconnected());
+
+      await _room!.connect(url, newToken);
+      _currentToken = newToken;
+      await _room!.localParticipant?.setMicrophoneEnabled(!wasMuted);
+
+      _scheduleTokenRefresh(newToken);
+      _emitParticipants();
+      _connectionController.add(true);
+      debugPrint('[LiveKit] Token renewed, reconnected');
+    } catch (e) {
+      debugPrint('[LiveKit] Token renewal failed: $e');
+    }
+  }
+
   void _onDisconnected() {
+    _tokenRefreshTimer?.cancel();
     _room = null;
     _listener?.dispose();
     _listener = null;
@@ -86,11 +187,13 @@ class LiveKitService {
       onLeaveCallback = null;
     }
 
+    _tokenRefreshTimer?.cancel();
     _listener?.dispose();
     _listener = null;
     final room = _room!;
     _room = null;
     _deafened = false;
+    onTokenRefreshNeeded = null;
 
     try {
       await room.disconnect();

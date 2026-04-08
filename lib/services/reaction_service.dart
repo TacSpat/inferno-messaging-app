@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../crypto/nostr_signer.dart';
 import '../database/database.dart';
@@ -10,7 +11,7 @@ class ReactionService {
 
   ReactionService(this._db, this._relayPool);
 
-  /// Add a reaction to a message
+  /// Add a reaction to a message and publish Kind 7 to Nostr
   Future<void> addReaction({
     required String privateKeyHex,
     required String publicKeyHex,
@@ -18,24 +19,115 @@ class ReactionService {
     required String emoji,
     String? channelGroupId,
   }) async {
-    // Store locally
+    // Store locally with reactor pubkey
     final now = DateTime.now();
-    await _db.into(_db.reactions).insert(ReactionsCompanion.insert(
-      messageId: message.id,
-      userId: 0, // local user
-      emoji: Value(emoji),
-      createdAt: now,
-      updatedAt: now,
-    ));
+    try {
+      await _db.into(_db.reactions).insert(ReactionsCompanion.insert(
+        messageId: message.id,
+        userId: 0,
+        emoji: Value(emoji),
+        reactorPubkey: Value(publicKeyHex),
+        createdAt: now,
+        updatedAt: now,
+      ));
+    } catch (_) {} // Ignore duplicate
 
     // Publish Kind 7 event
-    if (message.nostrEventId == null) return;
+    _publishKind7(
+      privateKeyHex: privateKeyHex,
+      publicKeyHex: publicKeyHex,
+      message: message,
+      content: emoji,
+      channelGroupId: channelGroupId,
+    );
+  }
+
+  /// Toggle a reaction (add if not present, remove if present)
+  Future<void> toggleReaction({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String eventId,
+    required String emoji,
+    String? channelGroupId,
+  }) async {
+    final message = await (_db.select(_db.messages)
+          ..where((m) => m.nostrEventId.equals(eventId)))
+        .getSingleOrNull();
+    if (message == null) return;
+
+    // Check if already reacted by our pubkey
+    final existing = await (_db.select(_db.reactions)
+          ..where((r) => r.messageId.equals(message.id) &
+              r.emoji.equals(emoji) &
+              r.reactorPubkey.equals(publicKeyHex)))
+        .getSingleOrNull();
+
+    if (existing != null) {
+      await removeReaction(
+        privateKeyHex: privateKeyHex,
+        publicKeyHex: publicKeyHex,
+        message: message,
+        emoji: emoji,
+        channelGroupId: channelGroupId,
+      );
+    } else {
+      await addReaction(
+        privateKeyHex: privateKeyHex,
+        publicKeyHex: publicKeyHex,
+        message: message,
+        emoji: emoji,
+        channelGroupId: channelGroupId,
+      );
+    }
+  }
+
+  /// Remove a reaction locally and publish Kind 7 with "-" content
+  Future<void> removeReaction({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required Message message,
+    required String emoji,
+    String? channelGroupId,
+  }) async {
+    // Delete locally
+    await (_db.delete(_db.reactions)
+          ..where((r) => r.messageId.equals(message.id) &
+              r.emoji.equals(emoji) &
+              r.reactorPubkey.equals(publicKeyHex)))
+        .go();
+
+    // Publish Kind 7 removal (content = "-")
+    _publishKind7(
+      privateKeyHex: privateKeyHex,
+      publicKeyHex: publicKeyHex,
+      message: message,
+      content: '-',
+      channelGroupId: channelGroupId,
+    );
+  }
+
+  /// Publish a Kind 7 Nostr event (reaction add or removal)
+  Future<void> _publishKind7({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required Message message,
+    required String content,
+    String? channelGroupId,
+  }) async {
+    if (message.nostrEventId == null) {
+      debugPrint('[ReactionService] Cannot publish Kind 7: message has no nostrEventId');
+      return;
+    }
+
     final tags = <List<String>>[
       ['e', message.nostrEventId!],
       ['p', message.nostrAuthorPubkey ?? publicKeyHex],
+      ['k', '9'],
     ];
     if (channelGroupId != null) {
       tags.add(['h', channelGroupId]);
+    } else {
+      debugPrint('[ReactionService] WARNING: no channelGroupId — h tag omitted, Rails will not see this reaction');
     }
 
     final event = nostr.NostrEvent(
@@ -43,51 +135,32 @@ class ReactionService {
       createdAt: nostr.NostrEvent.now(),
       kind: 7,
       tags: tags,
-      content: emoji,
+      content: content,
     );
 
     final signer = NostrSigner(privateKeyHex: privateKeyHex);
     final signed = signer.sign(event);
-    _relayPool.publish(signed);
-  }
+    debugPrint('[ReactionService] Publishing Kind 7: content="$content" tags=$tags eventId=${signed.id}');
 
-  /// Toggle a reaction by event ID (add if not present, remove if present)
-  Future<void> toggleReaction({
-    required String privateKeyHex,
-    required String publicKeyHex,
-    required String eventId,
-    required String emoji,
-  }) async {
-    final message = await (_db.select(_db.messages)
-          ..where((m) => m.nostrEventId.equals(eventId)))
-        .getSingleOrNull();
-    if (message == null) return;
+    // Log outbound event for dedup
+    _logEvent(signed.id!, signed.pubkey, signed.createdAt, 'outbound');
 
-    // Check if already reacted
-    final existing = await (_db.select(_db.reactions)
-          ..where((r) => r.messageId.equals(message.id) & r.emoji.equals(emoji) & r.userId.equals(0)))
-        .getSingleOrNull();
-    if (existing != null) {
-      await removeReaction(message.id, emoji);
-    } else {
-      await addReaction(
-        privateKeyHex: privateKeyHex,
-        publicKeyHex: publicKeyHex,
-        message: message,
-        emoji: emoji,
-      );
+    final results = await _relayPool.publish(signed);
+    for (final entry in results.entries) {
+      debugPrint('[ReactionService] Relay ${entry.key}: ${entry.value ? "OK" : "FAILED"}');
     }
   }
 
-  /// Remove a reaction
-  Future<void> removeReaction(int messageId, String emoji) async {
-    await (_db.delete(_db.reactions)
-          ..where((r) => r.messageId.equals(messageId) & r.emoji.equals(emoji) & r.userId.equals(0)))
-        .go();
-  }
-
-  /// Process inbound Kind 7 reaction
+  /// Process inbound Kind 7 reaction from relays
   Future<void> processInboundReaction(nostr.NostrEvent event) async {
+    // Dedup: skip if we already processed this event ID
+    if (event.id != null) {
+      final alreadySeen = await (_db.select(_db.nostrEventLogs)
+            ..where((l) => l.eventId.equals(event.id!)))
+          .getSingleOrNull();
+      if (alreadySeen != null) return;
+    }
+
     final eTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'e').firstOrNull;
     if (eTag == null || eTag.length < 2) return;
 
@@ -96,16 +169,73 @@ class ReactionService {
         .getSingleOrNull();
     if (message == null) return;
 
+    final emoji = event.content;
+    final reactorPubkey = event.pubkey;
+
+    // Handle removal: content == "-"
+    if (emoji == '-') {
+      await (_db.delete(_db.reactions)
+            ..where((r) => r.messageId.equals(message.id) &
+                r.reactorPubkey.equals(reactorPubkey)))
+          .go();
+      // Log this event so we know it was processed
+      if (event.id != null) _logEvent(event.id!, reactorPubkey, event.createdAt, 'inbound');
+      return;
+    }
+
+    if (emoji.isEmpty) return;
+
+    // Check if a newer removal event exists for this reactor+message
+    // (handles out-of-order delivery: add arrives after remove)
+    if (event.id != null) {
+      final eventTime = DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000);
+      // Look for any logged removal (Kind 7, same pubkey) that's newer
+      final newerRemoval = await (_db.select(_db.nostrEventLogs)
+            ..where((l) => l.kind.equals(7) &
+                l.pubkey.equals(reactorPubkey) &
+                l.messageId.equals(message.id) &
+                l.eventCreatedAt.isBiggerThanValue(eventTime)))
+          .getSingleOrNull();
+      if (newerRemoval != null) {
+        debugPrint('[ReactionService] Skipping stale add event (newer removal exists)');
+        _logEvent(event.id!, reactorPubkey, event.createdAt, 'inbound');
+        return;
+      }
+    }
+
+    // Insert reaction (ignore duplicate)
     final now = DateTime.now();
     try {
       await _db.into(_db.reactions).insert(ReactionsCompanion.insert(
         messageId: message.id,
-        userId: 0, // will be resolved to contact later
-        emoji: Value(event.content.isNotEmpty ? event.content : '+'),
+        userId: 0,
+        emoji: Value(emoji),
+        reactorPubkey: Value(reactorPubkey),
         createdAt: now,
         updatedAt: now,
       ));
-    } catch (_) {} // Ignore duplicates
+    } catch (_) {} // Unique constraint handles dedup
+
+    // Log this event
+    if (event.id != null) _logEvent(event.id!, reactorPubkey, event.createdAt, 'inbound', messageId: message.id);
+  }
+
+  /// Log a Kind 7 event to prevent re-processing
+  void _logEvent(String eventId, String pubkey, int createdAt, String direction, {int? messageId}) {
+    final eventTime = DateTime.fromMillisecondsSinceEpoch(createdAt * 1000);
+    final now = DateTime.now();
+    try {
+      _db.into(_db.nostrEventLogs).insert(NostrEventLogsCompanion.insert(
+        eventId: eventId,
+        kind: 7,
+        pubkey: pubkey,
+        direction: direction,
+        messageId: Value(messageId),
+        eventCreatedAt: Value(eventTime),
+        createdAt: now,
+        updatedAt: now,
+      ));
+    } catch (_) {} // Ignore duplicate event IDs
   }
 
   /// Watch reactions for a message
@@ -113,18 +243,5 @@ class ReactionService {
     return (_db.select(_db.reactions)
           ..where((r) => r.messageId.equals(messageId)))
         .watch();
-  }
-
-  /// Get grouped reaction counts for a message
-  Future<Map<String, int>> getReactionCounts(int messageId) async {
-    final reactions = await (_db.select(_db.reactions)
-          ..where((r) => r.messageId.equals(messageId)))
-        .get();
-    final counts = <String, int>{};
-    for (final r in reactions) {
-      final emoji = r.emoji ?? '+';
-      counts[emoji] = (counts[emoji] ?? 0) + 1;
-    }
-    return counts;
   }
 }

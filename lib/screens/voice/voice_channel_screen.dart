@@ -11,7 +11,10 @@ import '../../services/voice_token_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../../providers/conversations_provider.dart';
 import '../../widgets/participant_tile.dart';
+import '../../models/permission.dart';
+import '../../providers/server_settings_provider.dart';
 import '../../theme/all_themes.dart';
+import '../../theme/theme_provider.dart';
 
 class VoiceChannelScreen extends ConsumerStatefulWidget {
   final String channelPublicId;
@@ -34,10 +37,20 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   bool _deafened = false;
   String? _error;
 
+  // Permission cache
+  bool _canConnect = true;
+  bool _canSpeak = true;
+  bool _canVideo = true;
+  bool _canScreenShare = true;
+  bool _canMuteMembers = false;
+  bool _canDeafenMembers = false;
+  bool _canMoveMembers = false;
+
   @override
   void initState() {
     super.initState();
     _loadChannel();
+    _loadPermissions();
   }
 
   @override
@@ -52,6 +65,36 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
     final db = ref.read(databaseProvider);
     final ch = await db.serversDao.getChannelByPublicId(widget.channelPublicId);
     if (mounted) setState(() => _channel = ch);
+    if (ch != null) _loadPermissions(ch.serverId);
+  }
+
+  Future<void> _loadPermissions([int? serverId]) async {
+    final sid = serverId ?? _channel?.serverId;
+    if (sid == null) return;
+    final auth = ref.read(authServiceProvider);
+    if (auth.publicKeyHex == null) return;
+    final permSvc = ref.read(permissionServiceProvider);
+    final pk = auth.publicKeyHex!;
+    final results = await Future.wait([
+      permSvc.hasPermission(sid, pk, Permission.connectVoice),
+      permSvc.hasPermission(sid, pk, Permission.speak),
+      permSvc.hasPermission(sid, pk, Permission.video),
+      permSvc.hasPermission(sid, pk, Permission.screenShare),
+      permSvc.hasPermission(sid, pk, Permission.muteMembers),
+      permSvc.hasPermission(sid, pk, Permission.deafenMembers),
+      permSvc.hasPermission(sid, pk, Permission.moveMembers),
+    ]);
+    if (mounted) {
+      setState(() {
+        _canConnect = results[0];
+        _canSpeak = results[1];
+        _canVideo = results[2];
+        _canScreenShare = results[3];
+        _canMuteMembers = results[4];
+        _canDeafenMembers = results[5];
+        _canMoveMembers = results[6];
+      });
+    }
   }
 
   Future<void> _joinVoice() async {
@@ -134,10 +177,28 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         echoCancellation: echoCancellation,
         autoGainControl: autoGainControl,
       );
-      await livekit.setMicrophoneEnabled(true);
+      await livekit.setMicrophoneEnabled(_canSpeak);
 
       // Set leave callback so sidebar disconnect also publishes leave state
       livekit.onLeaveCallback = () => _publishVoiceState('leave');
+
+      // Set token refresh callback — requests a new token from the provider
+      // before the current one expires (fires 30 min before expiry)
+      livekit.onTokenRefreshNeeded = () async {
+        final newRequestId = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+        await VoiceTokenService.requestToken(
+          relayPool: pool,
+          privateKeyHex: auth.privateKeyHex!,
+          publicKeyHex: auth.publicKeyHex!,
+          providerPubkey: provider.providerPubkey!,
+          serverGroupId: server.nostrGroupId ?? '',
+          channelPublicId: widget.channelPublicId,
+          requestId: newRequestId,
+          userDisplayName: displayName,
+        );
+        final resp = await dmService.waitForVoiceToken(newRequestId);
+        return resp?['token'] as String?;
+      };
 
       // Publish voice state join to remote instances
       await _publishVoiceState('join');
@@ -194,7 +255,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
   Widget build(BuildContext context) {
     if (_channel == null) return const Center(child: CircularProgressIndicator());
 
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
     final livekit = ref.watch(livekitServiceProvider);
     ref.watch(livekitConnectionProvider); // triggers rebuild on connect/disconnect
     final isConnected = livekit.isConnected;
@@ -255,7 +316,10 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                   child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
                     Icon(Icons.headset, size: 64, color: c.gray500),
                     const SizedBox(height: 16),
-                    if (!_connecting)
+                    if (!_canConnect)
+                      Text('You do not have permission to connect to voice channels.',
+                        style: TextStyle(color: c.gray500, fontSize: 13)),
+                    if (_canConnect && !_connecting)
                       GestureDetector(
                         onTap: _joinVoice,
                         child: Container(
@@ -264,7 +328,7 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
                           child: const Text('Join Voice', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
                         ),
                       ),
-                    if (_connecting)
+                    if (_canConnect && _connecting)
                       SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: c.accent)),
                     if (_error != null) ...[
                       const SizedBox(height: 12),

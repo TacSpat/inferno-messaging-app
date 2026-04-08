@@ -5,11 +5,12 @@ class Reactions extends Table {
   IntColumn get messageId => integer()();
   IntColumn get userId => integer()();
   TextColumn get emoji => text().nullable()();
+  TextColumn get reactorPubkey => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
   List<Set<Column>> get uniqueKeys => [
-    {userId, messageId, emoji},
+    {reactorPubkey, messageId, emoji},
   ];
 }

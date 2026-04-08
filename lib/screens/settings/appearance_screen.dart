@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/theme_provider.dart';
 import '../../theme/all_themes.dart';
@@ -7,11 +8,41 @@ import '../../theme/ui_effects.dart';
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
 
+  /// Show spinner → swap theme → wait for rebuild to finish → hide spinner
+  Future<void> _switchTheme(WidgetRef ref, String name) async {
+    if (ref.read(themeTransitionProvider)) return;
+    ref.read(themeTransitionProvider.notifier).state = true;
+
+    // Let spinner render
+    await Future.delayed(const Duration(milliseconds: 50));
+
+    // Swap theme — triggers rebuilds
+    ref.read(themeNameProvider.notifier).setTheme(name);
+
+    // Wait for multiple frames so all widgets finish rebuilding
+    await Future.delayed(const Duration(milliseconds: 150));
+
+    ref.read(themeTransitionProvider.notifier).state = false;
+  }
+
+  Future<void> _switchEffect(WidgetRef ref, String name) async {
+    if (ref.read(themeTransitionProvider)) return;
+    ref.read(themeTransitionProvider.notifier).state = true;
+
+    await Future.delayed(const Duration(milliseconds: 50));
+
+    ref.read(effectThemeNameProvider.notifier).setEffect(name);
+
+    await Future.delayed(const Duration(milliseconds: 150));
+
+    ref.read(themeTransitionProvider.notifier).state = false;
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentTheme = ref.watch(themeNameProvider);
     final currentEffect = ref.watch(effectThemeNameProvider);
-    final c = Theme.of(context).extension<InfernoColors>()!;
+    final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -39,7 +70,7 @@ class AppearanceScreen extends ConsumerWidget {
               ),
               title: Text(name[0].toUpperCase() + name.substring(1), style: TextStyle(color: c.gray200)),
               trailing: isSelected ? Icon(Icons.check_circle, color: color) : null,
-              onTap: () => ref.read(themeNameProvider.notifier).setTheme(name),
+              onTap: () => _switchTheme(ref, name),
             ),
           );
         }),
@@ -82,7 +113,7 @@ class AppearanceScreen extends ConsumerWidget {
                 style: TextStyle(color: c.gray500, fontSize: 12),
               ),
               trailing: isSelected ? Icon(Icons.check_circle, color: c.accent) : null,
-              onTap: () => ref.read(effectThemeNameProvider.notifier).setEffect(effect.name),
+              onTap: () => _switchEffect(ref, effect.name),
             ),
           );
         }),

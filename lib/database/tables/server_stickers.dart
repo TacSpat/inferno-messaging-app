@@ -7,6 +7,7 @@ class ServerStickers extends Table {
   TextColumn get name => text().withLength(max: 50)();
   TextColumn get description => text().nullable()();
   IntColumn get creatorId => integer()();
+  TextColumn get creatorPubkey => text().nullable()();
   TextColumn get url => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();

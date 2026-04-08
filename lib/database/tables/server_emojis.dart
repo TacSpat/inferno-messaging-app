@@ -6,6 +6,7 @@ class ServerEmojis extends Table {
   IntColumn get serverId => integer()();
   TextColumn get name => text().withLength(max: 32)();
   IntColumn get creatorId => integer()();
+  TextColumn get creatorPubkey => text().nullable()();
   TextColumn get url => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();

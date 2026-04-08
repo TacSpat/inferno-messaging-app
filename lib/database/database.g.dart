@@ -3911,6 +3911,18 @@ class $ChannelsTable extends Channels with TableInfo<$ChannelsTable, Channel> {
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _lastBackfilledAtMeta = const VerificationMeta(
+    'lastBackfilledAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastBackfilledAt =
+      GeneratedColumn<DateTime>(
+        'last_backfilled_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -3959,6 +3971,7 @@ class $ChannelsTable extends Channels with TableInfo<$ChannelsTable, Channel> {
     voiceUserLimit,
     videoEnabled,
     sidechatChannelId,
+    lastBackfilledAt,
     createdAt,
     updatedAt,
   ];
@@ -4162,6 +4175,15 @@ class $ChannelsTable extends Channels with TableInfo<$ChannelsTable, Channel> {
         ),
       );
     }
+    if (data.containsKey('last_backfilled_at')) {
+      context.handle(
+        _lastBackfilledAtMeta,
+        lastBackfilledAt.isAcceptableOrUnknown(
+          data['last_backfilled_at']!,
+          _lastBackfilledAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -4283,6 +4305,10 @@ class $ChannelsTable extends Channels with TableInfo<$ChannelsTable, Channel> {
         DriftSqlType.int,
         data['${effectivePrefix}sidechat_channel_id'],
       ),
+      lastBackfilledAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_backfilled_at'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -4325,6 +4351,7 @@ class Channel extends DataClass implements Insertable<Channel> {
   final int voiceUserLimit;
   final bool videoEnabled;
   final int? sidechatChannelId;
+  final DateTime? lastBackfilledAt;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Channel({
@@ -4352,6 +4379,7 @@ class Channel extends DataClass implements Insertable<Channel> {
     required this.voiceUserLimit,
     required this.videoEnabled,
     this.sidechatChannelId,
+    this.lastBackfilledAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -4410,6 +4438,9 @@ class Channel extends DataClass implements Insertable<Channel> {
     if (!nullToAbsent || sidechatChannelId != null) {
       map['sidechat_channel_id'] = Variable<int>(sidechatChannelId);
     }
+    if (!nullToAbsent || lastBackfilledAt != null) {
+      map['last_backfilled_at'] = Variable<DateTime>(lastBackfilledAt);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -4466,6 +4497,9 @@ class Channel extends DataClass implements Insertable<Channel> {
       sidechatChannelId: sidechatChannelId == null && nullToAbsent
           ? const Value.absent()
           : Value(sidechatChannelId),
+      lastBackfilledAt: lastBackfilledAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastBackfilledAt),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -4507,6 +4541,9 @@ class Channel extends DataClass implements Insertable<Channel> {
       voiceUserLimit: serializer.fromJson<int>(json['voiceUserLimit']),
       videoEnabled: serializer.fromJson<bool>(json['videoEnabled']),
       sidechatChannelId: serializer.fromJson<int?>(json['sidechatChannelId']),
+      lastBackfilledAt: serializer.fromJson<DateTime?>(
+        json['lastBackfilledAt'],
+      ),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -4541,6 +4578,7 @@ class Channel extends DataClass implements Insertable<Channel> {
       'voiceUserLimit': serializer.toJson<int>(voiceUserLimit),
       'videoEnabled': serializer.toJson<bool>(videoEnabled),
       'sidechatChannelId': serializer.toJson<int?>(sidechatChannelId),
+      'lastBackfilledAt': serializer.toJson<DateTime?>(lastBackfilledAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -4571,6 +4609,7 @@ class Channel extends DataClass implements Insertable<Channel> {
     int? voiceUserLimit,
     bool? videoEnabled,
     Value<int?> sidechatChannelId = const Value.absent(),
+    Value<DateTime?> lastBackfilledAt = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Channel(
@@ -4614,6 +4653,9 @@ class Channel extends DataClass implements Insertable<Channel> {
     sidechatChannelId: sidechatChannelId.present
         ? sidechatChannelId.value
         : this.sidechatChannelId,
+    lastBackfilledAt: lastBackfilledAt.present
+        ? lastBackfilledAt.value
+        : this.lastBackfilledAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -4671,6 +4713,9 @@ class Channel extends DataClass implements Insertable<Channel> {
       sidechatChannelId: data.sidechatChannelId.present
           ? data.sidechatChannelId.value
           : this.sidechatChannelId,
+      lastBackfilledAt: data.lastBackfilledAt.present
+          ? data.lastBackfilledAt.value
+          : this.lastBackfilledAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -4703,6 +4748,7 @@ class Channel extends DataClass implements Insertable<Channel> {
           ..write('voiceUserLimit: $voiceUserLimit, ')
           ..write('videoEnabled: $videoEnabled, ')
           ..write('sidechatChannelId: $sidechatChannelId, ')
+          ..write('lastBackfilledAt: $lastBackfilledAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -4735,6 +4781,7 @@ class Channel extends DataClass implements Insertable<Channel> {
     voiceUserLimit,
     videoEnabled,
     sidechatChannelId,
+    lastBackfilledAt,
     createdAt,
     updatedAt,
   ]);
@@ -4766,6 +4813,7 @@ class Channel extends DataClass implements Insertable<Channel> {
           other.voiceUserLimit == this.voiceUserLimit &&
           other.videoEnabled == this.videoEnabled &&
           other.sidechatChannelId == this.sidechatChannelId &&
+          other.lastBackfilledAt == this.lastBackfilledAt &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -4795,6 +4843,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
   final Value<int> voiceUserLimit;
   final Value<bool> videoEnabled;
   final Value<int?> sidechatChannelId;
+  final Value<DateTime?> lastBackfilledAt;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const ChannelsCompanion({
@@ -4822,6 +4871,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
     this.voiceUserLimit = const Value.absent(),
     this.videoEnabled = const Value.absent(),
     this.sidechatChannelId = const Value.absent(),
+    this.lastBackfilledAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -4850,6 +4900,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
     this.voiceUserLimit = const Value.absent(),
     this.videoEnabled = const Value.absent(),
     this.sidechatChannelId = const Value.absent(),
+    this.lastBackfilledAt = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
   }) : publicId = Value(publicId),
@@ -4883,6 +4934,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
     Expression<int>? voiceUserLimit,
     Expression<bool>? videoEnabled,
     Expression<int>? sidechatChannelId,
+    Expression<DateTime>? lastBackfilledAt,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -4914,6 +4966,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
       if (voiceUserLimit != null) 'voice_user_limit': voiceUserLimit,
       if (videoEnabled != null) 'video_enabled': videoEnabled,
       if (sidechatChannelId != null) 'sidechat_channel_id': sidechatChannelId,
+      if (lastBackfilledAt != null) 'last_backfilled_at': lastBackfilledAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -4944,6 +4997,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
     Value<int>? voiceUserLimit,
     Value<bool>? videoEnabled,
     Value<int?>? sidechatChannelId,
+    Value<DateTime?>? lastBackfilledAt,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -4974,6 +5028,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
       voiceUserLimit: voiceUserLimit ?? this.voiceUserLimit,
       videoEnabled: videoEnabled ?? this.videoEnabled,
       sidechatChannelId: sidechatChannelId ?? this.sidechatChannelId,
+      lastBackfilledAt: lastBackfilledAt ?? this.lastBackfilledAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -5060,6 +5115,9 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
     if (sidechatChannelId.present) {
       map['sidechat_channel_id'] = Variable<int>(sidechatChannelId.value);
     }
+    if (lastBackfilledAt.present) {
+      map['last_backfilled_at'] = Variable<DateTime>(lastBackfilledAt.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -5096,6 +5154,7 @@ class ChannelsCompanion extends UpdateCompanion<Channel> {
           ..write('voiceUserLimit: $voiceUserLimit, ')
           ..write('videoEnabled: $videoEnabled, ')
           ..write('sidechatChannelId: $sidechatChannelId, ')
+          ..write('lastBackfilledAt: $lastBackfilledAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -6886,6 +6945,29 @@ class $ConversationsTable extends Conversations
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _lastBackfilledAtMeta = const VerificationMeta(
+    'lastBackfilledAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastBackfilledAt =
+      GeneratedColumn<DateTime>(
+        'last_backfilled_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
+  static const VerificationMeta _lastReadAtMeta = const VerificationMeta(
+    'lastReadAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastReadAt = GeneratedColumn<DateTime>(
+    'last_read_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -6917,6 +6999,8 @@ class $ConversationsTable extends Conversations
     counterpartyPubkey,
     counterpartyDisplayName,
     iconUrl,
+    lastBackfilledAt,
+    lastReadAt,
     createdAt,
     updatedAt,
   ];
@@ -6979,6 +7063,24 @@ class $ConversationsTable extends Conversations
         iconUrl.isAcceptableOrUnknown(data['icon_url']!, _iconUrlMeta),
       );
     }
+    if (data.containsKey('last_backfilled_at')) {
+      context.handle(
+        _lastBackfilledAtMeta,
+        lastBackfilledAt.isAcceptableOrUnknown(
+          data['last_backfilled_at']!,
+          _lastBackfilledAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('last_read_at')) {
+      context.handle(
+        _lastReadAtMeta,
+        lastReadAt.isAcceptableOrUnknown(
+          data['last_read_at']!,
+          _lastReadAtMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -7032,6 +7134,14 @@ class $ConversationsTable extends Conversations
         DriftSqlType.string,
         data['${effectivePrefix}icon_url'],
       ),
+      lastBackfilledAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_backfilled_at'],
+      ),
+      lastReadAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_read_at'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -7057,6 +7167,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
   final String? counterpartyPubkey;
   final String? counterpartyDisplayName;
   final String? iconUrl;
+  final DateTime? lastBackfilledAt;
+  final DateTime? lastReadAt;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Conversation({
@@ -7067,6 +7179,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     this.counterpartyPubkey,
     this.counterpartyDisplayName,
     this.iconUrl,
+    this.lastBackfilledAt,
+    this.lastReadAt,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -7090,6 +7204,12 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     if (!nullToAbsent || iconUrl != null) {
       map['icon_url'] = Variable<String>(iconUrl);
     }
+    if (!nullToAbsent || lastBackfilledAt != null) {
+      map['last_backfilled_at'] = Variable<DateTime>(lastBackfilledAt);
+    }
+    if (!nullToAbsent || lastReadAt != null) {
+      map['last_read_at'] = Variable<DateTime>(lastReadAt);
+    }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -7110,6 +7230,12 @@ class Conversation extends DataClass implements Insertable<Conversation> {
       iconUrl: iconUrl == null && nullToAbsent
           ? const Value.absent()
           : Value(iconUrl),
+      lastBackfilledAt: lastBackfilledAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastBackfilledAt),
+      lastReadAt: lastReadAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastReadAt),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -7132,6 +7258,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
         json['counterpartyDisplayName'],
       ),
       iconUrl: serializer.fromJson<String?>(json['iconUrl']),
+      lastBackfilledAt: serializer.fromJson<DateTime?>(
+        json['lastBackfilledAt'],
+      ),
+      lastReadAt: serializer.fromJson<DateTime?>(json['lastReadAt']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -7149,6 +7279,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
         counterpartyDisplayName,
       ),
       'iconUrl': serializer.toJson<String?>(iconUrl),
+      'lastBackfilledAt': serializer.toJson<DateTime?>(lastBackfilledAt),
+      'lastReadAt': serializer.toJson<DateTime?>(lastReadAt),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -7162,6 +7294,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     Value<String?> counterpartyPubkey = const Value.absent(),
     Value<String?> counterpartyDisplayName = const Value.absent(),
     Value<String?> iconUrl = const Value.absent(),
+    Value<DateTime?> lastBackfilledAt = const Value.absent(),
+    Value<DateTime?> lastReadAt = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Conversation(
@@ -7176,6 +7310,10 @@ class Conversation extends DataClass implements Insertable<Conversation> {
         ? counterpartyDisplayName.value
         : this.counterpartyDisplayName,
     iconUrl: iconUrl.present ? iconUrl.value : this.iconUrl,
+    lastBackfilledAt: lastBackfilledAt.present
+        ? lastBackfilledAt.value
+        : this.lastBackfilledAt,
+    lastReadAt: lastReadAt.present ? lastReadAt.value : this.lastReadAt,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -7192,6 +7330,12 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ? data.counterpartyDisplayName.value
           : this.counterpartyDisplayName,
       iconUrl: data.iconUrl.present ? data.iconUrl.value : this.iconUrl,
+      lastBackfilledAt: data.lastBackfilledAt.present
+          ? data.lastBackfilledAt.value
+          : this.lastBackfilledAt,
+      lastReadAt: data.lastReadAt.present
+          ? data.lastReadAt.value
+          : this.lastReadAt,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -7207,6 +7351,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           ..write('counterpartyPubkey: $counterpartyPubkey, ')
           ..write('counterpartyDisplayName: $counterpartyDisplayName, ')
           ..write('iconUrl: $iconUrl, ')
+          ..write('lastBackfilledAt: $lastBackfilledAt, ')
+          ..write('lastReadAt: $lastReadAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -7222,6 +7368,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
     counterpartyPubkey,
     counterpartyDisplayName,
     iconUrl,
+    lastBackfilledAt,
+    lastReadAt,
     createdAt,
     updatedAt,
   );
@@ -7236,6 +7384,8 @@ class Conversation extends DataClass implements Insertable<Conversation> {
           other.counterpartyPubkey == this.counterpartyPubkey &&
           other.counterpartyDisplayName == this.counterpartyDisplayName &&
           other.iconUrl == this.iconUrl &&
+          other.lastBackfilledAt == this.lastBackfilledAt &&
+          other.lastReadAt == this.lastReadAt &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -7248,6 +7398,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
   final Value<String?> counterpartyPubkey;
   final Value<String?> counterpartyDisplayName;
   final Value<String?> iconUrl;
+  final Value<DateTime?> lastBackfilledAt;
+  final Value<DateTime?> lastReadAt;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const ConversationsCompanion({
@@ -7258,6 +7410,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.counterpartyPubkey = const Value.absent(),
     this.counterpartyDisplayName = const Value.absent(),
     this.iconUrl = const Value.absent(),
+    this.lastBackfilledAt = const Value.absent(),
+    this.lastReadAt = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -7269,6 +7423,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     this.counterpartyPubkey = const Value.absent(),
     this.counterpartyDisplayName = const Value.absent(),
     this.iconUrl = const Value.absent(),
+    this.lastBackfilledAt = const Value.absent(),
+    this.lastReadAt = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
   }) : publicId = Value(publicId),
@@ -7282,6 +7438,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Expression<String>? counterpartyPubkey,
     Expression<String>? counterpartyDisplayName,
     Expression<String>? iconUrl,
+    Expression<DateTime>? lastBackfilledAt,
+    Expression<DateTime>? lastReadAt,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -7294,6 +7452,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       if (counterpartyDisplayName != null)
         'counterparty_display_name': counterpartyDisplayName,
       if (iconUrl != null) 'icon_url': iconUrl,
+      if (lastBackfilledAt != null) 'last_backfilled_at': lastBackfilledAt,
+      if (lastReadAt != null) 'last_read_at': lastReadAt,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -7307,6 +7467,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     Value<String?>? counterpartyPubkey,
     Value<String?>? counterpartyDisplayName,
     Value<String?>? iconUrl,
+    Value<DateTime?>? lastBackfilledAt,
+    Value<DateTime?>? lastReadAt,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -7319,6 +7481,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
       counterpartyDisplayName:
           counterpartyDisplayName ?? this.counterpartyDisplayName,
       iconUrl: iconUrl ?? this.iconUrl,
+      lastBackfilledAt: lastBackfilledAt ?? this.lastBackfilledAt,
+      lastReadAt: lastReadAt ?? this.lastReadAt,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -7350,6 +7514,12 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
     if (iconUrl.present) {
       map['icon_url'] = Variable<String>(iconUrl.value);
     }
+    if (lastBackfilledAt.present) {
+      map['last_backfilled_at'] = Variable<DateTime>(lastBackfilledAt.value);
+    }
+    if (lastReadAt.present) {
+      map['last_read_at'] = Variable<DateTime>(lastReadAt.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -7369,6 +7539,8 @@ class ConversationsCompanion extends UpdateCompanion<Conversation> {
           ..write('counterpartyPubkey: $counterpartyPubkey, ')
           ..write('counterpartyDisplayName: $counterpartyDisplayName, ')
           ..write('iconUrl: $iconUrl, ')
+          ..write('lastBackfilledAt: $lastBackfilledAt, ')
+          ..write('lastReadAt: $lastReadAt, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -13901,6 +14073,17 @@ class $ReactionsTable extends Reactions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _reactorPubkeyMeta = const VerificationMeta(
+    'reactorPubkey',
+  );
+  @override
+  late final GeneratedColumn<String> reactorPubkey = GeneratedColumn<String>(
+    'reactor_pubkey',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -13929,6 +14112,7 @@ class $ReactionsTable extends Reactions
     messageId,
     userId,
     emoji,
+    reactorPubkey,
     createdAt,
     updatedAt,
   ];
@@ -13969,6 +14153,15 @@ class $ReactionsTable extends Reactions
         emoji.isAcceptableOrUnknown(data['emoji']!, _emojiMeta),
       );
     }
+    if (data.containsKey('reactor_pubkey')) {
+      context.handle(
+        _reactorPubkeyMeta,
+        reactorPubkey.isAcceptableOrUnknown(
+          data['reactor_pubkey']!,
+          _reactorPubkeyMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -13992,7 +14185,7 @@ class $ReactionsTable extends Reactions
   Set<GeneratedColumn> get $primaryKey => {id};
   @override
   List<Set<GeneratedColumn>> get uniqueKeys => [
-    {userId, messageId, emoji},
+    {reactorPubkey, messageId, emoji},
   ];
   @override
   Reaction map(Map<String, dynamic> data, {String? tablePrefix}) {
@@ -14013,6 +14206,10 @@ class $ReactionsTable extends Reactions
       emoji: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}emoji'],
+      ),
+      reactorPubkey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}reactor_pubkey'],
       ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
@@ -14036,6 +14233,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
   final int messageId;
   final int userId;
   final String? emoji;
+  final String? reactorPubkey;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Reaction({
@@ -14043,6 +14241,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
     required this.messageId,
     required this.userId,
     this.emoji,
+    this.reactorPubkey,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -14054,6 +14253,9 @@ class Reaction extends DataClass implements Insertable<Reaction> {
     map['user_id'] = Variable<int>(userId);
     if (!nullToAbsent || emoji != null) {
       map['emoji'] = Variable<String>(emoji);
+    }
+    if (!nullToAbsent || reactorPubkey != null) {
+      map['reactor_pubkey'] = Variable<String>(reactorPubkey);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -14068,6 +14270,9 @@ class Reaction extends DataClass implements Insertable<Reaction> {
       emoji: emoji == null && nullToAbsent
           ? const Value.absent()
           : Value(emoji),
+      reactorPubkey: reactorPubkey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(reactorPubkey),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -14083,6 +14288,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
       messageId: serializer.fromJson<int>(json['messageId']),
       userId: serializer.fromJson<int>(json['userId']),
       emoji: serializer.fromJson<String?>(json['emoji']),
+      reactorPubkey: serializer.fromJson<String?>(json['reactorPubkey']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -14095,6 +14301,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
       'messageId': serializer.toJson<int>(messageId),
       'userId': serializer.toJson<int>(userId),
       'emoji': serializer.toJson<String?>(emoji),
+      'reactorPubkey': serializer.toJson<String?>(reactorPubkey),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -14105,6 +14312,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
     int? messageId,
     int? userId,
     Value<String?> emoji = const Value.absent(),
+    Value<String?> reactorPubkey = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Reaction(
@@ -14112,6 +14320,9 @@ class Reaction extends DataClass implements Insertable<Reaction> {
     messageId: messageId ?? this.messageId,
     userId: userId ?? this.userId,
     emoji: emoji.present ? emoji.value : this.emoji,
+    reactorPubkey: reactorPubkey.present
+        ? reactorPubkey.value
+        : this.reactorPubkey,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -14121,6 +14332,9 @@ class Reaction extends DataClass implements Insertable<Reaction> {
       messageId: data.messageId.present ? data.messageId.value : this.messageId,
       userId: data.userId.present ? data.userId.value : this.userId,
       emoji: data.emoji.present ? data.emoji.value : this.emoji,
+      reactorPubkey: data.reactorPubkey.present
+          ? data.reactorPubkey.value
+          : this.reactorPubkey,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -14133,6 +14347,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('emoji: $emoji, ')
+          ..write('reactorPubkey: $reactorPubkey, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -14140,8 +14355,15 @@ class Reaction extends DataClass implements Insertable<Reaction> {
   }
 
   @override
-  int get hashCode =>
-      Object.hash(id, messageId, userId, emoji, createdAt, updatedAt);
+  int get hashCode => Object.hash(
+    id,
+    messageId,
+    userId,
+    emoji,
+    reactorPubkey,
+    createdAt,
+    updatedAt,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -14150,6 +14372,7 @@ class Reaction extends DataClass implements Insertable<Reaction> {
           other.messageId == this.messageId &&
           other.userId == this.userId &&
           other.emoji == this.emoji &&
+          other.reactorPubkey == this.reactorPubkey &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -14159,6 +14382,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
   final Value<int> messageId;
   final Value<int> userId;
   final Value<String?> emoji;
+  final Value<String?> reactorPubkey;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const ReactionsCompanion({
@@ -14166,6 +14390,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
     this.messageId = const Value.absent(),
     this.userId = const Value.absent(),
     this.emoji = const Value.absent(),
+    this.reactorPubkey = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -14174,6 +14399,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
     required int messageId,
     required int userId,
     this.emoji = const Value.absent(),
+    this.reactorPubkey = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
   }) : messageId = Value(messageId),
@@ -14185,6 +14411,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
     Expression<int>? messageId,
     Expression<int>? userId,
     Expression<String>? emoji,
+    Expression<String>? reactorPubkey,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -14193,6 +14420,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
       if (messageId != null) 'message_id': messageId,
       if (userId != null) 'user_id': userId,
       if (emoji != null) 'emoji': emoji,
+      if (reactorPubkey != null) 'reactor_pubkey': reactorPubkey,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -14203,6 +14431,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
     Value<int>? messageId,
     Value<int>? userId,
     Value<String?>? emoji,
+    Value<String?>? reactorPubkey,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -14211,6 +14440,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
       messageId: messageId ?? this.messageId,
       userId: userId ?? this.userId,
       emoji: emoji ?? this.emoji,
+      reactorPubkey: reactorPubkey ?? this.reactorPubkey,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -14231,6 +14461,9 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
     if (emoji.present) {
       map['emoji'] = Variable<String>(emoji.value);
     }
+    if (reactorPubkey.present) {
+      map['reactor_pubkey'] = Variable<String>(reactorPubkey.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -14247,6 +14480,7 @@ class ReactionsCompanion extends UpdateCompanion<Reaction> {
           ..write('messageId: $messageId, ')
           ..write('userId: $userId, ')
           ..write('emoji: $emoji, ')
+          ..write('reactorPubkey: $reactorPubkey, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -15275,6 +15509,17 @@ class $ServerEmojisTable extends ServerEmojis
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _creatorPubkeyMeta = const VerificationMeta(
+    'creatorPubkey',
+  );
+  @override
+  late final GeneratedColumn<String> creatorPubkey = GeneratedColumn<String>(
+    'creator_pubkey',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
   late final GeneratedColumn<String> url = GeneratedColumn<String>(
@@ -15313,6 +15558,7 @@ class $ServerEmojisTable extends ServerEmojis
     serverId,
     name,
     creatorId,
+    creatorPubkey,
     url,
     createdAt,
     updatedAt,
@@ -15363,6 +15609,15 @@ class $ServerEmojisTable extends ServerEmojis
       );
     } else if (isInserting) {
       context.missing(_creatorIdMeta);
+    }
+    if (data.containsKey('creator_pubkey')) {
+      context.handle(
+        _creatorPubkeyMeta,
+        creatorPubkey.isAcceptableOrUnknown(
+          data['creator_pubkey']!,
+          _creatorPubkeyMeta,
+        ),
+      );
     }
     if (data.containsKey('url')) {
       context.handle(
@@ -15419,6 +15674,10 @@ class $ServerEmojisTable extends ServerEmojis
         DriftSqlType.int,
         data['${effectivePrefix}creator_id'],
       )!,
+      creatorPubkey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}creator_pubkey'],
+      ),
       url: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}url'],
@@ -15446,6 +15705,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
   final int serverId;
   final String name;
   final int creatorId;
+  final String? creatorPubkey;
   final String? url;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -15455,6 +15715,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
     required this.serverId,
     required this.name,
     required this.creatorId,
+    this.creatorPubkey,
     this.url,
     required this.createdAt,
     required this.updatedAt,
@@ -15467,6 +15728,9 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
     map['server_id'] = Variable<int>(serverId);
     map['name'] = Variable<String>(name);
     map['creator_id'] = Variable<int>(creatorId);
+    if (!nullToAbsent || creatorPubkey != null) {
+      map['creator_pubkey'] = Variable<String>(creatorPubkey);
+    }
     if (!nullToAbsent || url != null) {
       map['url'] = Variable<String>(url);
     }
@@ -15482,6 +15746,9 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
       serverId: Value(serverId),
       name: Value(name),
       creatorId: Value(creatorId),
+      creatorPubkey: creatorPubkey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(creatorPubkey),
       url: url == null && nullToAbsent ? const Value.absent() : Value(url),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -15499,6 +15766,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
       serverId: serializer.fromJson<int>(json['serverId']),
       name: serializer.fromJson<String>(json['name']),
       creatorId: serializer.fromJson<int>(json['creatorId']),
+      creatorPubkey: serializer.fromJson<String?>(json['creatorPubkey']),
       url: serializer.fromJson<String?>(json['url']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -15513,6 +15781,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
       'serverId': serializer.toJson<int>(serverId),
       'name': serializer.toJson<String>(name),
       'creatorId': serializer.toJson<int>(creatorId),
+      'creatorPubkey': serializer.toJson<String?>(creatorPubkey),
       'url': serializer.toJson<String?>(url),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -15525,6 +15794,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
     int? serverId,
     String? name,
     int? creatorId,
+    Value<String?> creatorPubkey = const Value.absent(),
     Value<String?> url = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -15534,6 +15804,9 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
     serverId: serverId ?? this.serverId,
     name: name ?? this.name,
     creatorId: creatorId ?? this.creatorId,
+    creatorPubkey: creatorPubkey.present
+        ? creatorPubkey.value
+        : this.creatorPubkey,
     url: url.present ? url.value : this.url,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -15545,6 +15818,9 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
       serverId: data.serverId.present ? data.serverId.value : this.serverId,
       name: data.name.present ? data.name.value : this.name,
       creatorId: data.creatorId.present ? data.creatorId.value : this.creatorId,
+      creatorPubkey: data.creatorPubkey.present
+          ? data.creatorPubkey.value
+          : this.creatorPubkey,
       url: data.url.present ? data.url.value : this.url,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -15559,6 +15835,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
           ..write('serverId: $serverId, ')
           ..write('name: $name, ')
           ..write('creatorId: $creatorId, ')
+          ..write('creatorPubkey: $creatorPubkey, ')
           ..write('url: $url, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -15573,6 +15850,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
     serverId,
     name,
     creatorId,
+    creatorPubkey,
     url,
     createdAt,
     updatedAt,
@@ -15586,6 +15864,7 @@ class ServerEmoji extends DataClass implements Insertable<ServerEmoji> {
           other.serverId == this.serverId &&
           other.name == this.name &&
           other.creatorId == this.creatorId &&
+          other.creatorPubkey == this.creatorPubkey &&
           other.url == this.url &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -15597,6 +15876,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
   final Value<int> serverId;
   final Value<String> name;
   final Value<int> creatorId;
+  final Value<String?> creatorPubkey;
   final Value<String?> url;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -15606,6 +15886,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
     this.serverId = const Value.absent(),
     this.name = const Value.absent(),
     this.creatorId = const Value.absent(),
+    this.creatorPubkey = const Value.absent(),
     this.url = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -15616,6 +15897,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
     required int serverId,
     required String name,
     required int creatorId,
+    this.creatorPubkey = const Value.absent(),
     this.url = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -15631,6 +15913,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
     Expression<int>? serverId,
     Expression<String>? name,
     Expression<int>? creatorId,
+    Expression<String>? creatorPubkey,
     Expression<String>? url,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -15641,6 +15924,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
       if (serverId != null) 'server_id': serverId,
       if (name != null) 'name': name,
       if (creatorId != null) 'creator_id': creatorId,
+      if (creatorPubkey != null) 'creator_pubkey': creatorPubkey,
       if (url != null) 'url': url,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -15653,6 +15937,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
     Value<int>? serverId,
     Value<String>? name,
     Value<int>? creatorId,
+    Value<String?>? creatorPubkey,
     Value<String?>? url,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -15663,6 +15948,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
       serverId: serverId ?? this.serverId,
       name: name ?? this.name,
       creatorId: creatorId ?? this.creatorId,
+      creatorPubkey: creatorPubkey ?? this.creatorPubkey,
       url: url ?? this.url,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -15687,6 +15973,9 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
     if (creatorId.present) {
       map['creator_id'] = Variable<int>(creatorId.value);
     }
+    if (creatorPubkey.present) {
+      map['creator_pubkey'] = Variable<String>(creatorPubkey.value);
+    }
     if (url.present) {
       map['url'] = Variable<String>(url.value);
     }
@@ -15707,6 +15996,7 @@ class ServerEmojisCompanion extends UpdateCompanion<ServerEmoji> {
           ..write('serverId: $serverId, ')
           ..write('name: $name, ')
           ..write('creatorId: $creatorId, ')
+          ..write('creatorPubkey: $creatorPubkey, ')
           ..write('url: $url, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -15790,6 +16080,17 @@ class $ServerStickersTable extends ServerStickers
     type: DriftSqlType.int,
     requiredDuringInsert: true,
   );
+  static const VerificationMeta _creatorPubkeyMeta = const VerificationMeta(
+    'creatorPubkey',
+  );
+  @override
+  late final GeneratedColumn<String> creatorPubkey = GeneratedColumn<String>(
+    'creator_pubkey',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _urlMeta = const VerificationMeta('url');
   @override
   late final GeneratedColumn<String> url = GeneratedColumn<String>(
@@ -15829,6 +16130,7 @@ class $ServerStickersTable extends ServerStickers
     name,
     description,
     creatorId,
+    creatorPubkey,
     url,
     createdAt,
     updatedAt,
@@ -15889,6 +16191,15 @@ class $ServerStickersTable extends ServerStickers
     } else if (isInserting) {
       context.missing(_creatorIdMeta);
     }
+    if (data.containsKey('creator_pubkey')) {
+      context.handle(
+        _creatorPubkeyMeta,
+        creatorPubkey.isAcceptableOrUnknown(
+          data['creator_pubkey']!,
+          _creatorPubkeyMeta,
+        ),
+      );
+    }
     if (data.containsKey('url')) {
       context.handle(
         _urlMeta,
@@ -15948,6 +16259,10 @@ class $ServerStickersTable extends ServerStickers
         DriftSqlType.int,
         data['${effectivePrefix}creator_id'],
       )!,
+      creatorPubkey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}creator_pubkey'],
+      ),
       url: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}url'],
@@ -15976,6 +16291,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
   final String name;
   final String? description;
   final int creatorId;
+  final String? creatorPubkey;
   final String? url;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -15986,6 +16302,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
     required this.name,
     this.description,
     required this.creatorId,
+    this.creatorPubkey,
     this.url,
     required this.createdAt,
     required this.updatedAt,
@@ -16001,6 +16318,9 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
       map['description'] = Variable<String>(description);
     }
     map['creator_id'] = Variable<int>(creatorId);
+    if (!nullToAbsent || creatorPubkey != null) {
+      map['creator_pubkey'] = Variable<String>(creatorPubkey);
+    }
     if (!nullToAbsent || url != null) {
       map['url'] = Variable<String>(url);
     }
@@ -16019,6 +16339,9 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
           ? const Value.absent()
           : Value(description),
       creatorId: Value(creatorId),
+      creatorPubkey: creatorPubkey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(creatorPubkey),
       url: url == null && nullToAbsent ? const Value.absent() : Value(url),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -16037,6 +16360,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
       name: serializer.fromJson<String>(json['name']),
       description: serializer.fromJson<String?>(json['description']),
       creatorId: serializer.fromJson<int>(json['creatorId']),
+      creatorPubkey: serializer.fromJson<String?>(json['creatorPubkey']),
       url: serializer.fromJson<String?>(json['url']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -16052,6 +16376,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
       'name': serializer.toJson<String>(name),
       'description': serializer.toJson<String?>(description),
       'creatorId': serializer.toJson<int>(creatorId),
+      'creatorPubkey': serializer.toJson<String?>(creatorPubkey),
       'url': serializer.toJson<String?>(url),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -16065,6 +16390,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
     String? name,
     Value<String?> description = const Value.absent(),
     int? creatorId,
+    Value<String?> creatorPubkey = const Value.absent(),
     Value<String?> url = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -16075,6 +16401,9 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
     name: name ?? this.name,
     description: description.present ? description.value : this.description,
     creatorId: creatorId ?? this.creatorId,
+    creatorPubkey: creatorPubkey.present
+        ? creatorPubkey.value
+        : this.creatorPubkey,
     url: url.present ? url.value : this.url,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -16089,6 +16418,9 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
           ? data.description.value
           : this.description,
       creatorId: data.creatorId.present ? data.creatorId.value : this.creatorId,
+      creatorPubkey: data.creatorPubkey.present
+          ? data.creatorPubkey.value
+          : this.creatorPubkey,
       url: data.url.present ? data.url.value : this.url,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
@@ -16104,6 +16436,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
           ..write('name: $name, ')
           ..write('description: $description, ')
           ..write('creatorId: $creatorId, ')
+          ..write('creatorPubkey: $creatorPubkey, ')
           ..write('url: $url, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -16119,6 +16452,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
     name,
     description,
     creatorId,
+    creatorPubkey,
     url,
     createdAt,
     updatedAt,
@@ -16133,6 +16467,7 @@ class ServerSticker extends DataClass implements Insertable<ServerSticker> {
           other.name == this.name &&
           other.description == this.description &&
           other.creatorId == this.creatorId &&
+          other.creatorPubkey == this.creatorPubkey &&
           other.url == this.url &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -16145,6 +16480,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
   final Value<String> name;
   final Value<String?> description;
   final Value<int> creatorId;
+  final Value<String?> creatorPubkey;
   final Value<String?> url;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -16155,6 +16491,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
     this.name = const Value.absent(),
     this.description = const Value.absent(),
     this.creatorId = const Value.absent(),
+    this.creatorPubkey = const Value.absent(),
     this.url = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -16166,6 +16503,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
     required String name,
     this.description = const Value.absent(),
     required int creatorId,
+    this.creatorPubkey = const Value.absent(),
     this.url = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -16182,6 +16520,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
     Expression<String>? name,
     Expression<String>? description,
     Expression<int>? creatorId,
+    Expression<String>? creatorPubkey,
     Expression<String>? url,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -16193,6 +16532,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
       if (name != null) 'name': name,
       if (description != null) 'description': description,
       if (creatorId != null) 'creator_id': creatorId,
+      if (creatorPubkey != null) 'creator_pubkey': creatorPubkey,
       if (url != null) 'url': url,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -16206,6 +16546,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
     Value<String>? name,
     Value<String?>? description,
     Value<int>? creatorId,
+    Value<String?>? creatorPubkey,
     Value<String?>? url,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -16217,6 +16558,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
       name: name ?? this.name,
       description: description ?? this.description,
       creatorId: creatorId ?? this.creatorId,
+      creatorPubkey: creatorPubkey ?? this.creatorPubkey,
       url: url ?? this.url,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -16244,6 +16586,9 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
     if (creatorId.present) {
       map['creator_id'] = Variable<int>(creatorId.value);
     }
+    if (creatorPubkey.present) {
+      map['creator_pubkey'] = Variable<String>(creatorPubkey.value);
+    }
     if (url.present) {
       map['url'] = Variable<String>(url.value);
     }
@@ -16265,6 +16610,7 @@ class ServerStickersCompanion extends UpdateCompanion<ServerSticker> {
           ..write('name: $name, ')
           ..write('description: $description, ')
           ..write('creatorId: $creatorId, ')
+          ..write('creatorPubkey: $creatorPubkey, ')
           ..write('url: $url, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -21358,7 +21704,168 @@ class $AppSettingsTable extends AppSettings
         defaultConstraints: GeneratedColumn.constraintIsAlways(
           'CHECK ("safety_image_hash_enabled" IN (0, 1))',
         ),
+        defaultValue: const Constant(true),
+      );
+  static const VerificationMeta _safetyProtectionLevelMeta =
+      const VerificationMeta('safetyProtectionLevel');
+  @override
+  late final GeneratedColumn<String> safetyProtectionLevel =
+      GeneratedColumn<String>(
+        'safety_protection_level',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultValue: const Constant('standard'),
+      );
+  static const VerificationMeta _safetySharedHashesEnabledMeta =
+      const VerificationMeta('safetySharedHashesEnabled');
+  @override
+  late final GeneratedColumn<bool> safetySharedHashesEnabled =
+      GeneratedColumn<bool>(
+        'safety_shared_hashes_enabled',
+        aliasedName,
+        false,
+        type: DriftSqlType.bool,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("safety_shared_hashes_enabled" IN (0, 1))',
+        ),
+        defaultValue: const Constant(true),
+      );
+  static const VerificationMeta _safetyPublishHashesMeta =
+      const VerificationMeta('safetyPublishHashes');
+  @override
+  late final GeneratedColumn<bool> safetyPublishHashes = GeneratedColumn<bool>(
+    'safety_publish_hashes',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("safety_publish_hashes" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _safetyBlockPhoneNumbersMeta =
+      const VerificationMeta('safetyBlockPhoneNumbers');
+  @override
+  late final GeneratedColumn<bool> safetyBlockPhoneNumbers =
+      GeneratedColumn<bool>(
+        'safety_block_phone_numbers',
+        aliasedName,
+        false,
+        type: DriftSqlType.bool,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("safety_block_phone_numbers" IN (0, 1))',
+        ),
         defaultValue: const Constant(false),
+      );
+  static const VerificationMeta _safetyBlockAllCapsMeta =
+      const VerificationMeta('safetyBlockAllCaps');
+  @override
+  late final GeneratedColumn<bool> safetyBlockAllCaps = GeneratedColumn<bool>(
+    'safety_block_all_caps',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("safety_block_all_caps" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _safetyBlockSpamCharsMeta =
+      const VerificationMeta('safetyBlockSpamChars');
+  @override
+  late final GeneratedColumn<bool> safetyBlockSpamChars = GeneratedColumn<bool>(
+    'safety_block_spam_chars',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("safety_block_spam_chars" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _safetyReportThresholdMeta =
+      const VerificationMeta('safetyReportThreshold');
+  @override
+  late final GeneratedColumn<int> safetyReportThreshold = GeneratedColumn<int>(
+    'safety_report_threshold',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(3),
+  );
+  static const VerificationMeta _safetyReputationEnabledMeta =
+      const VerificationMeta('safetyReputationEnabled');
+  @override
+  late final GeneratedColumn<bool> safetyReputationEnabled =
+      GeneratedColumn<bool>(
+        'safety_reputation_enabled',
+        aliasedName,
+        false,
+        type: DriftSqlType.bool,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("safety_reputation_enabled" IN (0, 1))',
+        ),
+        defaultValue: const Constant(true),
+      );
+  static const VerificationMeta _safetyReputationSensitivityMeta =
+      const VerificationMeta('safetyReputationSensitivity');
+  @override
+  late final GeneratedColumn<String> safetyReputationSensitivity =
+      GeneratedColumn<String>(
+        'safety_reputation_sensitivity',
+        aliasedName,
+        false,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+        defaultValue: const Constant('moderate'),
+      );
+  static const VerificationMeta _safetyReputationThresholdMeta =
+      const VerificationMeta('safetyReputationThreshold');
+  @override
+  late final GeneratedColumn<int> safetyReputationThreshold =
+      GeneratedColumn<int>(
+        'safety_reputation_threshold',
+        aliasedName,
+        false,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(40),
+      );
+  static const VerificationMeta _safetySharedHashMinReportersMeta =
+      const VerificationMeta('safetySharedHashMinReporters');
+  @override
+  late final GeneratedColumn<int> safetySharedHashMinReporters =
+      GeneratedColumn<int>(
+        'safety_shared_hash_min_reporters',
+        aliasedName,
+        false,
+        type: DriftSqlType.int,
+        requiredDuringInsert: false,
+        defaultValue: const Constant(3),
+      );
+  static const VerificationMeta _safetySharedHashTrustFriendsMeta =
+      const VerificationMeta('safetySharedHashTrustFriends');
+  @override
+  late final GeneratedColumn<bool> safetySharedHashTrustFriends =
+      GeneratedColumn<bool>(
+        'safety_shared_hash_trust_friends',
+        aliasedName,
+        false,
+        type: DriftSqlType.bool,
+        requiredDuringInsert: false,
+        defaultConstraints: GeneratedColumn.constraintIsAlways(
+          'CHECK ("safety_shared_hash_trust_friends" IN (0, 1))',
+        ),
+        defaultValue: const Constant(true),
       );
   static const VerificationMeta _maxUploadSizeMbMeta = const VerificationMeta(
     'maxUploadSizeMb',
@@ -21413,6 +21920,18 @@ class $AppSettingsTable extends AppSettings
     safetyHideUnknownSenders,
     safetyKeywordFilter,
     safetyImageHashEnabled,
+    safetyProtectionLevel,
+    safetySharedHashesEnabled,
+    safetyPublishHashes,
+    safetyBlockPhoneNumbers,
+    safetyBlockAllCaps,
+    safetyBlockSpamChars,
+    safetyReportThreshold,
+    safetyReputationEnabled,
+    safetyReputationSensitivity,
+    safetyReputationThreshold,
+    safetySharedHashMinReporters,
+    safetySharedHashTrustFriends,
     maxUploadSizeMb,
     createdAt,
     updatedAt,
@@ -21576,6 +22095,114 @@ class $AppSettingsTable extends AppSettings
         ),
       );
     }
+    if (data.containsKey('safety_protection_level')) {
+      context.handle(
+        _safetyProtectionLevelMeta,
+        safetyProtectionLevel.isAcceptableOrUnknown(
+          data['safety_protection_level']!,
+          _safetyProtectionLevelMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_shared_hashes_enabled')) {
+      context.handle(
+        _safetySharedHashesEnabledMeta,
+        safetySharedHashesEnabled.isAcceptableOrUnknown(
+          data['safety_shared_hashes_enabled']!,
+          _safetySharedHashesEnabledMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_publish_hashes')) {
+      context.handle(
+        _safetyPublishHashesMeta,
+        safetyPublishHashes.isAcceptableOrUnknown(
+          data['safety_publish_hashes']!,
+          _safetyPublishHashesMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_block_phone_numbers')) {
+      context.handle(
+        _safetyBlockPhoneNumbersMeta,
+        safetyBlockPhoneNumbers.isAcceptableOrUnknown(
+          data['safety_block_phone_numbers']!,
+          _safetyBlockPhoneNumbersMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_block_all_caps')) {
+      context.handle(
+        _safetyBlockAllCapsMeta,
+        safetyBlockAllCaps.isAcceptableOrUnknown(
+          data['safety_block_all_caps']!,
+          _safetyBlockAllCapsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_block_spam_chars')) {
+      context.handle(
+        _safetyBlockSpamCharsMeta,
+        safetyBlockSpamChars.isAcceptableOrUnknown(
+          data['safety_block_spam_chars']!,
+          _safetyBlockSpamCharsMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_report_threshold')) {
+      context.handle(
+        _safetyReportThresholdMeta,
+        safetyReportThreshold.isAcceptableOrUnknown(
+          data['safety_report_threshold']!,
+          _safetyReportThresholdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_reputation_enabled')) {
+      context.handle(
+        _safetyReputationEnabledMeta,
+        safetyReputationEnabled.isAcceptableOrUnknown(
+          data['safety_reputation_enabled']!,
+          _safetyReputationEnabledMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_reputation_sensitivity')) {
+      context.handle(
+        _safetyReputationSensitivityMeta,
+        safetyReputationSensitivity.isAcceptableOrUnknown(
+          data['safety_reputation_sensitivity']!,
+          _safetyReputationSensitivityMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_reputation_threshold')) {
+      context.handle(
+        _safetyReputationThresholdMeta,
+        safetyReputationThreshold.isAcceptableOrUnknown(
+          data['safety_reputation_threshold']!,
+          _safetyReputationThresholdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_shared_hash_min_reporters')) {
+      context.handle(
+        _safetySharedHashMinReportersMeta,
+        safetySharedHashMinReporters.isAcceptableOrUnknown(
+          data['safety_shared_hash_min_reporters']!,
+          _safetySharedHashMinReportersMeta,
+        ),
+      );
+    }
+    if (data.containsKey('safety_shared_hash_trust_friends')) {
+      context.handle(
+        _safetySharedHashTrustFriendsMeta,
+        safetySharedHashTrustFriends.isAcceptableOrUnknown(
+          data['safety_shared_hash_trust_friends']!,
+          _safetySharedHashTrustFriendsMeta,
+        ),
+      );
+    }
     if (data.containsKey('max_upload_size_mb')) {
       context.handle(
         _maxUploadSizeMbMeta,
@@ -21678,6 +22305,54 @@ class $AppSettingsTable extends AppSettings
         DriftSqlType.bool,
         data['${effectivePrefix}safety_image_hash_enabled'],
       )!,
+      safetyProtectionLevel: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}safety_protection_level'],
+      )!,
+      safetySharedHashesEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_shared_hashes_enabled'],
+      )!,
+      safetyPublishHashes: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_publish_hashes'],
+      )!,
+      safetyBlockPhoneNumbers: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_block_phone_numbers'],
+      )!,
+      safetyBlockAllCaps: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_block_all_caps'],
+      )!,
+      safetyBlockSpamChars: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_block_spam_chars'],
+      )!,
+      safetyReportThreshold: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}safety_report_threshold'],
+      )!,
+      safetyReputationEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_reputation_enabled'],
+      )!,
+      safetyReputationSensitivity: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}safety_reputation_sensitivity'],
+      )!,
+      safetyReputationThreshold: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}safety_reputation_threshold'],
+      )!,
+      safetySharedHashMinReporters: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}safety_shared_hash_min_reporters'],
+      )!,
+      safetySharedHashTrustFriends: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}safety_shared_hash_trust_friends'],
+      )!,
       maxUploadSizeMb: attachedDatabase.typeMapping.read(
         DriftSqlType.int,
         data['${effectivePrefix}max_upload_size_mb'],
@@ -21717,6 +22392,18 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
   final bool safetyHideUnknownSenders;
   final String safetyKeywordFilter;
   final bool safetyImageHashEnabled;
+  final String safetyProtectionLevel;
+  final bool safetySharedHashesEnabled;
+  final bool safetyPublishHashes;
+  final bool safetyBlockPhoneNumbers;
+  final bool safetyBlockAllCaps;
+  final bool safetyBlockSpamChars;
+  final int safetyReportThreshold;
+  final bool safetyReputationEnabled;
+  final String safetyReputationSensitivity;
+  final int safetyReputationThreshold;
+  final int safetySharedHashMinReporters;
+  final bool safetySharedHashTrustFriends;
   final int maxUploadSizeMb;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -21738,6 +22425,18 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
     required this.safetyHideUnknownSenders,
     required this.safetyKeywordFilter,
     required this.safetyImageHashEnabled,
+    required this.safetyProtectionLevel,
+    required this.safetySharedHashesEnabled,
+    required this.safetyPublishHashes,
+    required this.safetyBlockPhoneNumbers,
+    required this.safetyBlockAllCaps,
+    required this.safetyBlockSpamChars,
+    required this.safetyReportThreshold,
+    required this.safetyReputationEnabled,
+    required this.safetyReputationSensitivity,
+    required this.safetyReputationThreshold,
+    required this.safetySharedHashMinReporters,
+    required this.safetySharedHashTrustFriends,
     required this.maxUploadSizeMb,
     required this.createdAt,
     required this.updatedAt,
@@ -21766,6 +22465,28 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
     );
     map['safety_keyword_filter'] = Variable<String>(safetyKeywordFilter);
     map['safety_image_hash_enabled'] = Variable<bool>(safetyImageHashEnabled);
+    map['safety_protection_level'] = Variable<String>(safetyProtectionLevel);
+    map['safety_shared_hashes_enabled'] = Variable<bool>(
+      safetySharedHashesEnabled,
+    );
+    map['safety_publish_hashes'] = Variable<bool>(safetyPublishHashes);
+    map['safety_block_phone_numbers'] = Variable<bool>(safetyBlockPhoneNumbers);
+    map['safety_block_all_caps'] = Variable<bool>(safetyBlockAllCaps);
+    map['safety_block_spam_chars'] = Variable<bool>(safetyBlockSpamChars);
+    map['safety_report_threshold'] = Variable<int>(safetyReportThreshold);
+    map['safety_reputation_enabled'] = Variable<bool>(safetyReputationEnabled);
+    map['safety_reputation_sensitivity'] = Variable<String>(
+      safetyReputationSensitivity,
+    );
+    map['safety_reputation_threshold'] = Variable<int>(
+      safetyReputationThreshold,
+    );
+    map['safety_shared_hash_min_reporters'] = Variable<int>(
+      safetySharedHashMinReporters,
+    );
+    map['safety_shared_hash_trust_friends'] = Variable<bool>(
+      safetySharedHashTrustFriends,
+    );
     map['max_upload_size_mb'] = Variable<int>(maxUploadSizeMb);
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -21793,6 +22514,18 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
       safetyHideUnknownSenders: Value(safetyHideUnknownSenders),
       safetyKeywordFilter: Value(safetyKeywordFilter),
       safetyImageHashEnabled: Value(safetyImageHashEnabled),
+      safetyProtectionLevel: Value(safetyProtectionLevel),
+      safetySharedHashesEnabled: Value(safetySharedHashesEnabled),
+      safetyPublishHashes: Value(safetyPublishHashes),
+      safetyBlockPhoneNumbers: Value(safetyBlockPhoneNumbers),
+      safetyBlockAllCaps: Value(safetyBlockAllCaps),
+      safetyBlockSpamChars: Value(safetyBlockSpamChars),
+      safetyReportThreshold: Value(safetyReportThreshold),
+      safetyReputationEnabled: Value(safetyReputationEnabled),
+      safetyReputationSensitivity: Value(safetyReputationSensitivity),
+      safetyReputationThreshold: Value(safetyReputationThreshold),
+      safetySharedHashMinReporters: Value(safetySharedHashMinReporters),
+      safetySharedHashTrustFriends: Value(safetySharedHashTrustFriends),
       maxUploadSizeMb: Value(maxUploadSizeMb),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
@@ -21836,6 +22569,40 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
       safetyImageHashEnabled: serializer.fromJson<bool>(
         json['safetyImageHashEnabled'],
       ),
+      safetyProtectionLevel: serializer.fromJson<String>(
+        json['safetyProtectionLevel'],
+      ),
+      safetySharedHashesEnabled: serializer.fromJson<bool>(
+        json['safetySharedHashesEnabled'],
+      ),
+      safetyPublishHashes: serializer.fromJson<bool>(
+        json['safetyPublishHashes'],
+      ),
+      safetyBlockPhoneNumbers: serializer.fromJson<bool>(
+        json['safetyBlockPhoneNumbers'],
+      ),
+      safetyBlockAllCaps: serializer.fromJson<bool>(json['safetyBlockAllCaps']),
+      safetyBlockSpamChars: serializer.fromJson<bool>(
+        json['safetyBlockSpamChars'],
+      ),
+      safetyReportThreshold: serializer.fromJson<int>(
+        json['safetyReportThreshold'],
+      ),
+      safetyReputationEnabled: serializer.fromJson<bool>(
+        json['safetyReputationEnabled'],
+      ),
+      safetyReputationSensitivity: serializer.fromJson<String>(
+        json['safetyReputationSensitivity'],
+      ),
+      safetyReputationThreshold: serializer.fromJson<int>(
+        json['safetyReputationThreshold'],
+      ),
+      safetySharedHashMinReporters: serializer.fromJson<int>(
+        json['safetySharedHashMinReporters'],
+      ),
+      safetySharedHashTrustFriends: serializer.fromJson<bool>(
+        json['safetySharedHashTrustFriends'],
+      ),
       maxUploadSizeMb: serializer.fromJson<int>(json['maxUploadSizeMb']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
@@ -21866,6 +22633,32 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
       ),
       'safetyKeywordFilter': serializer.toJson<String>(safetyKeywordFilter),
       'safetyImageHashEnabled': serializer.toJson<bool>(safetyImageHashEnabled),
+      'safetyProtectionLevel': serializer.toJson<String>(safetyProtectionLevel),
+      'safetySharedHashesEnabled': serializer.toJson<bool>(
+        safetySharedHashesEnabled,
+      ),
+      'safetyPublishHashes': serializer.toJson<bool>(safetyPublishHashes),
+      'safetyBlockPhoneNumbers': serializer.toJson<bool>(
+        safetyBlockPhoneNumbers,
+      ),
+      'safetyBlockAllCaps': serializer.toJson<bool>(safetyBlockAllCaps),
+      'safetyBlockSpamChars': serializer.toJson<bool>(safetyBlockSpamChars),
+      'safetyReportThreshold': serializer.toJson<int>(safetyReportThreshold),
+      'safetyReputationEnabled': serializer.toJson<bool>(
+        safetyReputationEnabled,
+      ),
+      'safetyReputationSensitivity': serializer.toJson<String>(
+        safetyReputationSensitivity,
+      ),
+      'safetyReputationThreshold': serializer.toJson<int>(
+        safetyReputationThreshold,
+      ),
+      'safetySharedHashMinReporters': serializer.toJson<int>(
+        safetySharedHashMinReporters,
+      ),
+      'safetySharedHashTrustFriends': serializer.toJson<bool>(
+        safetySharedHashTrustFriends,
+      ),
       'maxUploadSizeMb': serializer.toJson<int>(maxUploadSizeMb),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
@@ -21890,6 +22683,18 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
     bool? safetyHideUnknownSenders,
     String? safetyKeywordFilter,
     bool? safetyImageHashEnabled,
+    String? safetyProtectionLevel,
+    bool? safetySharedHashesEnabled,
+    bool? safetyPublishHashes,
+    bool? safetyBlockPhoneNumbers,
+    bool? safetyBlockAllCaps,
+    bool? safetyBlockSpamChars,
+    int? safetyReportThreshold,
+    bool? safetyReputationEnabled,
+    String? safetyReputationSensitivity,
+    int? safetyReputationThreshold,
+    int? safetySharedHashMinReporters,
+    bool? safetySharedHashTrustFriends,
     int? maxUploadSizeMb,
     DateTime? createdAt,
     DateTime? updatedAt,
@@ -21916,6 +22721,25 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
     safetyKeywordFilter: safetyKeywordFilter ?? this.safetyKeywordFilter,
     safetyImageHashEnabled:
         safetyImageHashEnabled ?? this.safetyImageHashEnabled,
+    safetyProtectionLevel: safetyProtectionLevel ?? this.safetyProtectionLevel,
+    safetySharedHashesEnabled:
+        safetySharedHashesEnabled ?? this.safetySharedHashesEnabled,
+    safetyPublishHashes: safetyPublishHashes ?? this.safetyPublishHashes,
+    safetyBlockPhoneNumbers:
+        safetyBlockPhoneNumbers ?? this.safetyBlockPhoneNumbers,
+    safetyBlockAllCaps: safetyBlockAllCaps ?? this.safetyBlockAllCaps,
+    safetyBlockSpamChars: safetyBlockSpamChars ?? this.safetyBlockSpamChars,
+    safetyReportThreshold: safetyReportThreshold ?? this.safetyReportThreshold,
+    safetyReputationEnabled:
+        safetyReputationEnabled ?? this.safetyReputationEnabled,
+    safetyReputationSensitivity:
+        safetyReputationSensitivity ?? this.safetyReputationSensitivity,
+    safetyReputationThreshold:
+        safetyReputationThreshold ?? this.safetyReputationThreshold,
+    safetySharedHashMinReporters:
+        safetySharedHashMinReporters ?? this.safetySharedHashMinReporters,
+    safetySharedHashTrustFriends:
+        safetySharedHashTrustFriends ?? this.safetySharedHashTrustFriends,
     maxUploadSizeMb: maxUploadSizeMb ?? this.maxUploadSizeMb,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
@@ -21971,6 +22795,42 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
       safetyImageHashEnabled: data.safetyImageHashEnabled.present
           ? data.safetyImageHashEnabled.value
           : this.safetyImageHashEnabled,
+      safetyProtectionLevel: data.safetyProtectionLevel.present
+          ? data.safetyProtectionLevel.value
+          : this.safetyProtectionLevel,
+      safetySharedHashesEnabled: data.safetySharedHashesEnabled.present
+          ? data.safetySharedHashesEnabled.value
+          : this.safetySharedHashesEnabled,
+      safetyPublishHashes: data.safetyPublishHashes.present
+          ? data.safetyPublishHashes.value
+          : this.safetyPublishHashes,
+      safetyBlockPhoneNumbers: data.safetyBlockPhoneNumbers.present
+          ? data.safetyBlockPhoneNumbers.value
+          : this.safetyBlockPhoneNumbers,
+      safetyBlockAllCaps: data.safetyBlockAllCaps.present
+          ? data.safetyBlockAllCaps.value
+          : this.safetyBlockAllCaps,
+      safetyBlockSpamChars: data.safetyBlockSpamChars.present
+          ? data.safetyBlockSpamChars.value
+          : this.safetyBlockSpamChars,
+      safetyReportThreshold: data.safetyReportThreshold.present
+          ? data.safetyReportThreshold.value
+          : this.safetyReportThreshold,
+      safetyReputationEnabled: data.safetyReputationEnabled.present
+          ? data.safetyReputationEnabled.value
+          : this.safetyReputationEnabled,
+      safetyReputationSensitivity: data.safetyReputationSensitivity.present
+          ? data.safetyReputationSensitivity.value
+          : this.safetyReputationSensitivity,
+      safetyReputationThreshold: data.safetyReputationThreshold.present
+          ? data.safetyReputationThreshold.value
+          : this.safetyReputationThreshold,
+      safetySharedHashMinReporters: data.safetySharedHashMinReporters.present
+          ? data.safetySharedHashMinReporters.value
+          : this.safetySharedHashMinReporters,
+      safetySharedHashTrustFriends: data.safetySharedHashTrustFriends.present
+          ? data.safetySharedHashTrustFriends.value
+          : this.safetySharedHashTrustFriends,
       maxUploadSizeMb: data.maxUploadSizeMb.present
           ? data.maxUploadSizeMb.value
           : this.maxUploadSizeMb,
@@ -21999,6 +22859,22 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
           ..write('safetyHideUnknownSenders: $safetyHideUnknownSenders, ')
           ..write('safetyKeywordFilter: $safetyKeywordFilter, ')
           ..write('safetyImageHashEnabled: $safetyImageHashEnabled, ')
+          ..write('safetyProtectionLevel: $safetyProtectionLevel, ')
+          ..write('safetySharedHashesEnabled: $safetySharedHashesEnabled, ')
+          ..write('safetyPublishHashes: $safetyPublishHashes, ')
+          ..write('safetyBlockPhoneNumbers: $safetyBlockPhoneNumbers, ')
+          ..write('safetyBlockAllCaps: $safetyBlockAllCaps, ')
+          ..write('safetyBlockSpamChars: $safetyBlockSpamChars, ')
+          ..write('safetyReportThreshold: $safetyReportThreshold, ')
+          ..write('safetyReputationEnabled: $safetyReputationEnabled, ')
+          ..write('safetyReputationSensitivity: $safetyReputationSensitivity, ')
+          ..write('safetyReputationThreshold: $safetyReputationThreshold, ')
+          ..write(
+            'safetySharedHashMinReporters: $safetySharedHashMinReporters, ',
+          )
+          ..write(
+            'safetySharedHashTrustFriends: $safetySharedHashTrustFriends, ',
+          )
           ..write('maxUploadSizeMb: $maxUploadSizeMb, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -22007,7 +22883,7 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     pruningStrategy,
     messageRetentionDays,
@@ -22025,10 +22901,22 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
     safetyHideUnknownSenders,
     safetyKeywordFilter,
     safetyImageHashEnabled,
+    safetyProtectionLevel,
+    safetySharedHashesEnabled,
+    safetyPublishHashes,
+    safetyBlockPhoneNumbers,
+    safetyBlockAllCaps,
+    safetyBlockSpamChars,
+    safetyReportThreshold,
+    safetyReputationEnabled,
+    safetyReputationSensitivity,
+    safetyReputationThreshold,
+    safetySharedHashMinReporters,
+    safetySharedHashTrustFriends,
     maxUploadSizeMb,
     createdAt,
     updatedAt,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -22050,6 +22938,21 @@ class AppSetting extends DataClass implements Insertable<AppSetting> {
           other.safetyHideUnknownSenders == this.safetyHideUnknownSenders &&
           other.safetyKeywordFilter == this.safetyKeywordFilter &&
           other.safetyImageHashEnabled == this.safetyImageHashEnabled &&
+          other.safetyProtectionLevel == this.safetyProtectionLevel &&
+          other.safetySharedHashesEnabled == this.safetySharedHashesEnabled &&
+          other.safetyPublishHashes == this.safetyPublishHashes &&
+          other.safetyBlockPhoneNumbers == this.safetyBlockPhoneNumbers &&
+          other.safetyBlockAllCaps == this.safetyBlockAllCaps &&
+          other.safetyBlockSpamChars == this.safetyBlockSpamChars &&
+          other.safetyReportThreshold == this.safetyReportThreshold &&
+          other.safetyReputationEnabled == this.safetyReputationEnabled &&
+          other.safetyReputationSensitivity ==
+              this.safetyReputationSensitivity &&
+          other.safetyReputationThreshold == this.safetyReputationThreshold &&
+          other.safetySharedHashMinReporters ==
+              this.safetySharedHashMinReporters &&
+          other.safetySharedHashTrustFriends ==
+              this.safetySharedHashTrustFriends &&
           other.maxUploadSizeMb == this.maxUploadSizeMb &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
@@ -22073,6 +22976,18 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
   final Value<bool> safetyHideUnknownSenders;
   final Value<String> safetyKeywordFilter;
   final Value<bool> safetyImageHashEnabled;
+  final Value<String> safetyProtectionLevel;
+  final Value<bool> safetySharedHashesEnabled;
+  final Value<bool> safetyPublishHashes;
+  final Value<bool> safetyBlockPhoneNumbers;
+  final Value<bool> safetyBlockAllCaps;
+  final Value<bool> safetyBlockSpamChars;
+  final Value<int> safetyReportThreshold;
+  final Value<bool> safetyReputationEnabled;
+  final Value<String> safetyReputationSensitivity;
+  final Value<int> safetyReputationThreshold;
+  final Value<int> safetySharedHashMinReporters;
+  final Value<bool> safetySharedHashTrustFriends;
   final Value<int> maxUploadSizeMb;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
@@ -22094,6 +23009,18 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
     this.safetyHideUnknownSenders = const Value.absent(),
     this.safetyKeywordFilter = const Value.absent(),
     this.safetyImageHashEnabled = const Value.absent(),
+    this.safetyProtectionLevel = const Value.absent(),
+    this.safetySharedHashesEnabled = const Value.absent(),
+    this.safetyPublishHashes = const Value.absent(),
+    this.safetyBlockPhoneNumbers = const Value.absent(),
+    this.safetyBlockAllCaps = const Value.absent(),
+    this.safetyBlockSpamChars = const Value.absent(),
+    this.safetyReportThreshold = const Value.absent(),
+    this.safetyReputationEnabled = const Value.absent(),
+    this.safetyReputationSensitivity = const Value.absent(),
+    this.safetyReputationThreshold = const Value.absent(),
+    this.safetySharedHashMinReporters = const Value.absent(),
+    this.safetySharedHashTrustFriends = const Value.absent(),
     this.maxUploadSizeMb = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
@@ -22116,6 +23043,18 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
     this.safetyHideUnknownSenders = const Value.absent(),
     this.safetyKeywordFilter = const Value.absent(),
     this.safetyImageHashEnabled = const Value.absent(),
+    this.safetyProtectionLevel = const Value.absent(),
+    this.safetySharedHashesEnabled = const Value.absent(),
+    this.safetyPublishHashes = const Value.absent(),
+    this.safetyBlockPhoneNumbers = const Value.absent(),
+    this.safetyBlockAllCaps = const Value.absent(),
+    this.safetyBlockSpamChars = const Value.absent(),
+    this.safetyReportThreshold = const Value.absent(),
+    this.safetyReputationEnabled = const Value.absent(),
+    this.safetyReputationSensitivity = const Value.absent(),
+    this.safetyReputationThreshold = const Value.absent(),
+    this.safetySharedHashMinReporters = const Value.absent(),
+    this.safetySharedHashTrustFriends = const Value.absent(),
     this.maxUploadSizeMb = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
@@ -22139,6 +23078,18 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
     Expression<bool>? safetyHideUnknownSenders,
     Expression<String>? safetyKeywordFilter,
     Expression<bool>? safetyImageHashEnabled,
+    Expression<String>? safetyProtectionLevel,
+    Expression<bool>? safetySharedHashesEnabled,
+    Expression<bool>? safetyPublishHashes,
+    Expression<bool>? safetyBlockPhoneNumbers,
+    Expression<bool>? safetyBlockAllCaps,
+    Expression<bool>? safetyBlockSpamChars,
+    Expression<int>? safetyReportThreshold,
+    Expression<bool>? safetyReputationEnabled,
+    Expression<String>? safetyReputationSensitivity,
+    Expression<int>? safetyReputationThreshold,
+    Expression<int>? safetySharedHashMinReporters,
+    Expression<bool>? safetySharedHashTrustFriends,
     Expression<int>? maxUploadSizeMb,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
@@ -22168,6 +23119,30 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
         'safety_keyword_filter': safetyKeywordFilter,
       if (safetyImageHashEnabled != null)
         'safety_image_hash_enabled': safetyImageHashEnabled,
+      if (safetyProtectionLevel != null)
+        'safety_protection_level': safetyProtectionLevel,
+      if (safetySharedHashesEnabled != null)
+        'safety_shared_hashes_enabled': safetySharedHashesEnabled,
+      if (safetyPublishHashes != null)
+        'safety_publish_hashes': safetyPublishHashes,
+      if (safetyBlockPhoneNumbers != null)
+        'safety_block_phone_numbers': safetyBlockPhoneNumbers,
+      if (safetyBlockAllCaps != null)
+        'safety_block_all_caps': safetyBlockAllCaps,
+      if (safetyBlockSpamChars != null)
+        'safety_block_spam_chars': safetyBlockSpamChars,
+      if (safetyReportThreshold != null)
+        'safety_report_threshold': safetyReportThreshold,
+      if (safetyReputationEnabled != null)
+        'safety_reputation_enabled': safetyReputationEnabled,
+      if (safetyReputationSensitivity != null)
+        'safety_reputation_sensitivity': safetyReputationSensitivity,
+      if (safetyReputationThreshold != null)
+        'safety_reputation_threshold': safetyReputationThreshold,
+      if (safetySharedHashMinReporters != null)
+        'safety_shared_hash_min_reporters': safetySharedHashMinReporters,
+      if (safetySharedHashTrustFriends != null)
+        'safety_shared_hash_trust_friends': safetySharedHashTrustFriends,
       if (maxUploadSizeMb != null) 'max_upload_size_mb': maxUploadSizeMb,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
@@ -22192,6 +23167,18 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
     Value<bool>? safetyHideUnknownSenders,
     Value<String>? safetyKeywordFilter,
     Value<bool>? safetyImageHashEnabled,
+    Value<String>? safetyProtectionLevel,
+    Value<bool>? safetySharedHashesEnabled,
+    Value<bool>? safetyPublishHashes,
+    Value<bool>? safetyBlockPhoneNumbers,
+    Value<bool>? safetyBlockAllCaps,
+    Value<bool>? safetyBlockSpamChars,
+    Value<int>? safetyReportThreshold,
+    Value<bool>? safetyReputationEnabled,
+    Value<String>? safetyReputationSensitivity,
+    Value<int>? safetyReputationThreshold,
+    Value<int>? safetySharedHashMinReporters,
+    Value<bool>? safetySharedHashTrustFriends,
     Value<int>? maxUploadSizeMb,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
@@ -22217,6 +23204,27 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
       safetyKeywordFilter: safetyKeywordFilter ?? this.safetyKeywordFilter,
       safetyImageHashEnabled:
           safetyImageHashEnabled ?? this.safetyImageHashEnabled,
+      safetyProtectionLevel:
+          safetyProtectionLevel ?? this.safetyProtectionLevel,
+      safetySharedHashesEnabled:
+          safetySharedHashesEnabled ?? this.safetySharedHashesEnabled,
+      safetyPublishHashes: safetyPublishHashes ?? this.safetyPublishHashes,
+      safetyBlockPhoneNumbers:
+          safetyBlockPhoneNumbers ?? this.safetyBlockPhoneNumbers,
+      safetyBlockAllCaps: safetyBlockAllCaps ?? this.safetyBlockAllCaps,
+      safetyBlockSpamChars: safetyBlockSpamChars ?? this.safetyBlockSpamChars,
+      safetyReportThreshold:
+          safetyReportThreshold ?? this.safetyReportThreshold,
+      safetyReputationEnabled:
+          safetyReputationEnabled ?? this.safetyReputationEnabled,
+      safetyReputationSensitivity:
+          safetyReputationSensitivity ?? this.safetyReputationSensitivity,
+      safetyReputationThreshold:
+          safetyReputationThreshold ?? this.safetyReputationThreshold,
+      safetySharedHashMinReporters:
+          safetySharedHashMinReporters ?? this.safetySharedHashMinReporters,
+      safetySharedHashTrustFriends:
+          safetySharedHashTrustFriends ?? this.safetySharedHashTrustFriends,
       maxUploadSizeMb: maxUploadSizeMb ?? this.maxUploadSizeMb,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
@@ -22287,6 +23295,62 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
         safetyImageHashEnabled.value,
       );
     }
+    if (safetyProtectionLevel.present) {
+      map['safety_protection_level'] = Variable<String>(
+        safetyProtectionLevel.value,
+      );
+    }
+    if (safetySharedHashesEnabled.present) {
+      map['safety_shared_hashes_enabled'] = Variable<bool>(
+        safetySharedHashesEnabled.value,
+      );
+    }
+    if (safetyPublishHashes.present) {
+      map['safety_publish_hashes'] = Variable<bool>(safetyPublishHashes.value);
+    }
+    if (safetyBlockPhoneNumbers.present) {
+      map['safety_block_phone_numbers'] = Variable<bool>(
+        safetyBlockPhoneNumbers.value,
+      );
+    }
+    if (safetyBlockAllCaps.present) {
+      map['safety_block_all_caps'] = Variable<bool>(safetyBlockAllCaps.value);
+    }
+    if (safetyBlockSpamChars.present) {
+      map['safety_block_spam_chars'] = Variable<bool>(
+        safetyBlockSpamChars.value,
+      );
+    }
+    if (safetyReportThreshold.present) {
+      map['safety_report_threshold'] = Variable<int>(
+        safetyReportThreshold.value,
+      );
+    }
+    if (safetyReputationEnabled.present) {
+      map['safety_reputation_enabled'] = Variable<bool>(
+        safetyReputationEnabled.value,
+      );
+    }
+    if (safetyReputationSensitivity.present) {
+      map['safety_reputation_sensitivity'] = Variable<String>(
+        safetyReputationSensitivity.value,
+      );
+    }
+    if (safetyReputationThreshold.present) {
+      map['safety_reputation_threshold'] = Variable<int>(
+        safetyReputationThreshold.value,
+      );
+    }
+    if (safetySharedHashMinReporters.present) {
+      map['safety_shared_hash_min_reporters'] = Variable<int>(
+        safetySharedHashMinReporters.value,
+      );
+    }
+    if (safetySharedHashTrustFriends.present) {
+      map['safety_shared_hash_trust_friends'] = Variable<bool>(
+        safetySharedHashTrustFriends.value,
+      );
+    }
     if (maxUploadSizeMb.present) {
       map['max_upload_size_mb'] = Variable<int>(maxUploadSizeMb.value);
     }
@@ -22319,6 +23383,22 @@ class AppSettingsCompanion extends UpdateCompanion<AppSetting> {
           ..write('safetyHideUnknownSenders: $safetyHideUnknownSenders, ')
           ..write('safetyKeywordFilter: $safetyKeywordFilter, ')
           ..write('safetyImageHashEnabled: $safetyImageHashEnabled, ')
+          ..write('safetyProtectionLevel: $safetyProtectionLevel, ')
+          ..write('safetySharedHashesEnabled: $safetySharedHashesEnabled, ')
+          ..write('safetyPublishHashes: $safetyPublishHashes, ')
+          ..write('safetyBlockPhoneNumbers: $safetyBlockPhoneNumbers, ')
+          ..write('safetyBlockAllCaps: $safetyBlockAllCaps, ')
+          ..write('safetyBlockSpamChars: $safetyBlockSpamChars, ')
+          ..write('safetyReportThreshold: $safetyReportThreshold, ')
+          ..write('safetyReputationEnabled: $safetyReputationEnabled, ')
+          ..write('safetyReputationSensitivity: $safetyReputationSensitivity, ')
+          ..write('safetyReputationThreshold: $safetyReputationThreshold, ')
+          ..write(
+            'safetySharedHashMinReporters: $safetySharedHashMinReporters, ',
+          )
+          ..write(
+            'safetySharedHashTrustFriends: $safetySharedHashTrustFriends, ',
+          )
           ..write('maxUploadSizeMb: $maxUploadSizeMb, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
@@ -24344,6 +25424,1267 @@ class GifFavoritesCompanion extends UpdateCompanion<GifFavorite> {
   }
 }
 
+class $MediaCacheTable extends MediaCache
+    with TableInfo<$MediaCacheTable, MediaCacheData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MediaCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+    'url',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'),
+  );
+  static const VerificationMeta _widthMeta = const VerificationMeta('width');
+  @override
+  late final GeneratedColumn<double> width = GeneratedColumn<double>(
+    'width',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _heightMeta = const VerificationMeta('height');
+  @override
+  late final GeneratedColumn<double> height = GeneratedColumn<double>(
+    'height',
+    aliasedName,
+    false,
+    type: DriftSqlType.double,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, url, width, height, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'media_cache';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MediaCacheData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('url')) {
+      context.handle(
+        _urlMeta,
+        url.isAcceptableOrUnknown(data['url']!, _urlMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_urlMeta);
+    }
+    if (data.containsKey('width')) {
+      context.handle(
+        _widthMeta,
+        width.isAcceptableOrUnknown(data['width']!, _widthMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_widthMeta);
+    }
+    if (data.containsKey('height')) {
+      context.handle(
+        _heightMeta,
+        height.isAcceptableOrUnknown(data['height']!, _heightMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_heightMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  MediaCacheData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MediaCacheData(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      url: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}url'],
+      )!,
+      width: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}width'],
+      )!,
+      height: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}height'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MediaCacheTable createAlias(String alias) {
+    return $MediaCacheTable(attachedDatabase, alias);
+  }
+}
+
+class MediaCacheData extends DataClass implements Insertable<MediaCacheData> {
+  final int id;
+  final String url;
+  final double width;
+  final double height;
+  final DateTime createdAt;
+  const MediaCacheData({
+    required this.id,
+    required this.url,
+    required this.width,
+    required this.height,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['url'] = Variable<String>(url);
+    map['width'] = Variable<double>(width);
+    map['height'] = Variable<double>(height);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  MediaCacheCompanion toCompanion(bool nullToAbsent) {
+    return MediaCacheCompanion(
+      id: Value(id),
+      url: Value(url),
+      width: Value(width),
+      height: Value(height),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory MediaCacheData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MediaCacheData(
+      id: serializer.fromJson<int>(json['id']),
+      url: serializer.fromJson<String>(json['url']),
+      width: serializer.fromJson<double>(json['width']),
+      height: serializer.fromJson<double>(json['height']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'url': serializer.toJson<String>(url),
+      'width': serializer.toJson<double>(width),
+      'height': serializer.toJson<double>(height),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  MediaCacheData copyWith({
+    int? id,
+    String? url,
+    double? width,
+    double? height,
+    DateTime? createdAt,
+  }) => MediaCacheData(
+    id: id ?? this.id,
+    url: url ?? this.url,
+    width: width ?? this.width,
+    height: height ?? this.height,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  MediaCacheData copyWithCompanion(MediaCacheCompanion data) {
+    return MediaCacheData(
+      id: data.id.present ? data.id.value : this.id,
+      url: data.url.present ? data.url.value : this.url,
+      width: data.width.present ? data.width.value : this.width,
+      height: data.height.present ? data.height.value : this.height,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MediaCacheData(')
+          ..write('id: $id, ')
+          ..write('url: $url, ')
+          ..write('width: $width, ')
+          ..write('height: $height, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, url, width, height, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MediaCacheData &&
+          other.id == this.id &&
+          other.url == this.url &&
+          other.width == this.width &&
+          other.height == this.height &&
+          other.createdAt == this.createdAt);
+}
+
+class MediaCacheCompanion extends UpdateCompanion<MediaCacheData> {
+  final Value<int> id;
+  final Value<String> url;
+  final Value<double> width;
+  final Value<double> height;
+  final Value<DateTime> createdAt;
+  const MediaCacheCompanion({
+    this.id = const Value.absent(),
+    this.url = const Value.absent(),
+    this.width = const Value.absent(),
+    this.height = const Value.absent(),
+    this.createdAt = const Value.absent(),
+  });
+  MediaCacheCompanion.insert({
+    this.id = const Value.absent(),
+    required String url,
+    required double width,
+    required double height,
+    required DateTime createdAt,
+  }) : url = Value(url),
+       width = Value(width),
+       height = Value(height),
+       createdAt = Value(createdAt);
+  static Insertable<MediaCacheData> custom({
+    Expression<int>? id,
+    Expression<String>? url,
+    Expression<double>? width,
+    Expression<double>? height,
+    Expression<DateTime>? createdAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (url != null) 'url': url,
+      if (width != null) 'width': width,
+      if (height != null) 'height': height,
+      if (createdAt != null) 'created_at': createdAt,
+    });
+  }
+
+  MediaCacheCompanion copyWith({
+    Value<int>? id,
+    Value<String>? url,
+    Value<double>? width,
+    Value<double>? height,
+    Value<DateTime>? createdAt,
+  }) {
+    return MediaCacheCompanion(
+      id: id ?? this.id,
+      url: url ?? this.url,
+      width: width ?? this.width,
+      height: height ?? this.height,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (width.present) {
+      map['width'] = Variable<double>(width.value);
+    }
+    if (height.present) {
+      map['height'] = Variable<double>(height.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MediaCacheCompanion(')
+          ..write('id: $id, ')
+          ..write('url: $url, ')
+          ..write('width: $width, ')
+          ..write('height: $height, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CsamHashEntriesTable extends CsamHashEntries
+    with TableInfo<$CsamHashEntriesTable, CsamHashEntry> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CsamHashEntriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _hashValueMeta = const VerificationMeta(
+    'hashValue',
+  );
+  @override
+  late final GeneratedColumn<String> hashValue = GeneratedColumn<String>(
+    'hash_value',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hashTypeMeta = const VerificationMeta(
+    'hashType',
+  );
+  @override
+  late final GeneratedColumn<String> hashType = GeneratedColumn<String>(
+    'hash_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('dhash'),
+  );
+  static const VerificationMeta _listSourceMeta = const VerificationMeta(
+    'listSource',
+  );
+  @override
+  late final GeneratedColumn<String> listSource = GeneratedColumn<String>(
+    'list_source',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _addedAtMeta = const VerificationMeta(
+    'addedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> addedAt = GeneratedColumn<DateTime>(
+    'added_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    hashValue,
+    hashType,
+    listSource,
+    addedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'csam_hash_entries';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CsamHashEntry> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('hash_value')) {
+      context.handle(
+        _hashValueMeta,
+        hashValue.isAcceptableOrUnknown(data['hash_value']!, _hashValueMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_hashValueMeta);
+    }
+    if (data.containsKey('hash_type')) {
+      context.handle(
+        _hashTypeMeta,
+        hashType.isAcceptableOrUnknown(data['hash_type']!, _hashTypeMeta),
+      );
+    }
+    if (data.containsKey('list_source')) {
+      context.handle(
+        _listSourceMeta,
+        listSource.isAcceptableOrUnknown(data['list_source']!, _listSourceMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_listSourceMeta);
+    }
+    if (data.containsKey('added_at')) {
+      context.handle(
+        _addedAtMeta,
+        addedAt.isAcceptableOrUnknown(data['added_at']!, _addedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_addedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  CsamHashEntry map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CsamHashEntry(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      hashValue: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hash_value'],
+      )!,
+      hashType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hash_type'],
+      )!,
+      listSource: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}list_source'],
+      )!,
+      addedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}added_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CsamHashEntriesTable createAlias(String alias) {
+    return $CsamHashEntriesTable(attachedDatabase, alias);
+  }
+}
+
+class CsamHashEntry extends DataClass implements Insertable<CsamHashEntry> {
+  final int id;
+  final String hashValue;
+  final String hashType;
+  final String listSource;
+  final DateTime addedAt;
+  const CsamHashEntry({
+    required this.id,
+    required this.hashValue,
+    required this.hashType,
+    required this.listSource,
+    required this.addedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['hash_value'] = Variable<String>(hashValue);
+    map['hash_type'] = Variable<String>(hashType);
+    map['list_source'] = Variable<String>(listSource);
+    map['added_at'] = Variable<DateTime>(addedAt);
+    return map;
+  }
+
+  CsamHashEntriesCompanion toCompanion(bool nullToAbsent) {
+    return CsamHashEntriesCompanion(
+      id: Value(id),
+      hashValue: Value(hashValue),
+      hashType: Value(hashType),
+      listSource: Value(listSource),
+      addedAt: Value(addedAt),
+    );
+  }
+
+  factory CsamHashEntry.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CsamHashEntry(
+      id: serializer.fromJson<int>(json['id']),
+      hashValue: serializer.fromJson<String>(json['hashValue']),
+      hashType: serializer.fromJson<String>(json['hashType']),
+      listSource: serializer.fromJson<String>(json['listSource']),
+      addedAt: serializer.fromJson<DateTime>(json['addedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'hashValue': serializer.toJson<String>(hashValue),
+      'hashType': serializer.toJson<String>(hashType),
+      'listSource': serializer.toJson<String>(listSource),
+      'addedAt': serializer.toJson<DateTime>(addedAt),
+    };
+  }
+
+  CsamHashEntry copyWith({
+    int? id,
+    String? hashValue,
+    String? hashType,
+    String? listSource,
+    DateTime? addedAt,
+  }) => CsamHashEntry(
+    id: id ?? this.id,
+    hashValue: hashValue ?? this.hashValue,
+    hashType: hashType ?? this.hashType,
+    listSource: listSource ?? this.listSource,
+    addedAt: addedAt ?? this.addedAt,
+  );
+  CsamHashEntry copyWithCompanion(CsamHashEntriesCompanion data) {
+    return CsamHashEntry(
+      id: data.id.present ? data.id.value : this.id,
+      hashValue: data.hashValue.present ? data.hashValue.value : this.hashValue,
+      hashType: data.hashType.present ? data.hashType.value : this.hashType,
+      listSource: data.listSource.present
+          ? data.listSource.value
+          : this.listSource,
+      addedAt: data.addedAt.present ? data.addedAt.value : this.addedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CsamHashEntry(')
+          ..write('id: $id, ')
+          ..write('hashValue: $hashValue, ')
+          ..write('hashType: $hashType, ')
+          ..write('listSource: $listSource, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, hashValue, hashType, listSource, addedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CsamHashEntry &&
+          other.id == this.id &&
+          other.hashValue == this.hashValue &&
+          other.hashType == this.hashType &&
+          other.listSource == this.listSource &&
+          other.addedAt == this.addedAt);
+}
+
+class CsamHashEntriesCompanion extends UpdateCompanion<CsamHashEntry> {
+  final Value<int> id;
+  final Value<String> hashValue;
+  final Value<String> hashType;
+  final Value<String> listSource;
+  final Value<DateTime> addedAt;
+  const CsamHashEntriesCompanion({
+    this.id = const Value.absent(),
+    this.hashValue = const Value.absent(),
+    this.hashType = const Value.absent(),
+    this.listSource = const Value.absent(),
+    this.addedAt = const Value.absent(),
+  });
+  CsamHashEntriesCompanion.insert({
+    this.id = const Value.absent(),
+    required String hashValue,
+    this.hashType = const Value.absent(),
+    required String listSource,
+    required DateTime addedAt,
+  }) : hashValue = Value(hashValue),
+       listSource = Value(listSource),
+       addedAt = Value(addedAt);
+  static Insertable<CsamHashEntry> custom({
+    Expression<int>? id,
+    Expression<String>? hashValue,
+    Expression<String>? hashType,
+    Expression<String>? listSource,
+    Expression<DateTime>? addedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (hashValue != null) 'hash_value': hashValue,
+      if (hashType != null) 'hash_type': hashType,
+      if (listSource != null) 'list_source': listSource,
+      if (addedAt != null) 'added_at': addedAt,
+    });
+  }
+
+  CsamHashEntriesCompanion copyWith({
+    Value<int>? id,
+    Value<String>? hashValue,
+    Value<String>? hashType,
+    Value<String>? listSource,
+    Value<DateTime>? addedAt,
+  }) {
+    return CsamHashEntriesCompanion(
+      id: id ?? this.id,
+      hashValue: hashValue ?? this.hashValue,
+      hashType: hashType ?? this.hashType,
+      listSource: listSource ?? this.listSource,
+      addedAt: addedAt ?? this.addedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (hashValue.present) {
+      map['hash_value'] = Variable<String>(hashValue.value);
+    }
+    if (hashType.present) {
+      map['hash_type'] = Variable<String>(hashType.value);
+    }
+    if (listSource.present) {
+      map['list_source'] = Variable<String>(listSource.value);
+    }
+    if (addedAt.present) {
+      map['added_at'] = Variable<DateTime>(addedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CsamHashEntriesCompanion(')
+          ..write('id: $id, ')
+          ..write('hashValue: $hashValue, ')
+          ..write('hashType: $hashType, ')
+          ..write('listSource: $listSource, ')
+          ..write('addedAt: $addedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $HiddenAttachmentRecordsTable extends HiddenAttachmentRecords
+    with TableInfo<$HiddenAttachmentRecordsTable, HiddenAttachmentRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $HiddenAttachmentRecordsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _messageIdMeta = const VerificationMeta(
+    'messageId',
+  );
+  @override
+  late final GeneratedColumn<int> messageId = GeneratedColumn<int>(
+    'message_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _originalFilenameMeta = const VerificationMeta(
+    'originalFilename',
+  );
+  @override
+  late final GeneratedColumn<String> originalFilename = GeneratedColumn<String>(
+    'original_filename',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _contentTypeMeta = const VerificationMeta(
+    'contentType',
+  );
+  @override
+  late final GeneratedColumn<String> contentType = GeneratedColumn<String>(
+    'content_type',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _byteSizeMeta = const VerificationMeta(
+    'byteSize',
+  );
+  @override
+  late final GeneratedColumn<int> byteSize = GeneratedColumn<int>(
+    'byte_size',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _checksumMeta = const VerificationMeta(
+    'checksum',
+  );
+  @override
+  late final GeneratedColumn<String> checksum = GeneratedColumn<String>(
+    'checksum',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _purgedAtMeta = const VerificationMeta(
+    'purgedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> purgedAt = GeneratedColumn<DateTime>(
+    'purged_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    messageId,
+    originalFilename,
+    contentType,
+    byteSize,
+    checksum,
+    purgedAt,
+    createdAt,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'hidden_attachment_records';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<HiddenAttachmentRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('message_id')) {
+      context.handle(
+        _messageIdMeta,
+        messageId.isAcceptableOrUnknown(data['message_id']!, _messageIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_messageIdMeta);
+    }
+    if (data.containsKey('original_filename')) {
+      context.handle(
+        _originalFilenameMeta,
+        originalFilename.isAcceptableOrUnknown(
+          data['original_filename']!,
+          _originalFilenameMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_originalFilenameMeta);
+    }
+    if (data.containsKey('content_type')) {
+      context.handle(
+        _contentTypeMeta,
+        contentType.isAcceptableOrUnknown(
+          data['content_type']!,
+          _contentTypeMeta,
+        ),
+      );
+    }
+    if (data.containsKey('byte_size')) {
+      context.handle(
+        _byteSizeMeta,
+        byteSize.isAcceptableOrUnknown(data['byte_size']!, _byteSizeMeta),
+      );
+    }
+    if (data.containsKey('checksum')) {
+      context.handle(
+        _checksumMeta,
+        checksum.isAcceptableOrUnknown(data['checksum']!, _checksumMeta),
+      );
+    }
+    if (data.containsKey('purged_at')) {
+      context.handle(
+        _purgedAtMeta,
+        purgedAt.isAcceptableOrUnknown(data['purged_at']!, _purgedAtMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  HiddenAttachmentRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return HiddenAttachmentRecord(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      messageId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}message_id'],
+      )!,
+      originalFilename: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}original_filename'],
+      )!,
+      contentType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content_type'],
+      ),
+      byteSize: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}byte_size'],
+      ),
+      checksum: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}checksum'],
+      ),
+      purgedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}purged_at'],
+      ),
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $HiddenAttachmentRecordsTable createAlias(String alias) {
+    return $HiddenAttachmentRecordsTable(attachedDatabase, alias);
+  }
+}
+
+class HiddenAttachmentRecord extends DataClass
+    implements Insertable<HiddenAttachmentRecord> {
+  final int id;
+  final int messageId;
+  final String originalFilename;
+  final String? contentType;
+  final int? byteSize;
+  final String? checksum;
+  final DateTime? purgedAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const HiddenAttachmentRecord({
+    required this.id,
+    required this.messageId,
+    required this.originalFilename,
+    this.contentType,
+    this.byteSize,
+    this.checksum,
+    this.purgedAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['message_id'] = Variable<int>(messageId);
+    map['original_filename'] = Variable<String>(originalFilename);
+    if (!nullToAbsent || contentType != null) {
+      map['content_type'] = Variable<String>(contentType);
+    }
+    if (!nullToAbsent || byteSize != null) {
+      map['byte_size'] = Variable<int>(byteSize);
+    }
+    if (!nullToAbsent || checksum != null) {
+      map['checksum'] = Variable<String>(checksum);
+    }
+    if (!nullToAbsent || purgedAt != null) {
+      map['purged_at'] = Variable<DateTime>(purgedAt);
+    }
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  HiddenAttachmentRecordsCompanion toCompanion(bool nullToAbsent) {
+    return HiddenAttachmentRecordsCompanion(
+      id: Value(id),
+      messageId: Value(messageId),
+      originalFilename: Value(originalFilename),
+      contentType: contentType == null && nullToAbsent
+          ? const Value.absent()
+          : Value(contentType),
+      byteSize: byteSize == null && nullToAbsent
+          ? const Value.absent()
+          : Value(byteSize),
+      checksum: checksum == null && nullToAbsent
+          ? const Value.absent()
+          : Value(checksum),
+      purgedAt: purgedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(purgedAt),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory HiddenAttachmentRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return HiddenAttachmentRecord(
+      id: serializer.fromJson<int>(json['id']),
+      messageId: serializer.fromJson<int>(json['messageId']),
+      originalFilename: serializer.fromJson<String>(json['originalFilename']),
+      contentType: serializer.fromJson<String?>(json['contentType']),
+      byteSize: serializer.fromJson<int?>(json['byteSize']),
+      checksum: serializer.fromJson<String?>(json['checksum']),
+      purgedAt: serializer.fromJson<DateTime?>(json['purgedAt']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'messageId': serializer.toJson<int>(messageId),
+      'originalFilename': serializer.toJson<String>(originalFilename),
+      'contentType': serializer.toJson<String?>(contentType),
+      'byteSize': serializer.toJson<int?>(byteSize),
+      'checksum': serializer.toJson<String?>(checksum),
+      'purgedAt': serializer.toJson<DateTime?>(purgedAt),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  HiddenAttachmentRecord copyWith({
+    int? id,
+    int? messageId,
+    String? originalFilename,
+    Value<String?> contentType = const Value.absent(),
+    Value<int?> byteSize = const Value.absent(),
+    Value<String?> checksum = const Value.absent(),
+    Value<DateTime?> purgedAt = const Value.absent(),
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) => HiddenAttachmentRecord(
+    id: id ?? this.id,
+    messageId: messageId ?? this.messageId,
+    originalFilename: originalFilename ?? this.originalFilename,
+    contentType: contentType.present ? contentType.value : this.contentType,
+    byteSize: byteSize.present ? byteSize.value : this.byteSize,
+    checksum: checksum.present ? checksum.value : this.checksum,
+    purgedAt: purgedAt.present ? purgedAt.value : this.purgedAt,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  HiddenAttachmentRecord copyWithCompanion(
+    HiddenAttachmentRecordsCompanion data,
+  ) {
+    return HiddenAttachmentRecord(
+      id: data.id.present ? data.id.value : this.id,
+      messageId: data.messageId.present ? data.messageId.value : this.messageId,
+      originalFilename: data.originalFilename.present
+          ? data.originalFilename.value
+          : this.originalFilename,
+      contentType: data.contentType.present
+          ? data.contentType.value
+          : this.contentType,
+      byteSize: data.byteSize.present ? data.byteSize.value : this.byteSize,
+      checksum: data.checksum.present ? data.checksum.value : this.checksum,
+      purgedAt: data.purgedAt.present ? data.purgedAt.value : this.purgedAt,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HiddenAttachmentRecord(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('originalFilename: $originalFilename, ')
+          ..write('contentType: $contentType, ')
+          ..write('byteSize: $byteSize, ')
+          ..write('checksum: $checksum, ')
+          ..write('purgedAt: $purgedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    messageId,
+    originalFilename,
+    contentType,
+    byteSize,
+    checksum,
+    purgedAt,
+    createdAt,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is HiddenAttachmentRecord &&
+          other.id == this.id &&
+          other.messageId == this.messageId &&
+          other.originalFilename == this.originalFilename &&
+          other.contentType == this.contentType &&
+          other.byteSize == this.byteSize &&
+          other.checksum == this.checksum &&
+          other.purgedAt == this.purgedAt &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class HiddenAttachmentRecordsCompanion
+    extends UpdateCompanion<HiddenAttachmentRecord> {
+  final Value<int> id;
+  final Value<int> messageId;
+  final Value<String> originalFilename;
+  final Value<String?> contentType;
+  final Value<int?> byteSize;
+  final Value<String?> checksum;
+  final Value<DateTime?> purgedAt;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  const HiddenAttachmentRecordsCompanion({
+    this.id = const Value.absent(),
+    this.messageId = const Value.absent(),
+    this.originalFilename = const Value.absent(),
+    this.contentType = const Value.absent(),
+    this.byteSize = const Value.absent(),
+    this.checksum = const Value.absent(),
+    this.purgedAt = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  });
+  HiddenAttachmentRecordsCompanion.insert({
+    this.id = const Value.absent(),
+    required int messageId,
+    required String originalFilename,
+    this.contentType = const Value.absent(),
+    this.byteSize = const Value.absent(),
+    this.checksum = const Value.absent(),
+    this.purgedAt = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+  }) : messageId = Value(messageId),
+       originalFilename = Value(originalFilename),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<HiddenAttachmentRecord> custom({
+    Expression<int>? id,
+    Expression<int>? messageId,
+    Expression<String>? originalFilename,
+    Expression<String>? contentType,
+    Expression<int>? byteSize,
+    Expression<String>? checksum,
+    Expression<DateTime>? purgedAt,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (messageId != null) 'message_id': messageId,
+      if (originalFilename != null) 'original_filename': originalFilename,
+      if (contentType != null) 'content_type': contentType,
+      if (byteSize != null) 'byte_size': byteSize,
+      if (checksum != null) 'checksum': checksum,
+      if (purgedAt != null) 'purged_at': purgedAt,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+    });
+  }
+
+  HiddenAttachmentRecordsCompanion copyWith({
+    Value<int>? id,
+    Value<int>? messageId,
+    Value<String>? originalFilename,
+    Value<String?>? contentType,
+    Value<int?>? byteSize,
+    Value<String?>? checksum,
+    Value<DateTime?>? purgedAt,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+  }) {
+    return HiddenAttachmentRecordsCompanion(
+      id: id ?? this.id,
+      messageId: messageId ?? this.messageId,
+      originalFilename: originalFilename ?? this.originalFilename,
+      contentType: contentType ?? this.contentType,
+      byteSize: byteSize ?? this.byteSize,
+      checksum: checksum ?? this.checksum,
+      purgedAt: purgedAt ?? this.purgedAt,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (messageId.present) {
+      map['message_id'] = Variable<int>(messageId.value);
+    }
+    if (originalFilename.present) {
+      map['original_filename'] = Variable<String>(originalFilename.value);
+    }
+    if (contentType.present) {
+      map['content_type'] = Variable<String>(contentType.value);
+    }
+    if (byteSize.present) {
+      map['byte_size'] = Variable<int>(byteSize.value);
+    }
+    if (checksum.present) {
+      map['checksum'] = Variable<String>(checksum.value);
+    }
+    if (purgedAt.present) {
+      map['purged_at'] = Variable<DateTime>(purgedAt.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('HiddenAttachmentRecordsCompanion(')
+          ..write('id: $id, ')
+          ..write('messageId: $messageId, ')
+          ..write('originalFilename: $originalFilename, ')
+          ..write('contentType: $contentType, ')
+          ..write('byteSize: $byteSize, ')
+          ..write('checksum: $checksum, ')
+          ..write('purgedAt: $purgedAt, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$InfernoDatabase extends GeneratedDatabase {
   _$InfernoDatabase(QueryExecutor e) : super(e);
   $InfernoDatabaseManager get managers => $InfernoDatabaseManager(this);
@@ -24390,6 +26731,12 @@ abstract class _$InfernoDatabase extends GeneratedDatabase {
   late final $ContentHashesTable contentHashes = $ContentHashesTable(this);
   late final $GifCollectionsTable gifCollections = $GifCollectionsTable(this);
   late final $GifFavoritesTable gifFavorites = $GifFavoritesTable(this);
+  late final $MediaCacheTable mediaCache = $MediaCacheTable(this);
+  late final $CsamHashEntriesTable csamHashEntries = $CsamHashEntriesTable(
+    this,
+  );
+  late final $HiddenAttachmentRecordsTable hiddenAttachmentRecords =
+      $HiddenAttachmentRecordsTable(this);
   late final MessagesDao messagesDao = MessagesDao(this as InfernoDatabase);
   late final ServersDao serversDao = ServersDao(this as InfernoDatabase);
   late final ContactsDao contactsDao = ContactsDao(this as InfernoDatabase);
@@ -24431,6 +26778,9 @@ abstract class _$InfernoDatabase extends GeneratedDatabase {
     contentHashes,
     gifCollections,
     gifFavorites,
+    mediaCache,
+    csamHashEntries,
+    hiddenAttachmentRecords,
   ];
 }
 
@@ -25955,6 +28305,7 @@ typedef $$ChannelsTableCreateCompanionBuilder =
       Value<int> voiceUserLimit,
       Value<bool> videoEnabled,
       Value<int?> sidechatChannelId,
+      Value<DateTime?> lastBackfilledAt,
       required DateTime createdAt,
       required DateTime updatedAt,
     });
@@ -25984,6 +28335,7 @@ typedef $$ChannelsTableUpdateCompanionBuilder =
       Value<int> voiceUserLimit,
       Value<bool> videoEnabled,
       Value<int?> sidechatChannelId,
+      Value<DateTime?> lastBackfilledAt,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -26114,6 +28466,11 @@ class $$ChannelsTableFilterComposer
 
   ColumnFilters<int> get sidechatChannelId => $composableBuilder(
     column: $table.sidechatChannelId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -26257,6 +28614,11 @@ class $$ChannelsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -26377,6 +28739,11 @@ class $$ChannelsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -26437,6 +28804,7 @@ class $$ChannelsTableTableManager
                 Value<int> voiceUserLimit = const Value.absent(),
                 Value<bool> videoEnabled = const Value.absent(),
                 Value<int?> sidechatChannelId = const Value.absent(),
+                Value<DateTime?> lastBackfilledAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => ChannelsCompanion(
@@ -26464,6 +28832,7 @@ class $$ChannelsTableTableManager
                 voiceUserLimit: voiceUserLimit,
                 videoEnabled: videoEnabled,
                 sidechatChannelId: sidechatChannelId,
+                lastBackfilledAt: lastBackfilledAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -26494,6 +28863,7 @@ class $$ChannelsTableTableManager
                 Value<int> voiceUserLimit = const Value.absent(),
                 Value<bool> videoEnabled = const Value.absent(),
                 Value<int?> sidechatChannelId = const Value.absent(),
+                Value<DateTime?> lastBackfilledAt = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
               }) => ChannelsCompanion.insert(
@@ -26521,6 +28891,7 @@ class $$ChannelsTableTableManager
                 voiceUserLimit: voiceUserLimit,
                 videoEnabled: videoEnabled,
                 sidechatChannelId: sidechatChannelId,
+                lastBackfilledAt: lastBackfilledAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -27311,6 +29682,8 @@ typedef $$ConversationsTableCreateCompanionBuilder =
       Value<String?> counterpartyPubkey,
       Value<String?> counterpartyDisplayName,
       Value<String?> iconUrl,
+      Value<DateTime?> lastBackfilledAt,
+      Value<DateTime?> lastReadAt,
       required DateTime createdAt,
       required DateTime updatedAt,
     });
@@ -27323,6 +29696,8 @@ typedef $$ConversationsTableUpdateCompanionBuilder =
       Value<String?> counterpartyPubkey,
       Value<String?> counterpartyDisplayName,
       Value<String?> iconUrl,
+      Value<DateTime?> lastBackfilledAt,
+      Value<DateTime?> lastReadAt,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -27368,6 +29743,16 @@ class $$ConversationsTableFilterComposer
 
   ColumnFilters<String> get iconUrl => $composableBuilder(
     column: $table.iconUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastReadAt => $composableBuilder(
+    column: $table.lastReadAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -27426,6 +29811,16 @@ class $$ConversationsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastReadAt => $composableBuilder(
+    column: $table.lastReadAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -27470,6 +29865,16 @@ class $$ConversationsTableAnnotationComposer
 
   GeneratedColumn<String> get iconUrl =>
       $composableBuilder(column: $table.iconUrl, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastBackfilledAt => $composableBuilder(
+    column: $table.lastBackfilledAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get lastReadAt => $composableBuilder(
+    column: $table.lastReadAt,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -27522,6 +29927,8 @@ class $$ConversationsTableTableManager
                 Value<String?> counterpartyPubkey = const Value.absent(),
                 Value<String?> counterpartyDisplayName = const Value.absent(),
                 Value<String?> iconUrl = const Value.absent(),
+                Value<DateTime?> lastBackfilledAt = const Value.absent(),
+                Value<DateTime?> lastReadAt = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => ConversationsCompanion(
@@ -27532,6 +29939,8 @@ class $$ConversationsTableTableManager
                 counterpartyPubkey: counterpartyPubkey,
                 counterpartyDisplayName: counterpartyDisplayName,
                 iconUrl: iconUrl,
+                lastBackfilledAt: lastBackfilledAt,
+                lastReadAt: lastReadAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -27544,6 +29953,8 @@ class $$ConversationsTableTableManager
                 Value<String?> counterpartyPubkey = const Value.absent(),
                 Value<String?> counterpartyDisplayName = const Value.absent(),
                 Value<String?> iconUrl = const Value.absent(),
+                Value<DateTime?> lastBackfilledAt = const Value.absent(),
+                Value<DateTime?> lastReadAt = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
               }) => ConversationsCompanion.insert(
@@ -27554,6 +29965,8 @@ class $$ConversationsTableTableManager
                 counterpartyPubkey: counterpartyPubkey,
                 counterpartyDisplayName: counterpartyDisplayName,
                 iconUrl: iconUrl,
+                lastBackfilledAt: lastBackfilledAt,
+                lastReadAt: lastReadAt,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -30700,6 +33113,7 @@ typedef $$ReactionsTableCreateCompanionBuilder =
       required int messageId,
       required int userId,
       Value<String?> emoji,
+      Value<String?> reactorPubkey,
       required DateTime createdAt,
       required DateTime updatedAt,
     });
@@ -30709,6 +33123,7 @@ typedef $$ReactionsTableUpdateCompanionBuilder =
       Value<int> messageId,
       Value<int> userId,
       Value<String?> emoji,
+      Value<String?> reactorPubkey,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -30739,6 +33154,11 @@ class $$ReactionsTableFilterComposer
 
   ColumnFilters<String> get emoji => $composableBuilder(
     column: $table.emoji,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -30782,6 +33202,11 @@ class $$ReactionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -30813,6 +33238,11 @@ class $$ReactionsTableAnnotationComposer
 
   GeneratedColumn<String> get emoji =>
       $composableBuilder(column: $table.emoji, builder: (column) => column);
+
+  GeneratedColumn<String> get reactorPubkey => $composableBuilder(
+    column: $table.reactorPubkey,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
@@ -30856,6 +33286,7 @@ class $$ReactionsTableTableManager
                 Value<int> messageId = const Value.absent(),
                 Value<int> userId = const Value.absent(),
                 Value<String?> emoji = const Value.absent(),
+                Value<String?> reactorPubkey = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => ReactionsCompanion(
@@ -30863,6 +33294,7 @@ class $$ReactionsTableTableManager
                 messageId: messageId,
                 userId: userId,
                 emoji: emoji,
+                reactorPubkey: reactorPubkey,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -30872,6 +33304,7 @@ class $$ReactionsTableTableManager
                 required int messageId,
                 required int userId,
                 Value<String?> emoji = const Value.absent(),
+                Value<String?> reactorPubkey = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
               }) => ReactionsCompanion.insert(
@@ -30879,6 +33312,7 @@ class $$ReactionsTableTableManager
                 messageId: messageId,
                 userId: userId,
                 emoji: emoji,
+                reactorPubkey: reactorPubkey,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -31406,6 +33840,7 @@ typedef $$ServerEmojisTableCreateCompanionBuilder =
       required int serverId,
       required String name,
       required int creatorId,
+      Value<String?> creatorPubkey,
       Value<String?> url,
       required DateTime createdAt,
       required DateTime updatedAt,
@@ -31417,6 +33852,7 @@ typedef $$ServerEmojisTableUpdateCompanionBuilder =
       Value<int> serverId,
       Value<String> name,
       Value<int> creatorId,
+      Value<String?> creatorPubkey,
       Value<String?> url,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -31453,6 +33889,11 @@ class $$ServerEmojisTableFilterComposer
 
   ColumnFilters<int> get creatorId => $composableBuilder(
     column: $table.creatorId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -31506,6 +33947,11 @@ class $$ServerEmojisTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get url => $composableBuilder(
     column: $table.url,
     builder: (column) => ColumnOrderings(column),
@@ -31545,6 +33991,11 @@ class $$ServerEmojisTableAnnotationComposer
 
   GeneratedColumn<int> get creatorId =>
       $composableBuilder(column: $table.creatorId, builder: (column) => column);
+
+  GeneratedColumn<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get url =>
       $composableBuilder(column: $table.url, builder: (column) => column);
@@ -31594,6 +34045,7 @@ class $$ServerEmojisTableTableManager
                 Value<int> serverId = const Value.absent(),
                 Value<String> name = const Value.absent(),
                 Value<int> creatorId = const Value.absent(),
+                Value<String?> creatorPubkey = const Value.absent(),
                 Value<String?> url = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -31603,6 +34055,7 @@ class $$ServerEmojisTableTableManager
                 serverId: serverId,
                 name: name,
                 creatorId: creatorId,
+                creatorPubkey: creatorPubkey,
                 url: url,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -31614,6 +34067,7 @@ class $$ServerEmojisTableTableManager
                 required int serverId,
                 required String name,
                 required int creatorId,
+                Value<String?> creatorPubkey = const Value.absent(),
                 Value<String?> url = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
@@ -31623,6 +34077,7 @@ class $$ServerEmojisTableTableManager
                 serverId: serverId,
                 name: name,
                 creatorId: creatorId,
+                creatorPubkey: creatorPubkey,
                 url: url,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -31660,6 +34115,7 @@ typedef $$ServerStickersTableCreateCompanionBuilder =
       required String name,
       Value<String?> description,
       required int creatorId,
+      Value<String?> creatorPubkey,
       Value<String?> url,
       required DateTime createdAt,
       required DateTime updatedAt,
@@ -31672,6 +34128,7 @@ typedef $$ServerStickersTableUpdateCompanionBuilder =
       Value<String> name,
       Value<String?> description,
       Value<int> creatorId,
+      Value<String?> creatorPubkey,
       Value<String?> url,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -31713,6 +34170,11 @@ class $$ServerStickersTableFilterComposer
 
   ColumnFilters<int> get creatorId => $composableBuilder(
     column: $table.creatorId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -31771,6 +34233,11 @@ class $$ServerStickersTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get url => $composableBuilder(
     column: $table.url,
     builder: (column) => ColumnOrderings(column),
@@ -31815,6 +34282,11 @@ class $$ServerStickersTableAnnotationComposer
 
   GeneratedColumn<int> get creatorId =>
       $composableBuilder(column: $table.creatorId, builder: (column) => column);
+
+  GeneratedColumn<String> get creatorPubkey => $composableBuilder(
+    column: $table.creatorPubkey,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get url =>
       $composableBuilder(column: $table.url, builder: (column) => column);
@@ -31869,6 +34341,7 @@ class $$ServerStickersTableTableManager
                 Value<String> name = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<int> creatorId = const Value.absent(),
+                Value<String?> creatorPubkey = const Value.absent(),
                 Value<String?> url = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -31879,6 +34352,7 @@ class $$ServerStickersTableTableManager
                 name: name,
                 description: description,
                 creatorId: creatorId,
+                creatorPubkey: creatorPubkey,
                 url: url,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -31891,6 +34365,7 @@ class $$ServerStickersTableTableManager
                 required String name,
                 Value<String?> description = const Value.absent(),
                 required int creatorId,
+                Value<String?> creatorPubkey = const Value.absent(),
                 Value<String?> url = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
@@ -31901,6 +34376,7 @@ class $$ServerStickersTableTableManager
                 name: name,
                 description: description,
                 creatorId: creatorId,
+                creatorPubkey: creatorPubkey,
                 url: url,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -34333,6 +36809,18 @@ typedef $$AppSettingsTableCreateCompanionBuilder =
       Value<bool> safetyHideUnknownSenders,
       Value<String> safetyKeywordFilter,
       Value<bool> safetyImageHashEnabled,
+      Value<String> safetyProtectionLevel,
+      Value<bool> safetySharedHashesEnabled,
+      Value<bool> safetyPublishHashes,
+      Value<bool> safetyBlockPhoneNumbers,
+      Value<bool> safetyBlockAllCaps,
+      Value<bool> safetyBlockSpamChars,
+      Value<int> safetyReportThreshold,
+      Value<bool> safetyReputationEnabled,
+      Value<String> safetyReputationSensitivity,
+      Value<int> safetyReputationThreshold,
+      Value<int> safetySharedHashMinReporters,
+      Value<bool> safetySharedHashTrustFriends,
       Value<int> maxUploadSizeMb,
       required DateTime createdAt,
       required DateTime updatedAt,
@@ -34356,6 +36844,18 @@ typedef $$AppSettingsTableUpdateCompanionBuilder =
       Value<bool> safetyHideUnknownSenders,
       Value<String> safetyKeywordFilter,
       Value<bool> safetyImageHashEnabled,
+      Value<String> safetyProtectionLevel,
+      Value<bool> safetySharedHashesEnabled,
+      Value<bool> safetyPublishHashes,
+      Value<bool> safetyBlockPhoneNumbers,
+      Value<bool> safetyBlockAllCaps,
+      Value<bool> safetyBlockSpamChars,
+      Value<int> safetyReportThreshold,
+      Value<bool> safetyReputationEnabled,
+      Value<String> safetyReputationSensitivity,
+      Value<int> safetyReputationThreshold,
+      Value<int> safetySharedHashMinReporters,
+      Value<bool> safetySharedHashTrustFriends,
       Value<int> maxUploadSizeMb,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
@@ -34452,6 +36952,66 @@ class $$AppSettingsTableFilterComposer
 
   ColumnFilters<bool> get safetyImageHashEnabled => $composableBuilder(
     column: $table.safetyImageHashEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get safetyProtectionLevel => $composableBuilder(
+    column: $table.safetyProtectionLevel,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetySharedHashesEnabled => $composableBuilder(
+    column: $table.safetySharedHashesEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetyPublishHashes => $composableBuilder(
+    column: $table.safetyPublishHashes,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetyBlockPhoneNumbers => $composableBuilder(
+    column: $table.safetyBlockPhoneNumbers,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetyBlockAllCaps => $composableBuilder(
+    column: $table.safetyBlockAllCaps,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetyBlockSpamChars => $composableBuilder(
+    column: $table.safetyBlockSpamChars,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get safetyReportThreshold => $composableBuilder(
+    column: $table.safetyReportThreshold,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetyReputationEnabled => $composableBuilder(
+    column: $table.safetyReputationEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get safetyReputationSensitivity => $composableBuilder(
+    column: $table.safetyReputationSensitivity,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get safetyReputationThreshold => $composableBuilder(
+    column: $table.safetyReputationThreshold,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get safetySharedHashMinReporters => $composableBuilder(
+    column: $table.safetySharedHashMinReporters,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get safetySharedHashTrustFriends => $composableBuilder(
+    column: $table.safetySharedHashTrustFriends,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -34565,6 +37125,66 @@ class $$AppSettingsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get safetyProtectionLevel => $composableBuilder(
+    column: $table.safetyProtectionLevel,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetySharedHashesEnabled => $composableBuilder(
+    column: $table.safetySharedHashesEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetyPublishHashes => $composableBuilder(
+    column: $table.safetyPublishHashes,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetyBlockPhoneNumbers => $composableBuilder(
+    column: $table.safetyBlockPhoneNumbers,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetyBlockAllCaps => $composableBuilder(
+    column: $table.safetyBlockAllCaps,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetyBlockSpamChars => $composableBuilder(
+    column: $table.safetyBlockSpamChars,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get safetyReportThreshold => $composableBuilder(
+    column: $table.safetyReportThreshold,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetyReputationEnabled => $composableBuilder(
+    column: $table.safetyReputationEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get safetyReputationSensitivity => $composableBuilder(
+    column: $table.safetyReputationSensitivity,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get safetyReputationThreshold => $composableBuilder(
+    column: $table.safetyReputationThreshold,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get safetySharedHashMinReporters => $composableBuilder(
+    column: $table.safetySharedHashMinReporters,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get safetySharedHashTrustFriends => $composableBuilder(
+    column: $table.safetySharedHashTrustFriends,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<int> get maxUploadSizeMb => $composableBuilder(
     column: $table.maxUploadSizeMb,
     builder: (column) => ColumnOrderings(column),
@@ -34673,6 +37293,66 @@ class $$AppSettingsTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get safetyProtectionLevel => $composableBuilder(
+    column: $table.safetyProtectionLevel,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetySharedHashesEnabled => $composableBuilder(
+    column: $table.safetySharedHashesEnabled,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetyPublishHashes => $composableBuilder(
+    column: $table.safetyPublishHashes,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetyBlockPhoneNumbers => $composableBuilder(
+    column: $table.safetyBlockPhoneNumbers,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetyBlockAllCaps => $composableBuilder(
+    column: $table.safetyBlockAllCaps,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetyBlockSpamChars => $composableBuilder(
+    column: $table.safetyBlockSpamChars,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get safetyReportThreshold => $composableBuilder(
+    column: $table.safetyReportThreshold,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetyReputationEnabled => $composableBuilder(
+    column: $table.safetyReputationEnabled,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get safetyReputationSensitivity => $composableBuilder(
+    column: $table.safetyReputationSensitivity,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get safetyReputationThreshold => $composableBuilder(
+    column: $table.safetyReputationThreshold,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get safetySharedHashMinReporters => $composableBuilder(
+    column: $table.safetySharedHashMinReporters,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get safetySharedHashTrustFriends => $composableBuilder(
+    column: $table.safetySharedHashTrustFriends,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<int> get maxUploadSizeMb => $composableBuilder(
     column: $table.maxUploadSizeMb,
     builder: (column) => column,
@@ -34733,6 +37413,19 @@ class $$AppSettingsTableTableManager
                 Value<bool> safetyHideUnknownSenders = const Value.absent(),
                 Value<String> safetyKeywordFilter = const Value.absent(),
                 Value<bool> safetyImageHashEnabled = const Value.absent(),
+                Value<String> safetyProtectionLevel = const Value.absent(),
+                Value<bool> safetySharedHashesEnabled = const Value.absent(),
+                Value<bool> safetyPublishHashes = const Value.absent(),
+                Value<bool> safetyBlockPhoneNumbers = const Value.absent(),
+                Value<bool> safetyBlockAllCaps = const Value.absent(),
+                Value<bool> safetyBlockSpamChars = const Value.absent(),
+                Value<int> safetyReportThreshold = const Value.absent(),
+                Value<bool> safetyReputationEnabled = const Value.absent(),
+                Value<String> safetyReputationSensitivity =
+                    const Value.absent(),
+                Value<int> safetyReputationThreshold = const Value.absent(),
+                Value<int> safetySharedHashMinReporters = const Value.absent(),
+                Value<bool> safetySharedHashTrustFriends = const Value.absent(),
                 Value<int> maxUploadSizeMb = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
@@ -34754,6 +37447,18 @@ class $$AppSettingsTableTableManager
                 safetyHideUnknownSenders: safetyHideUnknownSenders,
                 safetyKeywordFilter: safetyKeywordFilter,
                 safetyImageHashEnabled: safetyImageHashEnabled,
+                safetyProtectionLevel: safetyProtectionLevel,
+                safetySharedHashesEnabled: safetySharedHashesEnabled,
+                safetyPublishHashes: safetyPublishHashes,
+                safetyBlockPhoneNumbers: safetyBlockPhoneNumbers,
+                safetyBlockAllCaps: safetyBlockAllCaps,
+                safetyBlockSpamChars: safetyBlockSpamChars,
+                safetyReportThreshold: safetyReportThreshold,
+                safetyReputationEnabled: safetyReputationEnabled,
+                safetyReputationSensitivity: safetyReputationSensitivity,
+                safetyReputationThreshold: safetyReputationThreshold,
+                safetySharedHashMinReporters: safetySharedHashMinReporters,
+                safetySharedHashTrustFriends: safetySharedHashTrustFriends,
                 maxUploadSizeMb: maxUploadSizeMb,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -34777,6 +37482,19 @@ class $$AppSettingsTableTableManager
                 Value<bool> safetyHideUnknownSenders = const Value.absent(),
                 Value<String> safetyKeywordFilter = const Value.absent(),
                 Value<bool> safetyImageHashEnabled = const Value.absent(),
+                Value<String> safetyProtectionLevel = const Value.absent(),
+                Value<bool> safetySharedHashesEnabled = const Value.absent(),
+                Value<bool> safetyPublishHashes = const Value.absent(),
+                Value<bool> safetyBlockPhoneNumbers = const Value.absent(),
+                Value<bool> safetyBlockAllCaps = const Value.absent(),
+                Value<bool> safetyBlockSpamChars = const Value.absent(),
+                Value<int> safetyReportThreshold = const Value.absent(),
+                Value<bool> safetyReputationEnabled = const Value.absent(),
+                Value<String> safetyReputationSensitivity =
+                    const Value.absent(),
+                Value<int> safetyReputationThreshold = const Value.absent(),
+                Value<int> safetySharedHashMinReporters = const Value.absent(),
+                Value<bool> safetySharedHashTrustFriends = const Value.absent(),
                 Value<int> maxUploadSizeMb = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
@@ -34798,6 +37516,18 @@ class $$AppSettingsTableTableManager
                 safetyHideUnknownSenders: safetyHideUnknownSenders,
                 safetyKeywordFilter: safetyKeywordFilter,
                 safetyImageHashEnabled: safetyImageHashEnabled,
+                safetyProtectionLevel: safetyProtectionLevel,
+                safetySharedHashesEnabled: safetySharedHashesEnabled,
+                safetyPublishHashes: safetyPublishHashes,
+                safetyBlockPhoneNumbers: safetyBlockPhoneNumbers,
+                safetyBlockAllCaps: safetyBlockAllCaps,
+                safetyBlockSpamChars: safetyBlockSpamChars,
+                safetyReportThreshold: safetyReportThreshold,
+                safetyReputationEnabled: safetyReputationEnabled,
+                safetyReputationSensitivity: safetyReputationSensitivity,
+                safetyReputationThreshold: safetyReputationThreshold,
+                safetySharedHashMinReporters: safetySharedHashMinReporters,
+                safetySharedHashTrustFriends: safetySharedHashTrustFriends,
                 maxUploadSizeMb: maxUploadSizeMb,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
@@ -35804,6 +38534,695 @@ typedef $$GifFavoritesTableProcessedTableManager =
       GifFavorite,
       PrefetchHooks Function()
     >;
+typedef $$MediaCacheTableCreateCompanionBuilder =
+    MediaCacheCompanion Function({
+      Value<int> id,
+      required String url,
+      required double width,
+      required double height,
+      required DateTime createdAt,
+    });
+typedef $$MediaCacheTableUpdateCompanionBuilder =
+    MediaCacheCompanion Function({
+      Value<int> id,
+      Value<String> url,
+      Value<double> width,
+      Value<double> height,
+      Value<DateTime> createdAt,
+    });
+
+class $$MediaCacheTableFilterComposer
+    extends Composer<_$InfernoDatabase, $MediaCacheTable> {
+  $$MediaCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get width => $composableBuilder(
+    column: $table.width,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get height => $composableBuilder(
+    column: $table.height,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$MediaCacheTableOrderingComposer
+    extends Composer<_$InfernoDatabase, $MediaCacheTable> {
+  $$MediaCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get width => $composableBuilder(
+    column: $table.width,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get height => $composableBuilder(
+    column: $table.height,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$MediaCacheTableAnnotationComposer
+    extends Composer<_$InfernoDatabase, $MediaCacheTable> {
+  $$MediaCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+
+  GeneratedColumn<double> get width =>
+      $composableBuilder(column: $table.width, builder: (column) => column);
+
+  GeneratedColumn<double> get height =>
+      $composableBuilder(column: $table.height, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$MediaCacheTableTableManager
+    extends
+        RootTableManager<
+          _$InfernoDatabase,
+          $MediaCacheTable,
+          MediaCacheData,
+          $$MediaCacheTableFilterComposer,
+          $$MediaCacheTableOrderingComposer,
+          $$MediaCacheTableAnnotationComposer,
+          $$MediaCacheTableCreateCompanionBuilder,
+          $$MediaCacheTableUpdateCompanionBuilder,
+          (
+            MediaCacheData,
+            BaseReferences<_$InfernoDatabase, $MediaCacheTable, MediaCacheData>,
+          ),
+          MediaCacheData,
+          PrefetchHooks Function()
+        > {
+  $$MediaCacheTableTableManager(_$InfernoDatabase db, $MediaCacheTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MediaCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MediaCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MediaCacheTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> url = const Value.absent(),
+                Value<double> width = const Value.absent(),
+                Value<double> height = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+              }) => MediaCacheCompanion(
+                id: id,
+                url: url,
+                width: width,
+                height: height,
+                createdAt: createdAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String url,
+                required double width,
+                required double height,
+                required DateTime createdAt,
+              }) => MediaCacheCompanion.insert(
+                id: id,
+                url: url,
+                width: width,
+                height: height,
+                createdAt: createdAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$MediaCacheTableProcessedTableManager =
+    ProcessedTableManager<
+      _$InfernoDatabase,
+      $MediaCacheTable,
+      MediaCacheData,
+      $$MediaCacheTableFilterComposer,
+      $$MediaCacheTableOrderingComposer,
+      $$MediaCacheTableAnnotationComposer,
+      $$MediaCacheTableCreateCompanionBuilder,
+      $$MediaCacheTableUpdateCompanionBuilder,
+      (
+        MediaCacheData,
+        BaseReferences<_$InfernoDatabase, $MediaCacheTable, MediaCacheData>,
+      ),
+      MediaCacheData,
+      PrefetchHooks Function()
+    >;
+typedef $$CsamHashEntriesTableCreateCompanionBuilder =
+    CsamHashEntriesCompanion Function({
+      Value<int> id,
+      required String hashValue,
+      Value<String> hashType,
+      required String listSource,
+      required DateTime addedAt,
+    });
+typedef $$CsamHashEntriesTableUpdateCompanionBuilder =
+    CsamHashEntriesCompanion Function({
+      Value<int> id,
+      Value<String> hashValue,
+      Value<String> hashType,
+      Value<String> listSource,
+      Value<DateTime> addedAt,
+    });
+
+class $$CsamHashEntriesTableFilterComposer
+    extends Composer<_$InfernoDatabase, $CsamHashEntriesTable> {
+  $$CsamHashEntriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hashValue => $composableBuilder(
+    column: $table.hashValue,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hashType => $composableBuilder(
+    column: $table.hashType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get listSource => $composableBuilder(
+    column: $table.listSource,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CsamHashEntriesTableOrderingComposer
+    extends Composer<_$InfernoDatabase, $CsamHashEntriesTable> {
+  $$CsamHashEntriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hashValue => $composableBuilder(
+    column: $table.hashValue,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hashType => $composableBuilder(
+    column: $table.hashType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get listSource => $composableBuilder(
+    column: $table.listSource,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get addedAt => $composableBuilder(
+    column: $table.addedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CsamHashEntriesTableAnnotationComposer
+    extends Composer<_$InfernoDatabase, $CsamHashEntriesTable> {
+  $$CsamHashEntriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get hashValue =>
+      $composableBuilder(column: $table.hashValue, builder: (column) => column);
+
+  GeneratedColumn<String> get hashType =>
+      $composableBuilder(column: $table.hashType, builder: (column) => column);
+
+  GeneratedColumn<String> get listSource => $composableBuilder(
+    column: $table.listSource,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get addedAt =>
+      $composableBuilder(column: $table.addedAt, builder: (column) => column);
+}
+
+class $$CsamHashEntriesTableTableManager
+    extends
+        RootTableManager<
+          _$InfernoDatabase,
+          $CsamHashEntriesTable,
+          CsamHashEntry,
+          $$CsamHashEntriesTableFilterComposer,
+          $$CsamHashEntriesTableOrderingComposer,
+          $$CsamHashEntriesTableAnnotationComposer,
+          $$CsamHashEntriesTableCreateCompanionBuilder,
+          $$CsamHashEntriesTableUpdateCompanionBuilder,
+          (
+            CsamHashEntry,
+            BaseReferences<
+              _$InfernoDatabase,
+              $CsamHashEntriesTable,
+              CsamHashEntry
+            >,
+          ),
+          CsamHashEntry,
+          PrefetchHooks Function()
+        > {
+  $$CsamHashEntriesTableTableManager(
+    _$InfernoDatabase db,
+    $CsamHashEntriesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CsamHashEntriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CsamHashEntriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CsamHashEntriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> hashValue = const Value.absent(),
+                Value<String> hashType = const Value.absent(),
+                Value<String> listSource = const Value.absent(),
+                Value<DateTime> addedAt = const Value.absent(),
+              }) => CsamHashEntriesCompanion(
+                id: id,
+                hashValue: hashValue,
+                hashType: hashType,
+                listSource: listSource,
+                addedAt: addedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String hashValue,
+                Value<String> hashType = const Value.absent(),
+                required String listSource,
+                required DateTime addedAt,
+              }) => CsamHashEntriesCompanion.insert(
+                id: id,
+                hashValue: hashValue,
+                hashType: hashType,
+                listSource: listSource,
+                addedAt: addedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CsamHashEntriesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$InfernoDatabase,
+      $CsamHashEntriesTable,
+      CsamHashEntry,
+      $$CsamHashEntriesTableFilterComposer,
+      $$CsamHashEntriesTableOrderingComposer,
+      $$CsamHashEntriesTableAnnotationComposer,
+      $$CsamHashEntriesTableCreateCompanionBuilder,
+      $$CsamHashEntriesTableUpdateCompanionBuilder,
+      (
+        CsamHashEntry,
+        BaseReferences<_$InfernoDatabase, $CsamHashEntriesTable, CsamHashEntry>,
+      ),
+      CsamHashEntry,
+      PrefetchHooks Function()
+    >;
+typedef $$HiddenAttachmentRecordsTableCreateCompanionBuilder =
+    HiddenAttachmentRecordsCompanion Function({
+      Value<int> id,
+      required int messageId,
+      required String originalFilename,
+      Value<String?> contentType,
+      Value<int?> byteSize,
+      Value<String?> checksum,
+      Value<DateTime?> purgedAt,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+    });
+typedef $$HiddenAttachmentRecordsTableUpdateCompanionBuilder =
+    HiddenAttachmentRecordsCompanion Function({
+      Value<int> id,
+      Value<int> messageId,
+      Value<String> originalFilename,
+      Value<String?> contentType,
+      Value<int?> byteSize,
+      Value<String?> checksum,
+      Value<DateTime?> purgedAt,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+    });
+
+class $$HiddenAttachmentRecordsTableFilterComposer
+    extends Composer<_$InfernoDatabase, $HiddenAttachmentRecordsTable> {
+  $$HiddenAttachmentRecordsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get originalFilename => $composableBuilder(
+    column: $table.originalFilename,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get byteSize => $composableBuilder(
+    column: $table.byteSize,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get checksum => $composableBuilder(
+    column: $table.checksum,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get purgedAt => $composableBuilder(
+    column: $table.purgedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$HiddenAttachmentRecordsTableOrderingComposer
+    extends Composer<_$InfernoDatabase, $HiddenAttachmentRecordsTable> {
+  $$HiddenAttachmentRecordsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get messageId => $composableBuilder(
+    column: $table.messageId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get originalFilename => $composableBuilder(
+    column: $table.originalFilename,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get byteSize => $composableBuilder(
+    column: $table.byteSize,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get checksum => $composableBuilder(
+    column: $table.checksum,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get purgedAt => $composableBuilder(
+    column: $table.purgedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$HiddenAttachmentRecordsTableAnnotationComposer
+    extends Composer<_$InfernoDatabase, $HiddenAttachmentRecordsTable> {
+  $$HiddenAttachmentRecordsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get messageId =>
+      $composableBuilder(column: $table.messageId, builder: (column) => column);
+
+  GeneratedColumn<String> get originalFilename => $composableBuilder(
+    column: $table.originalFilename,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get contentType => $composableBuilder(
+    column: $table.contentType,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get byteSize =>
+      $composableBuilder(column: $table.byteSize, builder: (column) => column);
+
+  GeneratedColumn<String> get checksum =>
+      $composableBuilder(column: $table.checksum, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get purgedAt =>
+      $composableBuilder(column: $table.purgedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$HiddenAttachmentRecordsTableTableManager
+    extends
+        RootTableManager<
+          _$InfernoDatabase,
+          $HiddenAttachmentRecordsTable,
+          HiddenAttachmentRecord,
+          $$HiddenAttachmentRecordsTableFilterComposer,
+          $$HiddenAttachmentRecordsTableOrderingComposer,
+          $$HiddenAttachmentRecordsTableAnnotationComposer,
+          $$HiddenAttachmentRecordsTableCreateCompanionBuilder,
+          $$HiddenAttachmentRecordsTableUpdateCompanionBuilder,
+          (
+            HiddenAttachmentRecord,
+            BaseReferences<
+              _$InfernoDatabase,
+              $HiddenAttachmentRecordsTable,
+              HiddenAttachmentRecord
+            >,
+          ),
+          HiddenAttachmentRecord,
+          PrefetchHooks Function()
+        > {
+  $$HiddenAttachmentRecordsTableTableManager(
+    _$InfernoDatabase db,
+    $HiddenAttachmentRecordsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$HiddenAttachmentRecordsTableFilterComposer(
+                $db: db,
+                $table: table,
+              ),
+          createOrderingComposer: () =>
+              $$HiddenAttachmentRecordsTableOrderingComposer(
+                $db: db,
+                $table: table,
+              ),
+          createComputedFieldComposer: () =>
+              $$HiddenAttachmentRecordsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> messageId = const Value.absent(),
+                Value<String> originalFilename = const Value.absent(),
+                Value<String?> contentType = const Value.absent(),
+                Value<int?> byteSize = const Value.absent(),
+                Value<String?> checksum = const Value.absent(),
+                Value<DateTime?> purgedAt = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+              }) => HiddenAttachmentRecordsCompanion(
+                id: id,
+                messageId: messageId,
+                originalFilename: originalFilename,
+                contentType: contentType,
+                byteSize: byteSize,
+                checksum: checksum,
+                purgedAt: purgedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int messageId,
+                required String originalFilename,
+                Value<String?> contentType = const Value.absent(),
+                Value<int?> byteSize = const Value.absent(),
+                Value<String?> checksum = const Value.absent(),
+                Value<DateTime?> purgedAt = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+              }) => HiddenAttachmentRecordsCompanion.insert(
+                id: id,
+                messageId: messageId,
+                originalFilename: originalFilename,
+                contentType: contentType,
+                byteSize: byteSize,
+                checksum: checksum,
+                purgedAt: purgedAt,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$HiddenAttachmentRecordsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$InfernoDatabase,
+      $HiddenAttachmentRecordsTable,
+      HiddenAttachmentRecord,
+      $$HiddenAttachmentRecordsTableFilterComposer,
+      $$HiddenAttachmentRecordsTableOrderingComposer,
+      $$HiddenAttachmentRecordsTableAnnotationComposer,
+      $$HiddenAttachmentRecordsTableCreateCompanionBuilder,
+      $$HiddenAttachmentRecordsTableUpdateCompanionBuilder,
+      (
+        HiddenAttachmentRecord,
+        BaseReferences<
+          _$InfernoDatabase,
+          $HiddenAttachmentRecordsTable,
+          HiddenAttachmentRecord
+        >,
+      ),
+      HiddenAttachmentRecord,
+      PrefetchHooks Function()
+    >;
 
 class $InfernoDatabaseManager {
   final _$InfernoDatabase _db;
@@ -35876,4 +39295,13 @@ class $InfernoDatabaseManager {
       $$GifCollectionsTableTableManager(_db, _db.gifCollections);
   $$GifFavoritesTableTableManager get gifFavorites =>
       $$GifFavoritesTableTableManager(_db, _db.gifFavorites);
+  $$MediaCacheTableTableManager get mediaCache =>
+      $$MediaCacheTableTableManager(_db, _db.mediaCache);
+  $$CsamHashEntriesTableTableManager get csamHashEntries =>
+      $$CsamHashEntriesTableTableManager(_db, _db.csamHashEntries);
+  $$HiddenAttachmentRecordsTableTableManager get hiddenAttachmentRecords =>
+      $$HiddenAttachmentRecordsTableTableManager(
+        _db,
+        _db.hiddenAttachmentRecords,
+      );
 }

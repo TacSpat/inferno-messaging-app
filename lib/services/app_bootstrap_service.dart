@@ -15,6 +15,11 @@ import '../services/reaction_service.dart';
 import '../services/presence_service.dart';
 import '../services/typing_service.dart';
 import '../services/server_sync_service.dart';
+import '../services/invite_service.dart';
+import '../services/media_cache_service.dart';
+import '../services/content_safety_service.dart';
+import '../services/shared_hash_service.dart';
+import '../services/nsfw_detector.dart';
 
 class AppBootstrapService {
   final InfernoDatabase db;
@@ -28,7 +33,11 @@ class AppBootstrapService {
   final ReactionService reactionService;
   final PresenceService presenceService;
   final TypingService typingService;
+  final InviteService inviteService;
+  final MediaCacheService? mediaCacheService;
   late final RelayConfigService relayConfig;
+  late final ContentSafetyService contentSafety;
+  late final SharedHashService sharedHashService;
   Timer? _resyncTimer;
 
   AppBootstrapService({
@@ -41,11 +50,18 @@ class AppBootstrapService {
     required this.groupMessageService,
     required this.dmService,
     required this.contactService,
+    required this.inviteService,
+    this.mediaCacheService,
   }) {
     relayConfig = RelayConfigService(db);
+    contentSafety = ContentSafetyService(db);
+    sharedHashService = SharedHashService(db, relayPool);
   }
 
   Future<void> bootstrap() async {
+    // 0. Warm media dimension cache (fast, single SELECT)
+    mediaCacheService?.warmUp();
+
     // 1. Ensure default relays + local user (fast, DB only)
     await relayConfig.ensureDefaultRelays();
     await _ensureLocalUser();
@@ -78,6 +94,12 @@ class AppBootstrapService {
 
     // 6. Start periodic server resync (every 60 minutes, matches Rails hourly sync)
     _startPeriodicResync();
+
+    // 7. Initialize NSFW detector (non-blocking — falls back gracefully)
+    NsfwDetector.instance.init();
+
+    // 8. Start shared hash fetching (if enabled)
+    sharedHashService.start();
   }
 
   /// Periodically resync all joined servers from relays (structure, members, etc.)
@@ -92,9 +114,11 @@ class AppBootstrapService {
 
     for (final server in servers) {
       if (server.nostrGroupId == null) continue;
+      // Yield between servers so UI stays responsive during multi-server resync
+      await Future.delayed(Duration.zero);
       try {
-        debugPrint('[Resync] Syncing server: ${server.name}');
-        await syncService.syncServer(server.nostrGroupId!);
+        // Periodic resync uses 30-minute throttle — skips if recently synced
+        await syncService.syncServer(server.nostrGroupId!, minInterval: const Duration(minutes: 30));
       } catch (e) {
         debugPrint('[Resync] Failed to sync ${server.name}: $e');
       }
@@ -105,6 +129,25 @@ class AppBootstrapService {
     _resyncTimer?.cancel();
     presenceService.dispose();
     typingService.dispose();
+    sharedHashService.dispose();
+    NsfwDetector.instance.dispose();
+  }
+
+  /// Fire-and-forget safety check on a message by its nostrEventId.
+  void _runSafetyCheck(String nostrEventId) {
+    // Run async without blocking the event handler
+    () async {
+      try {
+        final message = await (db.select(db.messages)
+              ..where((m) => m.nostrEventId.equals(nostrEventId)))
+            .getSingleOrNull();
+        if (message != null) {
+          await contentSafety.check(message.id);
+        }
+      } catch (e) {
+        debugPrint('[ContentSafety] Check failed for event $nostrEventId: $e');
+      }
+    }();
   }
 
   Future<void> _ensureLocalUser() async {
@@ -140,6 +183,8 @@ class AppBootstrapService {
           eventId: event.id!, direction: 'inbound',
           kind: 9, pubkey: event.pubkey,
         );
+        // Run content safety check on the newly inserted message
+        _runSafetyCheck(event.id!);
       }
     });
 
@@ -172,6 +217,8 @@ class AppBootstrapService {
           eventId: event.id!, direction: event.pubkey == pubKey ? 'outbound' : 'inbound',
           kind: 14, pubkey: event.pubkey,
         );
+        // Run content safety check on the newly inserted message
+        _runSafetyCheck(event.id!);
       }
     });
 
@@ -230,6 +277,8 @@ class AppBootstrapService {
 
     // Kind 31753: Member join/leave — live updates to member list
     relayPool.onKind(31753, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
       final dTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
       if (dTag == null || dTag.length < 2) return;
 
@@ -276,7 +325,7 @@ class AppBootstrapService {
         } catch (_) {} // Race condition — another handler may have inserted
       }
 
-      // Extract embedded profile from member event
+      // Extract ALL embedded profile data from member event tags
       String? tag(String key) {
         final t = event.tags.where((t) => t.isNotEmpty && t[0] == key).firstOrNull;
         return (t != null && t.length > 1 && t[1].isNotEmpty) ? t[1] : null;
@@ -284,19 +333,113 @@ class AppBootstrapService {
       final profileName = tag('profile_name');
       final profileDisplayName = tag('profile_display_name');
       final profilePicture = tag('profile_picture');
-      if (profileName != null || profileDisplayName != null) {
+      final profileColor = tag('profile_color');
+      final profileColor2 = tag('profile_color_2');
+      final profileStatus = tag('profile_status');
+      final profileStatusEmoji = tag('profile_status_emoji');
+      final profileAbout = tag('profile_about');
+      final profileBanner = tag('profile_banner');
+      final nickname = tag('nickname');
+
+      // Update profile if ANY profile tag is present
+      if (profileName != null || profileDisplayName != null || profilePicture != null || profileColor != null || profileStatus != null || nickname != null) {
         await (db.update(db.remoteMembers)
               ..where((m) => m.serverId.equals(server.id) & m.pubkey.equals(memberPubkey)))
             .write(RemoteMembersCompanion(
-          username: Value(profileName),
-          displayName: Value(profileDisplayName),
-          avatarUrl: Value(profilePicture),
-          bio: Value(tag('profile_about')),
-          bannerUrl: Value(tag('profile_banner')),
-          status: Value(tag('profile_status')),
-          statusEmoji: Value(tag('profile_status_emoji')),
+          username: profileName != null ? Value(profileName) : const Value.absent(),
+          displayName: profileDisplayName != null ? Value(profileDisplayName) : const Value.absent(),
+          avatarUrl: profilePicture != null ? Value(profilePicture) : const Value.absent(),
+          bio: profileAbout != null ? Value(profileAbout) : const Value.absent(),
+          bannerUrl: profileBanner != null ? Value(profileBanner) : const Value.absent(),
+          profileColor: profileColor != null ? Value(profileColor) : const Value.absent(),
+          profileColor2: profileColor2 != null ? Value(profileColor2) : const Value.absent(),
+          status: profileStatus != null ? Value(profileStatus) : const Value.absent(),
+          statusEmoji: profileStatusEmoji != null ? Value(profileStatusEmoji) : const Value.absent(),
+          nickname: nickname != null ? Value(nickname) : const Value.absent(),
           updatedAt: Value(now),
         ));
+      }
+
+      // Update role assignments from "roles" tag
+      final rolesTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'roles' && t.length >= 2).firstOrNull;
+      if (rolesTag != null) {
+        final member = await (db.select(db.remoteMembers)
+              ..where((m) => m.serverId.equals(server.id) & m.pubkey.equals(memberPubkey)))
+            .getSingleOrNull();
+        if (member != null) {
+          await (db.delete(db.remoteMembershipRoles)
+                ..where((r) => r.remoteMemberId.equals(member.id)))
+              .go();
+          for (int i = 1; i < rolesTag.length; i++) {
+            final rolePublicId = rolesTag[i];
+            if (rolePublicId.isEmpty) continue;
+            final role = await (db.select(db.roles)
+                  ..where((r) => r.serverId.equals(server.id) & r.publicId.equals(rolePublicId)))
+                .getSingleOrNull();
+            if (role != null) {
+              try {
+                await db.into(db.remoteMembershipRoles).insert(
+                  RemoteMembershipRolesCompanion.insert(
+                    remoteMemberId: member.id, roleId: role.id,
+                    createdAt: now, updatedAt: now,
+                  ),
+                );
+              } catch (_) {}
+            }
+          }
+        }
+      }
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31753, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+    });
+
+    // Kind 31752: Role updates — live sync role changes
+    relayPool.onKind(31752, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final dTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+      if (dTag == null || dTag.length < 2) return;
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      final gid = serverTag != null && serverTag.length > 1 ? serverTag[1] : dTag[1].replaceFirst('inferno-roles-', '');
+      final server = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(gid))).getSingleOrNull();
+      if (server == null) return;
+
+      for (final tag in event.tags) {
+        if (tag.isEmpty || tag[0] != 'role' || tag.length < 3) continue;
+        final color = tag.length > 3 ? tag[3] : null;
+        final position = tag.length > 4 ? int.tryParse(tag[4]) ?? 0 : 0;
+        final hoist = tag.length > 5 && tag[5] == 'true';
+        final permissions = tag.length > 7 && tag[7].isNotEmpty ? tag[7] : null;
+
+        final existingRole = await (db.select(db.roles)..where((r) => r.publicId.equals(tag[1]))).getSingleOrNull();
+        final now = DateTime.now();
+        if (existingRole != null) {
+          await (db.update(db.roles)..where((r) => r.id.equals(existingRole.id)))
+            .write(RolesCompanion(name: Value(tag[2]), color: Value(color), position: Value(position),
+              hoist: Value(hoist), permissions: Value(permissions), updatedAt: Value(now)));
+        } else {
+          try {
+            await db.into(db.roles).insert(RolesCompanion.insert(
+              publicId: tag[1], serverId: server.id, name: Value(tag[2]),
+              color: Value(color), position: Value(position), hoist: Value(hoist),
+              permissions: Value(permissions), createdAt: now, updatedAt: now));
+          } catch (_) {}
+        }
+      }
+      debugPrint('[LiveSync] Roles updated for ${server.name}');
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31752, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
       }
     });
 
@@ -313,6 +456,200 @@ class AppBootstrapService {
     // Kind 25050: Typing indicators
     relayPool.onKind(25050, (relayUrl, event) {
       typingService.processInboundTyping(event);
+    });
+
+    // Kind 31754: Server emoji updates (live)
+    relayPool.onKind(31754, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      if (serverTag == null || serverTag.length < 2) return;
+      final nostrGroupId = serverTag[1];
+      final server = await (db.select(db.servers)
+            ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+          .getSingleOrNull();
+      if (server == null) return;
+      debugPrint('[Live] Emoji update for ${server.name}');
+
+      final seenNames = <String>{};
+      for (final tag in event.tags) {
+        if (tag.isEmpty || tag[0] != 'emoji' || tag.length < 3) continue;
+        final name = tag[1];
+        final url = tag[2];
+        seenNames.add(name);
+        final publicId = name.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
+        try {
+          final existing = await (db.select(db.serverEmojis)
+                ..where((e) => e.serverId.equals(server.id) & e.name.equals(name)))
+              .getSingleOrNull();
+          if (existing != null) {
+            await (db.update(db.serverEmojis)..where((e) => e.id.equals(existing.id)))
+                .write(ServerEmojisCompanion(url: Value(url), updatedAt: Value(DateTime.now())));
+          } else {
+            await db.into(db.serverEmojis).insert(ServerEmojisCompanion.insert(
+              publicId: publicId, serverId: server.id, name: name, creatorId: 0,
+              url: Value(url), createdAt: DateTime.now(), updatedAt: DateTime.now(),
+            ));
+          }
+        } catch (_) {}
+      }
+      // Remove emojis no longer in the event (deleted on Rails)
+      final allEmojis = await (db.select(db.serverEmojis)
+            ..where((e) => e.serverId.equals(server.id)))
+          .get();
+      for (final emoji in allEmojis) {
+        if (!seenNames.contains(emoji.name)) {
+          await (db.delete(db.serverEmojis)..where((e) => e.id.equals(emoji.id))).go();
+        }
+      }
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31754, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+    });
+
+    // Kind 31755: Server sticker updates (live)
+    relayPool.onKind(31755, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      if (serverTag == null || serverTag.length < 2) return;
+      final nostrGroupId = serverTag[1];
+      final server = await (db.select(db.servers)
+            ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+          .getSingleOrNull();
+      if (server == null) return;
+      debugPrint('[Live] Sticker update for ${server.name}');
+
+      final seenNames = <String>{};
+      for (final tag in event.tags) {
+        if (tag.isEmpty || tag[0] != 'sticker' || tag.length < 4) continue;
+        final name = tag[1];
+        final description = tag[2];
+        final url = tag[3];
+        seenNames.add(name);
+        final publicId = name.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
+        try {
+          final existing = await (db.select(db.serverStickers)
+                ..where((s) => s.serverId.equals(server.id) & s.name.equals(name)))
+              .getSingleOrNull();
+          if (existing != null) {
+            await (db.update(db.serverStickers)..where((s) => s.id.equals(existing.id)))
+                .write(ServerStickersCompanion(
+                  url: Value(url),
+                  description: Value(description.isNotEmpty ? description : null),
+                  updatedAt: Value(DateTime.now()),
+                ));
+          } else {
+            await db.into(db.serverStickers).insert(ServerStickersCompanion.insert(
+              publicId: publicId, serverId: server.id, name: name, creatorId: 0,
+              url: Value(url),
+              description: Value(description.isNotEmpty ? description : null),
+              createdAt: DateTime.now(), updatedAt: DateTime.now(),
+            ));
+          }
+        } catch (_) {}
+      }
+      // Remove stickers no longer in the event
+      final allStickers = await (db.select(db.serverStickers)
+            ..where((s) => s.serverId.equals(server.id)))
+          .get();
+      for (final sticker in allStickers) {
+        if (!seenNames.contains(sticker.name)) {
+          await (db.delete(db.serverStickers)..where((s) => s.id.equals(sticker.id))).go();
+        }
+      }
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31755, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+    });
+
+    // Kind 31757: Invite updates (live sync)
+    relayPool.onKind(31757, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      if (serverTag == null || serverTag.length < 2) return;
+      final nostrGroupId = serverTag[1];
+      final server = await (db.select(db.servers)
+            ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+          .getSingleOrNull();
+      if (server == null) return;
+      await inviteService.processInboundInvite(event, server);
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31757, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+    });
+
+    // Kind 31750: Server metadata updates — log for audit trail
+    relayPool.onKind(31750, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final dTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+      if (dTag == null || dTag.length < 2) return;
+      final gid = dTag[1].replaceFirst('inferno-', '');
+      final server = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(gid))).getSingleOrNull();
+      if (server == null) return;
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31750, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+      debugPrint('[LiveSync] Metadata update for ${server.name}');
+    });
+
+    // Kind 31751: Server structure updates — log for audit trail
+    relayPool.onKind(31751, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final dTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'd').firstOrNull;
+      if (dTag == null || dTag.length < 2) return;
+      final gid = dTag[1].replaceFirst('inferno-struct-', '');
+      final server = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(gid))).getSingleOrNull();
+      if (server == null) return;
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31751, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+      debugPrint('[LiveSync] Structure update for ${server.name}');
+    });
+
+    // Kind 31756: Ban updates — log for audit trail
+    relayPool.onKind(31756, (relayUrl, event) async {
+      if (event.id != null && await relayConfig.isEventProcessed(event.id!)) return;
+
+      final serverTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'server').firstOrNull;
+      if (serverTag == null || serverTag.length < 2) return;
+      final server = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(serverTag[1]))).getSingleOrNull();
+      if (server == null) return;
+
+      if (event.id != null) {
+        await relayConfig.markEventProcessed(
+          eventId: event.id!, direction: 'inbound',
+          kind: 31756, pubkey: event.pubkey, serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+        );
+      }
+      debugPrint('[LiveSync] Ban update for ${server.name}');
     });
 
     // NIP-42 AUTH challenges — auto-respond with ["AUTH", event] to the specific relay
@@ -360,7 +697,7 @@ class AppBootstrapService {
     }
     // Presence + member events: subscribe broadly for live updates
     relayPool.subscribe(filters: [
-      NostrFilter(kinds: [30315, 31753], since: catchupSince),
+      NostrFilter(kinds: [30315, 31750, 31751, 31752, 31753, 31754, 31755, 31756, 31757], since: catchupSince),
     ]);
 
     // Subscribe to group messages for all joined channels

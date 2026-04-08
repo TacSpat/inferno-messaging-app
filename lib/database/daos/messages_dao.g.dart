@@ -6,4 +6,6 @@ part of 'messages_dao.dart';
 mixin _$MessagesDaoMixin on DatabaseAccessor<InfernoDatabase> {
   $MessagesTable get messages => attachedDatabase.messages;
   $ReactionsTable get reactions => attachedDatabase.reactions;
+  $ChannelReadsTable get channelReads => attachedDatabase.channelReads;
+  $ConversationsTable get conversations => attachedDatabase.conversations;
 }

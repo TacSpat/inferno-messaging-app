@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/auth_service.dart';
 import '../services/nostr_profile_service.dart';
 import '../nostr/relay_pool.dart';
+import 'database_provider.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) {
   return AuthService();
@@ -20,5 +21,6 @@ final relayPoolProvider = Provider<RelayPool>((ref) {
 
 final profileServiceProvider = Provider<NostrProfileService>((ref) {
   final pool = ref.watch(relayPoolProvider);
-  return NostrProfileService(pool);
+  final db = ref.watch(databaseProvider);
+  return NostrProfileService(pool, db);
 });
