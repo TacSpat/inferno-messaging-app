@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../providers/auth_provider.dart';
 
-enum _KeyFormat { unknown, nsec, ncryptsec, hex }
+enum _KeyFormat { unknown, nsec, ncryptsec }
 
 class KeyImportScreen extends ConsumerStatefulWidget {
   const KeyImportScreen({super.key});
@@ -18,7 +18,6 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
   _KeyFormat _detectedFormat = _KeyFormat.unknown;
   bool _loading = false;
   String? _error;
-  bool _obscureKey = true;
   bool _obscurePassword = true;
 
   @override
@@ -35,8 +34,6 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
         _detectedFormat = _KeyFormat.nsec;
       } else if (trimmed.startsWith('ncryptsec1')) {
         _detectedFormat = _KeyFormat.ncryptsec;
-      } else if (RegExp(r'^[0-9a-f]{64}$').hasMatch(trimmed)) {
-        _detectedFormat = _KeyFormat.hex;
       } else {
         _detectedFormat = _KeyFormat.unknown;
       }
@@ -65,11 +62,8 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
           }
           await authService.importNcryptsec(input, password);
           break;
-        case _KeyFormat.hex:
-          await authService.importHex(input);
-          break;
         case _KeyFormat.unknown:
-          setState(() { _loading = false; _error = 'Unrecognized key format. Use nsec1..., ncryptsec1..., or 64-char hex.'; });
+          setState(() { _loading = false; _error = 'Unrecognized key format. Use nsec1... or ncryptsec1...'; });
           return;
       }
 
@@ -88,9 +82,8 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
 
   String get _formatLabel {
     switch (_detectedFormat) {
-      case _KeyFormat.nsec: return 'nsec (raw private key)';
+      case _KeyFormat.nsec: return 'nsec (private key)';
       case _KeyFormat.ncryptsec: return 'ncryptsec (password-encrypted)';
-      case _KeyFormat.hex: return 'Hex private key';
       case _KeyFormat.unknown: return '';
     }
   }
@@ -126,16 +119,16 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
               const SizedBox(height: 24),
               TextFormField(
                 controller: _keyController,
-                decoration: InputDecoration(
+                decoration: const InputDecoration(
                   labelText: 'Private Key',
-                  hintText: 'nsec1..., ncryptsec1..., or hex',
-                  prefixIcon: const Icon(Icons.key),
-                  suffixIcon: IconButton(
-                    icon: Icon(_obscureKey ? Icons.visibility_off : Icons.visibility),
-                    onPressed: () => setState(() => _obscureKey = !_obscureKey),
+                  hintText: 'nsec1... or ncryptsec1...',
+                  prefixIcon: Icon(Icons.key),
+                  suffixIcon: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Icon(Icons.visibility_off, color: Color(0xFF5C5C5C)),
                   ),
                 ),
-                obscureText: _obscureKey,
+                obscureText: true,
                 onChanged: _detectFormat,
                 maxLines: 1,
               ),
@@ -150,6 +143,33 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                       style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 13),
                     ),
                   ],
+                ),
+              ],
+              if (_detectedFormat == _KeyFormat.nsec) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1A2A3A),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFF2196F3).withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline, color: Color(0xFF2196F3), size: 16),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'For better security, use an ncryptsec (encrypted backup) instead. '
+                          'Raw nsec keys can be leaked if your clipboard is compromised.',
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF90CAF9), fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
               if (_detectedFormat == _KeyFormat.ncryptsec) ...[
@@ -209,7 +229,9 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'Your private key is stored securely on this device using the platform keychain. Never share your nsec with anyone.',
+                        'Your private key is stored securely on this device using the platform keychain. '
+                        'For maximum security, use an ncryptsec (encrypted backup) instead of a raw nsec. '
+                        'Never share your private key with anyone.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: const Color(0xFFFF9800),
                         ),

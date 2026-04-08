@@ -23,8 +23,11 @@ class InfernoApp extends ConsumerWidget {
       routerConfig: router,
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
-        // On mobile, wrap with UpgradeAlert for App Store / Play Store prompts
-        var content = child!;
+        // Ensure Noto Color Emoji is used as fallback for consistent cross-platform emoji
+        var content = DefaultTextStyle.merge(
+          style: const TextStyle(fontFamilyFallback: ['NotoColorEmoji']),
+          child: child!,
+        );
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           content = UpgradeAlert(
             showIgnore: false,

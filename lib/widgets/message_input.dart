@@ -226,6 +226,8 @@ class _MessageInputState extends ConsumerState<MessageInput> {
     }
   }
 
+  static final _nsecPattern = RegExp(r'nsec1[qpzry9x8gf2tvdw0s3jn54khce6mua7l]{58,}', caseSensitive: false);
+
   void _send() async {
     if (_sending || _uploading) return;
     final text = _controller.text.trim();
@@ -237,6 +239,19 @@ class _MessageInputState extends ConsumerState<MessageInput> {
     }
 
     if (text.isEmpty) return;
+
+    // Block messages containing private keys (nsec) per Nostr design guidelines
+    if (_nsecPattern.hasMatch(text)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Your message contains a private key (nsec). '
+              'Posting this would permanently compromise your account. Message blocked.'),
+          backgroundColor: Color(0xFFD32F2F),
+          duration: Duration(seconds: 5),
+        ));
+      }
+      return;
+    }
     final spoiler = _isSpoiler;
     // Clear input immediately for snappy UX, but block re-sends until complete
     _controller.clear();

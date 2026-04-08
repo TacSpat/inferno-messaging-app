@@ -159,18 +159,41 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                       border: Border.all(color: primary.withValues(alpha: 0.3)),
                     ),
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
                             Icon(Icons.check_circle, color: primary, size: 20),
                             const SizedBox(width: 8),
-                            const Text('Key generated!', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold)),
+                            const Text('Identity created!', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold)),
                           ],
                         ),
                         const SizedBox(height: 8),
                         Text(
                           _generatedNpub!,
                           style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFF8899A6)),
+                        ),
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A2A1A),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF4CAF50).withValues(alpha: 0.3)),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.shield_outlined, color: Color(0xFF81C784), size: 16),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Your private key is stored securely on this device. '
+                                  'Create an encrypted backup in Settings to protect your identity.',
+                                  style: TextStyle(color: Color(0xFF81C784), fontSize: 11, height: 1.4),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                         const SizedBox(height: 8),
                         const Text('Connecting to relays...', style: TextStyle(color: Color(0xFF8899A6), fontSize: 12)),

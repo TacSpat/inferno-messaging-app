@@ -596,7 +596,7 @@ class _UnifiedPickerState extends ConsumerState<UnifiedPicker> {
                         child: Center(
                           child: selectedIcon.startsWith('http')
                               ? CachedNetworkImage(imageUrl: selectedIcon, width: 28, height: 28, fit: BoxFit.contain)
-                              : Text(selectedIcon, style: const TextStyle(fontSize: 24)),
+                              : Text(selectedIcon, style: const TextStyle(fontSize: 24, fontFamilyFallback: ['NotoColorEmoji'])),
                         ),
                       ),
                     ),
@@ -1195,7 +1195,7 @@ class _EmojiButtonState extends State<_EmojiButton> {
           child: Center(
             child: widget.customImageUrl != null && widget.customImageUrl!.isNotEmpty
                 ? Image.network(widget.customImageUrl!, width: 24, height: 24, errorBuilder: (_, __, ___) => const SizedBox.shrink())
-                : Text(widget.emoji, style: const TextStyle(fontSize: 22)),
+                : Text(widget.emoji, style: const TextStyle(fontSize: 22, fontFamilyFallback: ['NotoColorEmoji'])),
           ),
         ),
       ),
@@ -1349,9 +1349,9 @@ class _CollectionTileState extends State<_CollectionTile> {
                 Icon(Icons.add, size: 24, color: widget.colors.gray400)
               else if (widget.icon.startsWith('http'))
                 CachedNetworkImage(imageUrl: widget.icon, width: 24, height: 24, fit: BoxFit.contain,
-                  errorWidget: (_, __, ___) => Text('\u{1F4C1}', style: const TextStyle(fontSize: 24)))
+                  errorWidget: (_, __, ___) => Text('\u{1F4C1}', style: const TextStyle(fontSize: 24, fontFamilyFallback: ['NotoColorEmoji'])))
               else
-                Text(widget.icon, style: const TextStyle(fontSize: 24)),
+                Text(widget.icon, style: const TextStyle(fontSize: 24, fontFamilyFallback: ['NotoColorEmoji'])),
               const SizedBox(height: 4),
               Text(widget.name,
                 style: TextStyle(

@@ -47,21 +47,6 @@ class KeyManagementService {
     return key;
   }
 
-  /// Import from raw hex private key
-  static Future<NostrKey> importHex(String hexPrivKey) async {
-    final key = NostrKey.fromPrivateKey(hexPrivKey);
-    await _storage.write(key: _privKeyKey, value: key.privateKeyHex);
-    await _storage.write(key: _pubKeyKey, value: key.publicKeyHex);
-    return key;
-  }
-
-  /// Export as nsec (raw bech32 private key)
-  static Future<String> exportNsec() async {
-    final privHex = await _storage.read(key: _privKeyKey);
-    if (privHex == null) throw StateError('No key stored');
-    return Bech32Nostr.nsecEncode(privHex);
-  }
-
   /// Export as ncryptsec (password-encrypted)
   static Future<String> exportNcryptsec(String password,
       {int logN = 16}) async {
