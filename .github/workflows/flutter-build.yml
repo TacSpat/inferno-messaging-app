@@ -55,6 +55,27 @@ jobs:
           $ortVersion = "1.20.1"
           Copy-Item "ort/onnxruntime-win-x64-${ortVersion}/lib/onnxruntime.dll" "build/windows/x64/runner/Release/"
 
+      - name: Bundle VC++ runtime DLLs
+        working-directory: flutter
+        shell: pwsh
+        run: |
+          $releaseDir = "build/windows/x64/runner/Release"
+          # Copy VC++ runtime DLLs that the app needs
+          $vcDir = "${env:VCToolsRedistDir}x64\Microsoft.VC143.CRT"
+          if (Test-Path $vcDir) {
+            Copy-Item "$vcDir\msvcp140.dll" "$releaseDir\" -ErrorAction SilentlyContinue
+            Copy-Item "$vcDir\vcruntime140.dll" "$releaseDir\" -ErrorAction SilentlyContinue
+            Copy-Item "$vcDir\vcruntime140_1.dll" "$releaseDir\" -ErrorAction SilentlyContinue
+            Write-Host "Bundled VC++ runtime from $vcDir"
+          } else {
+            Write-Host "WARNING: VCToolsRedistDir not found, VC++ runtime not bundled"
+          }
+
+      - name: List Windows build output
+        working-directory: flutter
+        shell: pwsh
+        run: Get-ChildItem "build/windows/x64/runner/Release" | Select-Object Name, Length | Format-Table -AutoSize
+
       - name: Package Windows zip
         working-directory: flutter
         shell: pwsh
