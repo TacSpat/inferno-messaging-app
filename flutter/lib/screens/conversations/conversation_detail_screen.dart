@@ -95,6 +95,24 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
   }
 
   @override
+  void deactivate() {
+    // Update read timestamp on leave and clear active conversation for badge reappearance
+    // Must happen in deactivate() — ref is unavailable in dispose()
+    if (_conversation != null) {
+      final db = ref.read(databaseProvider);
+      db.messagesDao.markConversationRead(_conversation!.id);
+      final convId = _conversation!.id;
+      final activeId = ref.read(activeConversationIdProvider);
+      final notifier = ref.read(activeConversationIdProvider.notifier);
+      // Defer provider modification to avoid "modified during build" error
+      if (activeId == convId) {
+        Future(() => notifier.state = null);
+      }
+    }
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();

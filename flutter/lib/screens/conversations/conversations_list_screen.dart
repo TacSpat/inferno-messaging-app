@@ -302,86 +302,144 @@ class _PendingTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final pendingAsync = ref.watch(pendingRequestsStreamProvider);
-    return pendingAsync.when(
-      data: (pending) {
-        if (pending.isEmpty) {
-          return _EmptyState(icon: Icons.people_outline, text: 'There are no pending friend requests.', colors: colors);
-        }
-        return ListView(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 8, bottom: 8),
-              child: Text('INCOMING \u2014 ${pending.length}',
-                style: TextStyle(color: colors.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+    final incomingAsync = ref.watch(pendingRequestsStreamProvider);
+    final outgoingAsync = ref.watch(pendingOutgoingStreamProvider);
+
+    final incoming = incomingAsync.valueOrNull ?? [];
+    final outgoing = outgoingAsync.valueOrNull ?? [];
+
+    if (incoming.isEmpty && outgoing.isEmpty) {
+      return _EmptyState(icon: Icons.people_outline, text: 'There are no pending friend requests.', colors: colors);
+    }
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+      children: [
+        if (incoming.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text('INCOMING \u2014 ${incoming.length}',
+              style: TextStyle(color: colors.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+          ),
+          ...incoming.map((contact) => _incomingRow(context, ref, contact)),
+        ],
+        if (outgoing.isNotEmpty) ...[
+          if (incoming.isNotEmpty) const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.only(left: 8, bottom: 8),
+            child: Text('OUTGOING \u2014 ${outgoing.length}',
+              style: TextStyle(color: colors.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+          ),
+          ...outgoing.map((contact) => _outgoingRow(context, ref, contact)),
+        ],
+      ],
+    );
+  }
+
+  Widget _incomingRow(BuildContext context, WidgetRef ref, Contact contact) {
+    final name = contact.displayName ?? contact.username ?? '${contact.pubkey.substring(0, 12)}...';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.gray700.withValues(alpha: 0.5))),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 18, backgroundColor: colors.gray600,
+            backgroundImage: contact.avatarUrl != null ? NetworkImage(contact.avatarUrl!) : null,
+            child: contact.avatarUrl == null
+                ? Text(name[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.bold))
+                : null),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                Text('Incoming Friend Request', style: TextStyle(color: colors.gray400, fontSize: 12)),
+              ],
             ),
-            ...pending.map((contact) {
-              final name = contact.displayName ?? contact.username ?? '${contact.pubkey.substring(0, 12)}...';
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: colors.gray700.withValues(alpha: 0.5))),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(radius: 18, backgroundColor: colors.gray600,
-                      child: Text(name[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
-                          Text('Incoming Friend Request', style: TextStyle(color: colors.gray400, fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () async {
-                        final dmService = ref.read(dmServiceProvider);
-                        final auth = ref.read(authServiceProvider);
-                        if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
-                        await dmService.sendFriendResponse(
-                          privateKeyHex: auth.privateKeyHex!,
-                          publicKeyHex: auth.publicKeyHex!,
-                          recipientPubkey: contact.pubkey,
-                          status: 'accepted',
-                        );
-                      },
-                      child: Container(
-                        width: 36, height: 36, margin: const EdgeInsets.only(right: 8),
-                        decoration: BoxDecoration(color: colors.gray700, shape: BoxShape.circle),
-                        child: Icon(Icons.check, size: 20, color: colors.online),
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: () async {
-                        final dmService = ref.read(dmServiceProvider);
-                        final auth = ref.read(authServiceProvider);
-                        if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
-                        await dmService.sendFriendResponse(
-                          privateKeyHex: auth.privateKeyHex!,
-                          publicKeyHex: auth.publicKeyHex!,
-                          recipientPubkey: contact.pubkey,
-                          status: 'declined',
-                        );
-                      },
-                      child: Container(
-                        width: 36, height: 36,
-                        decoration: BoxDecoration(color: colors.gray700, shape: BoxShape.circle),
-                        child: Icon(Icons.close, size: 20, color: colors.accent),
-                      ),
-                    ),
-                  ],
-                ),
+          ),
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+            onTap: () async {
+              final dmService = ref.read(dmServiceProvider);
+              final auth = ref.read(authServiceProvider);
+              if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
+              await dmService.sendFriendResponse(
+                privateKeyHex: auth.privateKeyHex!,
+                publicKeyHex: auth.publicKeyHex!,
+                recipientPubkey: contact.pubkey,
+                status: 'accepted',
               );
-            }),
-          ],
-        );
-      },
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(child: Text('Error: $e')),
+            },
+            child: Container(
+              width: 36, height: 36, margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(color: colors.gray700, shape: BoxShape.circle),
+              child: Icon(Icons.check, size: 20, color: colors.online),
+            ),
+          )),
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+            onTap: () async {
+              final dmService = ref.read(dmServiceProvider);
+              final auth = ref.read(authServiceProvider);
+              if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
+              await dmService.sendFriendResponse(
+                privateKeyHex: auth.privateKeyHex!,
+                publicKeyHex: auth.publicKeyHex!,
+                recipientPubkey: contact.pubkey,
+                status: 'declined',
+              );
+            },
+            child: Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(color: colors.gray700, shape: BoxShape.circle),
+              child: Icon(Icons.close, size: 20, color: colors.accent),
+            ),
+          )),
+        ],
+      ),
+    );
+  }
+
+  Widget _outgoingRow(BuildContext context, WidgetRef ref, Contact contact) {
+    final name = contact.displayName ?? contact.username ?? '${contact.pubkey.substring(0, 12)}...';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: colors.gray700.withValues(alpha: 0.5))),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(radius: 18, backgroundColor: colors.gray600,
+            backgroundImage: contact.avatarUrl != null ? NetworkImage(contact.avatarUrl!) : null,
+            child: contact.avatarUrl == null
+                ? Text(name[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.bold))
+                : null),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                Text('Outgoing Friend Request', style: TextStyle(color: colors.gray400, fontSize: 12)),
+              ],
+            ),
+          ),
+          MouseRegion(cursor: SystemMouseCursors.click, child: GestureDetector(
+            onTap: () async {
+              // Cancel the outgoing request
+              final db = ref.read(databaseProvider);
+              await (db.update(db.contacts)..where((c) => c.pubkey.equals(contact.pubkey)))
+                  .write(ContactsCompanion(friendshipStatus: const Value(0), updatedAt: Value(DateTime.now())));
+            },
+            child: Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(color: colors.gray700, shape: BoxShape.circle),
+              child: Icon(Icons.close, size: 20, color: colors.gray400),
+            ),
+          )),
+        ],
+      ),
     );
   }
 }
@@ -726,12 +784,10 @@ class _SearchResultItemState extends State<_SearchResultItem> {
       }
 
       if (mounted) setState(() => _buttonState = 'sent');
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[AddFriend] Error: $e');
       if (mounted) {
         setState(() => _buttonState = 'add');
-        Future.delayed(const Duration(seconds: 2), () {
-          if (mounted) setState(() => _buttonState = 'add');
-        });
       }
     }
   }
@@ -809,12 +865,19 @@ class _SearchResultItemState extends State<_SearchResultItem> {
           child: Text('Sent', style: TextStyle(color: c.idle, fontSize: 13, fontWeight: FontWeight.w600)),
         );
       default:
-        return GestureDetector(
-          onTap: _addFriend,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(color: const Color(0xFF16A34A), borderRadius: BorderRadius.circular(4)),
-            child: const Text('Add', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Material(
+            color: const Color(0xFF16A34A),
+            borderRadius: BorderRadius.circular(4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: _addFriend,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: const Text('Add', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
           ),
         );
     }

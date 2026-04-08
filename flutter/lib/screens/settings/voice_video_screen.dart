@@ -171,7 +171,7 @@ class _VoiceVideoScreenState extends ConsumerState<VoiceVideoScreen> {
                   DropdownMenuItem(value: 'moderate', child: Text('Moderate — balanced (recommended)')),
                   DropdownMenuItem(value: 'aggressive', child: Text('Aggressive — maximum suppression')),
                 ],
-                onChanged: (v) => setState(() => _suppressionLevel = v!),
+                onChanged: (v) { setState(() => _suppressionLevel = v!); _storage.write(key: 'voice_suppression_level', value: v!); },
               ),
             ],
           )),

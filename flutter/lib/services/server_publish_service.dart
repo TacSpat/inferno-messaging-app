@@ -206,6 +206,7 @@ class ServerPublishService {
   }
 
   /// Publish Kind 31753 member event (announce ourselves to the server)
+  /// Matches Rails NostrServerPublishJob#build_member_event — includes embedded profile data
   Future<void> publishMember({
     required String privateKeyHex,
     required String publicKeyHex,
@@ -214,15 +215,52 @@ class ServerPublishService {
     if (server.nostrGroupId == null) return;
     final baseId = server.nostrGroupId!;
 
+    final tags = <List<String>>[
+      ['d', 'inferno-mbr-$baseId-${publicKeyHex.substring(0, 16)}'],
+      ['p', publicKeyHex],
+      ['server', server.nostrGroupId!],
+    ];
+
+    // Embed profile data in member event (matches Rails profile_* tags)
+    final contact = await (_db.select(_db.contacts)
+          ..where((c) => c.pubkey.equals(publicKeyHex)))
+        .getSingleOrNull();
+    final member = await (_db.select(_db.remoteMembers)
+          ..where((m) => m.pubkey.equals(publicKeyHex) & m.serverId.equals(server.id)))
+        .getSingleOrNull();
+
+    if (contact != null) {
+      tags.add(['profile_name', contact.username ?? '']);
+      tags.add(['profile_display_name', contact.displayName ?? '']);
+      tags.add(['profile_picture', contact.avatarUrl ?? '']);
+      tags.add(['profile_banner', contact.bannerUrl ?? '']);
+      tags.add(['profile_about', contact.bio ?? '']);
+      tags.add(['profile_status', contact.status ?? '']);
+      tags.add(['profile_status_emoji', contact.statusEmoji ?? '']);
+    }
+    tags.add(['profile_color', member?.profileColor ?? '']);
+    tags.add(['profile_color_2', member?.profileColor2 ?? '']);
+
+    // Include role assignments if we have them
+    if (member != null) {
+      final roleAssignments = await (_db.select(_db.remoteMembershipRoles)
+            ..where((a) => a.remoteMemberId.equals(member.id)))
+          .get();
+      for (final ra in roleAssignments) {
+        final role = await (_db.select(_db.roles)
+              ..where((r) => r.id.equals(ra.roleId)))
+            .getSingleOrNull();
+        if (role != null) {
+          tags.add(['role', role.publicId, role.name ?? '']);
+        }
+      }
+    }
+
     final event = nostr.NostrEvent(
       pubkey: publicKeyHex,
       createdAt: nostr.NostrEvent.now(),
       kind: 31753,
-      tags: [
-        ['d', 'inferno-mbr-$baseId-${publicKeyHex.substring(0, 16)}'],
-        ['p', publicKeyHex],
-        ['server', server.nostrGroupId!],
-      ],
+      tags: tags,
       content: '',
     );
 

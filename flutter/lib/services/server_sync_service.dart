@@ -1011,6 +1011,8 @@ class ServerSyncService {
             bannerUrl: Value(profile['banner'] as String?),
             bio: Value(profile['about'] as String?),
             nip05: Value(profile['nip05'] as String?),
+            status: Value(profile['status'] as String?),
+            statusEmoji: Value(profile['status_emoji'] as String?),
             profileFetchedAt: Value(now),
             updatedAt: Value(now),
           ));
@@ -1035,6 +1037,8 @@ class ServerSyncService {
         avatarUrl: Value(profile['picture'] as String?),
         bannerUrl: Value(profile['banner'] as String?),
         nip05: Value(profile['nip05'] as String?),
+        status: Value(profile['status'] as String?),
+        statusEmoji: Value(profile['status_emoji'] as String?),
         profileFetchedAt: Value(now),
         updatedAt: Value(now),
       ));
@@ -1048,6 +1052,8 @@ class ServerSyncService {
           avatarUrl: Value(profile['picture'] as String?),
           bannerUrl: Value(profile['banner'] as String?),
           nip05: Value(profile['nip05'] as String?),
+          status: Value(profile['status'] as String?),
+          statusEmoji: Value(profile['status_emoji'] as String?),
           profileFetchedAt: Value(now),
           createdAt: now,
           updatedAt: now,

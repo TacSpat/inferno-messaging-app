@@ -130,6 +130,21 @@ class NostrProfileService {
           updatedAt: now,
         ));
       }
+      // Also update remote_members so member list reflects changes immediately
+      await (_db.update(_db.remoteMembers)
+            ..where((m) => m.pubkey.equals(publicKeyHex)))
+          .write(RemoteMembersCompanion(
+        username: Value(username),
+        displayName: Value(displayName ?? username),
+        bio: Value(about),
+        avatarUrl: Value(pictureUrl),
+        bannerUrl: Value(bannerUrl),
+        nip05: Value(nip05),
+        status: Value(status),
+        statusEmoji: Value(statusEmoji),
+        profileFetchedAt: Value(now),
+        updatedAt: Value(now),
+      ));
     } catch (e) {
       debugPrint('[Profile] Failed to update local contact: $e');
     }
@@ -145,8 +160,10 @@ class NostrProfileService {
       final servers = await _db.select(_db.servers).get();
       final relayConfig = RelayConfigService(_db);
       final publishService = ServerPublishService(_db, _relayPool, relayConfig);
-      for (final server in servers) {
+      for (int i = 0; i < servers.length; i++) {
+        final server = servers[i];
         if (server.nostrGroupId == null) continue;
+        if (i > 0) await Future.delayed(const Duration(seconds: 2));
         await publishService.publishMember(
           privateKeyHex: privateKeyHex,
           publicKeyHex: publicKeyHex,

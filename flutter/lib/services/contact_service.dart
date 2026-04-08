@@ -14,15 +14,21 @@ class ContactService {
   /// Add a contact by pubkey
   Future<Contact> addContact(String pubkey, {String? petname}) async {
     final now = DateTime.now();
-    await _db.into(_db.contacts).insertOnConflictUpdate(
-      ContactsCompanion.insert(
+    final existing = await (_db.select(_db.contacts)
+          ..where((c) => c.pubkey.equals(pubkey)))
+        .getSingleOrNull();
+    if (existing != null) {
+      await (_db.update(_db.contacts)..where((c) => c.pubkey.equals(pubkey)))
+          .write(ContactsCompanion(petname: Value(petname), updatedAt: Value(now)));
+    } else {
+      await _db.into(_db.contacts).insert(ContactsCompanion.insert(
         pubkey: pubkey,
         petname: Value(petname),
         friendshipStatus: const Value(0), // not_friend
         createdAt: now,
         updatedAt: now,
-      ),
-    );
+      ));
+    }
 
     // Fetch profile from relays
     await fetchContactProfile(pubkey);
@@ -77,6 +83,8 @@ class ContactService {
         avatarUrl: Value(profile['picture'] as String?),
         bannerUrl: Value(profile['banner'] as String?),
         nip05: Value(profile['nip05'] as String?),
+        status: Value(profile['status'] as String?),
+        statusEmoji: Value(profile['status_emoji'] as String?),
         profileFetchedAt: Value(DateTime.now()),
         updatedAt: Value(DateTime.now()),
       ));
@@ -101,8 +109,26 @@ class ContactService {
     for (final entry in byPubkey.entries) {
       try {
         final profile = json.decode(entry.value.content) as Map<String, dynamic>;
-        await _db.into(_db.contacts).insertOnConflictUpdate(
-          ContactsCompanion.insert(
+        final now = DateTime.now();
+        final existing = await (_db.select(_db.contacts)
+              ..where((c) => c.pubkey.equals(entry.key)))
+            .getSingleOrNull();
+        if (existing != null) {
+          await (_db.update(_db.contacts)..where((c) => c.pubkey.equals(entry.key)))
+              .write(ContactsCompanion(
+            username: Value(profile['name'] as String?),
+            displayName: Value(profile['display_name'] as String?),
+            bio: Value(profile['about'] as String?),
+            avatarUrl: Value(profile['picture'] as String?),
+            bannerUrl: Value(profile['banner'] as String?),
+            nip05: Value(profile['nip05'] as String?),
+            status: Value(profile['status'] as String?),
+            statusEmoji: Value(profile['status_emoji'] as String?),
+            profileFetchedAt: Value(now),
+            updatedAt: Value(now),
+          ));
+        } else {
+          await _db.into(_db.contacts).insert(ContactsCompanion.insert(
             pubkey: entry.key,
             username: Value(profile['name'] as String?),
             displayName: Value(profile['display_name'] as String?),
@@ -110,11 +136,13 @@ class ContactService {
             avatarUrl: Value(profile['picture'] as String?),
             bannerUrl: Value(profile['banner'] as String?),
             nip05: Value(profile['nip05'] as String?),
-            profileFetchedAt: Value(DateTime.now()),
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
+            status: Value(profile['status'] as String?),
+            statusEmoji: Value(profile['status_emoji'] as String?),
+            profileFetchedAt: Value(now),
+            createdAt: now,
+            updatedAt: now,
+          ));
+        }
       } catch (_) {}
     }
   }
@@ -149,6 +177,13 @@ class ContactService {
   Stream<List<Contact>> watchPendingIncoming() {
     return (_db.select(_db.contacts)
           ..where((c) => c.friendshipStatus.equals(2)))
+        .watch();
+  }
+
+  /// Watch pending outgoing
+  Stream<List<Contact>> watchPendingOutgoing() {
+    return (_db.select(_db.contacts)
+          ..where((c) => c.friendshipStatus.equals(1)))
         .watch();
   }
 

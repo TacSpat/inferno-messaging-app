@@ -82,8 +82,11 @@ class _MemberListState extends ConsumerState<MemberList> {
               }
 
               String? resolveStatus(RemoteMember m) {
-                if (m.status != null && m.status!.isNotEmpty) return m.status;
-                return contactMap[m.pubkey]?.status;
+                final emoji = m.statusEmoji ?? contactMap[m.pubkey]?.statusEmoji;
+                final text = (m.status != null && m.status!.isNotEmpty) ? m.status : contactMap[m.pubkey]?.status;
+                if (emoji != null && emoji.isNotEmpty && text != null && text.isNotEmpty) return '$emoji $text';
+                if (emoji != null && emoji.isNotEmpty) return emoji;
+                return text;
               }
 
               final presenceSvc = ref.watch(presenceServiceProvider);
