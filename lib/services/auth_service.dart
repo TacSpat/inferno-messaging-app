@@ -41,13 +41,6 @@ class AuthService {
     return _currentKey!;
   }
 
-  /// Import from raw hex
-  Future<NostrKey> importHex(String hex) async {
-    _currentKey = await KeyManagementService.importHex(hex);
-    _state = AuthState.authenticated;
-    return _currentKey!;
-  }
-
   /// Log out (delete stored key)
   Future<void> logout() async {
     await KeyManagementService.deleteKey();

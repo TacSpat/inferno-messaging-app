@@ -140,11 +140,11 @@ class _ReactionChipState extends State<_ReactionChip> {
           width: 18,
           height: 18,
           fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => Text(emoji, style: const TextStyle(fontSize: 14)),
+          errorWidget: (_, __, ___) => Text(emoji, style: const TextStyle(fontSize: 14, fontFamilyFallback: ['NotoColorEmoji'])),
         );
       }
-      return Text(emoji, style: const TextStyle(fontSize: 14));
+      return Text(emoji, style: const TextStyle(fontSize: 14, fontFamilyFallback: ['NotoColorEmoji']));
     }
-    return Text(emoji, style: const TextStyle(fontSize: 16));
+    return Text(emoji, style: const TextStyle(fontSize: 16, fontFamilyFallback: ['NotoColorEmoji']));
   }
 }

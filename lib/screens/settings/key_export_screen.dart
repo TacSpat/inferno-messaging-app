@@ -17,7 +17,6 @@ class KeyExportScreen extends ConsumerStatefulWidget {
 class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
   String? _npub;
   String? _ncryptsec;
-  bool _showNsec = false;
   bool _generating = false;
   final _passwordController = TextEditingController();
 
@@ -48,7 +47,6 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
     final auth = ref.read(authServiceProvider);
     if (auth.privateKeyHex == null) return;
 
-    // Run in isolate-friendly way (scrypt is slow)
     final ncryptsec = Nip49Crypto.encrypt(auth.privateKeyHex!, password, logN: 16);
     if (mounted) {
       setState(() {
@@ -65,31 +63,33 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authServiceProvider);
     final c = ref.watch(infernoColorsProvider);
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('My Account', style: TextStyle(color: c.gray50, fontSize: 20, fontWeight: FontWeight.w600)),
+        Text('Key Backup', style: TextStyle(color: c.gray50, fontSize: 20, fontWeight: FontWeight.w600)),
         const SizedBox(height: 24),
-        // Warning
+
+        // Info box
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: const Color(0xFF2A2A1A),
+            color: c.gray800,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFF5C4D00)),
+            border: Border.all(color: c.gray700),
           ),
-          child: const Row(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.warning_amber, color: Color(0xFFFF9800), size: 20),
-              SizedBox(width: 12),
+              Icon(Icons.shield_outlined, color: c.accent, size: 20),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
-                  'Your private key gives full access to your Nostr identity. Never share your nsec with anyone. Use ncryptsec for safe backups.',
-                  style: TextStyle(color: Color(0xFFFF9800), fontSize: 13),
+                  'Your private key is stored securely on this device and is never displayed. '
+                  'To back up your identity, generate an encrypted backup (ncryptsec) below. '
+                  'You can import it on another device using your backup password.',
+                  style: TextStyle(color: c.gray400, fontSize: 13, height: 1.5),
                 ),
               ),
             ],
@@ -104,30 +104,14 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
           onCopy: _npub != null ? () => _copyToClipboard(_npub!, 'npub') : null,
           c: c,
         ),
-        const SizedBox(height: 16),
-
-        // nsec (raw private key)
-        _KeySection(
-          label: 'Private Key (nsec)',
-          value: _showNsec && auth.privateKeyHex != null
-              ? Bech32Nostr.nsecEncode(auth.privateKeyHex!)
-              : '\u2022' * 40,
-          onCopy: auth.privateKeyHex != null
-              ? () => _copyToClipboard(Bech32Nostr.nsecEncode(auth.privateKeyHex!), 'nsec')
-              : null,
-          c: c,
-          trailing: TextButton(
-            onPressed: () => setState(() => _showNsec = !_showNsec),
-            child: Text(_showNsec ? 'Hide' : 'Reveal', style: TextStyle(color: c.accent)),
-          ),
-        ),
         const SizedBox(height: 24),
 
         // ncryptsec generation
         Text('ENCRYPTED BACKUP', style: TextStyle(color: c.gray500, fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1)),
         const SizedBox(height: 8),
         Text(
-          'Generate a password-encrypted backup of your private key. This is the safest way to store your key.',
+          'Generate a password-encrypted backup of your private key (NIP-49). '
+          'This is the only safe way to transfer your identity between devices.',
           style: TextStyle(color: c.gray500, fontSize: 13),
         ),
         const SizedBox(height: 12),
@@ -152,7 +136,7 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
                     Text('Generating...'),
                   ],
                 )
-              : const Text('Generate ncryptsec'),
+              : const Text('Generate Encrypted Backup'),
         ),
         if (_ncryptsec != null) ...[
           const SizedBox(height: 16),
@@ -161,6 +145,11 @@ class _KeyExportScreenState extends ConsumerState<KeyExportScreen> {
             value: _ncryptsec!,
             onCopy: () => _copyToClipboard(_ncryptsec!, 'ncryptsec'),
             c: c,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Save this somewhere safe. You will need your backup password to import it.',
+            style: TextStyle(color: c.gray500, fontSize: 12),
           ),
         ],
       ],
@@ -172,10 +161,9 @@ class _KeySection extends StatelessWidget {
   final String label;
   final String value;
   final VoidCallback? onCopy;
-  final Widget? trailing;
   final InfernoColors c;
 
-  const _KeySection({required this.label, required this.value, this.onCopy, this.trailing, required this.c});
+  const _KeySection({required this.label, required this.value, this.onCopy, required this.c});
 
   @override
   Widget build(BuildContext context) {
@@ -192,7 +180,6 @@ class _KeySection extends StatelessWidget {
             children: [
               Text(label, style: TextStyle(color: c.gray500, fontSize: 12, fontWeight: FontWeight.bold)),
               const Spacer(),
-              if (trailing != null) trailing!,
               if (onCopy != null)
                 IconButton(icon: Icon(Icons.copy, size: 16, color: c.gray500), onPressed: onCopy),
             ],

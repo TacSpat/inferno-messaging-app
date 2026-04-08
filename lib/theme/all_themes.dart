@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 class InfernoThemes {
+  /// Bundled emoji font ensures consistent rendering across all platforms.
+  static const _emojiFallback = ['NotoColorEmoji'];
+
   static ThemeData inferno() => _buildTheme(
     primary: const Color(0xFFDC2626),
     primaryLight: const Color(0xFFF87171),
@@ -155,14 +158,14 @@ class InfernoThemes {
         labelStyle: TextStyle(color: gray400),
       ),
       textTheme: TextTheme(
-        bodyLarge: TextStyle(color: gray200, fontSize: 15),
-        bodyMedium: TextStyle(color: gray200, fontSize: 14),
-        bodySmall: TextStyle(color: gray500, fontSize: 12),
-        titleLarge: TextStyle(color: gray50, fontWeight: FontWeight.bold, fontSize: 20),
-        titleMedium: TextStyle(color: gray50, fontWeight: FontWeight.w600, fontSize: 16),
-        titleSmall: TextStyle(color: gray50, fontWeight: FontWeight.w600, fontSize: 14),
-        labelLarge: TextStyle(color: gray400, fontSize: 12, fontWeight: FontWeight.w600),
-        labelSmall: TextStyle(color: gray500, fontSize: 11),
+        bodyLarge: TextStyle(color: gray200, fontSize: 15, fontFamilyFallback: _emojiFallback),
+        bodyMedium: TextStyle(color: gray200, fontSize: 14, fontFamilyFallback: _emojiFallback),
+        bodySmall: TextStyle(color: gray500, fontSize: 12, fontFamilyFallback: _emojiFallback),
+        titleLarge: TextStyle(color: gray50, fontWeight: FontWeight.bold, fontSize: 20, fontFamilyFallback: _emojiFallback),
+        titleMedium: TextStyle(color: gray50, fontWeight: FontWeight.w600, fontSize: 16, fontFamilyFallback: _emojiFallback),
+        titleSmall: TextStyle(color: gray50, fontWeight: FontWeight.w600, fontSize: 14, fontFamilyFallback: _emojiFallback),
+        labelLarge: TextStyle(color: gray400, fontSize: 12, fontWeight: FontWeight.w600, fontFamilyFallback: _emojiFallback),
+        labelSmall: TextStyle(color: gray500, fontSize: 11, fontFamilyFallback: _emojiFallback),
       ),
       iconTheme: IconThemeData(color: gray400, size: 20),
       elevatedButtonTheme: ElevatedButtonThemeData(

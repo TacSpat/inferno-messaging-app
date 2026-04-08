@@ -10,6 +10,7 @@ import '../../services/auth_service.dart';
 import '../../services/app_bootstrap_service.dart';
 import '../../services/media_cache_service.dart';
 import '../../widgets/inferno_logo.dart';
+import '../../providers/app_update_provider.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -142,15 +143,27 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     side: const BorderSide(color: Color(0xFF2A3A5C)),
                     textStyle: const TextStyle(fontSize: 16),
                   ),
-                  child: const Text('Import Existing Key'),
+                  child: const Text('Import Existing Identity'),
                 ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Use an encrypted backup (ncryptsec) from another Nostr client',
+                style: TextStyle(color: const Color(0xFF5C6B77), fontSize: 12),
+                textAlign: TextAlign.center,
               ),
               const Spacer(flex: 1),
               // Version info
-              const Padding(
-                padding: EdgeInsets.only(bottom: 16),
-                child: Text('v0.1.0-alpha', style: TextStyle(color: Color(0xFF5C6B77), fontSize: 11)),
-              ),
+              Consumer(builder: (context, ref, _) {
+                final version = ref.watch(appVersionProvider);
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    version.when(data: (v) => 'v$v', loading: () => '', error: (_, __) => ''),
+                    style: const TextStyle(color: Color(0xFF5C6B77), fontSize: 11),
+                  ),
+                );
+              }),
             ],
           ),
         ),
