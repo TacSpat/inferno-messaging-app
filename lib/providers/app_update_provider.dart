@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -15,11 +16,19 @@ final appVersionProvider = FutureProvider<String>((ref) async {
   return info.version;
 });
 
-/// Checks for updates on first read.
+/// Checks for updates on startup, then re-checks every 30 minutes.
 /// Desktop: GitHub releases. Mobile: handled separately via in_app_update / upgrader.
-final updateCheckProvider = FutureProvider<AppUpdate?>((ref) async {
-  if (kIsWeb) return null;
-  if (Platform.isAndroid || Platform.isIOS) return null; // Mobile uses store APIs
+final updateCheckProvider = StreamProvider<AppUpdate?>((ref) async* {
+  if (kIsWeb) { yield null; return; }
+  if (Platform.isAndroid || Platform.isIOS) { yield null; return; }
+
   final svc = ref.read(appUpdateServiceProvider);
-  return svc.checkForUpdate();
+
+  // Check immediately on startup
+  yield await svc.checkForUpdate();
+
+  // Re-check every 30 minutes
+  await for (final _ in Stream.periodic(const Duration(minutes: 30))) {
+    yield await svc.checkForUpdate();
+  }
 });
