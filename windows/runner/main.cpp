@@ -7,6 +7,21 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // Single instance: if another instance is running, activate its window and exit.
+  HANDLE mutex = ::CreateMutexW(nullptr, TRUE, L"InfernoMessagingAppMutex");
+  if (::GetLastError() == ERROR_ALREADY_EXISTS) {
+    // Find and focus the existing window
+    HWND existing = ::FindWindowW(nullptr, L"inferno");
+    if (existing) {
+      if (::IsIconic(existing)) {
+        ::ShowWindow(existing, SW_RESTORE);
+      }
+      ::SetForegroundWindow(existing);
+    }
+    ::CloseHandle(mutex);
+    return EXIT_SUCCESS;
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
@@ -38,6 +53,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
+  ::CloseHandle(mutex);
   ::CoUninitialize();
   return EXIT_SUCCESS;
 }
