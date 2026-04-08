@@ -26,19 +26,19 @@ Inferno was built in response to centralized chat platforms introducing invasive
 
 ---
 
-## Phase 1: Foundation (current — v0.1.x)
+## Phase 1: The App (current — v0.1.x)
 
 What exists today:
 
+- Native cross-platform app — Windows, Linux, macOS, Android, iOS — built with Flutter
+- Relay-first architecture — the app connects directly to Nostr relays. No intermediary server. All server state, messages, DMs, and profiles sync through relays (Kinds 9, 14, 30315, 31750-31757)
 - Full messaging platform — text channels, DMs, voice/video, roles (30+ permissions), custom emoji/stickers, GIF search, embeds, mentions, reactions
 - Nostr identity — automatic keypair generation, NIP-05 verification, key export, profile publishing
-- Relay-bound architecture — all server state, messages, DMs, and profiles sync through Nostr relays (Kinds 9, 14, 30315, 31750–31757)
 - Encrypted channels — NIP-44 (XChaCha20-Poly1305) for private channels
 - Remote member support — users from other Nostr clients can be tracked and assigned roles
 - Admin tooling — usage limits, lockdown, suspensions, audit logging, data exports, message retention
-- Voice & video — LiveKit SFU integration, screen sharing, moderation controls
-- Mobile-responsive web UI
-- CI pipeline (RSpec, Minitest, Rubocop, Brakeman)
+- Voice and video — LiveKit SFU integration, screen sharing, moderation controls
+- Local storage — Drift (SQLite) database on-device for offline access and fast queries
 - Elastic License 2.0
 
 ---
@@ -48,8 +48,8 @@ What exists today:
 **Goal:** Get real users. Prove the product works for normal people.
 
 - Build a landing page that explains Inferno in plain language
-- Package as a downloadable single binary (Tebako or similar)
-- One-command setup experience
+- Package platform builds — `flutter build` for Windows (.msix), macOS (.dmg), Linux (.deb/.AppImage), Android (.apk/.aab), iOS (.ipa)
+- Publish to app stores — Google Play, Apple App Store, Microsoft Store, Flathub/Snap
 - Target communities frustrated with centralized platforms — every time a major platform makes a bad policy change, there's a wave of "where do we go?"
 - Post on Reddit (r/selfhosted, r/privacy, r/opensource, r/gaming), Hacker News, and Nostr when ready
 - Migrate one real community (50-200 people) and make sure their experience is great
@@ -58,16 +58,7 @@ What exists today:
 
 ---
 
-## Phase 3: Native Apps
-
-**Goal:** Meet users where they are.
-
-- **Mobile (iOS + Android)** — Turbo Native wrapping the existing responsive web UI. Native push notifications, home screen presence, app store distribution — reusing 100% of existing views.
-- **Desktop** — Tauri app wrapping the web UI. Lightweight, native-feeling, no Electron bloat.
-
----
-
-## Phase 4: Discovery
+## Phase 3: Discovery
 
 **Goal:** Users can find communities from inside the app.
 
@@ -81,7 +72,7 @@ An "Explore" button on the server rail (compass icon). Users search or browse by
 
 ---
 
-## Phase 5: Monetization
+## Phase 4: Monetization
 
 **Goal:** Sustainable revenue without paywalling core features.
 
@@ -112,12 +103,12 @@ Messaging, voice, channels, roles, DMs, identity, admin tools — everything tha
 
 ---
 
-## Phase 6: Product Depth
+## Phase 5: Product Depth
 
 Features that deepen the platform beyond parity:
 
 - **E2E encrypted DMs** — private conversations that not even the app can read (NIP-44 client-side encryption)
-- **2FA and OAuth** — Google/GitHub login, TOTP second factor
+- **NIP-46 remote signing** — delegate signing to a remote signer (Nostr Connect), so users can manage keys with dedicated key management apps like nsecBunker instead of trusting raw key material to the client
 - **Bots and integrations API** — webhook endpoints, bot accounts, custom slash commands
 - **Message search** — full-text search across channels and DMs
 - **Threads** — threaded replies within channels for long discussions

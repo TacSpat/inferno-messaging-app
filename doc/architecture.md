@@ -1,316 +1,634 @@
-# Inferno — Architecture
+# Inferno Flutter -- Architecture Document
 
 ## Overview
 
-Inferno is a single-binary Rails chat application where all communication flows through Nostr relays. There is no instance-to-instance federation — the relay network is the communication layer. The local SQLite database acts as a cache; Nostr relays are the source of truth.
+Inferno is a standalone desktop and mobile messaging application built with Flutter. It has no server component. The app connects directly to Nostr relays over WebSocket to send, receive, and synchronize all data. Identity is a secp256k1 keypair; there are no accounts, emails, or passwords. The local SQLite database is a cache -- relays are the source of truth.
 
-Users sign up with email and password (Devise). Behind the scenes, Inferno generates a Nostr secp256k1 keypair that serves as their portable identity. Users never need to understand Nostr or manage keys directly.
+**Platforms:** Windows, Linux, macOS, Android, iOS
 
 ---
 
-## 1. Identity Model
+## Technology Stack
 
-### Local Identity (Devise)
+| Layer | Technology |
+|---|---|
+| Framework | Flutter (Dart) |
+| State management | Riverpod (StateNotifier, FutureProvider, StreamProvider) |
+| Routing | go_router with ShellRoute for persistent layout |
+| Database / ORM | Drift (SQLite) with code generation via build_runner |
+| WebSocket | Pure Dart (`web_socket_channel`) |
+| Cryptography | Pure Dart secp256k1 Schnorr signatures, NIP-44 XChaCha20-Poly1305, NIP-49 scrypt |
+| Secure storage | flutter_secure_storage (platform keychain) |
+| Voice/Video | LiveKit via `livekit_client` |
+| Audio processing | DeepFilterNet noise suppression via native FFI |
+| Content safety | ONNX Runtime via FFI for on-device NSFW classification |
+| File hosting | Blossom servers (BUD-01 protocol) |
+| Image caching | cached_network_image |
+| Markdown | flutter_markdown with custom builders |
+| Emoji | Bundled Noto Color Emoji font for cross-platform consistency |
 
-Devise handles signup, login, email confirmation, and password management. A user's local identifier is `username#discriminator` (e.g. `Tac#0420`).
+---
 
-### Nostr Identity (Keypair)
+## Identity
 
-On signup, the app generates a Nostr secp256k1 keypair:
+Inferno uses Nostr keypairs for identity. There is no email/password authentication, no OAuth, no Devise, and no server-side session.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `nostr_public_key` | `string` | 32-byte hex public key (npub) — the user's global identity |
-| `nostr_encrypted_private_key` | `text` | Private key encrypted at rest via AES-256-GCM with a key derived from `Rails.application.secret_key_base` |
+**Authentication flow:**
 
-The public key is the user's identity across the Nostr network. Any Nostr client or Inferno instance with the same keypair is the same person.
+1. On first launch, the user either generates a new keypair or imports an existing one (nsec or ncryptsec).
+2. The private key is stored in the platform keychain via `flutter_secure_storage`.
+3. On subsequent launches, `AuthService` checks for a stored keypair. If one exists, the user is authenticated. If not, they are routed to the login/signup screen.
+4. The public key (hex) serves as the user's unique identifier across the Nostr network.
 
-### NIP-05 Verification
+**What "auth" means in Inferno:** Auth is simply "does the platform keychain contain a stored keypair?" There is no token exchange, no session cookie, no server validation.
 
-The app exposes `/.well-known/nostr.json` (NIP-05) mapping local usernames to public keys:
+`AuthService` (`lib/services/auth_service.dart`) exposes `privateKeyHex` and `publicKeyHex` after loading from secure storage. These are passed to services that need to sign or decrypt events.
+
+---
+
+## Key Management
+
+`KeyManagementService` (`lib/services/key_management_service.dart`) handles all keypair operations:
+
+| Operation | Method | Details |
+|---|---|---|
+| Generate | `generateAndStore()` | Creates a new secp256k1 keypair, stores both keys in platform keychain |
+| Load | `load()` | Reads private key from keychain, derives full `NostrKey` |
+| Import nsec | `importNsec(nsec)` | Decodes bech32 nsec to hex, stores in keychain |
+| Import ncryptsec | `importNcryptsec(ncryptsec, password)` | NIP-49 scrypt decryption, stores result in keychain |
+| Export ncryptsec | `exportNcryptsec(password)` | NIP-49 scrypt encryption of stored private key |
+| Export npub | `exportNpub()` | Bech32-encodes the public key |
+
+**Security rules:**
+
+- The raw private key (nsec) is never displayed to the user and never exported in plaintext.
+- Export is ncryptsec only (NIP-49 encrypted with a user-chosen password).
+- The private key never leaves `flutter_secure_storage` except into memory for signing/decryption operations.
+
+**Cryptography modules** (`lib/crypto/`):
+
+| File | Purpose |
+|---|---|
+| `nostr_key.dart` | Keypair generation and derivation |
+| `nostr_signer.dart` | Schnorr signing (secp256k1) |
+| `nostr_verifier.dart` | Signature verification |
+| `nostr_event.dart` | Nostr event model (kind, tags, content, serialization) |
+| `nip44_crypto.dart` | NIP-44 XChaCha20-Poly1305 encryption/decryption for DMs |
+| `nip49_crypto.dart` | NIP-49 scrypt-based key encryption/decryption |
+| `bech32_nostr.dart` | Bech32 encoding/decoding (npub, nsec, ncryptsec) |
+
+---
+
+## Data Architecture
+
+### SQLite via Drift
+
+The local database is a cache. All authoritative data lives on Nostr relays. If the database is deleted, the app re-fetches everything from relays on next launch.
+
+**Database definition:** `lib/database/database.dart` -- `InfernoDatabase` class annotated with `@DriftDatabase`, listing all tables and DAOs. Generated code lives in `database.g.dart`.
+
+**Tables** (`lib/database/tables/`):
+
+| Table | Purpose |
+|---|---|
+| `users` | User profiles (local and remote) |
+| `servers` | Joined servers with Nostr group IDs |
+| `channels` | Text and voice channels within servers |
+| `categories` | Channel grouping/ordering |
+| `messages` | All messages (DMs, group chat, channel messages) |
+| `conversations` | DM conversation metadata |
+| `conversation_participants` | DM conversation members |
+| `contacts` | Friend/contact relationships |
+| `roles` | Server roles with permission bitmasks |
+| `server_memberships` | User-server membership records |
+| `membership_roles` | Role assignments per member |
+| `remote_members` | Relay-sourced member data (before local user resolution) |
+| `remote_membership_roles` | Relay-sourced role assignments |
+| `invites` | Server invite links/codes |
+| `bans` | Server bans |
+| `blocks` | User-level blocks |
+| `reactions` | Message reactions |
+| `channel_reads` | Per-channel read position tracking |
+| `notifications` | Notification records |
+| `server_emojis` | Custom server emoji |
+| `server_stickers` | Custom server stickers |
+| `server_folders` | Server folder organization |
+| `voice_states` | Voice channel participation state |
+| `calls` | Call metadata |
+| `call_participants` | Call participant records |
+| `nostr_event_logs` | Processed event deduplication log |
+| `nostr_events` | Raw Nostr event cache |
+| `relay_connections` | Relay URL and connection config |
+| `server_voice_providers` | LiveKit voice provider configuration per server |
+| `app_settings` | Local app preferences |
+| `content_hashes` | Perceptual/cryptographic hashes for content safety |
+| `gif_collections` | GIF search result caching |
+| `gif_favorites` | User's favorited GIFs |
+| `media_cache` | Media dimension/metadata cache |
+| `csam_hash_entries` | CSAM hash database entries |
+| `hidden_attachment_records` | Attachments hidden by content safety |
+
+**DAOs** (`lib/database/daos/`): `MessagesDao`, `ServersDao`, `ContactsDao` -- encapsulate complex queries.
+
+### Data flow
+
+**Outbound (user action):**
 
 ```
-GET https://example.com/.well-known/nostr.json?name=tac
-
-{
-  "names": {
-    "tac": "ab12cd34..."
-  }
-}
+User action
+  -> Service method
+    -> Build NostrEvent
+      -> Sign with NostrSigner (Schnorr)
+        -> Publish to RelayPool
+          -> Save to local Drift DB
 ```
 
-This gives every user a human-readable identifier (`tac@example.com`) verifiable by any Nostr client.
-
----
-
-## 2. Data Architecture
-
-### What's Stored Locally (SQLite)
-
-The local database is a cache of relay data plus app-specific state:
-
-| Data | Description |
-|------|-------------|
-| User accounts | Devise auth, encrypted Nostr keys, preferences |
-| Messages | Cached copies of Kind 9 / Kind 14 events |
-| Server structure | Channels, categories, roles — mirrored from relay events (Kinds 31750–31757) |
-| Memberships | Server memberships, role assignments |
-| Attachments | Active Storage blobs, Blossom URL cache |
-| Nostr event log | Deduplication tracking (event IDs already processed) |
-| Voice state | LiveKit room/participant state (ephemeral, not relayed) |
-| Conversations | DM conversation records and participant lists |
-
-### What Syncs via Nostr Relays
-
-All persistent communication flows through relays. The app publishes and subscribes:
-
-| Event Kind | NIP | Purpose |
-|------------|-----|---------|
-| Kind 0 | NIP-01 | Profile metadata (name, bio, avatar URL) |
-| Kind 7 | NIP-25 | Reactions on messages |
-| Kind 9 | NIP-29 | Group chat messages |
-| Kind 14 | NIP-24 | Direct messages |
-| Kind 1059 | NIP-59 | Gift-wrapped (encrypted) DMs |
-| Kind 9005 | NIP-29 | Message deletion events |
-| Kind 22242 | NIP-42 | Relay authentication challenges |
-| Kind 25050 | — | Typing indicators (ephemeral) |
-| Kind 30315 | — | Online presence / status |
-| Kind 31750 | — | Server metadata (name, owner, picture, banner) |
-| Kind 31751 | — | Server structure (channels, categories, nesting) |
-| Kind 31752 | — | Server roles & permissions |
-| Kind 31753 | — | Server member presence (join/leave) |
-| Kind 31754 | — | Server custom emojis |
-| Kind 31755 | — | Server stickers |
-| Kind 31756 | — | Server bans |
-| Kind 31757 | — | Server invites |
-
-### Data Flow
+**Inbound (relay event):**
 
 ```
-User action (send message, update profile, create channel, etc.)
-        │
-        ▼
-Rails controller / service
-        │
-        ├── Save to local SQLite (cache)
-        │
-        ├── Sign as Nostr event (Schnorr/secp256k1)
-        │
-        └── Publish to all connected relays
-                │
-                ▼
-        Nostr Relay Network
-                │
-                ▼
-        Other subscribers receive event
-        (other Inferno instances, Nostr clients, etc.)
+RelayPool receives JSON from WebSocket
+  -> Parse to NostrEvent (background isolate for batches)
+    -> Deduplicate (check _processedEventIds set + nostr_event_logs table)
+      -> Route by kind via onKind handler
+        -> Service processes event
+          -> Upsert into Drift DB
+            -> Riverpod providers react to DB changes -> UI updates
 ```
 
-Inbound events from relays follow the reverse path — the `RelaySubscriptionManager` receives events via WebSocket, validates signatures, deduplicates by event ID, and saves to the local database.
+---
+
+## Relay Communication
+
+### RelayConnection (`lib/nostr/relay_connection.dart`)
+
+A single WebSocket connection to one Nostr relay. Handles:
+
+- Connect/disconnect lifecycle
+- Automatic reconnection with backoff
+- Sending raw JSON frames
+- Receiving and parsing relay messages (`EVENT`, `EOSE`, `OK`, `AUTH`, `NOTICE`)
+
+### RelayPool (`lib/nostr/relay_pool.dart`)
+
+Manages multiple `RelayConnection` instances. Core capabilities:
+
+| Feature | Details |
+|---|---|
+| Multi-relay fan-out | Publishes events to all connected relays |
+| Kind-based routing | `onKind(int kind, EventHandler)` registers handlers per event kind |
+| Global handlers | Catch-all event handlers for cross-cutting concerns |
+| Subscription management | `subscribe()` sends REQ to all relays, tracks by subscription ID |
+| EOSE handling | Per-subscription EOSE callbacks for knowing when historical data is complete |
+| Publish tracking | `OK` response completers -- publish returns a Future<bool> indicating relay acceptance |
+| Deduplication | In-memory set of processed event IDs prevents double-processing |
+| NIP-42 auth | `authPrivateKeyHex`/`authPublicKeyHex` for relay authentication challenges |
+| Background parsing | Uses `compute()` to parse event JSON on background isolates |
+| Failure tracking | Per-relay failure counters; skips relays after 3 consecutive failures in fetchFresh |
+| fetchFresh | Opens throwaway WebSocket connections for one-shot queries with NIP-42 support |
+
+### Supporting modules (`lib/nostr/`):
+
+| File | Purpose |
+|---|---|
+| `nostr_filter.dart` | Builds Nostr filter objects (kinds, authors, tags, since, until, limit) |
+| `subscription.dart` | Subscription model (ID, filters, handlers) |
+| `relay_auth.dart` | NIP-42 authentication event construction and signing |
+| `event_dispatcher.dart` | Event routing and dispatch logic |
 
 ---
 
-## 3. Relay Communication
+## Server State Sync
 
-### Persistent WebSocket Pool
+Servers in Inferno are represented as a set of replaceable Nostr events (Kinds 31750-31757). Each event kind represents a different aspect of server state.
 
-`RelaySubscriptionManager` maintains long-lived WebSocket connections to all configured relays using `Faye::WebSocket` + `EventMachine`. It subscribes to:
+### Replaceable event kinds
 
-- Group messages (Kind 9 filtered by `#h` group ID tags)
-- DMs (Kinds 4, 14, 1059 filtered by `#p` recipient and author pubkeys)
-- Profile metadata (Kind 0)
-- Presence (Kind 30315)
-- Typing indicators (Kind 25050, ephemeral)
-- Reactions (Kind 7)
-- Server state events (Kinds 31750–31757)
+| Kind | Purpose | d-tag format |
+|---|---|---|
+| 31750 | Server metadata (name, icon, description, settings) | `{server_public_id}` |
+| 31751 | Server structure (channels, categories, ordering) | `{server_public_id}` |
+| 31752 | Roles (permissions, colors, ordering) | `{server_public_id}` |
+| 31753 | Members | `{server_public_id}:{member_pubkey}` |
+| 31754 | Custom emoji | `{server_public_id}` |
+| 31755 | Custom stickers | `{server_public_id}` |
+| 31756 | Bans | `{server_public_id}` |
+| 31757 | Invites | `{server_public_id}` |
 
-### Publishing
+### ServerSyncService (`lib/services/server_sync_service.dart`)
 
-`RelayService.publish_to_all()` sends events to all active relays. Uses existing persistent connections when the EventMachine reactor is running; falls back to opening new connections with timeout handling.
+Responsible for fetching and processing server state from relays.
 
-### Fetching
+**Sync sequence** (mirrors the Rails `NostrServerJoinJob`):
 
-`RelayService.fetch_from_all()` parallelizes REQ queries across all relays for history syncs and metadata lookups. Deduplicates by event ID. Waits for EOSE before returning results.
+1. Fetch metadata (Kind 31750) -- server name, icon, description, AFK channel, voice providers
+2. Fetch structure (Kind 31751) -- channels, categories, ordering
+3. Fetch roles (Kind 31752) -- role definitions, permissions, hierarchy
+4. Fetch members (Kind 31753) -- per-member events with role assignments
+5. Fetch emoji (Kind 31754) -- custom server emoji
+6. Fetch stickers (Kind 31755) -- custom sticker packs
+7. Fetch bans (Kind 31756) -- banned users
+8. Subscribe to channel messages for all text channels
 
-### Relay Authentication (NIP-42)
+**Throttling:** By default, sync is skipped if the server was synced within the last 5 minutes (`minInterval` parameter). Periodic resync runs every 60 minutes.
 
-When a relay requires authentication, the app signs a Kind 22242 challenge-response event with the user's Nostr private key, proving identity without sharing credentials.
+**Preloaded events:** Discovery results can be passed as `preloadedStructure`, `preloadedRoles`, `preloadedMetadata` to avoid redundant relay fetches when joining a new server.
 
----
+### ServerPublishService (`lib/services/server_publish_service.dart`)
 
-## 4. Server State Sync
-
-Server state is stored as replaceable Nostr events (Kinds 31750–31757). When a server admin changes channels, roles, members, etc., the app:
-
-1. Updates local SQLite
-2. Publishes an updated replaceable event to relays
-3. Other instances subscribing to that server's events receive the update
-
-This means server configuration is portable — it lives on relays, not locked in a single database.
-
-### Server State Events
-
-| Kind | d-tag | Content |
-|------|-------|---------|
-| 31750 | server public ID | Server name, description, icon URL, banner URL, owner pubkey |
-| 31751 | server public ID | Channel list with categories, positions, nesting, types |
-| 31752 | server public ID | Roles with permissions bitmask, colors, hierarchy |
-| 31753 | server public ID + member pubkey | Individual member join/leave, role assignments |
-| 31754 | server public ID | Custom emoji definitions with Blossom URLs |
-| 31755 | server public ID | Custom sticker definitions with Blossom URLs |
-| 31756 | server public ID | Ban list (pubkeys, reasons) |
-| 31757 | server public ID | Active invite codes |
+Publishes server state changes as signed replaceable events to the relay pool. Each mutation (rename server, add channel, update role, etc.) rebuilds the relevant Kind 3175x event with the full current state and publishes it.
 
 ---
 
-## 5. Messaging
+## Messaging
 
-### Channel Messages (NIP-29)
+### Group Messages (Kind 9, NIP-29)
 
-Messages in channels are published as Kind 9 events with:
-- `#h` tag: group/channel identifier
-- Content: message text (may include markdown)
-- File attachments: encoded as Blossom URLs in the event content/tags
-- Replies: `#e` tag referencing parent event ID
+Handled by `GroupMessageService` (`lib/services/group_message_service.dart`).
 
-For encrypted channels, content is encrypted with NIP-44 (XChaCha20-Poly1305) using the channel's keypair.
+- Messages are published as Kind 9 events with an `h` tag containing the server's Nostr group ID.
+- Inbound Kind 9 events are matched to servers by `h` tag, resolved to a channel, and upserted into the messages table.
+- File attachments are URLs in the content (uploaded to Blossom servers first).
 
-### Direct Messages (Kind 14)
+### Direct Messages (Kind 14, NIP-24 / Kind 1059, NIP-59)
 
-DMs use Kind 14 events with `#p` tags for recipients. Content can be:
-- Plain text (for non-encrypted conversations)
-- NIP-44 encrypted (XChaCha20-Poly1305 with ECDH-derived shared secret)
+Handled by `DmService` (`lib/services/dm_service.dart`).
 
-File attachments in DMs are encoded as JSON payloads with `type: "message"`, containing `content`, `files`, and `emojis` fields.
+- Outbound: Content is encrypted with NIP-44 (XChaCha20-Poly1305) using the shared secret between sender and recipient. The encrypted payload is wrapped in a Kind 14 event, then gift-wrapped in a Kind 1059 event.
+- Inbound: Kind 1059 gift wraps are decrypted with the user's private key, revealing the Kind 14 inner event. The inner content is decrypted with NIP-44.
+- DMs also carry voice token responses and voice state updates as structured JSON payloads.
+
+### Message Deletion (Kind 9005)
+
+Deletion events reference the original event ID. Services process these by marking messages as deleted in the local DB.
+
+### Reactions (Kind 7)
+
+Handled by `ReactionService` (`lib/services/reaction_service.dart`). Reactions reference the target event via `e` tag. Custom emoji reactions use the emoji shortcode as content.
+
+### Typing Indicators (Kind 25050, ephemeral)
+
+Handled by `TypingService` (`lib/services/typing_service.dart`). Ephemeral events -- not persisted to relays, only forwarded to connected clients. Published when the user is actively typing in a channel or DM.
 
 ### Message Rendering
 
-Messages are rendered server-side with:
-- Markdown processing (Redcarpet + Rouge for syntax highlighting)
-- Custom emoji/sticker substitution
-- @mention resolution
-- Link preview unfurling (images, YouTube, Tenor GIFs)
-- Active Storage file attachment display
+`MessageContent` and `MessageBubble` widgets (`lib/widgets/`) render messages using `flutter_markdown` with custom builders for:
+
+- `@mentions` -- resolved to display names with tap-to-profile
+- Custom emoji -- rendered inline from server emoji URLs
+- Code blocks -- syntax-highlighted
+- Spoiler tags -- hidden until tapped
+- Link embeds -- preview cards for URLs (`lib/widgets/link_embed.dart`)
+- File attachments -- images, videos, audio with appropriate previews
 
 ---
 
-## 6. Key Management
+## Bootstrap Sequence
 
-### Default: Custodial (App-Managed)
+`AppBootstrapService` (`lib/services/app_bootstrap_service.dart`) orchestrates startup:
 
-The app manages keys for most users:
-
-- Keypair generated on signup using `secp256k1`
-- Private key encrypted with AES-256-GCM, key derived from `Rails.application.secret_key_base`
-- The user never needs to see or manage their keys
-- The app signs Nostr events on the user's behalf
-
-### Key Export (NIP-49)
-
-Power users can export their private key:
-
-- **nsec** — raw private key in bech32 format for use in standalone Nostr clients
-- **ncryptsec** — password-encrypted private key (NIP-49) for secure backup
-
-Key export is available in account settings. This is the user's recovery mechanism — if they lose access, an exported key lets them re-establish identity anywhere.
-
-### Key Import
-
-Users can import an existing Nostr keypair:
-- Enter an `nsec` or `ncryptsec` to link an existing identity
-- NIP-07 browser extension support (nos2x, Alby) for delegated signing
+1. **Warm media cache** -- single SELECT to preload image dimension data for instant layout
+2. **Ensure default relays** -- seed relay list if first run
+3. **Ensure local user** -- create a user record for the current keypair if missing
+4. **Connect to relays** -- parallel connection to all active relay URLs (3-second timeout)
+5. **Set auth credentials** -- configure NIP-42 credentials on the relay pool
+6. **Register event handlers** -- wire up `onKind` callbacks for all relevant event kinds
+7. **Publish presence** -- start periodic Kind 30315 presence publishing
+8. **Set up subscriptions** -- subscribe to DMs, profiles, presence, typing, reactions, server events
+9. **Start periodic resync** -- 60-minute timer to re-fetch all server state
+10. **Initialize NSFW detector** -- load ONNX model (non-blocking, falls back gracefully)
+11. **Start shared hash service** -- fetch content safety hash lists
 
 ---
 
-## 7. Asset Distribution (Blossom)
+## State Management (Riverpod)
 
-File attachments, avatars, banners, and server icons are uploaded to Blossom servers (content-addressable file hosting via BUD-01). URLs are embedded in Nostr events, making assets accessible from any client.
+Providers live in `lib/providers/`:
 
-The app caches remote Blossom files locally for performance. Default Blossom servers: `blossom.primal.net`, `cdn.satellite.earth`.
+| Provider | Type | Purpose |
+|---|---|---|
+| `databaseProvider` | Provider | Singleton `InfernoDatabase` instance |
+| `authProvider` | StateNotifierProvider | Auth state (keypair loaded, public key, login/logout) |
+| `serversProvider` | StateNotifierProvider | Server list, active server, join/leave |
+| `conversationsProvider` | StateNotifierProvider | DM conversation list and metadata |
+| `realtimeProvider` | Provider | Holds `AppBootstrapService` -- the live relay connection and all event handlers |
+| `serverSettingsProvider` | StateNotifierProvider | Server settings editing state |
+| `unreadProvider` | StateNotifierProvider | Unread message counts per channel/conversation |
+| `appUpdateProvider` | FutureProvider | Checks GitHub Releases API for available updates |
 
----
-
-## 8. Voice & Video
-
-Voice and video use LiveKit (SFU), not Nostr. This is the only non-relay communication channel:
-
-- Voice channels are local to the LiveKit server
-- WebRTC connections go through the LiveKit SFU
-- The app generates JWT tokens for LiveKit room access
-- Voice state (who's in which channel, mute/deafen) is managed locally
-
-See [voice-video-architecture.md](voice-video-architecture.md) for full details.
+Services are instantiated inside providers to ensure single instances are shared between UI and background event processing.
 
 ---
 
-## 9. Real-Time Broadcasting
+## Routing
 
-Within a single Inferno instance, ActionCable (async adapter) handles real-time WebSocket broadcasting to connected browser clients:
+`go_router` (`lib/router.dart`) with a `ShellRoute` for the persistent three-column layout:
 
-- New messages → broadcast to channel subscribers
-- Typing indicators → broadcast to channel
-- Presence changes → broadcast to all connected users
-- Server state changes → broadcast to server members
+```
+/auth/login          -- Login screen
+/auth/signup         -- Signup (generate keypair)
+/auth/import         -- Import existing key (nsec/ncryptsec)
+/auth/setup          -- Profile setup wizard
 
-ActionCable uses the `async` adapter (in-process, no Redis needed). This is appropriate because Inferno runs as a single process — there's no multi-server deployment to coordinate.
+/conversations       -- DM list (ShellRoute child)
+/conversations/:id   -- DM detail
 
----
+/servers/:serverId/channels/:channelId  -- Text channel
+/servers/:serverId/voice/:channelId     -- Voice channel
+```
 
-## 10. NIPs Reference
+The `MainShell` widget wraps all post-auth routes, providing:
 
-| NIP | Title | Usage |
-|-----|-------|-------|
-| [NIP-01](https://github.com/nostr-protocol/nips/blob/master/01.md) | Basic Protocol | Event format, signing, relay communication |
-| [NIP-05](https://github.com/nostr-protocol/nips/blob/master/05.md) | DNS-Based Verification | `user@domain` identifiers via `/.well-known/nostr.json` |
-| [NIP-24](https://github.com/nostr-protocol/nips/blob/master/24.md) | Extra Metadata | Kind 14 DM events |
-| [NIP-25](https://github.com/nostr-protocol/nips/blob/master/25.md) | Reactions | Kind 7 reactions on messages |
-| [NIP-29](https://github.com/nostr-protocol/nips/blob/master/29.md) | Relay-Based Groups | Kind 9 group chat messages, Kind 9005 deletions |
-| [NIP-42](https://github.com/nostr-protocol/nips/blob/master/42.md) | Relay Authentication | Kind 22242 challenge-response auth |
-| [NIP-44](https://github.com/nostr-protocol/nips/blob/master/44.md) | Encrypted Payloads | XChaCha20-Poly1305 encryption for DMs and private channels |
-| [NIP-49](https://github.com/nostr-protocol/nips/blob/master/49.md) | Encrypted Private Key | Password-encrypted key export (ncryptsec) |
-| [NIP-59](https://github.com/nostr-protocol/nips/blob/master/59.md) | Gift Wrap | Encrypted DM wrappers (Kind 1059) |
+- **Left rail:** Server icon list (`ServerRail`)
+- **Sidebar:** Channel list (`ChannelSidebar`) or DM list (`DmSidebar`)
+- **Content area:** The routed child widget
+- **Right panel:** Member list (`MemberList`), togglable
 
----
-
-## 11. Security
-
-### Cryptographic Protections
-
-| Protection | Mechanism |
-|-----------|-----------|
-| Event integrity | Schnorr signatures (secp256k1) on all Nostr events |
-| DM privacy | NIP-44 XChaCha20-Poly1305 end-to-end encryption |
-| Channel privacy | NIP-44 encryption with per-channel keypair |
-| Key storage | AES-256-GCM encryption at rest, key derived from `secret_key_base` |
-| Relay auth | NIP-42 challenge-response (no passwords over the wire) |
-| Transport | HTTPS / WSS for all relay connections |
-
-### Rate Limiting
-
-`Rack::Attack` provides rate limiting on:
-- Login attempts (per IP)
-- Registration (per IP)
-- API endpoints (per user)
+Page transitions are disabled (`CustomTransitionPage` with `Duration.zero`) -- content swaps instantly, matching Discord-style navigation.
 
 ---
 
-## 12. Technology Stack
+## Voice and Video
 
-| Layer | Technology |
-|-------|-----------|
-| Backend | Rails 8.1 |
-| Database | SQLite (primary, cache, queue) |
-| Background Jobs | Solid Queue |
-| Real-time (local) | ActionCable (async adapter) |
-| Real-time (relay) | Faye::WebSocket + EventMachine |
-| Frontend | Hotwire (Turbo + Stimulus) |
-| Styling | Tailwind CSS 4 |
-| JS Bundling | Bun (via jsbundling-rails) |
-| CSS Bundling | Tailwind (via cssbundling-rails) |
-| Asset Pipeline | Propshaft |
-| Auth | Devise |
-| File Storage | Active Storage + Blossom |
-| Voice/Video | LiveKit (SFU) |
-| Identity | Nostr (secp256k1 via nostr_ruby) |
-| Relay | strfry (C++ Nostr relay) |
-| Encryption | NIP-44 (libsodium via Fiddle FFI) |
+### Architecture
+
+Voice and video use LiveKit, a WebRTC-based media server. The Inferno app does not run its own media server -- it connects to LiveKit instances configured per server.
+
+### Components
+
+| Component | Location | Purpose |
+|---|---|---|
+| `LivekitService` | `lib/services/livekit_service.dart` | Room connection, track management, participant state |
+| `VoiceTokenService` | `lib/services/voice_token_service.dart` | JWT token generation for LiveKit auth |
+| `VoiceStateService` | `lib/services/voice_state_service.dart` | Publishes/subscribes Kind 10070 voice state events |
+| `CallService` | `lib/services/call_service.dart` | Call initiation and lifecycle |
+| `VoiceChannelScreen` | `lib/screens/voice/voice_channel_screen.dart` | Voice channel UI |
+| `VoiceControls` | `lib/widgets/voice_controls.dart` | Mute, deafen, disconnect controls |
+| `ParticipantTile` | `lib/widgets/participant_tile.dart` | Individual participant video/audio tile |
+
+### Voice state (Kind 10070)
+
+Voice presence is published as Kind 10070 public events so all server members can see who is in which voice channel without being connected themselves. These events contain:
+
+- Channel identifier
+- Mute/deafen state
+- Server identifier
+
+### Audio processing
+
+DeepFilterNet noise suppression is available on desktop platforms via native FFI:
+
+- Native library: `native/deepfilter/`
+- Dart bindings: `lib/src/deepfilter_bindings.dart`
+- Processing: `lib/services/noise_processor.dart`
+
+The noise suppression model runs on-device. If the native library is unavailable, the app falls back to unprocessed audio.
+
+---
+
+## Assets and File Hosting
+
+### Blossom (BUD-01)
+
+`BlossomClient` (`lib/services/blossom_client.dart`) handles file uploads to Blossom servers.
+
+**Upload flow:**
+
+1. Compute SHA-256 hash of file bytes
+2. Build a Kind 24242 authorization event (signed, with expiration)
+3. HTTP PUT to the Blossom server's `/upload` endpoint with the auth header
+4. Server returns the file URL
+
+**Default servers:** `blossom.primal.net`, `cdn.satellite.earth`
+
+### Caching
+
+- `MediaCacheService` (`lib/services/media_cache_service.dart`) -- caches image dimensions to prevent layout reflow
+- `BlossomCacheService` (`lib/services/blossom_cache_service.dart`) -- manages local file cache
+- `AssetCacheService` (`lib/services/asset_cache_service.dart`) -- general asset caching
+- `cached_network_image` -- HTTP-level image caching with disk persistence
+
+---
+
+## Content Safety
+
+### NSFW Detection
+
+`NsfwDetector` (`lib/services/nsfw_detector.dart`) runs a two-stage image classification pipeline on-device using ONNX Runtime via FFI:
+
+- Native library: `native/onnxruntime/`
+- Dart bindings: `lib/src/onnxruntime_bindings.dart`
+
+Images are classified locally. Detected NSFW content is blurred with a click-to-reveal overlay. No images are sent to external services for classification.
+
+### Content Safety Service
+
+`ContentSafetyService` (`lib/services/content_safety_service.dart`) orchestrates safety checks on messages, combining:
+
+- NSFW image detection
+- Perceptual hash matching against known-bad content (`SharedHashService`)
+- CSAM hash database lookups
+
+### Image Hashing
+
+`ImageHasher` (`lib/services/image_hasher.dart`) computes perceptual hashes for content matching. `SharedHashService` (`lib/services/shared_hash_service.dart`) fetches and maintains shared hash lists from relays.
+
+---
+
+## Theme System
+
+Seven bundled themes, all dark, defined in `lib/theme/all_themes.dart`:
+
+| Theme | Accent |
+|---|---|
+| Inferno | Red (#DC2626) |
+| Frostfire | Blue (#2563EB) |
+| Boron | Green (#059669) |
+| Brimstone | Purple (#7C3AED) |
+| Plasma | Pink (#DB2777) |
+| Pulsar | Amber (#F59E0B) |
+| Obsidian | Gray (#9CA3AF) |
+
+Each theme is built from a parameterized `_buildTheme()` function that takes primary colors and a gray scale (gray50 through gray950). The result is a full `ThemeData` with consistent `ColorScheme`, `AppBarTheme`, `CardTheme`, `InputDecorationTheme`, and text styles.
+
+Theme switching is hot-swappable. `ThemeProvider` (`lib/theme/theme_provider.dart`) swaps the entire `ThemeData` behind a spinner overlay to prevent partial-render flicker. The active theme preference is persisted in the `app_settings` table.
+
+All text rendering uses a font family stack with `NotoColorEmoji` as a fallback to ensure emoji render identically across Windows, Linux, macOS, Android, and iOS.
+
+---
+
+## Auto-Updates
+
+`AppUpdateService` (`lib/services/app_update_service.dart`) checks the GitHub Releases API every 30 minutes on desktop platforms. When a newer version is detected, an `UpdateBanner` widget is shown. The user can download and install the update.
+
+Mobile platforms (Android, iOS) use their respective app store update mechanisms.
+
+---
+
+## Nostr Implementation Protocol (NIP) Reference
+
+| NIP | Purpose | Implementation |
+|---|---|---|
+| NIP-01 | Basic protocol (events, filters, subscriptions) | `lib/nostr/relay_pool.dart`, `lib/crypto/nostr_event.dart` |
+| NIP-02 | Contact list | `ContactService` |
+| NIP-10 | Event threading (reply tags) | `GroupMessageService` message parsing |
+| NIP-19 | Bech32 encoding (npub, nsec, ncryptsec) | `lib/crypto/bech32_nostr.dart` |
+| NIP-24 | Sealed DMs (Kind 14) | `DmService` |
+| NIP-25 | Reactions (Kind 7) | `ReactionService` |
+| NIP-29 | Group chat (Kind 9) | `GroupMessageService` |
+| NIP-42 | Relay authentication (Kind 22242) | `lib/nostr/relay_auth.dart` |
+| NIP-44 | Encrypted payloads (XChaCha20-Poly1305) | `lib/crypto/nip44_crypto.dart` |
+| NIP-49 | Key encryption (ncryptsec) | `lib/crypto/nip49_crypto.dart` |
+| NIP-59 | Gift wrap (Kind 1059) | `DmService` |
+
+### Custom event kinds
+
+| Kind | Purpose |
+|---|---|
+| 10070 | Voice channel state (public, replaceable) |
+| 24242 | Blossom upload authorization |
+| 25050 | Typing indicators (ephemeral) |
+| 30315 | Presence/status (replaceable) |
+| 31750 | Server metadata (parameterized replaceable) |
+| 31751 | Server structure |
+| 31752 | Server roles |
+| 31753 | Server members |
+| 31754 | Server emoji |
+| 31755 | Server stickers |
+| 31756 | Server bans |
+| 31757 | Server invites |
+
+---
+
+## Security Model
+
+### Threat model
+
+Inferno is a client-only application. There is no Inferno server to compromise. The attack surface is:
+
+1. **Relay operators** -- can see public events, withhold events, or serve stale data. Mitigation: multi-relay fan-out, local cache, event signature verification.
+2. **Local device compromise** -- private key in platform keychain. Mitigation: OS-level keychain protection (Keychain on macOS/iOS, Keystore on Android, libsecret on Linux, Credential Manager on Windows).
+3. **Network interception** -- all relay connections use WSS (WebSocket over TLS).
+
+### Cryptographic guarantees
+
+- **Authentication:** Every event is signed with Schnorr (secp256k1). Signature is verified on receipt.
+- **DM confidentiality:** NIP-44 XChaCha20-Poly1305 with HKDF-derived shared secrets. Only sender and recipient can decrypt.
+- **Key export:** NIP-49 scrypt encryption. Private key never leaves the device in plaintext.
+- **No trust in relays:** Relays are untrusted storage. Events are self-authenticating via signatures. Tampered events fail verification and are discarded.
+
+### Content safety
+
+- On-device NSFW classification (no external API calls)
+- Perceptual hash matching against shared databases
+- CSAM hash checking
+- All processing happens locally -- no images are uploaded to classification services
+
+---
+
+## Directory Structure
+
+```
+lib/
+  main.dart                 -- Entry point
+  app.dart                  -- MaterialApp with Riverpod, router, theme
+  router.dart               -- go_router route definitions
+
+  crypto/                   -- Pure Dart cryptography
+    nostr_key.dart           -- Keypair generation/derivation
+    nostr_signer.dart        -- Schnorr signing
+    nostr_verifier.dart      -- Signature verification
+    nostr_event.dart         -- Event model and serialization
+    nip44_crypto.dart        -- NIP-44 encryption
+    nip49_crypto.dart        -- NIP-49 key encryption
+    bech32_nostr.dart        -- Bech32 encoding/decoding
+
+  database/                 -- Drift ORM layer
+    database.dart            -- Database class definition
+    database.g.dart          -- Generated code
+    tables/                  -- Table definitions (37 tables)
+    daos/                    -- Data access objects
+
+  nostr/                    -- Relay communication
+    relay_connection.dart    -- Single WebSocket connection
+    relay_pool.dart          -- Multi-relay pool manager
+    nostr_filter.dart        -- Subscription filter builder
+    subscription.dart        -- Subscription model
+    relay_auth.dart          -- NIP-42 authentication
+    event_dispatcher.dart    -- Event routing
+
+  providers/                -- Riverpod state management
+    database_provider.dart
+    auth_provider.dart
+    servers_provider.dart
+    conversations_provider.dart
+    realtime_provider.dart
+    server_settings_provider.dart
+    unread_provider.dart
+    app_update_provider.dart
+
+  services/                 -- Business logic (40+ services)
+    app_bootstrap_service.dart
+    auth_service.dart
+    key_management_service.dart
+    dm_service.dart
+    group_message_service.dart
+    server_sync_service.dart
+    server_publish_service.dart
+    contact_service.dart
+    reaction_service.dart
+    presence_service.dart
+    typing_service.dart
+    backfill_service.dart
+    relay_config_service.dart
+    livekit_service.dart
+    voice_token_service.dart
+    voice_state_service.dart
+    blossom_client.dart
+    content_safety_service.dart
+    nsfw_detector.dart
+    noise_processor.dart
+    ... (and others)
+
+  screens/                  -- Full-screen UI
+    auth/                    -- Login, signup, key import, setup wizard
+    channels/                -- Text channel, channel type router, search panel
+    conversations/           -- DM list, DM detail
+    voice/                   -- Voice channel
+    settings/                -- Settings hub, appearance, notifications, safety, voice/video
+    server_settings/         -- Server settings overlay
+    main_shell.dart          -- Persistent three-column layout shell
+
+  widgets/                  -- Reusable UI components
+    server_rail.dart         -- Server icon sidebar
+    channel_sidebar.dart     -- Channel list
+    dm_sidebar.dart          -- DM conversation list
+    member_list.dart         -- Server member list
+    message_list.dart        -- Scrollable message list
+    message_bubble.dart      -- Individual message rendering
+    message_content.dart     -- Markdown content rendering
+    message_input.dart       -- Compose bar with file upload
+    typing_indicator.dart    -- Typing status display
+    reaction_bar.dart        -- Reaction display and picker
+    unified_picker.dart      -- Emoji/GIF/sticker picker
+    voice_controls.dart      -- Voice channel controls
+    ... (and others)
+
+  theme/                    -- Theme system
+    all_themes.dart          -- 7 theme definitions
+    inferno_theme.dart       -- Legacy/fallback theme constants
+    theme_provider.dart      -- Hot-swap theme management
+    ui_effects.dart          -- Visual effect utilities
+
+  models/                   -- Domain models
+    permission.dart          -- Permission bitmask model
+
+  src/                      -- FFI bindings
+    deepfilter_bindings.dart -- DeepFilterNet noise suppression
+    onnxruntime_bindings.dart -- ONNX Runtime for NSFW detection
+
+  utils/                    -- Utility functions
+
+native/                     -- Native C/C++ libraries
+  deepfilter/               -- DeepFilterNet noise suppression
+  onnxruntime/              -- ONNX Runtime for inference
+```

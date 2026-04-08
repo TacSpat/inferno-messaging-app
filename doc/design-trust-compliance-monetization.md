@@ -1,6 +1,6 @@
-# Trust, Compliance & Monetization — Design Document
+# Trust, Compliance & Monetization -- Design Document (Flutter)
 
-This document covers designs for safety, compliance, and monetization systems. Each section includes database schema, models, services, and implementation details.
+This document covers designs for safety, compliance, and monetization systems in the Flutter client. All processing is on-device. There is no server component -- the app communicates with Nostr relays and external APIs directly. Database schemas are Drift table definitions (SQLite).
 
 ---
 
@@ -8,7 +8,7 @@ This document covers designs for safety, compliance, and monetization systems. E
 
 1. [Audit Logging & Legal Compliance](#1-audit-logging--legal-compliance)
 2. [Content Safety: CSAM Detection & Upload Scanning](#2-content-safety-csam-detection--upload-scanning)
-3. [User Suspensions](#3-user-suspensions)
+3. [User Blocking & Muting](#3-user-blocking--muting)
 4. [Message Integrity & E2EE](#4-message-integrity--e2ee)
 5. [Rate Limiting](#5-rate-limiting)
 6. [Monetization (Stripe + Zaps)](#6-monetization-stripe--zaps)
@@ -22,76 +22,59 @@ This document covers designs for safety, compliance, and monetization systems. E
 
 ### Purpose
 
-Provide an immutable record of user activity and moderation actions for legal compliance, evidence preservation, and administration.
+Provide a local, immutable record of safety-relevant events for the user's own records, evidence preservation, and authority reporting. Since there is no server, all audit data lives in the local SQLite database.
 
-### Database Schema
+### Drift Table Definitions
 
-#### `audit_logs`
+#### `AuditLogs`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `event_type` | `string` | `auth_attempt`, `auth_success`, `auth_failure`, `user_suspended`, `user_unsuspended`, `csam_match_detected`, `ncmec_report_submitted`, `data_export_created`, `settings_changed`, `tier1_verified` |
-| `actor_type` | `string` | Polymorphic: `User`, `System` |
-| `actor_id` | `bigint` | Polymorphic ID (nullable for system events) |
-| `target_type` | `string` | Polymorphic: `User`, `Server`, `Channel`, `Message` |
-| `target_id` | `bigint` | Polymorphic ID (nullable) |
-| `ip_address` | `string` | Request IP (stored for auth events) |
-| `metadata` | `json` | Freeform context |
-| `created_at` | `datetime` | Immutable timestamp |
+```dart
+class AuditLogs extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get eventType => text()(); // 'csam_match_detected', 'content_hidden', 'content_unhidden', 'authority_report_generated', 'data_export_created', 'settings_changed'
+  TextColumn get actorPubkey => text().nullable()(); // Nostr pubkey of acting user (null for system events)
+  TextColumn get targetType => text().nullable()(); // 'message', 'user', 'server', 'channel'
+  IntColumn get targetId => integer().nullable()();
+  TextColumn get targetPubkey => text().nullable()(); // Nostr pubkey of target (for user-level events)
+  TextColumn get metadata => text().withDefault(const Constant('{}'))(); // JSON freeform context
+  DateTimeColumn get createdAt => dateTime()();
+}
+```
 
 **Indexes:**
-- `(event_type, created_at)` — filter by type with time range
-- `(actor_type, actor_id)` — look up all events for a user
-- `(target_type, target_id)` — look up all events targeting a record
+- `(eventType, createdAt)` -- filter by type with time range
+- `(actorPubkey)` -- look up all events for a pubkey
+- `(targetType, targetId)` -- look up all events targeting a record
 
-#### `legal_holds`
+#### `DataExports`
 
-Prevents data pruning for specific users or servers under legal hold.
+Tracks user-initiated data exports (personal data download).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `holdable_type` | `string` | Polymorphic: `User`, `Server`, `Channel` |
-| `holdable_id` | `bigint` | Polymorphic ID |
-| `reason` | `text` | Legal reference / case number |
-| `placed_by_id` | `bigint` | FK → `users` (admin) |
-| `active` | `boolean` | Default `true` |
-| `placed_at` | `datetime` | When the hold was placed |
-| `lifted_at` | `datetime` | When lifted (null if active) |
-| `created_at` | `datetime` | |
-| `updated_at` | `datetime` | |
-
-#### `data_exports`
-
-Tracks data subject access requests (GDPR).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `user_id` | `bigint` | FK → `users` |
-| `requested_by_id` | `bigint` | FK → `users` (admin or self) |
-| `export_type` | `string` | `full`, `messages`, `profile`, `audit_log` |
-| `status` | `string` | `pending`, `processing`, `completed`, `failed`, `expired` |
-| `file_path` | `string` | Path to generated archive |
-| `expires_at` | `datetime` | Auto-delete after download window |
-| `created_at` | `datetime` | |
-| `updated_at` | `datetime` | |
+```dart
+class DataExports extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get exportType => text()(); // 'full', 'messages', 'profile', 'audit_log'
+  TextColumn get status => text()(); // 'pending', 'processing', 'completed', 'failed'
+  TextColumn get filePath => text().nullable()(); // Path to generated archive on disk
+  DateTimeColumn get expiresAt => dateTime().nullable()(); // Auto-delete after window
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
+```
 
 ### Services
 
 | Service | Purpose |
 |---------|---------|
-| `AuditService` | Central logging: `AuditService.log(event_type:, actor:, target:, ip_address:, metadata:)` |
-| `DataExportService` | Generates ZIP archive of user data (messages, profile, attachments, audit log). Runs as a Solid Queue job. |
+| `AuditService` | Central logging: `AuditService.log(eventType:, actorPubkey:, targetType:, targetId:, metadata:)` writes to local `audit_logs` table |
+| `DataExportService` | Generates ZIP archive of user data (messages, profile, attachments, audit log). Runs in a Dart isolate to avoid blocking the UI thread. |
 
-### Controllers
+### UI
 
-| Controller | Routes | Purpose |
-|------------|--------|---------|
-| `Admin::AuditLogsController` | `GET /admin/audit_logs` | Paginated, filterable log viewer |
-| `Admin::LegalHoldsController` | CRUD `/admin/legal_holds` | Manage legal holds |
-| `Admin::DataExportsController` | CRUD `/admin/data_exports` | Initiate and download exports |
+| Screen | Purpose |
+|--------|---------|
+| Safety Settings > Audit Log | Paginated, filterable log viewer within the app |
+| Safety Settings > Data Export | Initiate and download personal data exports |
 
 ---
 
@@ -99,189 +82,174 @@ Tracks data subject access requests (GDPR).
 
 ### Purpose
 
-Detect, quarantine, and report child sexual abuse material (CSAM) per federal law (18 U.S.C. 2258A). Provide upload scanning, hash matching, and NCMEC CyberTipline reporting.
+Detect, quarantine, and enable reporting of child sexual abuse material (CSAM). All scanning is performed on-device using perceptual hashing and ONNX-based classifiers. No images leave the device for scanning purposes.
 
-### Database Schema
+### Drift Table Definitions
 
-#### `content_hashes`
+#### `ContentHashes`
 
-Perceptual hash (pHash) and SHA-256 of every uploaded image blob.
+Perceptual hash (dHash) of every scanned image attachment, stored locally.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `blob_id` | `bigint` | FK → `active_storage_blobs` |
-| `sha256` | `string(64)` | SHA-256 hex digest |
-| `phash` | `string(16)` | 64-bit perceptual hash (dHash via `dhash-vips`) |
-| `match_status` | `string` | `clean`, `matched`, `pending_review` |
-| `matched_known_bad_hash_id` | `bigint` | FK → `known_bad_hashes` (nullable) |
-| `scanned_at` | `datetime` | When the scan completed |
-| `created_at` | `datetime` | |
-
-#### `known_bad_hashes`
-
-Known-bad hashes seeded from NCMEC, Project VIC, or local confirmed matches.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `hash_type` | `string` | `sha256`, `phash` |
-| `hash_value` | `string` | The hash value |
-| `source` | `string` | `ncmec`, `project_vic`, `local_confirmed` |
-| `severity` | `string` | `confirmed_csam`, `suspected`, `non_photographic` |
-| `active` | `boolean` | Default `true` |
-| `created_at` | `datetime` | |
-
-#### `quarantined_uploads`
-
-Uploads that matched a known-bad hash. Content is preserved under legal hold but hidden from users.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `content_hash_id` | `bigint` | FK → `content_hashes` |
-| `blob_id` | `bigint` | FK → `active_storage_blobs` |
-| `uploader_id` | `bigint` | FK → `users` |
-| `uploader_ip` | `string` | IP address at time of upload |
-| `matched_hash_id` | `bigint` | FK → `known_bad_hashes` |
-| `match_type` | `string` | `exact_sha256`, `perceptual_phash` |
-| `match_distance` | `integer` | Hamming distance for pHash matches |
-| `status` | `string` | `quarantined`, `confirmed_csam`, `false_positive`, `reported_to_ncmec` |
-| `auto_suspended` | `boolean` | Whether this triggered an automatic user suspension |
-| `reviewed_by_id` | `bigint` | FK → `users` (admin who reviewed) |
-| `reviewed_at` | `datetime` | |
-| `created_at` | `datetime` | |
-
-#### `ncmec_reports`
-
-CyberTipline submissions to NCMEC.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `report_id` | `string` | NCMEC-assigned report ID |
-| `status` | `string` | `draft`, `submitted`, `accepted`, `rejected` |
-| `suspect_user_id` | `bigint` | FK → `users` |
-| `suspect_ip` | `string` | IP address at time of incident |
-| `incident_datetime` | `datetime` | When the content was uploaded |
-| `incident_summary` | `text` | Description of the incident |
-| `submitted_at` | `datetime` | |
-| `created_at` | `datetime` | |
-
-### Scanning Pipeline
-
-```
-User uploads image
-        │
-        ▼
-Controller saves message normally
-        │
-        └── after_action: ScannableUpload detects new image blob(s)
-                │
-                ├── upload_scanning_enabled? → no → done
-                │
-                └── yes → UploadScanJob.perform_later(blob_id)
-                        │
-                        ▼
-                UploadScanService.call(blob)
-                        │
-                        ├── Compute SHA-256 digest
-                        ├── Compute pHash via dhash-vips
-                        ├── Create ContentHash record
-                        │
-                        ├── KnownBadHash.match?(sha256:, phash:, threshold:)
-                        │     │
-                        │     ├── No match → clean → done
-                        │     │
-                        │     └── Match found!
-                        │           │
-                        │           ▼
-                        │     QuarantineService.call
-                        │           ├── Hide content
-                        │           ├── Create QuarantinedUpload record
-                        │           ├── Create ModerationReport (type: csam, priority: 2)
-                        │           ├── Create LegalHold (90-day minimum)
-                        │           ├── Auto-suspend user (if configured)
-                        │           └── AuditService.log
+```dart
+class ContentHashes extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get hashType => text().withDefault(const Constant('dhash'))();
+  TextColumn get hashValue => text()();
+  TextColumn get mediaType => text().nullable()();
+  RealColumn get confidence => real().withDefault(const Constant(1.0))();
+  BoolColumn get allowlisted => boolean().withDefault(const Constant(false))();
+  IntColumn get reporterCount => integer().withDefault(const Constant(1))();
+  TextColumn get reporterPubkeys => text().withDefault(const Constant('[]'))(); // JSON array
+  TextColumn get nostrEventIds => text().withDefault(const Constant('[]'))(); // JSON array
+  IntColumn get messageId => integer().nullable()();
+  TextColumn get originalFilename => text().nullable()();
+  TextColumn get source => text().withDefault(const Constant('local'))(); // 'local', 'shared'
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
 ```
 
-### Admin Review: One-Click CSAM Action Panel
+#### `CsamHashEntries`
 
-When admin confirms a CSAM match, a single click does:
-- Confirm as CSAM
-- Suspend user (permanent)
-- Place legal hold (90 days)
-- Create NCMEC report draft
-- Publish NIP-56 report event to relays
-- Close all other reports for this user
+Known-bad hashes: seeded from shared hash network (NIP-56 reports) or confirmed locally.
+
+```dart
+class CsamHashEntries extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get hashValue => text()();
+  TextColumn get hashType => text().withDefault(const Constant('dhash'))();
+  TextColumn get listSource => text()(); // 'shared_promotion', 'local_confirmed'
+  DateTimeColumn get addedAt => dateTime()();
+}
+```
+
+#### `HiddenAttachmentRecords`
+
+Records of attachments that were purged from hidden messages, preserving metadata for authority reports.
+
+```dart
+class HiddenAttachmentRecords extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get messageId => integer()();
+  TextColumn get originalFilename => text()();
+  TextColumn get contentType => text().nullable()();
+  IntColumn get byteSize => integer().nullable()();
+  TextColumn get checksum => text().nullable()();
+  DateTimeColumn get purgedAt => dateTime().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
+```
+
+### On-Device Scanning Pipeline
+
+```
+Message arrives (DM or channel message with image attachments)
+        |
+        v
+ContentSafetyService.check(messageId)
+        |
+        +-- Stage 0: CSAM hash match (always on, non-negotiable)
+        |     |
+        |     +-- ImageHasher.hashMessageAttachments() computes dHash
+        |     |   using the `image` Dart package (9x8 grayscale, 64-bit difference hash)
+        |     |
+        |     +-- Compare against CsamHashEntries table (Hamming distance <= 10)
+        |     |
+        |     +-- Match found?
+        |           |
+        |           +-- Yes: auto-hide message, purge file URLs,
+        |           |        store HiddenAttachmentRecord, log to AuditService
+        |           |        (CSAM hides are NOT reversible by the user)
+        |           |
+        |           +-- No: continue to stage 1
+        |
+        +-- Stage 1: NSFW detection (ONNX Runtime via FFI)
+        |     |
+        |     +-- Pre-filter: Marqo ViT-Tiny (384x384) — high sensitivity
+        |     |   Score < 0.5 -> safe, skip confirmation
+        |     |
+        |     +-- Confirmation: TostAI FocalNet-Base (224x224)
+        |     |   5-class: drawings, hentai, neutral, porn, sexy
+        |     |
+        |     +-- Flagged? auto-hide with reason 'nsfw'
+        |
+        +-- Stages 2-5: Text/reputation/hash filters
+              (see ContentSafetyService for full filter chain)
+```
+
+### Shared Hash Network (NIP-56)
+
+The `SharedHashService` periodically fetches Kind 1984 report events from Nostr relays. These events contain `["x", "<hash>", "<type>"]` tags with content hashes reported by other users in the network.
+
+- Reports are aggregated into the local `content_hashes` table with confidence scoring
+- Friend reporters are weighted 2x (configurable)
+- When a hash reaches the confidence threshold AND minimum reporter count, it is auto-promoted to `csam_hash_entries` for mandatory blocking
+- Allowlisted hashes are never promoted
+
+### Authority Reporting
+
+Since there is no server to file NCMEC CyberTipline reports programmatically, the app provides tools for the user to generate structured reports for law enforcement:
+
+- `AuthorityReportGenerator` (`lib/services/authority_report_generator.dart`) produces a plaintext report containing: incident summary, message metadata, sender pubkey, timestamps, content hashes, and hidden attachment records
+- The Authority Report screen (`lib/screens/settings/authority_report_screen.dart`) lets the user select a category, generate the report, and copy it to clipboard for submission to the appropriate authority
+- NIP-56 report events (Kind 1984) can be published to relays to contribute to the shared hash network
 
 ### Services
 
 | Service | Purpose |
 |---------|---------|
-| `UploadScanService` | Compute SHA-256 + pHash, check against known-bad database |
-| `QuarantineService` | Hide content, create records, auto-suspend, audit log |
-| `NcmecReportService` | Build and submit CyberTipline reports |
-| `ContentHashImportService` | Bulk import known-bad hashes |
-| `CsamEscalationService` | Escalate unresolved CSAM reports after configurable hours |
+| `ContentSafetyService` | Orchestrates all content safety checks. Called after message insert. Six-stage filter pipeline (CSAM hash, NSFW, unknown sender, report threshold, reputation, image hash) plus text filters. |
+| `ImageHasher` | Computes dHash using the `image` Dart package. Static methods for hashing and Hamming distance comparison. |
+| `NsfwDetector` | Two-stage ONNX Runtime pipeline via FFI. Singleton with lazy model loading. |
+| `SharedHashService` | Fetches NIP-56 report events from relays, aggregates hash confidence, auto-promotes high-confidence hashes to CSAM entries. |
+| `ReputationScorer` | Multi-signal weighted reputation scoring (friend status, report count, account age, etc.) |
+| `AuthorityReportGenerator` | Generates structured plaintext reports for law enforcement submission. |
 
-### New Gem
+### Dart Packages
 
-| Gem | Purpose |
-|-----|---------|
-| `dhash-vips` | Perceptual hashing via `ruby-vips` — reuses existing `image_processing` bindings |
+| Package | Purpose |
+|---------|---------|
+| `image` | Pure Dart image decoding/resizing for dHash computation |
+| `onnxruntime` (FFI) | ONNX model inference for NSFW detection (`lib/src/onnxruntime_bindings.dart`) |
 
 ---
 
-## 3. User Suspensions
+## 3. User Blocking & Muting
 
 ### Purpose
 
-Instance-wide user suspensions (temporary or permanent) with Devise integration.
+Since there is no centralized server to suspend accounts, content moderation is local. Users block or mute other pubkeys, and the app enforces these locally.
 
-### Database Schema
+### Existing Drift Tables
 
-#### `user_suspensions`
+Blocking and muting are handled through the existing `Contacts` table (`friendship_status` field) and the `ContentSafetyService` filter chain (unknown sender, report threshold, reputation score).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `user_id` | `bigint` | FK → `users` |
-| `suspension_type` | `string` | `temporary`, `permanent` |
-| `reason` | `text` | Human-readable reason |
-| `reason_category` | `string` | `csam`, `spam`, `harassment`, `illegal`, `admin_action` |
-| `auto_triggered` | `boolean` | Whether triggered automatically by scanning pipeline |
-| `suspended_by_id` | `bigint` | FK → `users` (admin, nullable for auto) |
-| `expires_at` | `datetime` | Null for permanent suspensions |
-| `lifted_at` | `datetime` | When lifted (null if active) |
-| `lifted_by_id` | `bigint` | FK → `users` |
-| `lift_reason` | `text` | Why the suspension was lifted |
-| `created_at` | `datetime` | |
-
-### Suspension Flow
+### Blocking Flow
 
 ```
-Admin clicks "Suspend User" (or auto-triggered by CSAM match)
-        │
-        ▼
-UserSuspensionService.suspend!(user, params)
-        │
-        ├── Create UserSuspension record
-        ├── Set user.suspended_at = Time.current (denormalized for O(1) Devise auth check)
-        ├── Invalidate all active sessions (immediate logout)
-        ├── Hide user content via query scope (NOT deleted — preserved for evidence)
-        └── AuditService.log
+User taps "Block" on a profile or message
+        |
+        v
+ContactService.block(pubkey)
+        |
+        +-- Update contact record: friendshipStatus = blocked
+        +-- Publish NIP-56 report event to relays (optional, user-configurable)
+        +-- Hide all existing messages from this pubkey
+        +-- AuditService.log('user_blocked', ...)
 ```
 
-### Suspendable Concern
+### Auto-Hide Escalation
 
-Mixed into `User`. Overrides Devise `active_for_authentication?` to return `false` when `suspended_at` is present.
+The `ContentSafetyService` automatically hides content from senders who exceed the report threshold or fall below the reputation threshold. These are configurable per-user in Safety Settings:
 
-### Jobs
+- **Protection level**: `standard` (all filters active) or `minimal` (CSAM + NSFW only)
+- **Report threshold**: number of reports before auto-hide
+- **Reputation sensitivity**: weight multiplier for reputation scoring
+- **Image hash matching**: toggle perceptual hash comparison
+- **Text filters**: block links, phone numbers, ALL CAPS, spam characters, keyword filter
 
-| Job | Purpose |
-|-----|---------|
-| `LiftExpiredSuspensionsJob` | Recurring hourly — finds expired suspensions and lifts them |
+All auto-hides (except CSAM) are reversible via the Safety Settings UI.
 
 ---
 
@@ -289,37 +257,28 @@ Mixed into `User`. Overrides Devise `active_for_authentication?` to return `fals
 
 ### 4a. Message Signatures
 
-Every message carries a cryptographic signature proving the author wrote that exact content.
+Every message carries a Nostr event signature proving the author wrote that exact content.
 
-**Database changes — `messages` table:**
+**Messages table columns (already present):**
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `nostr_event_id` | `string` | Nostr event ID (SHA-256 of serialized event) |
-| `signature` | `string` | Schnorr signature (hex-encoded) |
+| `nostrEventId` | `text` | Nostr event ID (SHA-256 of serialized event) |
+| `nostrSignature` | `text` | Schnorr signature (hex-encoded) |
 
-**Service:** `MessageSigningService` — sign on create, verify on display.
-
-All messages are signed, not just relay-bound ones. This provides a universal integrity guarantee.
+**Service:** Message signing and verification is handled inline by `GroupMessageService` and `DmService` using the `nostr` Dart utilities. All messages are signed at creation time using the local Nostr keypair.
 
 ### 4b. NIP-44 Encrypted DMs
 
-DM content encrypted client-side so only conversation participants can read it.
-
-**Database changes — `messages` table:**
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `encrypted_content` | `text` | NIP-44 ciphertext (DM conversations only) |
-| `encrypted_content_nonce` | `string` | Per-message nonce |
+DM content is encrypted client-side so only conversation participants can read it.
 
 **Encryption scheme:** NIP-44 (XChaCha20-Poly1305 with HKDF-derived shared secret from sender + recipient Nostr keys)
 
-Encryption happens in the **Stimulus controller (client-side JS)** using `nostr-tools`. The server never sees plaintext for E2EE DMs.
+Encryption and decryption happen entirely on-device in `DmService`. The plaintext never leaves the local process.
 
-**E2EE vs. Content Safety trade-off:** E2EE DMs cannot be scanned server-side. This is inherent to E2EE and shared by Signal, WhatsApp, etc. Compliance obligations apply to content the provider has knowledge of; E2EE messages are opaque to the server.
+**E2EE vs. Content Safety trade-off:** E2EE DMs cannot be scanned by anyone other than the recipient. The on-device `ContentSafetyService` runs after decryption on the recipient's device, so CSAM hash matching and NSFW detection still work for incoming DMs -- this is a significant advantage over server-side architectures where E2EE messages are completely opaque.
 
-**Rollout:** Gradual — unencrypted DMs remain functional during transition. Encryption is opt-in per conversation until all clients support it.
+**Identity:** There is no Devise or username/password system. Identity is a Nostr keypair managed by `KeyManagementService`. Authentication is proving possession of the private key via Schnorr signatures.
 
 ---
 
@@ -327,39 +286,18 @@ Encryption happens in the **Stimulus controller (client-side JS)** using `nostr-
 
 ### Purpose
 
-Rate limit API endpoints to prevent abuse. Uses `Rack::Attack`.
+Since there is no server to rate-limit, abuse prevention is handled differently:
 
-### Configuration
+1. **Relay-side rate limiting** -- Nostr relays enforce their own rate limits on event publishing. The app respects `NOTICE` and rate-limit responses from relays.
 
-Rate limits stored in server settings as JSON, configurable by admin:
+2. **Client-side throttling** -- `ServerPublishService` and `DmService` implement local debouncing and batching to avoid flooding relays:
+   - Message publishing: debounced per-channel (prevents accidental double-sends)
+   - Typing indicators: throttled to one event per 3 seconds
+   - Presence updates: throttled to one event per 30 seconds
 
-```json
-{
-  "login_per_20s": 5,
-  "registration_per_hour": 3,
-  "api_per_minute": 120,
-  "api_per_hour": 5000
-}
-```
+3. **Incoming message filtering** -- The `ContentSafetyService` filter chain handles spam from other users (report threshold, reputation scoring, text filters for spam characters and ALL CAPS).
 
-### Implementation
-
-```ruby
-# config/initializers/rack_attack.rb
-Rack::Attack.throttle("login/ip", limit: 5, period: 20.seconds) do |req|
-  req.ip if req.path == "/users/sign_in" && req.post?
-end
-
-Rack::Attack.throttle("registration/ip", limit: 3, period: 1.hour) do |req|
-  req.ip if req.path == "/users" && req.post?
-end
-
-Rack::Attack.throttle("api/user", limit: 120, period: 1.minute) do |req|
-  req.env["warden"]&.user&.id
-end
-```
-
-Rate limit headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-Reset`, `Retry-After`) on all throttled responses.
+No additional rate-limit infrastructure is needed beyond what the relay protocol and content safety pipeline already provide.
 
 ---
 
@@ -367,113 +305,118 @@ Rate limit headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `X-RateLimit-R
 
 ### Purpose
 
-Two payment paths: **Stripe** (credit/debit card) for mainstream users, and **Zaps** (Bitcoin Lightning via NIP-57) for crypto-native users.
+Two payment paths: **Stripe** (credit/debit card) for mainstream users, and **Zaps** (Bitcoin Lightning via NIP-57) for crypto-native users. All payment flows are initiated client-side.
 
-### Database Schema
+### Drift Table Definitions
 
-#### `payment_records`
+#### `PaymentRecords`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `user_id` | `bigint` | FK → `users` |
-| `payment_type` | `string` | `stripe`, `zap` |
-| `payment_purpose` | `string` | `verification`, `cosmetic`, `boost`, `tip` |
-| `amount_sats` | `bigint` | Amount in satoshis (canonical unit) |
-| `amount_fiat` | `decimal(10,2)` | Fiat amount (for Stripe) |
-| `fiat_currency` | `string` | `USD`, `EUR`, etc. |
-| `status` | `string` | `pending`, `completed`, `failed`, `refunded`, `expired` |
-| `stripe_payment_intent_id` | `string` | Stripe PaymentIntent ID (nullable) |
-| `lightning_invoice` | `text` | BOLT11 invoice string (nullable) |
-| `lightning_payment_hash` | `string` | Lightning payment hash (nullable) |
-| `nostr_zap_receipt_id` | `string` | NIP-57 zap receipt event ID (nullable) |
-| `completed_at` | `datetime` | |
-| `created_at` | `datetime` | |
+```dart
+class PaymentRecords extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get paymentType => text()(); // 'stripe', 'zap'
+  TextColumn get paymentPurpose => text()(); // 'verification', 'cosmetic', 'boost', 'tip'
+  IntColumn get amountSats => integer()(); // Amount in satoshis (canonical unit)
+  RealColumn get amountFiat => real().nullable()(); // Fiat amount (for Stripe)
+  TextColumn get fiatCurrency => text().nullable()(); // 'USD', 'EUR', etc.
+  TextColumn get status => text()(); // 'pending', 'completed', 'failed', 'refunded', 'expired'
+  TextColumn get stripePaymentIntentId => text().nullable()();
+  TextColumn get lightningInvoice => text().nullable()(); // BOLT11 invoice string
+  TextColumn get lightningPaymentHash => text().nullable()();
+  TextColumn get nostrZapReceiptId => text().nullable()(); // NIP-57 zap receipt event ID
+  DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+}
+```
 
-#### `payment_config`
+#### `PaymentConfig`
 
-Singleton — one row defines all payment settings.
+Singleton -- one row defines all payment settings.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `stripe_enabled` | `boolean` | Whether Stripe is active |
-| `stripe_publishable_key` | `string` | Stripe public key |
-| `stripe_secret_key_encrypted` | `text` | Encrypted Stripe secret key |
-| `zaps_enabled` | `boolean` | Whether Lightning Zaps are active |
-| `lightning_address` | `string` | Lightning address for receiving payments |
-| `verification_price_sats` | `bigint` | Verification price in sats |
-| `verification_price_fiat` | `decimal(10,2)` | Verification price in fiat |
+```dart
+class PaymentConfig extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  BoolColumn get stripeEnabled => boolean().withDefault(const Constant(false))();
+  TextColumn get stripePublishableKey => text().nullable()();
+  BoolColumn get zapsEnabled => boolean().withDefault(const Constant(false))();
+  TextColumn get lightningAddress => text().nullable()(); // For receiving payments
+  IntColumn get verificationPriceSats => integer().withDefault(const Constant(0))();
+  RealColumn get verificationPriceFiat => real().withDefault(const Constant(0.0))();
+}
+```
 
 ### What Users Can Buy
 
-**Cosmetics** — animated avatars, profile effects, custom colors, badges, premium sticker packs. Stored as tags on the user's Nostr profile (Kind 0), so they travel across any Nostr client automatically.
+**Cosmetics** -- animated avatars, profile effects, custom colors, badges, premium sticker packs. Stored as tags on the user's Nostr profile (Kind 0), so they travel across any Nostr client automatically.
 
-**Verification badge** — small one-time payment for a verified badge. Not required for anything, but signals legitimacy.
+**Verification badge** -- small one-time payment for a verified badge. Not required for anything, but signals legitimacy.
 
-**Server boosts** — social support. Boosted servers get a badge, boosters get a visible role.
+**Server boosts** -- social support. Boosted servers get a badge, boosters get a visible role.
 
-**Tipping** — direct user-to-user via Zaps or Stripe.
+**Tipping** -- direct user-to-user via Zaps or Stripe.
 
 ### Services
 
 | Service | Purpose |
 |---------|---------|
-| `StripePaymentService` | Create PaymentIntent, handle webhooks, confirm payment |
-| `ZapPaymentService` | Generate Lightning invoice, verify NIP-57 zap receipt |
-| `VerificationPaymentService` | Orchestrate: determine payment methods, delegate, handle verification promotion |
+| `StripePaymentService` | Opens Stripe Checkout via URL launcher or in-app WebView. Handles deep-link callback for payment confirmation. |
+| `ZapPaymentService` | Generates NIP-57 zap request, fetches BOLT11 invoice via LNURL, monitors relays for zap receipt (Kind 9735). |
+| `VerificationPaymentService` | Orchestrates: determine available payment methods, delegate to Stripe or Zap service, update verification status on completion. |
 
 ### Flow: Stripe Verification
 
 ```
-User clicks "Get Verified"
-        │
-        ▼
-POST /payments/stripe/create_intent
-        │
-        ▼
-StripePaymentService creates PaymentIntent + PaymentRecord (pending)
-        │
-        ▼
-Frontend: Stripe.js collects card → confirmCardPayment
-        │
-        ▼
-Stripe webhook → payment_intent.succeeded
-        │
-        ├── PaymentRecord.complete!
-        ├── User gets verified badge
-        └── AuditService.log
+User taps "Get Verified"
+        |
+        v
+StripePaymentService creates PaymentRecord (pending)
+        |
+        v
+Open Stripe Checkout URL (via url_launcher or WebView)
+        |
+        v
+User completes payment in browser/WebView
+        |
+        v
+Stripe redirects back to app via deep link (custom URL scheme)
+        |
+        +-- StripePaymentService verifies payment via Stripe API
+        +-- PaymentRecord updated to 'completed'
+        +-- User gets verified badge (Kind 0 profile tag)
+        +-- AuditService.log
 ```
 
 ### Flow: Lightning Zap Verification
 
 ```
-User clicks "Pay with Lightning"
-        │
-        ▼
-POST /payments/zaps/create_invoice
-        │
-        ▼
-ZapPaymentService generates BOLT11 invoice via LNURL
-        │
-        ▼
-Frontend displays QR code / "Open in wallet"
-        │
-        ▼
+User taps "Pay with Lightning"
+        |
+        v
+ZapPaymentService creates NIP-57 zap request event
+        |
+        v
+Fetch BOLT11 invoice from recipient's LNURL endpoint
+        |
+        v
+Display QR code / "Open in wallet" button
+        |
+        v
 User pays in Lightning wallet
-        │
-        ▼
-Zap receipt (Kind 9735) appears on relay OR webhook
-        │
-        ├── PaymentRecord.complete!
-        ├── User gets verified badge
-        └── AuditService.log
+        |
+        v
+ZapPaymentService monitors relays for zap receipt (Kind 9735)
+        |
+        +-- PaymentRecord updated to 'completed'
+        +-- User gets verified badge
+        +-- AuditService.log
 ```
 
-### New Gem
+### Dart Packages
 
-| Gem | Purpose |
-|-----|---------|
-| `stripe` | Stripe API client |
+| Package | Purpose |
+|---------|---------|
+| `url_launcher` | Open Stripe Checkout in external browser |
+| `uni_links` / `app_links` | Handle deep-link callbacks from Stripe |
 
 ---
 
@@ -483,44 +426,47 @@ Zap receipt (Kind 9735) appears on relay OR webhook
 
 Configurable perks for verified users (those who completed a verification payment).
 
-### Database Schema
+### Drift Table Definitions
 
-#### `verified_user_benefits`
+#### `VerifiedUserBenefits`
 
-Singleton config — one row defines all benefit settings.
+Singleton config -- one row defines all benefit settings.
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `max_servers_per_user` | `integer` | Override limit for verified users (0 = use default) |
-| `max_upload_size_mb` | `integer` | Override upload limit |
-| `max_emojis_per_server` | `integer` | Override emoji limit for verified server owners |
-| `animated_avatar_enabled` | `boolean` | Can use animated GIF avatars |
-| `custom_profile_badges` | `boolean` | Gets a "Verified" badge (default `true`) |
-| `higher_rate_limits` | `boolean` | Uses elevated rate limits (default `true`) |
-| `screen_share_hd` | `boolean` | HD screen sharing in voice |
+```dart
+class VerifiedUserBenefits extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get maxServersPerUser => integer().withDefault(const Constant(0))(); // 0 = use default
+  IntColumn get maxUploadSizeMb => integer().withDefault(const Constant(0))();
+  IntColumn get maxEmojisPerServer => integer().withDefault(const Constant(0))();
+  BoolColumn get animatedAvatarEnabled => boolean().withDefault(const Constant(false))();
+  BoolColumn get customProfileBadges => boolean().withDefault(const Constant(true))();
+  BoolColumn get screenShareHd => boolean().withDefault(const Constant(false))();
+}
+```
 
-#### `custom_themes`
+#### `CustomThemes`
 
-User-created color themes (gated behind verification if configured).
+User-created color themes (optionally gated behind verification).
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `user_id` | `bigint` | FK → `users` |
-| `name` | `string(50)` | Theme name |
-| `theme_data` | `json` | Color palette, CSS variable overrides |
-| `public` | `boolean` | Whether others can use this theme |
-| `created_at` | `datetime` | |
+```dart
+class CustomThemes extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text().withLength(max: 50)();
+  TextColumn get themeData => text()(); // JSON color palette
+  BoolColumn get isPublic => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+}
+```
 
 ### Service
 
 | Service | Purpose |
 |---------|---------|
-| `UserBenefitsService` | Central query: `limit_for(user, :max_servers_per_user)` returns verified override or default. `can?(user, :custom_themes)` returns boolean. |
+| `UserBenefitsService` | Central query: `limitFor(benefitKey)` returns verified override or default. `can(featureKey)` returns boolean. Checks local user's verification status (Kind 0 profile tag). |
 
 ### Gated Servers & Channels
 
-Server owners can optionally require verification to join (`server.requires_verification`). Channel admins can require verification to access specific channels (`channel.requires_verification`).
+Server owners can optionally require verification to join (stored as a tag in the server's Nostr event). Channel admins can require verification to access specific channels (stored in channel metadata).
 
 ---
 
@@ -528,35 +474,32 @@ Server owners can optionally require verification to join (`server.requires_veri
 
 ### Purpose
 
-Check for new releases via GitHub Releases API and notify admins.
+Check for new releases and notify the user. Desktop and mobile use different update mechanisms.
 
-### Database Schema
+### Desktop: GitHub Releases API
 
-#### `app_update_notifications`
+`AppUpdateService` (`lib/services/app_update_service.dart`) handles desktop updates:
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | `bigint` | Primary key |
-| `version` | `string` | Release version tag |
-| `release_name` | `string` | GitHub release title |
-| `release_notes` | `text` | Release body (Markdown) |
-| `release_url` | `string` | URL to GitHub release page |
-| `published_at` | `datetime` | |
-| `dismissed_by_id` | `bigint` | FK → `users` (admin who dismissed) |
-| `dismissed_at` | `datetime` | |
-| `created_at` | `datetime` | |
+- Calls the GitHub Releases API to check for newer versions
+- Compares semver strings (current version from `package_info_plus` vs. latest release tag)
+- Finds the correct platform-specific asset (`.exe` / `.AppImage` / `.tar.gz` / `.dmg` / `.zip`)
+- Downloads with progress tracking, then spawns a platform-specific helper script that:
+  - Waits for the app to exit
+  - Extracts the archive
+  - Replaces the app bundle directory
+  - Relaunches the app
 
-### Service
+### Mobile: App Store Updates
 
-`AppUpdateCheckService` — calls GitHub Releases API, compares versions via `Gem::Version`, creates `AppUpdateNotification` for newer releases.
+Mobile platforms use their native update mechanisms:
+- **Android**: Google Play Store (or GitHub Releases for sideloaded builds)
+- **iOS**: Apple App Store
 
-### Job
+The unified `AppUpdateProvider` wraps both paths and exposes a consistent API to the UI.
 
-`CheckAppUpdatesJob` — runs daily via Solid Queue. Calls `AppUpdateCheckService`.
+### UI
 
-### Admin UI
-
-Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with link to release notes and dismiss button.
+Dashboard banner: "Inferno vX.Y.Z is available (you're running vA.B.C)" with a link to release notes, a download button (desktop), or a "View in Store" button (mobile). Dismiss button hides the banner until the next new release.
 
 ---
 
@@ -567,25 +510,25 @@ Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with lin
 **Dependencies:** None
 
 **Deliverables:**
-- `AuditLog` model + migration
+- `AuditLogs` Drift table
 - `AuditService`
-- Admin audit log viewer
-- `LegalHold`, `DataExport` models
+- Audit log viewer in Safety Settings
+- `DataExports` Drift table + `DataExportService` (runs in isolate)
 
 **Why first:** Every subsequent system generates audit events.
 
 ---
 
-### Phase B: User Suspensions + Content Safety
+### Phase B: Content Safety
 
 **Dependencies:** Phase A
 
 **Sub-phases:**
 
-1. **B.1: User Suspensions** — `UserSuspension` model, `Suspendable` concern, `UserSuspensionService`, `LiftExpiredSuspensionsJob`, admin UI
-2. **B.2: Hash Tables + Scan Pipeline** — `ContentHash`, `KnownBadHash`, `UploadScanService`, `ScannableUpload` concern, `dhash-vips` gem
-3. **B.3: Quarantine + Escalation** — `QuarantinedUpload`, `QuarantineService`, `CsamEscalationService`, admin review queue, one-click CSAM action panel
-4. **B.4: NCMEC Reporting** — `NcmecReport`, `NcmecReportService`, admin reporting UI
+1. **B.1: On-Device Hash Pipeline** -- `ContentHashes` Drift table, `CsamHashEntries` Drift table, `ImageHasher` (dHash via `image` package), `ContentSafetyService` filter chain
+2. **B.2: NSFW Detection** -- `NsfwDetector` (ONNX Runtime via FFI), two-stage pipeline (Marqo ViT-Tiny + TostAI FocalNet), model download and caching
+3. **B.3: Shared Hash Network** -- `SharedHashService` (NIP-56 Kind 1984 report events from relays), confidence aggregation, auto-promotion to CSAM entries
+4. **B.4: Authority Reporting** -- `AuthorityReportGenerator`, Authority Report screen, NIP-56 report event publishing, `HiddenAttachmentRecords` Drift table
 
 ---
 
@@ -593,8 +536,8 @@ Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with lin
 
 **Dependencies:** Phase A
 
-1. **C.1: Message Signatures** — `nostr_event_id` + `signature` columns on messages, `MessageSigningService`
-2. **C.2: E2EE DMs** — `encrypted_content` columns, client-side NIP-44 encryption
+1. **C.1: Message Signatures** -- Schnorr signatures on all messages via Nostr event serialization (already integrated in message services)
+2. **C.2: E2EE DMs** -- NIP-44 encryption/decryption in `DmService`, on-device scanning post-decryption
 
 ---
 
@@ -603,12 +546,13 @@ Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with lin
 **Dependencies:** Phase A
 
 **Deliverables:**
-- `PaymentRecord`, `PaymentConfig` models
-- `StripePaymentService`, `ZapPaymentService`, `VerificationPaymentService`
-- Payment controllers + admin config
-- `VerifiedUserBenefit` config, `UserBenefitsService`
-- `CustomTheme` model
-- `stripe` gem
+- `PaymentRecords`, `PaymentConfig` Drift tables
+- `StripePaymentService` (Checkout via URL launcher + deep-link callback)
+- `ZapPaymentService` (NIP-57 zap request + receipt monitoring)
+- `VerificationPaymentService`
+- Payment UI screens
+- `VerifiedUserBenefits` Drift table + `UserBenefitsService`
+- `CustomThemes` Drift table
 
 ---
 
@@ -617,10 +561,9 @@ Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with lin
 **Dependencies:** None (standalone)
 
 **Deliverables:**
-- `AppUpdateNotification` model
-- `AppUpdateCheckService`
-- `CheckAppUpdatesJob` (daily via Solid Queue)
-- Admin dashboard banner
+- `AppUpdateService` (GitHub Releases API, platform-specific download + apply) -- already implemented
+- `AppUpdateProvider` (unified Riverpod provider for desktop + mobile)
+- Dashboard update banner UI
 
 ---
 
@@ -628,19 +571,22 @@ Dashboard banner: "Inferno v1.2.0 is available (you're running v1.1.0)" with lin
 
 ```
 Phase A: Audit Logging
-    │
-    ├── Phase B: Content Safety (B.1 → B.2 → B.3 → B.4)
-    │
-    ├── Phase C: Message Integrity (C.1 → C.2)
-    │
-    └── Phase D: Monetization + Verification
+    |
+    +-- Phase B: Content Safety (B.1 -> B.2 -> B.3 -> B.4)
+    |
+    +-- Phase C: Message Integrity (C.1 -> C.2)
+    |
+    +-- Phase D: Monetization + Verification
 
 Phase E: App Updates (independent)
 ```
 
-### New Gems
+### Dart Packages
 
-| Gem | Phase | Purpose |
-|-----|-------|---------|
-| `dhash-vips` | B.2 | Perceptual hashing via `ruby-vips` |
-| `stripe` | D | Stripe API client |
+| Package | Phase | Purpose |
+|---------|-------|---------|
+| `image` | B.1 | Pure Dart image decoding for dHash computation |
+| ONNX Runtime (FFI) | B.2 | On-device NSFW model inference |
+| `url_launcher` | D | Open Stripe Checkout in browser |
+| `uni_links` / `app_links` | D | Deep-link callback from Stripe |
+| `package_info_plus` | E | Read current app version for update comparison |

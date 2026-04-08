@@ -1,10 +1,10 @@
-# Voice & Video Channels — Architecture
+# Voice & Video Channels -- Architecture
 
 ## Overview
 
-This document describes the architecture for adding Discord-style voice and video channels to Inferno Chat. The `channel_type: :voice` enum value already exists in `app/models/channel.rb` (value `1`) but is currently unimplemented. This design covers SFU selection, database schema, Rails integration, client-side WebRTC, moderation flows, and phased implementation.
+This document describes the architecture for Discord-style voice and video channels in the Inferno Chat Flutter client. Voice channels use the `channel_type: voice` (value `1`) enum. This design covers SFU selection, Drift database schema, Nostr-based voice state, client-side WebRTC via `livekit_client`, native audio processing via DeepFilterNet, moderation flows, and phased implementation.
 
-The guiding principle is **minimal new infrastructure**: one additional service (the SFU), no new ActionCable channels, and tight integration with the existing permission and broadcast systems.
+The guiding principle is **standalone client, no server dependency**: the Flutter app generates LiveKit tokens locally, publishes voice state as Nostr events (Kind 10070), and communicates with a voice provider via encrypted DMs. There is no Rails backend, no ActionCable, and no server-side webhook handling.
 
 ---
 
@@ -12,13 +12,13 @@ The guiding principle is **minimal new infrastructure**: one additional service 
 
 | User Requirement | Technical Capability | Where It Lives |
 |---|---|---|
-| Move users between voice channels | SFU move-participant API | `LivekitRoomService` wrapper → LiveKit REST |
-| Mute an individual member | SFU server-side mute | `LivekitRoomService#mute_participant` + `mute_members` permission |
-| Server-wide mute (e.g. stage mode) | SFU room-level permissions | LiveKit room metadata + grants |
-| Self-mute / self-deafen | Client-side track disable | `voice_channel_controller.js` → `livekit-client` |
-| Permission checks for voice actions | New voice keys in Role JSONB | `DEFAULT_PERMISSIONS` in `app/models/role.rb` |
-| Screen share with optional audio | SFU screen share track | `getDisplayMedia({ audio: true, video: true })` |
-| See who is in what call | ActionCable broadcasts + DB | `voice_states` table → `ServerChannel` broadcasts |
+| Move users between voice channels | SFU move-participant API | Not yet implemented (requires provider-side support) |
+| Mute an individual member | Kind 10070 Nostr event from moderator | `_publishVoiceState()` in `voice_channel_screen.dart` |
+| Server-wide mute (e.g. stage mode) | SFU room-level permissions via token grants | `VoiceTokenService.generateToken()` with `canPublish: false` |
+| Self-mute / self-deafen | Client-side track disable | `LiveKitService.toggleMicrophone()` / `toggleDeafen()` |
+| Permission checks for voice actions | Permission enum in Dart | `Permission` enum in `lib/models/permission.dart` |
+| Screen share with optional audio | SFU screen share track | `LiveKitService.toggleScreenShare()` via `livekit_client` |
+| See who is in what call | Kind 10070 Nostr events with `#h` tag | Published to relays, subscribed by all server members |
 
 ---
 
@@ -29,12 +29,12 @@ Three topologies exist for multi-party WebRTC:
 ```
 Mesh (P2P)                  SFU                         MCU
 
-A ◄──► B               A ──► ┌─────┐ ──► B        A ──► ┌─────┐ ──► A
-│ ╲  ╱ │               │     │ SFU │     │         │     │ MCU │     │
-│  ╲╱  │               │     │     │     │         │     │ Mix │     │
-│  ╱╲  │               │     │     │     │         │     │     │     │
-│ ╱  ╲ │               │     └─────┘     │         │     └─────┘     │
-C ◄──► D               C ──►         ──► D        C ──►           ──► D
+A <--> B               A --> +-----+ --> B        A --> +-----+ --> A
+| \  / |               |     | SFU |     |         |     | MCU |     |
+|  \/  |               |     |     |     |         |     | Mix |     |
+|  /\  |               |     |     |     |         |     |     |     |
+| /  \ |               |     +-----+     |         |     +-----+     |
+C <--> D               C -->         --> D        C -->           --> D
 
 N*(N-1)/2 connections   N connections (up)          N connections
 each peer encodes       1 encode per peer           1 encode per peer
@@ -44,8 +44,8 @@ N-1 times               server forwards             server mixes into
 
 **Why SFU:**
 
-- **Mesh** fails beyond ~4 users — each peer must encode and upload N-1 streams, saturating residential upload bandwidth. Acceptable only for 1:1 calls.
-- **MCU** is server-expensive — it decodes every stream, mixes them into a single composite, and re-encodes. CPU cost scales with participant count. No modern chat platform uses this.
+- **Mesh** fails beyond ~4 users -- each peer must encode and upload N-1 streams, saturating residential upload bandwidth. Acceptable only for 1:1 calls.
+- **MCU** is server-expensive -- it decodes every stream, mixes them into a single composite, and re-encodes. CPU cost scales with participant count. No modern chat platform uses this.
 - **SFU** is the sweet spot: each peer sends one upload, the server forwards selectively without transcoding. CPU cost is low (routing, not encoding). This is what Discord, Slack, Teams, and Meet all use.
 
 ---
@@ -58,13 +58,11 @@ N-1 times               server forwards             server mixes into
 |---|---|---|---|---|---|
 | Language | Go | C | Node + C++ | Go | Java + JS |
 | License | Apache 2.0 | GPLv3 | ISC | MIT | Apache 2.0 |
-| Ruby SDK | **Yes** (`livekit-server-sdk` v0.8.3) | No | No | No | No |
-| JavaScript SDK | Yes (`livekit-client`) | Yes (janus.js) | Yes (mediasoup-client) | Yes (built-in) | Yes (lib-jitsi-meet) |
-| Self-host complexity | Docker one-liner / single binary | Complex (deps, plugin config) | Node sidecar + custom signaling | Single binary | Very complex (Oressbar, Ojicofo, JVB, Orosody) |
-| Built-in TURN | Yes (integrated) | No (needs coturn) | No (needs coturn) | No (needs coturn) | Yes (built-in Orosody) |
+| Dart SDK | **Yes** (`livekit_client` on pub.dev) | No | No | No | No |
+| Self-host complexity | Docker one-liner / single binary | Complex (deps, plugin config) | Node sidecar + custom signaling | Single binary | Very complex (multiple services) |
+| Built-in TURN | Yes (integrated) | No (needs coturn) | No (needs coturn) | No (needs coturn) | Yes (built-in) |
 | Server-side mute/kick | Native API | Plugin-dependent | Custom implementation | No API | REST API |
 | Move participant | Native API | No | No | No | Partial |
-| Webhooks | Native (HTTP POST) | No | No | No | Yes |
 | Recording | Built-in (Egress) | Plugin | No | No | Jibri (separate service) |
 | Simulcast | Yes | Yes | Yes | Yes | Yes |
 | RAM idle | ~30 MB | ~10 MB | ~40 MB | ~15 MB | ~500 MB+ |
@@ -73,38 +71,38 @@ N-1 times               server forwards             server mixes into
 
 ### LiveKit
 
-Modern Go-based SFU built for exactly this use case. Only option with a first-party Ruby SDK, meaning token generation and room management integrate directly into Rails without HTTP client wrappers. Native webhooks map cleanly to a Rails controller + Sidekiq. Built-in TURN eliminates the need for a separate coturn deployment. Single binary or Docker image, ~30 MB RAM idle.
+Modern Go-based SFU built for exactly this use case. The only option with a first-party Dart/Flutter SDK (`livekit_client`), meaning room connection, track management, and participant events integrate directly into Flutter widgets. Built-in TURN eliminates the need for a separate coturn deployment. Single binary or Docker image, ~30 MB RAM idle.
 
-**Pros:** Ruby SDK, batteries-included (TURN, webhooks, recording), excellent docs, active development, Apache 2.0.
+**Pros:** Dart SDK, batteries-included (TURN, recording), excellent docs, active development, Apache 2.0.
 **Cons:** Youngest project on this list, though 4 years and 20k+ stars indicate strong adoption.
 
 ### Janus
 
-Battle-tested C-based media server, extremely mature. Very low memory footprint (~10 MB). Plugin architecture is flexible but means more integration work — there is no Ruby SDK and no webhook system; you poll or write a custom event handler plugin.
+Battle-tested C-based media server, extremely mature. Very low memory footprint (~10 MB). Plugin architecture is flexible but means more integration work -- there is no Dart SDK and no webhook system.
 
 **Pros:** Proven at scale, minimal RAM, GPLv3 is fine for self-hosted deployments.
-**Cons:** No Ruby SDK, no webhooks, complex deployment, plugin system requires C knowledge for customization. GPLv3 may conflict if the project ever changes license.
+**Cons:** No Dart SDK, no webhooks, complex deployment, plugin system requires C knowledge for customization.
 
 ### mediasoup
 
-Node.js signaling layer with C++ media workers. Highly flexible — you build your own signaling server. This is more of a library than a turnkey solution.
+Node.js signaling layer with C++ media workers. Highly flexible -- you build your own signaling server. This is more of a library than a turnkey solution.
 
 **Pros:** ISC license, very flexible, strong community.
-**Cons:** Requires a Node.js sidecar process, no Ruby SDK, no built-in TURN/webhooks/moderation, significant custom code needed.
+**Cons:** Requires a Node.js sidecar process, no Dart SDK, no built-in TURN/moderation, significant custom code needed.
 
 ### Galene
 
-Lightweight Go-based SFU designed for videoconferencing. Single binary, very low footprint. However, it has no server-side moderation API, no webhooks, and a much smaller community.
+Lightweight Go-based SFU designed for videoconferencing. Single binary, very low footprint. However, it has no server-side moderation API and a much smaller community.
 
 **Pros:** MIT license, tiny footprint, simple deployment.
-**Cons:** No Ruby SDK, no moderation API, no webhooks, small community, limited feature set for a chat platform.
+**Cons:** No Dart SDK, no moderation API, small community, limited feature set for a chat platform.
 
 ### Jitsi
 
 The most feature-complete open-source video platform. Full-featured out of the box with recording, transcription, and more. However, it is an entire application stack (Java + JS + multiple services), not an embeddable component. Deployment is complex and resource-heavy (~500 MB+ RAM idle).
 
 **Pros:** Apache 2.0, extremely feature-rich, huge community, built-in TURN.
-**Cons:** Very complex deployment (5+ services), no Ruby SDK, heavy resource usage, designed as a standalone app rather than an embeddable SFU.
+**Cons:** Very complex deployment (5+ services), no Dart SDK, heavy resource usage, designed as a standalone app rather than an embeddable SFU.
 
 ---
 
@@ -114,781 +112,567 @@ Three-tier reasoning:
 
 ### Integration
 
-LiveKit is the **only SFU with a Ruby SDK**. Token generation, room management, and participant control are native Ruby method calls, not hand-rolled HTTP requests. Webhooks are standard HTTP POST to a Rails controller, which can enqueue Sidekiq jobs for state updates. No sidecar process, no custom signaling server, no protocol adapter — just a Go binary alongside the existing Rails stack.
+LiveKit is the **only SFU with a first-party Dart/Flutter SDK** (`livekit_client`). Room connection, track management, participant events, and screen sharing are native Dart API calls. Token generation uses `dart_jsonwebtoken` locally -- no server round-trip needed for self-hosted providers. The Flutter client is fully standalone.
 
 ### Features
 
-Every moderation requirement maps to a native LiveKit API call:
+Every moderation requirement maps to either a local action or a Nostr event:
 
-- **Server-side mute** → `RoomServiceClient#mute_published_track`
-- **Server-side deafen** → `RoomServiceClient#update_participant` (revoke `can_subscribe`)
-- **Kick from channel** → `RoomServiceClient#remove_participant`
-- **Move to another channel** → Remove from current room + issue new token for target room
-- **List participants** → `RoomServiceClient#list_participants`
-
-No plugins, no custom C code, no workarounds.
+- **Self-mute** -- `LiveKitService.toggleMicrophone()` disables the local audio track
+- **Self-deafen** -- `LiveKitService.toggleDeafen()` disables all remote audio playback + auto-mutes
+- **Server-mute** -- moderator publishes Kind 10070 event; target client receives and disables mic
+- **Screen share** -- `LiveKitService.toggleScreenShare()` uses `livekit_client` built-in support
+- **Video** -- `LiveKitService.toggleCamera()` toggles camera track
 
 ### Efficiency
 
-The Go binary runs at ~30 MB RAM idle. Built-in TURN means no coturn deployment. On a 2-core machine, LiveKit comfortably handles 30 concurrent voice users — more than sufficient for small to medium self-hosted instances. Horizontal scaling is supported via Redis coordination for multi-node clusters.
+The Go binary runs at ~30 MB RAM idle. Built-in TURN means no coturn deployment. On a 2-core machine, LiveKit comfortably handles 30 concurrent voice users -- more than sufficient for small to medium self-hosted instances.
 
 ### When to Reconsider
 
-- **Janus** — if GPLv3 is acceptable and you need sub-1 GB total RAM for the entire stack (Janus idles at ~10 MB). Requires writing a custom webhook plugin and HTTP client wrappers for Ruby, but the C core is rock-solid.
-- **Mesh (no SFU)** — if the deployment will only ever have 2–3 person calls and you want zero additional infrastructure. Use `simple-peer` or raw `RTCPeerConnection` with Rails as the signaling server via ActionCable. This breaks down beyond ~4 participants.
+- **Janus** -- if GPLv3 is acceptable and you need sub-1 GB total RAM for the entire stack (Janus idles at ~10 MB). Requires writing custom Dart signaling wrappers, but the C core is rock-solid.
+- **Mesh (no SFU)** -- if the deployment will only ever have 2-3 person calls and you want zero additional infrastructure. Use raw `RTCPeerConnection` with Nostr as the signaling layer. This breaks down beyond ~4 participants.
 
 ---
 
 ## 5. Architecture Diagram
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                        Browser                           │
-│                                                          │
-│  ┌─────────────────────┐   ┌──────────────────────────┐  │
-│  │ Stimulus Controllers │   │   livekit-client (JS)    │  │
-│  │                     │   │                          │  │
-│  │ voice_channel_ctrl  │──►│ Room.connect(url, token) │  │
-│  │ channel_sidebar_ctrl│   │ localParticipant.setMic  │  │
-│  └────────┬────────────┘   └────────────┬─────────────┘  │
-│           │ ActionCable                  │ WebRTC (UDP)   │
-│           │ (voice_state_update)         │ + TURN (TCP)   │
-└───────────┼──────────────────────────────┼───────────────┘
-            │                              │
-            ▼                              ▼
-┌───────────────────────┐     ┌─────────────────────────┐
-│     Rails (Puma)      │     │    LiveKit Server        │
-│                       │     │    (Go binary)           │
-│ LivekitTokenService   │────►│                         │
-│   generate_token()    │     │  SFU media routing      │
-│                       │     │  Built-in TURN          │
-│ LivekitRoomService    │────►│  Room management API    │
-│   mute/kick/move      │     │                         │
-│                       │     │                         │
-│ LivekitWebhooksCtrl   │◄────│  HTTP POST webhooks     │
-│   participant_joined  │     │  (participant_joined,   │
-│   participant_left    │     │   participant_left,     │
-│   track_published     │     │   track_published,     │
-│                       │     │   track_unpublished)    │
-│ ServerChannel         │     │                         │
-│   broadcast_to(server,│     └─────────────────────────┘
-│   voice_state_update) │
-│                       │
-│ VoiceState (model)    │
-│   user ↔ channel      │
-└───────────────────────┘
++----------------------------------------------------------+
+|                    Flutter Client                          |
+|                                                          |
+|  +---------------------+   +---------------------------+ |
+|  | Voice Channel Screen |   |   livekit_client (Dart)   | |
+|  |                     |   |                           | |
+|  | VoiceChannelScreen  |-->| Room.connect(url, token)  | |
+|  | channel_sidebar     |   | localParticipant.setMic   | |
+|  +--------+------------+   +-------------+-------------+ |
+|           | Nostr (Kind 10070)           | WebRTC (UDP)   |
+|           | voice_state events           | + TURN (TCP)   |
++-----------+--------------+---------------+----------------+
+            |              |               |
+            v              |               v
++------------------------+ |  +---------------------------+
+|   Nostr Relays         | |  |    LiveKit Server         |
+|                        | |  |    (Go binary)            |
+|  Kind 10070 events     | |  |                           |
+|  with #h tag for       | |  |  SFU media routing        |
+|  server group ID       | |  |  Built-in TURN            |
+|                        | |  |  Room management API      |
++------------------------+ |  +---------------------------+
+                           |
+                           v
++----------------------------------------------+
+|   Voice Token Service (local or remote)       |
+|                                              |
+|  Local: VoiceTokenService.generateToken()    |
+|    uses dart_jsonwebtoken + API key/secret   |
+|                                              |
+|  Remote: encrypted DM (Kind 14) to provider  |
+|    request token --> provider generates -->   |
+|    encrypted DM response with JWT + URL      |
++----------------------------------------------+
 ```
 
 ### Data Flow: Joining a Voice Channel
 
-1. User clicks a voice channel in the sidebar.
-2. Browser sends a Turbo/fetch request to `VoiceChannelsController#join`.
-3. Rails checks permissions (`connect_voice` on the user's role).
-4. `LivekitTokenService.generate_token` creates a JWT with the user's identity, room name (channel public_id), and permission-scoped grants (can publish audio/video based on role).
-5. Rails returns the token and LiveKit server URL to the browser.
-6. `voice_channel_controller.js` calls `Room.connect(url, token)` via `livekit-client`.
+1. User clicks "Join Voice" in `VoiceChannelScreen`.
+2. The screen checks permissions (`connectVoice`, `speak`) via `PermissionService`.
+3. The app queries `ServerVoiceProviders` in Drift to find an active voice provider for the server.
+4. An encrypted DM (Kind 14) is sent to the provider's pubkey via `VoiceTokenService.requestToken()`, containing the server group ID, channel ID, and user identity.
+5. The provider generates a LiveKit JWT and responds with an encrypted DM containing the token and LiveKit URL.
+6. `LiveKitService.connect(url: ..., token: ...)` establishes the WebRTC connection via `livekit_client`.
 7. LiveKit authenticates the token, admits the user to the room, and begins SFU media routing.
-8. LiveKit fires a `participant_joined` webhook to `LivekitWebhooksController`.
-9. The controller creates a `VoiceState` record and broadcasts via `ServerChannel.broadcast_to(server, { type: "voice_state_update", ... })`.
-10. All connected browsers receive the broadcast. `channel_sidebar_controller.js` updates the sidebar to show the user under the voice channel.
+8. The client publishes a Kind 10070 Nostr event with `action: "join"` and the `#h` tag set to the server's Nostr group ID.
+9. All server members subscribed to Kind 10070 events for that `#h` tag receive the voice state update.
+10. The channel sidebar updates to show the user under the voice channel with mute/deafen indicators.
 
 ---
 
 ## 6. Codebase Integration Points
 
-### `app/models/channel.rb`
+### `lib/database/tables/channels.dart`
 
-The `voice: 1` enum already exists. Add columns for voice channel settings and a `has_many :voice_states` association:
+The `channelType` column stores `0` for text, `1` for voice, `2` for announcement. The voice channel screen is routed to when `channelType == 1`.
 
-```ruby
-# Existing
-enum :channel_type, { text: 0, voice: 1, announcement: 2 }
+### `lib/models/permission.dart`
 
-# Add association
-has_many :voice_states, dependent: :destroy
+Seven voice permissions are defined in the `Permission` enum:
 
-# Add helper
-def voice?
-  channel_type == "voice"
-end
-```
-
-New columns: `voice_bitrate` (integer, default 64000), `voice_user_limit` (integer, default 0 = unlimited), `video_enabled` (boolean, default false).
-
-### `app/models/role.rb`
-
-Add 7 voice permissions to `DEFAULT_PERMISSIONS`:
-
-```ruby
-DEFAULT_PERMISSIONS = {
-  # ... existing 22 permissions ...
-  connect_voice: true,     # join voice channels
-  speak: true,             # unmute and transmit audio
-  video: false,            # send video in voice channels
-  screen_share: false,     # share screen in voice channels
-  mute_members: false,     # server-mute other members
-  deafen_members: false,   # server-deafen other members
-  move_members: false      # move members between voice channels
-}.freeze
-```
-
-Corresponding updates to `ADMIN_PERMISSIONS` (add `mute_members: true`, `deafen_members: true`, `move_members: true`) and `OWNER_PERMISSIONS`.
-
-### `app/javascript/controllers/role_editor_controller.js`
-
-Add a `Voice` group to `PERMISSION_GROUPS`:
-
-```javascript
-const PERMISSION_GROUPS = {
-  // ... existing groups ...
-  Voice: {
-    connect_voice: "Join voice channels",
-    speak: "Speak in voice channels",
-    video: "Send video in voice channels",
-    screen_share: "Share their screen in voice channels",
-    mute_members: "Server-mute other members in voice",
-    deafen_members: "Server-deafen other members in voice",
-    move_members: "Move members between voice channels"
-  },
-  // Dangerous group stays last
+```dart
+enum Permission {
+  // ... existing permissions ...
+  connectVoice,   // join voice channels
+  speak,          // unmute and transmit audio
+  video,          // send video in voice channels
+  screenShare,    // share screen in voice channels
+  muteMembers,    // server-mute other members
+  deafenMembers,  // server-deafen other members
+  moveMembers,    // move members between voice channels
+  // ...
 }
 ```
 
-### `app/channels/server_channel.rb`
+Each maps to a snake_case key via `PermissionExtension.key` (e.g. `connectVoice` -> `"connect_voice"`), matching the JSON permission maps stored in role data synced from the server.
 
-No new ActionCable channel needed. Extend the existing `ServerChannel` with a new broadcast type:
+### `lib/services/voice_token_service.dart`
 
-```ruby
-# Called from LivekitWebhooksController or VoiceState callbacks
-ServerChannel.broadcast_to(server, {
-  type: "voice_state_update",
-  channel_id: channel.public_id,
-  user_id: user.public_id,
-  username: user.username,
-  avatar_url: user.avatar_url,
-  action: "joined",  # or "left", "muted", "deafened", "video_on", "screen_share_on"
-  self_mute: voice_state.self_mute,
-  self_deaf: voice_state.self_deaf,
-  server_mute: voice_state.server_mute,
-  server_deaf: voice_state.server_deaf,
-  video_on: voice_state.video_on,
-  screen_share_on: voice_state.screen_share_on
-})
+Handles both local and remote token generation:
+
+```dart
+class VoiceTokenService {
+  /// Generate a LiveKit JWT locally (when we are the voice provider)
+  static String generateToken({
+    required String apiKey,
+    required String apiSecret,
+    required String roomName,
+    required String participantIdentity,
+    String? participantName,
+    bool canPublish = true,
+    bool canSubscribe = true,
+    Duration expiry = const Duration(hours: 6),
+  }) {
+    final claims = {
+      'iss': apiKey,
+      'sub': participantIdentity,
+      'nbf': now.millisecondsSinceEpoch ~/ 1000,
+      'exp': now.add(expiry).millisecondsSinceEpoch ~/ 1000,
+      'video': {
+        'room': roomName,
+        'roomJoin': true,
+        'canPublish': canPublish,
+        'canSubscribe': canSubscribe,
+      },
+    };
+    final jwt = JWT(claims);
+    return jwt.sign(SecretKey(apiSecret), algorithm: JWTAlgorithm.HS256);
+  }
+
+  /// Request a voice token from a remote provider via encrypted Nostr DM (Kind 14)
+  static Future<void> requestToken({
+    required RelayPool relayPool,
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String providerPubkey,
+    required String serverGroupId,
+    required String channelPublicId,
+    required String requestId,
+    String? userDisplayName,
+  }) async { /* ... */ }
+
+  /// Respond with a token (sent by the provider via encrypted DM)
+  static Future<void> respondWithToken({
+    required RelayPool relayPool,
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String requesterPubkey,
+    required String requestId,
+    required String token,
+    required String livekitUrl,
+  }) async { /* ... */ }
+}
 ```
 
-### `app/javascript/controllers/channel_sidebar_controller.js`
+Token requests and responses use NIP-44 encryption over Kind 14 events, ensuring the LiveKit credentials are never exposed to relay operators or other subscribers.
 
-Add a `voice_state_update` case to the existing `handleMessage` switch:
+### `lib/services/livekit_service.dart`
 
-```javascript
-case "voice_state_update":
-  this.updateVoiceState(data)
-  break
+Manages the LiveKit `Room` lifecycle, participant streams, and local media controls:
+
+```dart
+class LiveKitService {
+  Room? _room;
+  EventsListener<RoomEvent>? _listener;
+
+  final _participantsController = StreamController<List<Participant>>.broadcast();
+  Stream<List<Participant>> get participantsStream => _participantsController.stream;
+
+  final _connectionController = StreamController<bool>.broadcast();
+  Stream<bool> get connectionStream => _connectionController.stream;
+
+  /// Callback to publish voice state leave before disconnecting
+  Future<void> Function()? onLeaveCallback;
+
+  /// Callback for token renewal (fires 30 min before expiry)
+  Future<String?> Function()? onTokenRefreshNeeded;
+
+  Future<void> connect({
+    required String url,
+    required String token,
+    bool noiseSuppression = true,
+    bool echoCancellation = true,
+    bool autoGainControl = true,
+    String suppressionLevel = 'moderate',
+  }) async {
+    _room = Room(
+      roomOptions: RoomOptions(
+        defaultAudioCaptureOptions: AudioCaptureOptions(
+          noiseSuppression: noiseSuppression,
+          echoCancellation: echoCancellation,
+          autoGainControl: autoGainControl,
+        ),
+      ),
+    );
+    // Set up event listeners, connect, init noise processor
+    await _room!.connect(url, token);
+    _scheduleTokenRefresh(token);
+  }
+
+  Future<void> disconnect() async { /* publishes leave via onLeaveCallback */ }
+  Future<void> toggleMicrophone() async { /* ... */ }
+  Future<void> toggleDeafen() async { /* ... */ }
+  Future<void> toggleCamera() async { /* ... */ }
+  Future<void> toggleScreenShare() async { /* ... */ }
+}
 ```
 
-The `updateVoiceState` method updates participant lists below voice channel items and manages mute/deafen/video icons.
+Key design decisions:
 
-The `buildChannelHtml` method needs a channel_type-aware icon: `#` for text, speaker icon for voice, megaphone for announcement.
+- **Token refresh**: parses the JWT `exp` claim and schedules renewal 30 minutes before expiry. On renewal, sends a new token request to the provider, reconnects, and restores mute state.
+- **Leave callback**: `onLeaveCallback` is set by the voice channel screen so that both explicit disconnect and sidebar disconnect publish a Kind 10070 leave event.
+- **Streams**: `participantsStream` and `connectionStream` drive reactive UI rebuilds.
 
-### `app/views/channels/_channel_item.html.erb`
+### `lib/screens/voice/voice_channel_screen.dart`
 
-Branch on `channel.voice?` to render a speaker icon instead of `#`, and append a participant list below voice channels:
+The voice channel UI. Handles:
 
-```erb
-<% if channel.voice? %>
-  <svg class="w-5 h-5 mr-1.5 opacity-60"><!-- speaker icon --></svg>
-<% else %>
-  <span class="text-lg mr-1.5 opacity-60">#</span>
-<% end %>
-```
+- Permission checking via `PermissionService` (connect, speak, video, screen share, mute/deafen/move members)
+- Voice provider lookup from `ServerVoiceProviders` Drift table
+- Token request/response flow via encrypted DMs
+- Audio processing settings from `FlutterSecureStorage`
+- Participant grid with responsive column layout (1/2/3 columns based on count)
+- Speaking indicator with pulsing glow animation
+- Participant profile resolution from `RemoteMembers` and `Contacts` tables
+- Voice state publishing (Kind 10070 events)
+- Sidechat panel (right side, 300px, when `sidechatChannelId` is set)
 
-Below voice channel items, render connected participants (from `voice_states`):
+### `lib/widgets/channel_sidebar.dart`
 
-```erb
-<% if channel.voice? && channel.voice_states.any? %>
-  <div class="ml-8 space-y-0.5">
-    <% channel.voice_states.includes(:user).each do |vs| %>
-      <div class="flex items-center text-xs text-gray-400 py-0.5">
-        <%= image_tag vs.user.avatar_url, class: "w-5 h-5 rounded-full mr-1.5" %>
-        <span class="truncate"><%= vs.user.display_name %></span>
-        <!-- mute/deafen icons -->
-      </div>
-    <% end %>
-  </div>
-<% end %>
-```
-
-### `app/policies/server_policy.rb`
-
-Add three new policy methods following the existing pattern:
-
-```ruby
-def mute_voice_member?
-  member_has_permission?("mute_members")
-end
-
-def deafen_voice_member?
-  member_has_permission?("deafen_members")
-end
-
-def move_voice_member?
-  member_has_permission?("move_members")
-end
-```
+Displays voice channel participants below voice channel items in the sidebar. Subscribes to Kind 10070 events for the server's `#h` tag and renders connected users with mute/deafen indicators.
 
 ---
 
-## 7. Database Schema
+## 7. Database Schema (Drift)
 
-### `voice_states` Table
+### `VoiceStates` Table
 
-Tracks who is currently in which voice channel and their audio/video state. Rows are created on join, destroyed on leave.
+`lib/database/tables/voice_states.dart` -- tracks who is currently in which voice channel and their audio/video state:
 
-```ruby
-create_table :voice_states do |t|
-  t.references :user, null: false, foreign_key: true
-  t.references :channel, null: false, foreign_key: true
-  t.references :server, null: false, foreign_key: true
-  t.boolean :self_mute, default: false, null: false
-  t.boolean :self_deaf, default: false, null: false
-  t.boolean :server_mute, default: false, null: false
-  t.boolean :server_deaf, default: false, null: false
-  t.boolean :video_on, default: false, null: false
-  t.boolean :screen_share_on, default: false, null: false
-  t.string :session_id, null: false         # LiveKit participant session ID
-  t.string :public_id, null: false          # HasPublicId concern
-
-  t.timestamps
-end
-
-add_index :voice_states, [:user_id, :server_id], unique: true  # one voice channel per user per server
-add_index :voice_states, :channel_id
-add_index :voice_states, :public_id, unique: true
-add_index :voice_states, :session_id, unique: true
+```dart
+class VoiceStates extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get publicId => text().withLength(max: 12).unique()();
+  IntColumn get userId => integer()();
+  IntColumn get serverId => integer()();
+  IntColumn get channelId => integer()();
+  TextColumn get sessionId => text().unique()();
+  BoolColumn get selfMute => boolean().withDefault(const Constant(false))();
+  BoolColumn get selfDeaf => boolean().withDefault(const Constant(false))();
+  BoolColumn get serverMute => boolean().withDefault(const Constant(false))();
+  BoolColumn get serverDeaf => boolean().withDefault(const Constant(false))();
+  BoolColumn get screenShareOn => boolean().withDefault(const Constant(false))();
+  BoolColumn get videoOn => boolean().withDefault(const Constant(false))();
+  BoolColumn get broadcasting => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
 ```
 
-### Channel Additions
+Voice state rows are populated from incoming Kind 10070 events and cleaned up on leave events. They serve as a local cache for rendering the sidebar participant list.
 
-```ruby
-add_column :channels, :voice_bitrate, :integer, default: 64000   # bits/sec (64kbps default)
-add_column :channels, :voice_user_limit, :integer, default: 0    # 0 = unlimited
-add_column :channels, :video_enabled, :boolean, default: false
+### `ServerVoiceProviders` Table
+
+`lib/database/tables/server_voice_providers.dart` -- tracks which users provide voice service for a server:
+
+```dart
+class ServerVoiceProviders extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get serverId => integer()();
+  IntColumn get userId => integer().nullable()();
+  TextColumn get providerPubkey => text().nullable()();
+  BoolColumn get active => boolean().withDefault(const Constant(true))();
+  IntColumn get position => integer().withDefault(const Constant(0))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+}
 ```
 
-### Instance Config Additions
+Synced from server metadata. The client picks the first active provider when joining a voice channel.
 
-Added to the existing `instance_configs` table (or `InstanceConfig` singleton):
+### Channel Voice Columns
 
-| Setting | Type | Default | Description |
+The `Channels` Drift table includes voice-specific columns:
+
+| Column | Type | Default | Description |
 |---|---|---|---|
-| `voice_enabled` | boolean | `false` | Master toggle for voice/video features instance-wide |
-| `max_voice_participants_per_channel` | integer | `25` | Global cap per voice channel (0 = unlimited) |
+| `voiceBitrate` | integer | 64000 | Audio bitrate in bits/sec (64kbps default) |
+| `voiceUserLimit` | integer | 0 | Max users (0 = unlimited) |
+| `videoEnabled` | boolean | false | Whether video is allowed in this voice channel |
+| `sidechatChannelId` | text (nullable) | null | Linked text channel for sidechat panel |
 
 ---
 
-## 8. Ruby SDK Integration
+## 8. Voice State via Nostr (Kind 10070)
 
-### LivekitTokenService
+Instead of a server database or ActionCable broadcasts, voice state is published as **public Nostr events** (Kind 10070) with an `#h` tag containing the server's Nostr group ID. All members subscribed to that group see voice state changes in real time.
 
-Generates JWT tokens for browser clients to connect to LiveKit rooms.
+### Event Structure
 
-```ruby
-# app/services/livekit_token_service.rb
-class LivekitTokenService
-  def initialize
-    @api_key = Rails.application.credentials.dig(:livekit, :api_key)
-    @api_secret = Rails.application.credentials.dig(:livekit, :api_secret)
-  end
-
-  def generate_token(user:, channel:, permissions: {})
-    token = LiveKit::AccessToken.new(api_key: @api_key, api_secret: @api_secret)
-    token.identity = user.public_id
-    token.name = user.display_name
-    token.metadata = { user_id: user.public_id, server_id: channel.server.public_id }.to_json
-
-    token.add_grant(LiveKit::VideoGrant.new(
-      room_join: true,
-      room: channel.public_id,
-      can_publish: permissions[:speak] != false,
-      can_subscribe: true,
-      can_publish_data: true
-    ))
-
-    token.to_jwt
-  end
-end
+```dart
+final event = NostrEvent(
+  pubkey: auth.publicKeyHex!,
+  createdAt: NostrEvent.now(),
+  kind: 10070,
+  tags: [['h', server.nostrGroupId!]],
+  content: jsonEncode({
+    'type': 'voice_state_sync',
+    'action': action,         // "join", "leave", "updated"
+    'server_nostr_group_id': server.nostrGroupId,
+    'channel_id': channelPublicId,
+    'user_id': publicKeyHex.substring(0, 12),
+    'user_pubkey': publicKeyHex,
+    'username': displayName,
+    'avatar_url': avatarUrl,
+    'self_mute': isMuted,
+    'self_deaf': isDeafened,
+  }),
+);
 ```
 
-### LivekitRoomService
+### Why Kind 10070
 
-Wraps `LiveKit::RoomServiceClient` for server-side moderation actions.
+- **Public**: all server members see voice state without N encrypted DMs per state change.
+- **Replaceable**: Kind 10070 is in the replaceable range (10000-19999), so relays keep only the latest event per pubkey, preventing stale state buildup.
+- **Filterable**: the `#h` tag allows clients to subscribe to voice events for a specific server group only.
+- **No server dependency**: works with any Nostr relay, no custom backend needed.
 
-```ruby
-# app/services/livekit_room_service.rb
-class LivekitRoomService
-  def initialize
-    @client = LiveKit::RoomServiceClient.new(
-      Rails.application.credentials.dig(:livekit, :url),
-      Rails.application.credentials.dig(:livekit, :api_key),
-      Rails.application.credentials.dig(:livekit, :api_secret)
-    )
-  end
+### Subscription
 
-  def mute_participant(channel:, user_public_id:, track_sid:)
-    @client.mute_published_track(
-      room: channel.public_id,
-      identity: user_public_id,
-      track_sid: track_sid,
-      muted: true
-    )
-  end
-
-  def remove_participant(channel:, user_public_id:)
-    @client.remove_participant(
-      room: channel.public_id,
-      identity: user_public_id
-    )
-  end
-
-  def update_participant_permissions(channel:, user_public_id:, can_publish: nil, can_subscribe: nil)
-    @client.update_participant(
-      room: channel.public_id,
-      identity: user_public_id,
-      permission: LiveKit::ParticipantPermission.new(
-        can_publish: can_publish,
-        can_subscribe: can_subscribe,
-        can_publish_data: true
-      )
-    )
-  end
-
-  def list_participants(channel:)
-    @client.list_participants(room: channel.public_id)
-  end
-
-  def list_rooms
-    @client.list_rooms
-  end
-end
-```
-
-### LivekitWebhooksController
-
-Receives LiveKit webhook events and updates `VoiceState` records accordingly.
-
-```ruby
-# app/controllers/livekit_webhooks_controller.rb
-class LivekitWebhooksController < ApplicationController
-  skip_before_action :verify_authenticity_token
-  before_action :verify_webhook_signature
-
-  def create
-    event = LiveKit::WebhookReceiver.new(
-      api_key: Rails.application.credentials.dig(:livekit, :api_key),
-      api_secret: Rails.application.credentials.dig(:livekit, :api_secret)
-    ).receive(request.body.read, request.headers["Authorization"])
-
-    case event.event
-    when "participant_joined"
-      handle_participant_joined(event)
-    when "participant_left"
-      handle_participant_left(event)
-    when "track_published"
-      handle_track_published(event)
-    when "track_unpublished"
-      handle_track_unpublished(event)
-    end
-
-    head :ok
-  end
-
-  private
-
-  def handle_participant_joined(event)
-    user = User.find_by!(public_id: event.participant.identity)
-    channel = Channel.find_by!(public_id: event.room.name)
-
-    voice_state = VoiceState.create!(
-      user: user,
-      channel: channel,
-      server: channel.server,
-      session_id: event.participant.sid
-    )
-
-    broadcast_voice_state(channel.server, channel, user, voice_state, "joined")
-  end
-
-  def handle_participant_left(event)
-    voice_state = VoiceState.find_by(session_id: event.participant.sid)
-    return unless voice_state
-
-    server = voice_state.server
-    channel = voice_state.channel
-    user = voice_state.user
-
-    voice_state.destroy!
-    broadcast_voice_state(server, channel, user, nil, "left")
-  end
-
-  def handle_track_published(event)
-    voice_state = VoiceState.find_by(session_id: event.participant.sid)
-    return unless voice_state
-
-    case event.track.source
-    when "SCREEN_SHARE"
-      voice_state.update!(screen_share_on: true)
-    when "CAMERA"
-      voice_state.update!(video_on: true)
-    end
-
-    broadcast_voice_state(voice_state.server, voice_state.channel, voice_state.user, voice_state, "updated")
-  end
-
-  def handle_track_unpublished(event)
-    voice_state = VoiceState.find_by(session_id: event.participant.sid)
-    return unless voice_state
-
-    case event.track.source
-    when "SCREEN_SHARE"
-      voice_state.update!(screen_share_on: false)
-    when "CAMERA"
-      voice_state.update!(video_on: false)
-    end
-
-    broadcast_voice_state(voice_state.server, voice_state.channel, voice_state.user, voice_state, "updated")
-  end
-
-  def broadcast_voice_state(server, channel, user, voice_state, action)
-    ServerChannel.broadcast_to(server, {
-      type: "voice_state_update",
-      channel_id: channel.public_id,
-      user_id: user.public_id,
-      username: user.username,
-      avatar_url: user.avatar_url,
-      action: action,
-      self_mute: voice_state&.self_mute || false,
-      self_deaf: voice_state&.self_deaf || false,
-      server_mute: voice_state&.server_mute || false,
-      server_deaf: voice_state&.server_deaf || false,
-      video_on: voice_state&.video_on || false,
-      screen_share_on: voice_state&.screen_share_on || false
-    })
-  end
-
-  def verify_webhook_signature
-    # LiveKit::WebhookReceiver handles signature verification internally
-    # via the Authorization header and API secret
-  end
-end
-```
+Clients subscribe to Kind 10070 events with the `#h` filter matching the current server's group ID. When a voice state event arrives, the local `VoiceStates` Drift table is updated and the sidebar re-renders.
 
 ---
 
-## 9. Client-Side JavaScript
+## 9. Token Flow: Local vs. Remote Provider
 
-### `voice_channel_controller.js`
+### Local Provider (Self-Hosted LiveKit)
 
-Stimulus controller for voice channel interaction. Uses `livekit-client` for WebRTC.
+When the current user is the voice provider (e.g., running LiveKit on their own machine):
 
-```javascript
-// app/javascript/controllers/voice_channel_controller.js
-import { Controller } from "@hotwired/stimulus"
-import {
-  Room,
-  RoomEvent,
-  Track,
-  LocalParticipant,
-  ConnectionQuality
-} from "livekit-client"
+1. `VoiceTokenService.generateToken()` creates the JWT locally using `dart_jsonwebtoken`.
+2. The token includes room name (`srv-{serverPublicId}-{channelPublicId}`), participant identity, and permission grants.
+3. No network request needed -- the token is used directly with `LiveKitService.connect()`.
 
-export default class extends Controller {
-  static values = {
-    livekitUrl: String,
-    token: String,
-    channelId: String,
-    serverId: String
-  }
+### Remote Provider (Another User Hosts LiveKit)
 
-  static targets = ["controls", "participants", "status"]
+When someone else provides the LiveKit server:
 
-  async connect() {
-    this.room = new Room({
-      adaptiveStream: true,
-      dynacast: true,
-      audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
-      }
-    })
+1. Client sends an encrypted DM (Kind 14, NIP-44) to the provider's pubkey via `VoiceTokenService.requestToken()`.
+2. The request includes: server group ID, channel ID, user pubkey, display name, and a unique request ID.
+3. The provider receives the DM, generates a token using their LiveKit API key/secret, and responds with an encrypted DM containing the JWT and LiveKit URL.
+4. Client waits up to 15 seconds for the response via `DmService.waitForVoiceToken(requestId)`.
+5. On success, connects with the received token and URL.
 
-    this.setupEventHandlers()
-  }
+### Token Renewal
 
-  async join() {
+Tokens are issued with a 6-hour expiry. `LiveKitService` parses the JWT `exp` claim and schedules renewal 30 minutes before expiry:
+
+```dart
+void _scheduleTokenRefresh(String token) {
+  // Parse JWT payload for exp claim
+  final parts = token.split('.');
+  final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+  final claims = json.decode(payload) as Map<String, dynamic>;
+  final exp = claims['exp'] as int?;
+
+  _tokenExpiresAt = DateTime.fromMillisecondsSinceEpoch(exp! * 1000);
+  final renewAt = _tokenExpiresAt!.subtract(const Duration(minutes: 30));
+  final delay = renewAt.difference(DateTime.now());
+
+  _tokenRefreshTimer = Timer(delay, _renewToken);
+}
+```
+
+On renewal, the service sends a new token request to the provider, reconnects to the room, and restores the previous mute state.
+
+---
+
+## 10. Audio Processing: DeepFilterNet via Native FFI
+
+### Architecture
+
+The Flutter app uses DeepFilterNet3 for ML-based noise suppression, loaded via native FFI. The pipeline is:
+
+```
+Microphone audio -> DeepFilterNet (STFT -> DNN -> ISTFT) -> Clean audio -> LiveKit
+```
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `native/deepfilter/` | Native Rust/C source for DeepFilterNet bindings |
+| `hook/build.dart` | Dart native assets build hook -- compiles the native library |
+| `lib/src/deepfilter_bindings.dart` | FFI function declarations (`df_create`, `df_process_frame`, etc.) |
+| `lib/services/noise_processor.dart` | Dart wrapper with init, processFrame, level adjustment |
+| `assets/models/DeepFilterNet3_onnx.tar.gz` | Bundled ONNX model (extracted to app support on first run) |
+
+### FFI Bindings
+
+```dart
+// lib/src/deepfilter_bindings.dart
+@Native<Pointer<Void> Function(Pointer<Utf8>, Float, Pointer<Utf8>)>(symbol: 'df_create')
+external Pointer<Void> dfCreate(Pointer<Utf8> path, double attenLim, Pointer<Utf8> logLevel);
+
+@Native<Float Function(Pointer<Void>, Pointer<Float>, Pointer<Float>)>(symbol: 'df_process_frame')
+external double dfProcessFrame(Pointer<Void> st, Pointer<Float> input, Pointer<Float> output);
+
+@Native<Size Function(Pointer<Void>)>(symbol: 'df_get_frame_length')
+external int dfGetFrameLength(Pointer<Void> st);
+
+@Native<Void Function(Pointer<Void>, Float)>(symbol: 'df_set_atten_lim')
+external void dfSetAttenLim(Pointer<Void> st, double limDb);
+```
+
+The shared library is compiled from source by `hook/build.dart` and bundled automatically via Dart native assets. No manual `DynamicLibrary.open()` or path searching is needed.
+
+### Suppression Levels
+
+| Level | Attenuation Limit | Use Case |
+|---|---|---|
+| `low` | 40 dB | Light background noise (quiet room, mild fan) |
+| `moderate` | 80 dB | Default -- handles keyboard, moderate ambient noise |
+| `aggressive` | 95 dB | Loud environments (construction, crowded space) |
+
+Levels can be changed at runtime via `dfSetAttenLim()` without rebuilding the model.
+
+### Fallback Chain
+
+```dart
+class NoiseProcessor {
+  Future<void> init({String level = 'moderate'}) async {
+    // Try DeepFilterNet (ML-based, best quality)
     try {
-      await this.room.connect(this.livekitUrlValue, this.tokenValue)
-      await this.room.localParticipant.setMicrophoneEnabled(true)
-      this.updateControlsUI()
-    } catch (error) {
-      console.error("Failed to join voice channel:", error)
+      _dfState = _DeepFilterState();
+      await _dfState!.init(level);
+      _activeProcessor = 'deepfilter';
+      return;
+    } catch (e) {
+      _dfState = null;
     }
-  }
-
-  async disconnect() {
-    await this.room.disconnect()
-    this.updateControlsUI()
-  }
-
-  async toggleMute() {
-    const enabled = this.room.localParticipant.isMicrophoneEnabled
-    await this.room.localParticipant.setMicrophoneEnabled(!enabled)
-    this.notifySelfMute(!enabled)
-  }
-
-  async toggleDeafen() {
-    // Deafen = disable all incoming audio tracks locally
-    const participants = this.room.remoteParticipants
-    const shouldDeafen = !this._deafened
-    this._deafened = shouldDeafen
-
-    participants.forEach((participant) => {
-      participant.audioTrackPublications.forEach((pub) => {
-        if (pub.track) pub.track.setEnabled(!shouldDeafen)
-      })
-    })
-
-    // Also mute self when deafening
-    if (shouldDeafen) {
-      await this.room.localParticipant.setMicrophoneEnabled(false)
-    }
-
-    this.notifySelfDeafen(shouldDeafen)
-    this.updateControlsUI()
-  }
-
-  async toggleVideo() {
-    const enabled = this.room.localParticipant.isCameraEnabled
-    await this.room.localParticipant.setCameraEnabled(!enabled)
-  }
-
-  async shareScreen() {
-    try {
-      const enabled = this.room.localParticipant.isScreenShareEnabled
-      await this.room.localParticipant.setScreenShareEnabled(!enabled, {
-        audio: true,  // capture system audio if supported
-        selfBrowserSurface: "exclude",
-        surfaceSwitching: "include"
-      })
-    } catch (error) {
-      // User cancelled the screen share picker
-      if (error.name !== "NotAllowedError") {
-        console.error("Screen share error:", error)
-      }
-    }
-  }
-
-  // --- Event Handlers ---
-
-  setupEventHandlers() {
-    this.room.on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
-      this.updateSpeakingIndicators(speakers)
-    })
-
-    this.room.on(RoomEvent.TrackMuted, (publication, participant) => {
-      this.updateParticipantUI(participant)
-    })
-
-    this.room.on(RoomEvent.TrackUnmuted, (publication, participant) => {
-      this.updateParticipantUI(participant)
-    })
-
-    this.room.on(RoomEvent.ConnectionQualityChanged, (quality, participant) => {
-      this.updateConnectionIndicator(participant, quality)
-    })
-
-    this.room.on(RoomEvent.Disconnected, (reason) => {
-      this.handleDisconnect(reason)
-    })
-
-    this.room.on(RoomEvent.Reconnecting, () => {
-      this.showReconnecting()
-    })
-
-    this.room.on(RoomEvent.Reconnected, () => {
-      this.hideReconnecting()
-    })
-  }
-
-  // ... UI update methods (updateControlsUI, updateSpeakingIndicators, etc.)
-
-  notifySelfMute(muted) {
-    fetch(`/voice_states/self_mute`, {
-      method: "PATCH",
-      headers: { "X-CSRF-Token": document.querySelector("[name=csrf-token]").content },
-      body: JSON.stringify({ self_mute: muted })
-    })
-  }
-
-  notifySelfDeafen(deafened) {
-    fetch(`/voice_states/self_deafen`, {
-      method: "PATCH",
-      headers: { "X-CSRF-Token": document.querySelector("[name=csrf-token]").content },
-      body: JSON.stringify({ self_deaf: deafened })
-    })
+    // Fall back to WebRTC built-in (handled by LiveKit AudioCaptureOptions)
+    _activeProcessor = 'webrtc';
   }
 }
 ```
 
-### Screen Share Browser Compatibility
-
-| Browser | OS | System Audio | Tab Audio | Notes |
-|---|---|---|---|---|
-| Chrome | Windows | Yes | Yes | Full support via `getDisplayMedia({ audio: true })` |
-| Chrome | macOS | No | Yes (tab only) | macOS blocks system audio capture at OS level |
-| Chrome | Linux | Yes (PipeWire) | Yes | Requires PipeWire audio backend |
-| Firefox | All | No | Yes (tab only) | Only captures tab audio, not window/screen |
-| Safari | macOS | No | No | No audio capture support in screen share |
-| Edge | Windows | Yes | Yes | Same engine as Chrome |
-
-### Voice Controls Bar
-
-The voice controls bar persists across text channel navigation (it is not inside the Turbo Frame). It renders at the bottom of the sidebar, above the user panel:
-
-```erb
-<!-- app/views/layouts/_voice_controls.html.erb -->
-<div id="voice-controls-bar" class="hidden border-t border-gray-700 p-2"
-     data-controller="voice-channel">
-  <div class="flex items-center justify-between">
-    <div class="flex flex-col min-w-0">
-      <span class="text-xs font-medium text-green-400 truncate">Voice Connected</span>
-      <span class="text-xs text-gray-400 truncate" data-voice-channel-target="channelName"></span>
-    </div>
-    <div class="flex items-center gap-1">
-      <button data-action="voice-channel#toggleMute" title="Mute">
-        <!-- microphone icon -->
-      </button>
-      <button data-action="voice-channel#toggleDeafen" title="Deafen">
-        <!-- headphone icon -->
-      </button>
-      <button data-action="voice-channel#disconnect" title="Disconnect" class="text-red-400">
-        <!-- phone-off icon -->
-      </button>
-    </div>
-  </div>
-</div>
-```
+DeepFilterNet handles the full pipeline internally (STFT, DNN inference, ISTFT), so no manual high-pass filter or noise gate is needed. If the native library is unavailable (e.g., unsupported platform), the app falls back to WebRTC's built-in noise suppression via `AudioCaptureOptions(noiseSuppression: true)`.
 
 ---
 
-## 10. Moderation Flows
+## 11. Moderation Flows
 
 ### Self-Mute
 
 ```
 User clicks mute button
-  │
-  ├─► voice_channel_controller.js
-  │     localParticipant.setMicrophoneEnabled(false)
-  │     ── audio track disabled locally, no server round-trip for media
-  │
-  ├─► PATCH /voice_states/self_mute { self_mute: true }
-  │     ── Rails updates VoiceState record
-  │
-  ├─► ServerChannel.broadcast_to(server, { type: "voice_state_update", action: "updated" })
-  │     ── all sidebar controllers update the mute icon
-  │
-  └─► LiveKit receives track mute via WebRTC signaling
-        ── stops forwarding audio packets to other participants
+  |
+  +-> LiveKitService.toggleMicrophone()
+  |     localParticipant.setMicrophoneEnabled(false)
+  |     -- audio track disabled locally, no server round-trip for media
+  |
+  +-> _publishVoiceState('updated')
+  |     -- publishes Kind 10070 event with self_mute: true
+  |
+  +-> All subscribers receive the event
+        -- sidebar controllers update the mute icon
 ```
 
 ### Server-Mute (Moderator Action)
 
 ```
-Moderator right-clicks user → "Server Mute"
-  │
-  ├─► POST /servers/:id/voice/mute_member { user_id: "..." }
-  │     ── Rails checks authorize(@server, :mute_voice_member?)
-  │     ── returns 403 if permission denied
-  │
-  ├─► LivekitRoomService#mute_participant
-  │     ── calls RoomServiceClient#mute_published_track
-  │     ── LiveKit force-mutes the participant's audio track
-  │
-  ├─► LiveKit fires track_muted webhook → LivekitWebhooksController
-  │     ── updates VoiceState: server_mute: true
-  │
-  ├─► ServerChannel.broadcast_to(server, { type: "voice_state_update" })
-  │     ── sidebar shows server-mute icon on the user
-  │
-  └─► Muted user's livekit-client receives TrackMuted event
-        ── UI updates to show "You have been server muted"
-        ── User cannot unmute until a moderator removes the server mute
+Moderator right-clicks user -> "Server Mute"
+  |
+  +-> Check Permission.muteMembers via PermissionService
+  |     -- returns false if not authorized
+  |
+  +-> Publish Kind 10070 event with:
+  |     action: "server_mute"
+  |     target_pubkey: <muted user's pubkey>
+  |     -- all subscribers see the server-mute state
+  |
+  +-> Target user's client receives the event
+  |     -- disables microphone locally
+  |     -- UI shows "You have been server muted"
+  |     -- user cannot unmute until moderator publishes server-unmute
+  |
+  +-> Sidebar shows server-mute icon on the user
 ```
+
+Unlike the server-backed approach where LiveKit force-mutes via its REST API, the Flutter client relies on the target client honoring the moderator's Kind 10070 event. This is a trust-based model consistent with Nostr's architecture.
 
 ### Self-Deafen
 
 ```
 User clicks deafen button
-  │
-  ├─► voice_channel_controller.js
-  │     ── disables all remote audio track playback locally
-  │     ── also disables own microphone (mute on deafen)
-  │     ── purely client-side audio disable, no SFU involvement
-  │
-  ├─► PATCH /voice_states/self_deafen { self_deaf: true }
-  │     ── Rails updates VoiceState record
-  │
-  └─► ServerChannel.broadcast_to(server, { type: "voice_state_update" })
-        ── sidebar shows deafen icon on the user
-```
-
-### Server-Deafen (Moderator Action)
-
-```
-Moderator right-clicks user → "Server Deafen"
-  │
-  ├─► POST /servers/:id/voice/deafen_member { user_id: "..." }
-  │     ── Rails checks authorize(@server, :deafen_voice_member?)
-  │
-  ├─► LivekitRoomService#update_participant_permissions
-  │     ── sets can_subscribe: false
-  │     ── LiveKit revokes the participant's ability to receive tracks
-  │
-  ├─► VoiceState.update!(server_deaf: true)
-  │
-  └─► ServerChannel.broadcast_to(server, { type: "voice_state_update" })
-        ── user sees "You have been server deafened"
-        ── user cannot hear any participants until moderator removes it
+  |
+  +-> LiveKitService.toggleDeafen()
+  |     -- disables all remote audio tracks locally (mediaStreamTrack.enabled = false)
+  |     -- also disables own microphone (mute on deafen)
+  |     -- purely client-side, no SFU involvement
+  |
+  +-> _publishVoiceState('updated')
+  |     -- publishes Kind 10070 event with self_deaf: true
+  |
+  +-> Sidebar shows deafen icon on the user
 ```
 
 ### Move Member
 
 ```
-Moderator right-clicks user → "Move to #voice-2"
-  │
-  ├─► POST /servers/:id/voice/move_member { user_id: "...", target_channel_id: "..." }
-  │     ── Rails checks authorize(@server, :move_voice_member?)
-  │     ── checks target channel exists and is voice type
-  │
-  ├─► LivekitRoomService#remove_participant(channel: source, user_public_id: user.public_id)
-  │     ── kicks user from current LiveKit room
-  │
-  ├─► LiveKit fires participant_left webhook
-  │     ── VoiceState destroyed, broadcast sent
-  │
-  ├─► Rails sends a move instruction via ActionCable (NotificationChannel or ServerChannel)
-  │     { type: "voice_move", target_channel_id: "...", token: "new_jwt_token" }
-  │
-  └─► User's voice_channel_controller receives the move instruction
-        ── auto-connects to the new room with the provided token
-        ── LiveKit fires participant_joined webhook
-        ── new VoiceState created, broadcast sent
+Moderator right-clicks user -> "Move to #voice-2"
+  |
+  +-> Check Permission.moveMembers via PermissionService
+  |
+  +-> Publish Kind 10070 event with:
+  |     action: "move"
+  |     target_pubkey: <user to move>
+  |     target_channel_id: <destination channel>
+  |
+  +-> Target user's client receives the event
+        -- disconnects from current room
+        -- requests a new token for the target channel
+        -- connects to the new room
+        -- publishes Kind 10070 join event for the new channel
 ```
 
 ---
 
-## 11. Scaling & Performance
+## 12. Screen Share
+
+Screen sharing uses `livekit_client`'s built-in `setScreenShareEnabled()`:
+
+```dart
+Future<void> toggleScreenShare() async {
+  if (_room == null) return;
+  final enabled = _room!.localParticipant?.isScreenShareEnabled() ?? false;
+  await _room!.localParticipant?.setScreenShareEnabled(!enabled);
+  _emitParticipants();
+}
+```
+
+### Platform Support
+
+| Platform | System Audio | Notes |
+|---|---|---|
+| Windows | Yes | Full support via desktop capture APIs |
+| macOS | Limited | macOS blocks system audio at OS level; window/screen capture works |
+| Linux | Yes (PipeWire) | Requires PipeWire audio backend |
+| Android | Yes | MediaProjection API (requires user permission dialog) |
+| iOS | Yes | ReplayKit broadcast extension |
+
+---
+
+## 13. Scaling & Performance
 
 ### LiveKit Official Benchmarks
 
@@ -898,7 +682,7 @@ Tested on a 16-core `c2-standard-16` GCP instance:
 |---|---|---|
 | Audio-only room | 10 speakers + 3,000 listeners | ~80% |
 | Video meeting | 150 bidirectional 720p streams | ~85% |
-| Livestream | 1 publisher → 3,000 viewers | ~92% |
+| Livestream | 1 publisher -> 3,000 viewers | ~92% |
 
 ### Self-Hosted Resource Estimates
 
@@ -912,29 +696,24 @@ Tested on a 16-core `c2-standard-16` GCP instance:
 
 LiveKit supports horizontal scaling for instances that outgrow a single server:
 
-- **Redis coordination** — nodes register and discover each other via Redis. Room state is shared across the cluster.
-- **Region-aware routing** — participants are routed to the nearest node. Rooms can span multiple nodes with cascaded forwarding.
-- **Graceful draining** — a node marked for maintenance stops accepting new rooms and waits for existing rooms to empty before shutting down.
-- **Kubernetes-native** — Helm chart provided. Nodes auto-scale based on CPU/bandwidth metrics.
-- **Room affinity** — each room lives on a single node (no split-brain). Unlimited concurrent rooms across the cluster; rooms are distributed automatically.
-- **No documented cluster size limit** — LiveKit Cloud runs millions of concurrent connections. Self-hosted ceiling is determined by hardware and Redis throughput.
-
-### How Far Can You Take It
-
-LiveKit Cloud handles millions of concurrent participants and up to 100,000 participants per session. Self-hosted instances scale horizontally by adding nodes — each node adds its full capacity to the cluster. The practical ceiling for self-hosted deployments is hardware budget and Redis throughput, not LiveKit software limits.
+- **Redis coordination** -- nodes register and discover each other via Redis. Room state is shared across the cluster.
+- **Region-aware routing** -- participants are routed to the nearest node. Rooms can span multiple nodes with cascaded forwarding.
+- **Graceful draining** -- a node marked for maintenance stops accepting new rooms and waits for existing rooms to empty before shutting down.
+- **Kubernetes-native** -- Helm chart provided. Nodes auto-scale based on CPU/bandwidth metrics.
+- **Room affinity** -- each room lives on a single node (no split-brain). Unlimited concurrent rooms across the cluster; rooms are distributed automatically.
 
 For Inferno Chat, a single 2-core node is sufficient for most self-hosted instances. Add nodes only when concurrent voice usage consistently exceeds capacity.
 
 ---
 
-## 12. Deployment
+## 14. Deployment
 
-### Docker Compose
+### Docker Compose (LiveKit Server Only)
 
-Add LiveKit alongside the existing Rails services:
+The Flutter client is a standalone app -- only the LiveKit server needs deployment:
 
 ```yaml
-# docker-compose.yml (additions)
+# docker-compose.yml
 services:
   livekit:
     image: livekit/livekit-server:latest
@@ -960,39 +739,28 @@ rtc:
   use_external_ip: true
 
 keys:
-  # API key : secret — generate with `livekit-server generate-keys`
+  # API key : secret -- generate with `livekit-server generate-keys`
   APIxxxxxxx: "secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
 turn:
   enabled: true
   tls_port: 5349
-  # Uses the same TLS certificate as the main service
   cert_file: /etc/livekit/tls/cert.pem
   key_file: /etc/livekit/tls/key.pem
 
-webhook:
-  urls:
-    - "https://your-instance.com/livekit/webhooks"
-  api_key: "APIxxxxxxx"
-
 room:
   empty_timeout: 300       # seconds before empty room is destroyed
-  max_participants: 0      # 0 = unlimited (enforced at Rails level instead)
+  max_participants: 0      # 0 = unlimited
 
 logging:
   level: info
 ```
 
-### Rails Credentials
+Note: No webhook configuration is needed. The Flutter client does not receive webhooks -- voice state is managed entirely via Kind 10070 Nostr events.
 
-```yaml
-# config/credentials.yml.enc (additions)
-livekit:
-  url: "wss://your-instance.com:7880"
-  api_key: "APIxxxxxxx"
-  api_secret: "secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  webhook_secret: "secret_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-```
+### Client Configuration
+
+The voice provider's LiveKit API key and secret are stored locally by the provider user (in `FlutterSecureStorage`). Other users never need these credentials -- they request tokens via encrypted DMs.
 
 ### Firewall Ports
 
@@ -1000,131 +768,121 @@ livekit:
 |---|---|---|
 | 7880 | TCP | LiveKit HTTP API + WebSocket signaling |
 | 7881 | TCP | WebRTC over TCP (fallback when UDP is blocked) |
-| 50000–60000 | UDP | WebRTC media (audio/video packets) |
+| 50000-60000 | UDP | WebRTC media (audio/video packets) |
 | 5349 | TCP | TURN over TLS (firewall traversal for restrictive networks) |
 
-All ports are only needed on the LiveKit server. The Rails server communicates with LiveKit over HTTP (port 7880) on the internal network.
+---
+
+## 15. Implementation Phases
+
+### Phase 1: Audio Voice Channels (Complete)
+
+- [x] Voice permissions in `Permission` enum (`connectVoice`, `speak`, `video`, `screenShare`, `muteMembers`, `deafenMembers`, `moveMembers`)
+- [x] `VoiceStates` and `ServerVoiceProviders` Drift tables
+- [x] `VoiceTokenService` with local JWT generation and encrypted DM request/response
+- [x] `LiveKitService` with connect, disconnect, toggle mute/deafen, participant streams
+- [x] `VoiceChannelScreen` with join flow, participant grid, speaking indicators
+- [x] Kind 10070 voice state publishing (join, leave, updated)
+- [x] Token refresh (30 min before expiry, re-requests from provider)
+- [x] Audio processing settings from `FlutterSecureStorage`
+- [x] Sidechat panel (linked text channel)
+
+**Verification:** User can join a voice channel, see participants in a responsive grid, mute/unmute, deafen/undeafen, and disconnect. Other users see real-time voice state updates via Nostr.
+
+### Phase 2: Native Audio Processing (Complete)
+
+- [x] DeepFilterNet3 native FFI integration (`native/deepfilter/`, `hook/build.dart`)
+- [x] `NoiseProcessor` with DeepFilterNet -> WebRTC fallback chain
+- [x] Three suppression levels (low/moderate/aggressive) with live adjustment
+- [x] Model asset bundling and first-run extraction
+- [x] `deepfilter_bindings.dart` FFI declarations
+
+**Verification:** Noise suppression active with DeepFilterNet on supported platforms, seamless fallback to WebRTC built-in elsewhere.
+
+### Phase 3: Moderation
+
+- [ ] Server-mute/unmute via Kind 10070 moderator events
+- [ ] Server-deafen/undeafen via Kind 10070 moderator events
+- [ ] Move member via Kind 10070 event (target client auto-reconnects to new channel)
+- [ ] Right-click context menu for voice moderation actions
+- [ ] Permission checks gate moderation actions in UI
+- [ ] Visual indicators for server-mute and server-deafen states
+
+**Verification:** Moderator can server-mute, server-deafen, and move members. Permission checks prevent unauthorized users. All state changes propagate via Nostr.
+
+### Phase 4: Video + Screen Share
+
+- [ ] Toggle camera via `LiveKitService.toggleCamera()`
+- [ ] Toggle screen share via `LiveKitService.toggleScreenShare()`
+- [ ] Video grid layout in participant tiles (show video track when active)
+- [ ] Screen share viewer with fullscreen toggle
+- [ ] Channel setting to enable/disable video per channel (`videoEnabled` column)
+- [ ] Permission checks for `video` and `screenShare`
+
+**Verification:** Users can enable video and share screen in voice channels. Video grid displays correctly. Channel admins can toggle video on/off per channel.
+
+### Phase 5: Polish
+
+- [ ] Voice user limit enforcement (deny join when full)
+- [ ] Connection quality indicator (green/yellow/red) via `ConnectionQualityChanged` event
+- [ ] Automatic reconnection with exponential backoff
+- [ ] AFK detection and visual indicator
+- [ ] Voice activity detection threshold (configurable sensitivity)
+- [ ] Voice & Video settings screen (`lib/screens/settings/voice_video_screen.dart`) for noise suppression level, echo cancellation, auto gain control toggles
+
+**Verification:** User limits enforced. Connection quality visible. Reconnection works after brief network drops. Settings screen allows tuning audio processing.
 
 ---
 
-## 13. Implementation Phases
+## 16. Security Considerations
 
-### Phase 1: Audio Voice Channels
-
-- Add voice permissions to `DEFAULT_PERMISSIONS` and `PERMISSION_GROUPS`
-- Create `voice_states` migration
-- Create `VoiceState` model with `HasPublicId`
-- Add `LivekitTokenService` and `LivekitRoomService`
-- Add `VoiceChannelsController` with `join` action
-- Add `LivekitWebhooksController` with `participant_joined`/`participant_left`
-- Add `voice_state_update` broadcast type to `ServerChannel`
-- Add `voice_state_update` handler to `channel_sidebar_controller.js`
-- Update `_channel_item.html.erb` with voice icon and participant list
-- Add `voice_channel_controller.js` with join, disconnect, toggleMute, toggleDeafen
-- Add persistent voice controls bar to sidebar layout
-- Add route for LiveKit webhooks
-- Add channel settings for `voice_bitrate` and `voice_user_limit`
-
-**Verification:** User can join a voice channel, see participants in sidebar, mute/unmute, deafen/undeafen, and disconnect. Other users see real-time participant list updates.
-
-### Phase 2: Moderation
-
-- Add `mute_voice_member?`, `deafen_voice_member?`, `move_voice_member?` to `ServerPolicy`
-- Add server-side mute/deafen/kick/move endpoints
-- Add `VoiceModerationController` with permission-checked actions
-- Add right-click context menu options for voice moderation
-- Handle `track_published`/`track_unpublished` webhooks for state sync
-- Add server-mute and server-deafen visual indicators
-
-**Verification:** Moderator can server-mute, server-deafen, and move members. Permission checks prevent unauthorized users. All state changes propagate in real time.
-
-### Testing Needed
-
-- [ ] Self-deafen: clicking deafen button should mute all incoming audio and disable own mic. Verify server request reaches `/voice_states/self_deafen` and UI updates correctly.
-- [ ] Self-deafen undeafen: clicking deafen again should restore incoming audio. User stays muted until they manually unmute.
-- [ ] Server-deafen via context menu: moderator right-clicks participant → Server Deafen. Target user should lose all audio.
-
-### Phase 3: Video + Screen Share
-
-- Add `video` and `screen_share` permissions
-- Add `video_enabled` column to channels
-- Add toggleVideo and shareScreen to `voice_channel_controller.js`
-- Add video grid layout component
-- Add screen share viewer with fullscreen toggle
-- Add channel setting to enable/disable video per channel
-- Handle screen share browser compatibility (audio capture varies by OS/browser)
-
-**Verification:** Users can enable video and share screen in voice channels. Video grid displays correctly. Screen share audio works on supported browsers. Channel admins can toggle video on/off per channel.
-
-### Phase 4: Polish
-
-- Add `voice_user_limit` enforcement (deny join when full)
-- Add speaking indicators (green ring around avatar) using `ActiveSpeakersChanged` event
-- Add connection quality indicator (green/yellow/red dots)
-- Add noise suppression toggle (Krisp-style, via LiveKit's built-in noise suppression)
-- Add automatic reconnection with exponential backoff
-- Add rate limiting on voice join/leave to prevent spam
-- Add admin instance config: `voice_enabled`, `max_voice_participants_per_channel`
-- Clean up stale `VoiceState` records on server startup (in case of unclean shutdown)
-
-**Verification:** User limits enforced. Speaking indicators visible. Reconnection works after brief network drops. Rate limiting prevents join/leave spam. Stale states cleaned up.
+- **Token expiry** -- LiveKit JWTs are issued with a 6-hour TTL. `LiveKitService` schedules renewal 30 minutes before expiry via `_scheduleTokenRefresh()`. On renewal, a new encrypted DM is sent to the provider.
+- **Token secrecy** -- API keys and secrets are stored only by the voice provider in `FlutterSecureStorage`. Other users receive opaque JWTs via NIP-44 encrypted DMs (Kind 14) -- relay operators cannot read the token contents.
+- **Permission scoping** -- token grants (`canPublish`, `canSubscribe`) are derived from the user's role at token generation time. Changing a role mid-session does not retroactively update grants; the user must rejoin.
+- **TURN credentials** -- LiveKit's built-in TURN server uses short-lived credentials derived from the API secret. No separate TURN credential management needed.
+- **Voice state authenticity** -- Kind 10070 events are signed by the publisher's Nostr keypair. Clients can verify that a voice state event genuinely came from the claimed user. Moderator events (server-mute, move) are verified against the server's role/permission data.
+- **Trust model** -- Server-mute is enforced by the target client honoring the moderator's Kind 10070 event. A malicious client could ignore the event, but this is consistent with Nostr's trust model. For high-security scenarios, the voice provider can revoke the user's token via the LiveKit REST API.
 
 ---
 
-## 14. Security, Routes, Libraries & Sources
+## 17. File Reference
 
-### Security Considerations
+| File | Purpose |
+|---|---|
+| `lib/services/livekit_service.dart` | LiveKit room lifecycle, participant streams, media controls |
+| `lib/services/voice_token_service.dart` | Local JWT generation, encrypted DM token request/response |
+| `lib/services/noise_processor.dart` | DeepFilterNet wrapper with fallback chain |
+| `lib/src/deepfilter_bindings.dart` | FFI declarations for DeepFilterNet native functions |
+| `lib/screens/voice/voice_channel_screen.dart` | Voice channel UI, join flow, participant grid |
+| `lib/screens/settings/voice_video_screen.dart` | Audio processing settings UI |
+| `lib/models/permission.dart` | Permission enum including voice permissions |
+| `lib/database/tables/voice_states.dart` | Drift table for local voice state cache |
+| `lib/database/tables/server_voice_providers.dart` | Drift table for server voice provider config |
+| `lib/database/tables/channels.dart` | Channel table with voice-specific columns |
+| `native/deepfilter/` | Native Rust/C source for DeepFilterNet |
+| `hook/build.dart` | Dart native assets build hook |
+| `assets/models/DeepFilterNet3_onnx.tar.gz` | Bundled DeepFilterNet3 ONNX model |
 
-- **Token expiry** — LiveKit JWTs are issued with a short TTL (e.g. 10 minutes). The `livekit-client` SDK handles automatic token refresh via the `RoomEvent.TokenExpired` event, which triggers a fetch for a new token from Rails.
-- **Permission scoping** — token grants are derived from the user's role at token generation time. Changing a role mid-session does not retroactively update grants; the user must rejoin.
-- **Webhook authentication** — LiveKit signs webhook payloads with the API secret. `LiveKit::WebhookReceiver` verifies the signature before processing.
-- **TURN credentials** — LiveKit's built-in TURN server uses short-lived credentials derived from the API secret. No separate TURN credential management needed.
-- **Rate limiting** — voice join endpoint should be rate-limited (e.g. 5 joins per minute per user) to prevent abuse.
-- **Input validation** — channel IDs and user IDs in voice endpoints must be validated as existing records with proper server membership.
+---
 
-### Routes
-
-```ruby
-# config/routes.rb (additions)
-
-# LiveKit webhooks (outside of authenticated scope)
-post "/livekit/webhooks", to: "livekit_webhooks#create"
-
-# Nested under servers
-resources :servers do
-  # Voice channel actions
-  scope "voice" do
-    post "join/:channel_id", to: "voice_channels#join", as: :voice_join
-    delete "leave", to: "voice_channels#leave", as: :voice_leave
-    post "mute_member", to: "voice_moderation#mute", as: :voice_mute
-    post "unmute_member", to: "voice_moderation#unmute", as: :voice_unmute
-    post "deafen_member", to: "voice_moderation#deafen", as: :voice_deafen
-    post "undeafen_member", to: "voice_moderation#undeafen", as: :voice_undeafen
-    post "move_member", to: "voice_moderation#move", as: :voice_move
-  end
-end
-
-# Self-state updates (current user only)
-patch "voice_states/self_mute", to: "voice_states#self_mute"
-patch "voice_states/self_deafen", to: "voice_states#self_deafen"
-```
-
-### Library Summary
+## 18. Library Summary
 
 | Library | Version | Purpose | Install |
 |---|---|---|---|
-| `livekit-server-sdk` | ~> 0.8 | Token generation, room management, webhook verification | `bundle add livekit-server-sdk` |
-| `livekit-client` | ~> 2.x | Browser WebRTC client, room connection, track management | `yarn add livekit-client` / `importmap pin livekit-client` |
+| `livekit_client` | ^2.x | Dart WebRTC client, room connection, track management | `flutter pub add livekit_client` |
+| `dart_jsonwebtoken` | ^2.x | Local JWT token generation for LiveKit | `flutter pub add dart_jsonwebtoken` |
 | `livekit/livekit-server` | latest | SFU server (Docker image or binary) | `docker pull livekit/livekit-server` |
+| `ffi` / `package:ffi` | (built-in) | Native FFI for DeepFilterNet bindings | (included with Flutter SDK) |
 
 ### Sources
 
 - LiveKit documentation: https://docs.livekit.io
-- LiveKit Ruby SDK: https://github.com/livekit/server-sdk-ruby
-- LiveKit JavaScript SDK: https://github.com/livekit/client-sdk-js
+- LiveKit Flutter/Dart SDK: https://github.com/livekit/client-sdk-flutter
 - LiveKit self-hosting guide: https://docs.livekit.io/realtime/self-hosting/
 - LiveKit benchmarks: https://docs.livekit.io/realtime/self-hosting/benchmark/
-- WebRTC `getDisplayMedia` spec: https://www.w3.org/TR/screen-capture/
+- DeepFilterNet: https://github.com/Rikorose/DeepFilterNet
+- dart_jsonwebtoken: https://pub.dev/packages/dart_jsonwebtoken
+- NIP-44 (Encrypted DMs): https://github.com/nostr-protocol/nips/blob/master/44.md
 - Janus Gateway: https://janus.conf.meetecho.com
 - mediasoup: https://mediasoup.org
 - Galene: https://galene.org
