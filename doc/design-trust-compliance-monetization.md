@@ -166,7 +166,7 @@ ContentSafetyService.check(messageId)
         |
         +-- Stage 1: NSFW detection (ONNX Runtime via FFI)
         |     |
-        |     +-- Pre-filter: Marqo ViT-Tiny (384x384) — high sensitivity
+        |     +-- Pre-filter: Marqo ViT-Tiny (384x384) - high sensitivity
         |     |   Score < 0.5 -> safe, skip confirmation
         |     |
         |     +-- Confirmation: TostAI FocalNet-Base (224x224)
