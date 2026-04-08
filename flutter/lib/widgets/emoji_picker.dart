@@ -45,7 +45,7 @@ class EmojiPicker extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   onTap: () => onSelect(emoji),
                   child: Center(
-                    child: Text(emoji, style: const TextStyle(fontSize: 24)),
+                    child: Text(emoji, style: const TextStyle(fontSize: 24, fontFamilyFallback: ['NotoColorEmoji'])),
                   ),
                 );
               },

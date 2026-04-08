@@ -21,9 +21,7 @@ class MyAccountScreen extends ConsumerStatefulWidget {
 class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
   String? _npub;
   String? _ncryptsec;
-  bool _showNsec = false;
   bool _generating = false;
-  final _revealPasswordController = TextEditingController();
   final _accountPasswordController = TextEditingController();
   final _backupPasswordController = TextEditingController();
 
@@ -45,7 +43,6 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
 
   @override
   void dispose() {
-    _revealPasswordController.dispose();
     _accountPasswordController.dispose();
     _backupPasswordController.dispose();
     super.dispose();
@@ -125,7 +122,6 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authServiceProvider);
     final c = ref.watch(infernoColorsProvider);
     final color1 = _parseColor(_profileColor) ?? c.gray700;
     final color2 = _parseColor(_profileColor2) ?? c.gray800;
@@ -161,67 +157,29 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
             _keyRow(_npub ?? '', 'npub', c),
             const SizedBox(height: 20),
 
-            // Private Key
+            // Private Key — never revealed, only encrypted export
             Container(height: 1, color: c.gray700),
             const SizedBox(height: 16),
             _sectionLabel('PRIVATE KEY', c),
             const SizedBox(height: 4),
-            Text('Your private key controls your identity. Never share it. You only need it if migrating to another device.',
-              style: TextStyle(color: const Color(0xFFFF9800), fontSize: 12)),
-            const SizedBox(height: 8),
-            if (!_showNsec) ...[
-              Text('Confirm your password to reveal', style: TextStyle(color: c.gray500, fontSize: 12)),
-              const SizedBox(height: 6),
-              Row(children: [
-                Expanded(child: TextField(
-                  controller: _revealPasswordController,
-                  obscureText: true,
-                  style: TextStyle(color: c.gray200, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'Enter your password',
-                    hintStyle: TextStyle(color: c.gray600),
-                    filled: true, fillColor: c.gray950,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray600)),
-                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray600)),
-                    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.accent)),
-                  ),
-                )),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () => setState(() => _showNsec = true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFE65100),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  ),
-                  child: const Text('Reveal'),
-                ),
-              ]),
-            ] else ...[
-              _keyRow(
-                auth.privateKeyHex != null ? Bech32Nostr.nsecEncode(auth.privateKeyHex!) : '',
-                'nsec', c,
-                valueColor: const Color(0xFFFF9800),
-              ),
-              const SizedBox(height: 4),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => setState(() => _showNsec = false),
-                  child: Text('Hide', style: TextStyle(color: c.gray400, fontSize: 12)),
-                ),
-              ),
-            ],
+            Row(children: [
+              Icon(Icons.shield_outlined, size: 14, color: c.accent),
+              const SizedBox(width: 6),
+              Expanded(child: Text(
+                'Your private key is stored securely on this device and is never displayed. '
+                'Use the encrypted backup below to transfer your identity to another device.',
+                style: TextStyle(color: c.gray400, fontSize: 12),
+              )),
+            ]),
 
             const SizedBox(height: 20),
 
             // Encrypted Backup
             Container(height: 1, color: c.gray700),
             const SizedBox(height: 16),
-            _sectionLabel('ENCRYPTED BACKUP', c),
+            _sectionLabel('ENCRYPTED BACKUP (NIP-49)', c),
             const SizedBox(height: 4),
-            Text('Export your private key encrypted with a backup password. Safer than a raw key \u2014 you can store the encrypted key and decrypt it later on any compatible client.',
+            Text('Export your private key encrypted with a backup password. Store the ncryptsec safely \u2014 you can import it on any compatible Nostr client.',
               style: TextStyle(color: c.gray500, fontSize: 12)),
             const SizedBox(height: 12),
             _inputField('Account password', _accountPasswordController, c, hint: 'Your account password'),

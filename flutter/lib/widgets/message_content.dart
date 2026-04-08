@@ -41,6 +41,7 @@ final _imageUrlPattern = RegExp(r'\.(png|jpg|jpeg|gif|webp|avif|svg)(\?.*)?$', c
 final _blossomPattern = RegExp(r'https?://blossom\.\S+', caseSensitive: false);
 final _videoUrlPattern = RegExp(r'\.(mp4|webm|mov|ogv)(\?.*)?$', caseSensitive: false);
 final _audioUrlPattern = RegExp(r'\.(mp3|ogg|wav|m4a|webm)(\?.*)?$', caseSensitive: false);
+const _emojiFallback = ['NotoColorEmoji'];
 final _documentUrlPattern = RegExp(r'\.(pdf|txt)(\?.*)?$', caseSensitive: false);
 final _urlPattern = RegExp(r'https?://\S+', caseSensitive: false);
 final _singleEmojiPattern = RegExp(r'^[\p{Emoji_Presentation}\p{Emoji}\u200d\ufe0f]{1,7}$', unicode: true);
@@ -386,7 +387,7 @@ class MessageContent extends ConsumerWidget {
       if (match.start > lastEnd) {
         final before = text.substring(lastEnd, match.start).trim();
         if (before.isNotEmpty) {
-          children.add(TextSpan(text: before, style: const TextStyle(fontSize: emojiSize)));
+          children.add(TextSpan(text: before, style: const TextStyle(fontSize: emojiSize, fontFamilyFallback: _emojiFallback)));
         }
       }
 
@@ -405,7 +406,7 @@ class MessageContent extends ConsumerWidget {
           ),
         ));
       } else {
-        children.add(TextSpan(text: match.group(0)!, style: const TextStyle(fontSize: emojiSize)));
+        children.add(TextSpan(text: match.group(0)!, style: const TextStyle(fontSize: emojiSize, fontFamilyFallback: _emojiFallback)));
       }
       lastEnd = match.end;
     }
@@ -414,7 +415,7 @@ class MessageContent extends ConsumerWidget {
     if (lastEnd < text.length) {
       final remaining = text.substring(lastEnd).trim();
       if (remaining.isNotEmpty) {
-        children.add(TextSpan(text: remaining, style: const TextStyle(fontSize: emojiSize)));
+        children.add(TextSpan(text: remaining, style: const TextStyle(fontSize: emojiSize, fontFamilyFallback: _emojiFallback)));
       }
     }
 
