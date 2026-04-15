@@ -14,7 +14,6 @@ class VoiceVideoScreen extends ConsumerStatefulWidget {
 class _VoiceVideoScreenState extends ConsumerState<VoiceVideoScreen> {
   // Audio processing
   bool _noiseSuppression = true;
-  String _suppressionLevel = 'moderate';
   bool _echoCancellation = true;
   bool _autoGainControl = true;
 
@@ -46,7 +45,6 @@ class _VoiceVideoScreenState extends ConsumerState<VoiceVideoScreen> {
     _noiseSuppression = (await _storage.read(key: 'voice_noise_suppression')) != 'false';
     _echoCancellation = (await _storage.read(key: 'voice_echo_cancellation')) != 'false';
     _autoGainControl = (await _storage.read(key: 'voice_auto_gain_control')) != 'false';
-    _suppressionLevel = (await _storage.read(key: 'voice_suppression_level')) ?? 'moderate';
     _inputMode = (await _storage.read(key: 'voice_input_mode')) ?? 'voice_activity';
 
     // LiveKit
@@ -147,35 +145,8 @@ class _VoiceVideoScreenState extends ConsumerState<VoiceVideoScreen> {
         _label('AUDIO PROCESSING', c),
         const SizedBox(height: 12),
 
-        _toggle('Noise Suppression', 'AI-powered noise removal (RNNoise)', _noiseSuppression, c,
+        _toggle('Noise Suppression', 'AI-powered noise removal (DeepFilterNet)', _noiseSuppression, c,
           (v) { setState(() => _noiseSuppression = v); _storage.write(key: 'voice_noise_suppression', value: v.toString()); }),
-        if (_noiseSuppression) ...[
-          const SizedBox(height: 8),
-          Padding(padding: const EdgeInsets.only(left: 28), child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('SUPPRESSION LEVEL', style: TextStyle(color: c.gray400, fontSize: 11, fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<String>(
-                value: _suppressionLevel,
-                dropdownColor: c.gray900,
-                style: TextStyle(color: c.gray200, fontSize: 13),
-                decoration: InputDecoration(
-                  fillColor: c.gray900, filled: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
-                  enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.gray700)),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'low', child: Text('Low — preserves voice detail')),
-                  DropdownMenuItem(value: 'moderate', child: Text('Moderate — balanced (recommended)')),
-                  DropdownMenuItem(value: 'aggressive', child: Text('Aggressive — maximum suppression')),
-                ],
-                onChanged: (v) { setState(() => _suppressionLevel = v!); _storage.write(key: 'voice_suppression_level', value: v!); },
-              ),
-            ],
-          )),
-        ],
         const SizedBox(height: 8),
         _toggle('Echo Cancellation', 'Prevent speakers from being picked up by mic', _echoCancellation, c,
           (v) { setState(() => _echoCancellation = v); _storage.write(key: 'voice_echo_cancellation', value: v.toString()); }),

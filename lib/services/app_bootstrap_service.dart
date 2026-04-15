@@ -547,11 +547,14 @@ class AppBootstrapService {
       debugPrint('[Live] Emoji update for ${server.name}');
 
       final seenNames = <String>{};
+      final cacheMap = <String, String>{};
       for (final tag in event.tags) {
         if (tag.isEmpty || tag[0] != 'emoji' || tag.length < 3) continue;
         final name = tag[1];
         final url = tag[2];
+        if (name.isEmpty || url.isEmpty) continue;
         seenNames.add(name);
+        cacheMap[name] = url;
         final publicId = name.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
         try {
           final existing = await (db.select(db.serverEmojis)
@@ -567,6 +570,20 @@ class AppBootstrapService {
             ));
           }
         } catch (_) {}
+      }
+      // Persist to global emoji cache — survives leaving this server and
+      // subsequent server-side deletion of the emoji.
+      if (cacheMap.isNotEmpty) {
+        final now = DateTime.now();
+        await db.batch((batch) {
+          for (final entry in cacheMap.entries) {
+            batch.insert(
+              db.emojiCache,
+              EmojiCacheCompanion.insert(name: entry.key, url: entry.value, lastSeenAt: now),
+              mode: InsertMode.insertOrIgnore,
+            );
+          }
+        });
       }
       // Remove emojis no longer in the event (deleted on Rails)
       final allEmojis = await (db.select(db.serverEmojis)

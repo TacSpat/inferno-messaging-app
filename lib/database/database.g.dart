@@ -5851,6 +5851,17 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _customEmojiUrlsMeta = const VerificationMeta(
+    'customEmojiUrls',
+  );
+  @override
+  late final GeneratedColumn<String> customEmojiUrls = GeneratedColumn<String>(
+    'custom_emoji_urls',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _createdAtMeta = const VerificationMeta(
     'createdAt',
   );
@@ -5895,6 +5906,7 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
     nostrEventId,
     nostrEventJson,
     fileUrls,
+    customEmojiUrls,
     createdAt,
     updatedAt,
   ];
@@ -6053,6 +6065,15 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         fileUrls.isAcceptableOrUnknown(data['file_urls']!, _fileUrlsMeta),
       );
     }
+    if (data.containsKey('custom_emoji_urls')) {
+      context.handle(
+        _customEmojiUrlsMeta,
+        customEmojiUrls.isAcceptableOrUnknown(
+          data['custom_emoji_urls']!,
+          _customEmojiUrlsMeta,
+        ),
+      );
+    }
     if (data.containsKey('created_at')) {
       context.handle(
         _createdAtMeta,
@@ -6158,6 +6179,10 @@ class $MessagesTable extends Messages with TableInfo<$MessagesTable, Message> {
         DriftSqlType.string,
         data['${effectivePrefix}file_urls'],
       ),
+      customEmojiUrls: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}custom_emoji_urls'],
+      ),
       createdAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}created_at'],
@@ -6196,6 +6221,7 @@ class Message extends DataClass implements Insertable<Message> {
   final String? nostrEventId;
   final String? nostrEventJson;
   final String? fileUrls;
+  final String? customEmojiUrls;
   final DateTime createdAt;
   final DateTime updatedAt;
   const Message({
@@ -6219,6 +6245,7 @@ class Message extends DataClass implements Insertable<Message> {
     this.nostrEventId,
     this.nostrEventJson,
     this.fileUrls,
+    this.customEmojiUrls,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -6274,6 +6301,9 @@ class Message extends DataClass implements Insertable<Message> {
     }
     if (!nullToAbsent || fileUrls != null) {
       map['file_urls'] = Variable<String>(fileUrls);
+    }
+    if (!nullToAbsent || customEmojiUrls != null) {
+      map['custom_emoji_urls'] = Variable<String>(customEmojiUrls);
     }
     map['created_at'] = Variable<DateTime>(createdAt);
     map['updated_at'] = Variable<DateTime>(updatedAt);
@@ -6332,6 +6362,9 @@ class Message extends DataClass implements Insertable<Message> {
       fileUrls: fileUrls == null && nullToAbsent
           ? const Value.absent()
           : Value(fileUrls),
+      customEmojiUrls: customEmojiUrls == null && nullToAbsent
+          ? const Value.absent()
+          : Value(customEmojiUrls),
       createdAt: Value(createdAt),
       updatedAt: Value(updatedAt),
     );
@@ -6367,6 +6400,7 @@ class Message extends DataClass implements Insertable<Message> {
       nostrEventId: serializer.fromJson<String?>(json['nostrEventId']),
       nostrEventJson: serializer.fromJson<String?>(json['nostrEventJson']),
       fileUrls: serializer.fromJson<String?>(json['fileUrls']),
+      customEmojiUrls: serializer.fromJson<String?>(json['customEmojiUrls']),
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -6397,6 +6431,7 @@ class Message extends DataClass implements Insertable<Message> {
       'nostrEventId': serializer.toJson<String?>(nostrEventId),
       'nostrEventJson': serializer.toJson<String?>(nostrEventJson),
       'fileUrls': serializer.toJson<String?>(fileUrls),
+      'customEmojiUrls': serializer.toJson<String?>(customEmojiUrls),
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -6423,6 +6458,7 @@ class Message extends DataClass implements Insertable<Message> {
     Value<String?> nostrEventId = const Value.absent(),
     Value<String?> nostrEventJson = const Value.absent(),
     Value<String?> fileUrls = const Value.absent(),
+    Value<String?> customEmojiUrls = const Value.absent(),
     DateTime? createdAt,
     DateTime? updatedAt,
   }) => Message(
@@ -6454,6 +6490,9 @@ class Message extends DataClass implements Insertable<Message> {
         ? nostrEventJson.value
         : this.nostrEventJson,
     fileUrls: fileUrls.present ? fileUrls.value : this.fileUrls,
+    customEmojiUrls: customEmojiUrls.present
+        ? customEmojiUrls.value
+        : this.customEmojiUrls,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,
   );
@@ -6495,6 +6534,9 @@ class Message extends DataClass implements Insertable<Message> {
           ? data.nostrEventJson.value
           : this.nostrEventJson,
       fileUrls: data.fileUrls.present ? data.fileUrls.value : this.fileUrls,
+      customEmojiUrls: data.customEmojiUrls.present
+          ? data.customEmojiUrls.value
+          : this.customEmojiUrls,
       createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -6523,6 +6565,7 @@ class Message extends DataClass implements Insertable<Message> {
           ..write('nostrEventId: $nostrEventId, ')
           ..write('nostrEventJson: $nostrEventJson, ')
           ..write('fileUrls: $fileUrls, ')
+          ..write('customEmojiUrls: $customEmojiUrls, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -6551,6 +6594,7 @@ class Message extends DataClass implements Insertable<Message> {
     nostrEventId,
     nostrEventJson,
     fileUrls,
+    customEmojiUrls,
     createdAt,
     updatedAt,
   ]);
@@ -6578,6 +6622,7 @@ class Message extends DataClass implements Insertable<Message> {
           other.nostrEventId == this.nostrEventId &&
           other.nostrEventJson == this.nostrEventJson &&
           other.fileUrls == this.fileUrls &&
+          other.customEmojiUrls == this.customEmojiUrls &&
           other.createdAt == this.createdAt &&
           other.updatedAt == this.updatedAt);
 }
@@ -6603,6 +6648,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
   final Value<String?> nostrEventId;
   final Value<String?> nostrEventJson;
   final Value<String?> fileUrls;
+  final Value<String?> customEmojiUrls;
   final Value<DateTime> createdAt;
   final Value<DateTime> updatedAt;
   const MessagesCompanion({
@@ -6626,6 +6672,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.nostrEventId = const Value.absent(),
     this.nostrEventJson = const Value.absent(),
     this.fileUrls = const Value.absent(),
+    this.customEmojiUrls = const Value.absent(),
     this.createdAt = const Value.absent(),
     this.updatedAt = const Value.absent(),
   });
@@ -6650,6 +6697,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     this.nostrEventId = const Value.absent(),
     this.nostrEventJson = const Value.absent(),
     this.fileUrls = const Value.absent(),
+    this.customEmojiUrls = const Value.absent(),
     required DateTime createdAt,
     required DateTime updatedAt,
   }) : publicId = Value(publicId),
@@ -6676,6 +6724,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Expression<String>? nostrEventId,
     Expression<String>? nostrEventJson,
     Expression<String>? fileUrls,
+    Expression<String>? customEmojiUrls,
     Expression<DateTime>? createdAt,
     Expression<DateTime>? updatedAt,
   }) {
@@ -6701,6 +6750,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       if (nostrEventId != null) 'nostr_event_id': nostrEventId,
       if (nostrEventJson != null) 'nostr_event_json': nostrEventJson,
       if (fileUrls != null) 'file_urls': fileUrls,
+      if (customEmojiUrls != null) 'custom_emoji_urls': customEmojiUrls,
       if (createdAt != null) 'created_at': createdAt,
       if (updatedAt != null) 'updated_at': updatedAt,
     });
@@ -6727,6 +6777,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     Value<String?>? nostrEventId,
     Value<String?>? nostrEventJson,
     Value<String?>? fileUrls,
+    Value<String?>? customEmojiUrls,
     Value<DateTime>? createdAt,
     Value<DateTime>? updatedAt,
   }) {
@@ -6752,6 +6803,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
       nostrEventId: nostrEventId ?? this.nostrEventId,
       nostrEventJson: nostrEventJson ?? this.nostrEventJson,
       fileUrls: fileUrls ?? this.fileUrls,
+      customEmojiUrls: customEmojiUrls ?? this.customEmojiUrls,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -6822,6 +6874,9 @@ class MessagesCompanion extends UpdateCompanion<Message> {
     if (fileUrls.present) {
       map['file_urls'] = Variable<String>(fileUrls.value);
     }
+    if (customEmojiUrls.present) {
+      map['custom_emoji_urls'] = Variable<String>(customEmojiUrls.value);
+    }
     if (createdAt.present) {
       map['created_at'] = Variable<DateTime>(createdAt.value);
     }
@@ -6854,6 +6909,7 @@ class MessagesCompanion extends UpdateCompanion<Message> {
           ..write('nostrEventId: $nostrEventId, ')
           ..write('nostrEventJson: $nostrEventJson, ')
           ..write('fileUrls: $fileUrls, ')
+          ..write('customEmojiUrls: $customEmojiUrls, ')
           ..write('createdAt: $createdAt, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -26685,6 +26741,311 @@ class HiddenAttachmentRecordsCompanion
   }
 }
 
+class $EmojiCacheTable extends EmojiCache
+    with TableInfo<$EmojiCacheTable, EmojiCacheData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $EmojiCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _urlMeta = const VerificationMeta('url');
+  @override
+  late final GeneratedColumn<String> url = GeneratedColumn<String>(
+    'url',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastSeenAtMeta = const VerificationMeta(
+    'lastSeenAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastSeenAt = GeneratedColumn<DateTime>(
+    'last_seen_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [id, name, url, lastSeenAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'emoji_cache';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<EmojiCacheData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('url')) {
+      context.handle(
+        _urlMeta,
+        url.isAcceptableOrUnknown(data['url']!, _urlMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_urlMeta);
+    }
+    if (data.containsKey('last_seen_at')) {
+      context.handle(
+        _lastSeenAtMeta,
+        lastSeenAt.isAcceptableOrUnknown(
+          data['last_seen_at']!,
+          _lastSeenAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_lastSeenAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  List<Set<GeneratedColumn>> get uniqueKeys => [
+    {name, url},
+  ];
+  @override
+  EmojiCacheData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return EmojiCacheData(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      url: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}url'],
+      )!,
+      lastSeenAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_seen_at'],
+      )!,
+    );
+  }
+
+  @override
+  $EmojiCacheTable createAlias(String alias) {
+    return $EmojiCacheTable(attachedDatabase, alias);
+  }
+}
+
+class EmojiCacheData extends DataClass implements Insertable<EmojiCacheData> {
+  final int id;
+  final String name;
+  final String url;
+  final DateTime lastSeenAt;
+  const EmojiCacheData({
+    required this.id,
+    required this.name,
+    required this.url,
+    required this.lastSeenAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['name'] = Variable<String>(name);
+    map['url'] = Variable<String>(url);
+    map['last_seen_at'] = Variable<DateTime>(lastSeenAt);
+    return map;
+  }
+
+  EmojiCacheCompanion toCompanion(bool nullToAbsent) {
+    return EmojiCacheCompanion(
+      id: Value(id),
+      name: Value(name),
+      url: Value(url),
+      lastSeenAt: Value(lastSeenAt),
+    );
+  }
+
+  factory EmojiCacheData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return EmojiCacheData(
+      id: serializer.fromJson<int>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      url: serializer.fromJson<String>(json['url']),
+      lastSeenAt: serializer.fromJson<DateTime>(json['lastSeenAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'name': serializer.toJson<String>(name),
+      'url': serializer.toJson<String>(url),
+      'lastSeenAt': serializer.toJson<DateTime>(lastSeenAt),
+    };
+  }
+
+  EmojiCacheData copyWith({
+    int? id,
+    String? name,
+    String? url,
+    DateTime? lastSeenAt,
+  }) => EmojiCacheData(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    url: url ?? this.url,
+    lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+  );
+  EmojiCacheData copyWithCompanion(EmojiCacheCompanion data) {
+    return EmojiCacheData(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      url: data.url.present ? data.url.value : this.url,
+      lastSeenAt: data.lastSeenAt.present
+          ? data.lastSeenAt.value
+          : this.lastSeenAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmojiCacheData(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('url: $url, ')
+          ..write('lastSeenAt: $lastSeenAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(id, name, url, lastSeenAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is EmojiCacheData &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.url == this.url &&
+          other.lastSeenAt == this.lastSeenAt);
+}
+
+class EmojiCacheCompanion extends UpdateCompanion<EmojiCacheData> {
+  final Value<int> id;
+  final Value<String> name;
+  final Value<String> url;
+  final Value<DateTime> lastSeenAt;
+  const EmojiCacheCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.url = const Value.absent(),
+    this.lastSeenAt = const Value.absent(),
+  });
+  EmojiCacheCompanion.insert({
+    this.id = const Value.absent(),
+    required String name,
+    required String url,
+    required DateTime lastSeenAt,
+  }) : name = Value(name),
+       url = Value(url),
+       lastSeenAt = Value(lastSeenAt);
+  static Insertable<EmojiCacheData> custom({
+    Expression<int>? id,
+    Expression<String>? name,
+    Expression<String>? url,
+    Expression<DateTime>? lastSeenAt,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (url != null) 'url': url,
+      if (lastSeenAt != null) 'last_seen_at': lastSeenAt,
+    });
+  }
+
+  EmojiCacheCompanion copyWith({
+    Value<int>? id,
+    Value<String>? name,
+    Value<String>? url,
+    Value<DateTime>? lastSeenAt,
+  }) {
+    return EmojiCacheCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      url: url ?? this.url,
+      lastSeenAt: lastSeenAt ?? this.lastSeenAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (url.present) {
+      map['url'] = Variable<String>(url.value);
+    }
+    if (lastSeenAt.present) {
+      map['last_seen_at'] = Variable<DateTime>(lastSeenAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('EmojiCacheCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('url: $url, ')
+          ..write('lastSeenAt: $lastSeenAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$InfernoDatabase extends GeneratedDatabase {
   _$InfernoDatabase(QueryExecutor e) : super(e);
   $InfernoDatabaseManager get managers => $InfernoDatabaseManager(this);
@@ -26737,6 +27098,7 @@ abstract class _$InfernoDatabase extends GeneratedDatabase {
   );
   late final $HiddenAttachmentRecordsTable hiddenAttachmentRecords =
       $HiddenAttachmentRecordsTable(this);
+  late final $EmojiCacheTable emojiCache = $EmojiCacheTable(this);
   late final MessagesDao messagesDao = MessagesDao(this as InfernoDatabase);
   late final ServersDao serversDao = ServersDao(this as InfernoDatabase);
   late final ContactsDao contactsDao = ContactsDao(this as InfernoDatabase);
@@ -26781,6 +27143,7 @@ abstract class _$InfernoDatabase extends GeneratedDatabase {
     mediaCache,
     csamHashEntries,
     hiddenAttachmentRecords,
+    emojiCache,
   ];
 }
 
@@ -29168,6 +29531,7 @@ typedef $$MessagesTableCreateCompanionBuilder =
       Value<String?> nostrEventId,
       Value<String?> nostrEventJson,
       Value<String?> fileUrls,
+      Value<String?> customEmojiUrls,
       required DateTime createdAt,
       required DateTime updatedAt,
     });
@@ -29193,6 +29557,7 @@ typedef $$MessagesTableUpdateCompanionBuilder =
       Value<String?> nostrEventId,
       Value<String?> nostrEventJson,
       Value<String?> fileUrls,
+      Value<String?> customEmojiUrls,
       Value<DateTime> createdAt,
       Value<DateTime> updatedAt,
     });
@@ -29303,6 +29668,11 @@ class $$MessagesTableFilterComposer
 
   ColumnFilters<String> get fileUrls => $composableBuilder(
     column: $table.fileUrls,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get customEmojiUrls => $composableBuilder(
+    column: $table.customEmojiUrls,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -29426,6 +29796,11 @@ class $$MessagesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get customEmojiUrls => $composableBuilder(
+    column: $table.customEmojiUrls,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get createdAt => $composableBuilder(
     column: $table.createdAt,
     builder: (column) => ColumnOrderings(column),
@@ -29522,6 +29897,11 @@ class $$MessagesTableAnnotationComposer
   GeneratedColumn<String> get fileUrls =>
       $composableBuilder(column: $table.fileUrls, builder: (column) => column);
 
+  GeneratedColumn<String> get customEmojiUrls => $composableBuilder(
+    column: $table.customEmojiUrls,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get createdAt =>
       $composableBuilder(column: $table.createdAt, builder: (column) => column);
 
@@ -29577,6 +29957,7 @@ class $$MessagesTableTableManager
                 Value<String?> nostrEventId = const Value.absent(),
                 Value<String?> nostrEventJson = const Value.absent(),
                 Value<String?> fileUrls = const Value.absent(),
+                Value<String?> customEmojiUrls = const Value.absent(),
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime> updatedAt = const Value.absent(),
               }) => MessagesCompanion(
@@ -29600,6 +29981,7 @@ class $$MessagesTableTableManager
                 nostrEventId: nostrEventId,
                 nostrEventJson: nostrEventJson,
                 fileUrls: fileUrls,
+                customEmojiUrls: customEmojiUrls,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -29625,6 +30007,7 @@ class $$MessagesTableTableManager
                 Value<String?> nostrEventId = const Value.absent(),
                 Value<String?> nostrEventJson = const Value.absent(),
                 Value<String?> fileUrls = const Value.absent(),
+                Value<String?> customEmojiUrls = const Value.absent(),
                 required DateTime createdAt,
                 required DateTime updatedAt,
               }) => MessagesCompanion.insert(
@@ -29648,6 +30031,7 @@ class $$MessagesTableTableManager
                 nostrEventId: nostrEventId,
                 nostrEventJson: nostrEventJson,
                 fileUrls: fileUrls,
+                customEmojiUrls: customEmojiUrls,
                 createdAt: createdAt,
                 updatedAt: updatedAt,
               ),
@@ -39223,6 +39607,183 @@ typedef $$HiddenAttachmentRecordsTableProcessedTableManager =
       HiddenAttachmentRecord,
       PrefetchHooks Function()
     >;
+typedef $$EmojiCacheTableCreateCompanionBuilder =
+    EmojiCacheCompanion Function({
+      Value<int> id,
+      required String name,
+      required String url,
+      required DateTime lastSeenAt,
+    });
+typedef $$EmojiCacheTableUpdateCompanionBuilder =
+    EmojiCacheCompanion Function({
+      Value<int> id,
+      Value<String> name,
+      Value<String> url,
+      Value<DateTime> lastSeenAt,
+    });
+
+class $$EmojiCacheTableFilterComposer
+    extends Composer<_$InfernoDatabase, $EmojiCacheTable> {
+  $$EmojiCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$EmojiCacheTableOrderingComposer
+    extends Composer<_$InfernoDatabase, $EmojiCacheTable> {
+  $$EmojiCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get url => $composableBuilder(
+    column: $table.url,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$EmojiCacheTableAnnotationComposer
+    extends Composer<_$InfernoDatabase, $EmojiCacheTable> {
+  $$EmojiCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get url =>
+      $composableBuilder(column: $table.url, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastSeenAt => $composableBuilder(
+    column: $table.lastSeenAt,
+    builder: (column) => column,
+  );
+}
+
+class $$EmojiCacheTableTableManager
+    extends
+        RootTableManager<
+          _$InfernoDatabase,
+          $EmojiCacheTable,
+          EmojiCacheData,
+          $$EmojiCacheTableFilterComposer,
+          $$EmojiCacheTableOrderingComposer,
+          $$EmojiCacheTableAnnotationComposer,
+          $$EmojiCacheTableCreateCompanionBuilder,
+          $$EmojiCacheTableUpdateCompanionBuilder,
+          (
+            EmojiCacheData,
+            BaseReferences<_$InfernoDatabase, $EmojiCacheTable, EmojiCacheData>,
+          ),
+          EmojiCacheData,
+          PrefetchHooks Function()
+        > {
+  $$EmojiCacheTableTableManager(_$InfernoDatabase db, $EmojiCacheTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$EmojiCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$EmojiCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$EmojiCacheTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> url = const Value.absent(),
+                Value<DateTime> lastSeenAt = const Value.absent(),
+              }) => EmojiCacheCompanion(
+                id: id,
+                name: name,
+                url: url,
+                lastSeenAt: lastSeenAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required String name,
+                required String url,
+                required DateTime lastSeenAt,
+              }) => EmojiCacheCompanion.insert(
+                id: id,
+                name: name,
+                url: url,
+                lastSeenAt: lastSeenAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$EmojiCacheTableProcessedTableManager =
+    ProcessedTableManager<
+      _$InfernoDatabase,
+      $EmojiCacheTable,
+      EmojiCacheData,
+      $$EmojiCacheTableFilterComposer,
+      $$EmojiCacheTableOrderingComposer,
+      $$EmojiCacheTableAnnotationComposer,
+      $$EmojiCacheTableCreateCompanionBuilder,
+      $$EmojiCacheTableUpdateCompanionBuilder,
+      (
+        EmojiCacheData,
+        BaseReferences<_$InfernoDatabase, $EmojiCacheTable, EmojiCacheData>,
+      ),
+      EmojiCacheData,
+      PrefetchHooks Function()
+    >;
 
 class $InfernoDatabaseManager {
   final _$InfernoDatabase _db;
@@ -39304,4 +39865,6 @@ class $InfernoDatabaseManager {
         _db,
         _db.hiddenAttachmentRecords,
       );
+  $$EmojiCacheTableTableManager get emojiCache =>
+      $$EmojiCacheTableTableManager(_db, _db.emojiCache);
 }

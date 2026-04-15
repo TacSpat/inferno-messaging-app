@@ -100,18 +100,41 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         return;
       }
 
-      // Fetch ALL server event kinds at once (31750 metadata, 31751 structure, 31752 roles)
-      // Do this upfront because relays won't re-send after first delivery
-      final allEvents = await pool.fetch(
+      // Fetch ALL server event kinds at once (31750 metadata, 31751 structure, 31752 roles).
+      // Use fetchFresh — opens a brand new WebSocket per relay so we always get
+      // the latest replaceable events. The existing subscription may have already
+      // received an older version and relays will not resend on the same sub.
+      final allEvents = await pool.fetchFresh(
         NostrFilter(kinds: [31750, 31751, 31752], limit: 200),
         timeout: const Duration(seconds: 10),
       );
 
-      // Separate by kind and cache for sync service
-      final events = allEvents.where((e) => e.kind == 31750).toList();
-      final structEvents = allEvents.where((e) => e.kind == 31751).toList();
-      final roleEvents = allEvents.where((e) => e.kind == 31752).toList();
-      debugPrint('[Discovery] Fetched ${events.length} metadata, ${structEvents.length} structure, ${roleEvents.length} role events');
+      // Separate by kind and keep only the latest version of each replaceable event.
+      // Parameterized replaceable events are keyed by (kind, pubkey, d-tag) — if we
+      // got multiple from different relays (or a stale one races a fresh one),
+      // use the highest created_at.
+      List<nostr.NostrEvent> latestByDTag(Iterable<nostr.NostrEvent> list) {
+        final latest = <String, nostr.NostrEvent>{};
+        for (final e in list) {
+          final dTagRow = e.tags.firstWhere(
+            (t) => t.isNotEmpty && t[0] == 'd',
+            orElse: () => const [],
+          );
+          if (dTagRow.length < 2) continue;
+          final dTag = dTagRow[1];
+          final key = '${e.pubkey}:$dTag';
+          final existing = latest[key];
+          if (existing == null || e.createdAt > existing.createdAt) {
+            latest[key] = e;
+          }
+        }
+        return latest.values.toList();
+      }
+
+      final events = latestByDTag(allEvents.where((e) => e.kind == 31750));
+      final structEvents = latestByDTag(allEvents.where((e) => e.kind == 31751));
+      final roleEvents = latestByDTag(allEvents.where((e) => e.kind == 31752));
+      debugPrint('[Discovery] Fetched ${events.length} metadata, ${structEvents.length} structure, ${roleEvents.length} role events (latest of each d-tag)');
 
       // Store for use during join (relay won't re-send these)
       _metadataEvents = events;
@@ -466,7 +489,20 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
                 // === DISCOVER ===
                 _Divider('Discover', c),
                 const SizedBox(height: 8),
-                Text('SERVERS ON YOUR RELAYS', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                Row(children: [
+                  Text('SERVERS ON YOUR RELAYS', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                  const Spacer(),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: GestureDetector(
+                      onTap: _discovering ? null : () { _discoveryCache = null; _discoverServers(); },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        child: Icon(Icons.refresh, size: 16, color: _discovering ? c.gray600 : c.gray400),
+                      ),
+                    ),
+                  ),
+                ]),
                 const SizedBox(height: 8),
                 if (_discovering)
                   Padding(

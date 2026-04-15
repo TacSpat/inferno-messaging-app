@@ -8,10 +8,12 @@ import '../crypto/nip44_crypto.dart';
 import '../crypto/nostr_key.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
+import 'emoji_resolver.dart';
 
 class DmService {
   final InfernoDatabase _db;
   final RelayPool _relayPool;
+  late final EmojiResolver _emojiResolver = EmojiResolver(_db);
 
   /// Pending voice token responses keyed by request_id
   final Map<String, Map<String, dynamic>> _voiceTokenResponses = {};
@@ -46,14 +48,19 @@ class DmService {
     List<String>? fileUrls,
     bool spoiler = false,
   }) async {
-    // Build payload — structured JSON if files or spoiler, plain text otherwise
+    // Resolve any :shortcode: emoji to URLs so the message is self-contained
+    // (recipient can render them without access to the source server).
+    final emojiUrls = await _emojiResolver.resolveInContent(content);
+
+    // Build payload — structured JSON if files, spoiler, or custom emoji present
     String payload;
-    if ((fileUrls != null && fileUrls.isNotEmpty) || spoiler) {
+    if ((fileUrls != null && fileUrls.isNotEmpty) || spoiler || emojiUrls.isNotEmpty) {
       payload = json.encode({
         'type': 'message',
         'content': content,
         if (fileUrls != null && fileUrls.isNotEmpty) 'files': fileUrls,
         if (spoiler) 'spoiler': true,
+        if (emojiUrls.isNotEmpty) 'emojis': emojiUrls,
       });
     } else {
       payload = content;
@@ -63,14 +70,20 @@ class DmService {
     final convKey = Nip44Crypto.conversationKey(privateKeyHex, recipientPubkey);
     final encrypted = Nip44Crypto.encrypt(payload, convKey);
 
-    // Build Kind 14 event
+    // Build Kind 14 event. NIP-30 `emoji` tags live outside the ciphertext so they
+    // can travel visibly on the event for clients that prefer tag-based rendering.
+    final tags = <List<String>>[
+      ['p', recipientPubkey],
+    ];
+    for (final entry in emojiUrls.entries) {
+      tags.add(['emoji', entry.key, entry.value]);
+    }
+
     final event = nostr.NostrEvent(
       pubkey: publicKeyHex,
       createdAt: nostr.NostrEvent.now(),
       kind: 14,
-      tags: [
-        ['p', recipientPubkey],
-      ],
+      tags: tags,
       content: encrypted,
     );
 
@@ -92,6 +105,7 @@ class DmService {
         nostrEventId: Value(signed.id),
         nostrEventJson: Value(json.encode(signed.toJson())),
         fileUrls: fileUrls != null ? Value(json.encode(fileUrls)) : const Value.absent(),
+        customEmojiUrls: emojiUrls.isNotEmpty ? Value(json.encode(emojiUrls)) : const Value.absent(),
         createdAt: now,
         updatedAt: now,
       ),
@@ -193,6 +207,29 @@ class DmService {
         : null;
     final isSpoiler = parsed != null && parsed['spoiler'] == true;
 
+    // Collect custom emoji URLs from two sources, in priority order:
+    //   1. NIP-30 `emoji` tags on the outer event
+    //   2. `emojis` map inside the encrypted JSON payload (our own format)
+    final emojiUrls = <String, String>{};
+    for (final tag in event.tags) {
+      if (tag.length >= 3 && tag[0] == 'emoji') {
+        if (tag[1].isNotEmpty && tag[2].isNotEmpty) emojiUrls[tag[1]] = tag[2];
+      }
+    }
+    if (parsed != null && parsed['emojis'] is Map) {
+      final inner = (parsed['emojis'] as Map).cast<String, dynamic>();
+      for (final entry in inner.entries) {
+        final url = entry.value;
+        if (url is String && url.isNotEmpty) emojiUrls.putIfAbsent(entry.key, () => url);
+      }
+    }
+
+    // Persist every seen emoji so references in old messages keep working
+    // after the user leaves the source server or the server deletes the emoji.
+    if (emojiUrls.isNotEmpty) {
+      await _emojiResolver.cacheAll(emojiUrls);
+    }
+
     // Dedup: skip if we already have this message
     if (event.id != null) {
       final existing = await (_db.select(_db.messages)
@@ -220,6 +257,7 @@ class DmService {
         nostrEventId: Value(event.id),
         nostrEventJson: Value(json.encode(event.toJson())),
         fileUrls: fileUrls != null ? Value(fileUrls) : const Value.absent(),
+        customEmojiUrls: emojiUrls.isNotEmpty ? Value(json.encode(emojiUrls)) : const Value.absent(),
         createdAt: eventTime,
         updatedAt: now,
       ),
@@ -229,9 +267,16 @@ class DmService {
       return;
     }
 
-    await (_db.update(_db.conversations)
+    // Use the message's createdAt time so backfilled old messages don't bump
+    // the conversation to the top — only newer-than-current activity wins.
+    final existing = await (_db.select(_db.conversations)
           ..where((c) => c.id.equals(conversation.id)))
-        .write(ConversationsCompanion(updatedAt: Value(now)));
+        .getSingle();
+    if (eventTime.isAfter(existing.updatedAt)) {
+      await (_db.update(_db.conversations)
+            ..where((c) => c.id.equals(conversation.id)))
+          .write(ConversationsCompanion(updatedAt: Value(eventTime)));
+    }
   }
 
   /// Send a friend request

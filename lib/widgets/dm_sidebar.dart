@@ -67,6 +67,7 @@ class DmSidebar extends ConsumerWidget {
                         return _ConversationItem(
                           conversationId: conv.id,
                           name: name,
+                          counterpartyPubkey: conv.counterpartyPubkey,
                           isGroup: conv.kind == 1,
                           isActive: isActive,
                           presenceState: presenceState,
@@ -244,12 +245,13 @@ class _NavItemState extends State<_NavItem> {
 class _ConversationItem extends ConsumerStatefulWidget {
   final int conversationId;
   final String name;
+  final String? counterpartyPubkey;
   final bool isGroup;
   final bool isActive;
   final OnlineState presenceState;
   final InfernoColors colors;
   final VoidCallback onTap;
-  const _ConversationItem({required this.conversationId, required this.name, required this.isGroup, required this.isActive, required this.presenceState, required this.colors, required this.onTap});
+  const _ConversationItem({required this.conversationId, required this.name, required this.counterpartyPubkey, required this.isGroup, required this.isActive, required this.presenceState, required this.colors, required this.onTap});
 
   @override
   ConsumerState<_ConversationItem> createState() => _ConversationItemState();
@@ -274,6 +276,14 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
     final active = widget.isActive;
     final unreadCount = ref.watch(conversationUnreadCountProvider(widget.conversationId)).valueOrNull ?? 0;
     final hasUnread = !active && unreadCount > 0;
+    final db = ref.watch(databaseProvider);
+
+    // Watch the contact row so the avatar updates live when profile syncs
+    final pubkey = widget.counterpartyPubkey;
+    final contactStream = (pubkey != null && !widget.isGroup)
+        ? (db.select(db.contacts)..where((c) => c.pubkey.equals(pubkey))).watchSingleOrNull()
+        : Stream<Contact?>.value(null);
+
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovering = true),
@@ -289,29 +299,42 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
           ),
           child: Row(
             children: [
-              Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: widget.isGroup ? c.accentDark.withValues(alpha: 0.3) : Colors.transparent,
-                    child: widget.isGroup
-                        ? Icon(Icons.group, size: 16, color: c.accentLight)
-                        : Text(widget.name[0].toUpperCase(),
-                            style: TextStyle(color: c.gray200, fontSize: 13, fontWeight: FontWeight.bold)),
-                  ),
-                  if (!widget.isGroup)
-                    Positioned(
-                      right: -2, bottom: -2,
-                      child: Container(
-                        width: 14, height: 14,
-                        decoration: BoxDecoration(
-                          color: _statusColor(),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: c.gray800, width: 2),
-                        ),
+              StreamBuilder<Contact?>(
+                stream: contactStream,
+                builder: (context, snap) {
+                  final avatarUrl = snap.data?.avatarUrl;
+                  return Stack(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: widget.isGroup
+                            ? c.accentDark.withValues(alpha: 0.3)
+                            : c.gray700,
+                        backgroundImage: avatarUrl != null && avatarUrl.isNotEmpty
+                            ? NetworkImage(avatarUrl)
+                            : null,
+                        child: widget.isGroup
+                            ? Icon(Icons.group, size: 16, color: c.accentLight)
+                            : (avatarUrl == null || avatarUrl.isEmpty
+                                ? Text(widget.name[0].toUpperCase(),
+                                    style: TextStyle(color: c.gray200, fontSize: 13, fontWeight: FontWeight.bold))
+                                : null),
                       ),
-                    ),
-                ],
+                      if (!widget.isGroup)
+                        Positioned(
+                          right: -2, bottom: -2,
+                          child: Container(
+                            width: 14, height: 14,
+                            decoration: BoxDecoration(
+                              color: _statusColor(),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: c.gray800, width: 2),
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
               const SizedBox(width: 10),
               Expanded(

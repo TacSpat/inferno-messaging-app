@@ -200,11 +200,15 @@ class ServerSyncService {
   /// Process Kind 31750 server metadata
   Future<Server?> _processMetadata(nostr.NostrEvent event, String nostrGroupId) async {
     String? name, description, iconUrl, bannerUrl, afkChannelPublicId, afkAction;
+    String? serverType, welcomeMessage;
+    String? welcomeChannelGroupId;
     int? afkTimeout;
     final relayUrls = <String>[];
     final voiceProviderPubkeys = <String>[];
     bool discoverable = false;
     bool voiceEnabled = false;
+    bool ageRestricted = false;
+    bool welcomeEnabled = false;
 
     for (final tag in event.tags) {
       if (tag.isEmpty) continue;
@@ -216,7 +220,12 @@ class ServerSyncService {
         case 'owner': break;
         case 'relay': if (tag.length > 1) relayUrls.add(tag[1]); break;
         case 'discoverable': discoverable = tag.length > 1 && tag[1] == 'true'; break;
+        case 'server_type': serverType = tag.length > 1 ? tag[1] : null; break;
+        case 'age_restricted': ageRestricted = tag.length > 1 && tag[1] == 'true'; break;
         case 'voice_enabled': voiceEnabled = tag.length > 1 && tag[1] == 'true'; break;
+        case 'welcome_channel': welcomeChannelGroupId = tag.length > 1 ? tag[1] : null; break;
+        case 'welcome_message': welcomeMessage = tag.length > 1 ? tag[1] : null; break;
+        case 'welcome_enabled': welcomeEnabled = tag.length > 1 && tag[1] == 'true'; break;
         case 'afk_channel': afkChannelPublicId = tag.length > 1 ? tag[1] : null; break;
         case 'afk_timeout': afkTimeout = tag.length > 1 ? int.tryParse(tag[1]) : null; break;
         case 'afk_action': afkAction = tag.length > 1 ? tag[1] : null; break;
@@ -247,12 +256,26 @@ class ServerSyncService {
         bannerUrl: Value(bannerUrl),
         relayUrls: Value(json.encode(relayUrls)),
         discoverable: Value(discoverable),
+        ageRestricted: Value(ageRestricted),
+        serverType: serverType != null ? Value(serverType) : const Value.absent(),
         voiceEnabled: Value(voiceEnabled),
+        welcomeMessageEnabled: Value(welcomeEnabled),
+        welcomeMessageTemplate: welcomeMessage != null ? Value(welcomeMessage) : const Value.absent(),
         afkTimeout: afkTimeout != null ? Value(afkTimeout) : const Value.absent(),
         afkAction: afkAction != null ? Value(afkAction) : const Value.absent(),
         lastSyncedAt: Value(now),
         updatedAt: Value(now),
       ));
+      // Resolve welcome channel by nostr group ID
+      if (welcomeChannelGroupId != null && welcomeChannelGroupId.isNotEmpty) {
+        final wCh = await (_db.select(_db.channels)
+              ..where((c) => c.nostrGroupId.equals(welcomeChannelGroupId!) & c.serverId.equals(existing.id)))
+            .getSingleOrNull();
+        if (wCh != null) {
+          await (_db.update(_db.servers)..where((s) => s.id.equals(existing.id)))
+              .write(ServersCompanion(welcomeChannelId: Value(wCh.id)));
+        }
+      }
       return (_db.select(_db.servers)..where((s) => s.id.equals(existing.id))).getSingle();
     } else {
       // Need an owner — use first user or create placeholder
@@ -269,7 +292,11 @@ class ServerSyncService {
         bannerUrl: Value(bannerUrl),
         relayUrls: Value(json.encode(relayUrls)),
         discoverable: Value(discoverable),
+        ageRestricted: Value(ageRestricted),
+        serverType: serverType != null ? Value(serverType) : const Value.absent(),
         voiceEnabled: Value(voiceEnabled),
+        welcomeMessageEnabled: Value(welcomeEnabled),
+        welcomeMessageTemplate: welcomeMessage != null ? Value(welcomeMessage) : const Value.absent(),
         afkTimeout: afkTimeout != null ? Value(afkTimeout) : const Value.absent(),
         afkAction: afkAction != null ? Value(afkAction) : const Value.absent(),
         lastSyncedAt: Value(now),
@@ -616,12 +643,15 @@ class ServerSyncService {
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     debugPrint('[Sync] Emoji event has ${events.first.tags.length} tags');
+    final cacheMap = <String, String>{};
     for (final tag in events.first.tags) {
       debugPrint('[Sync] Emoji tag: $tag');
       // Rails: ["emoji", name, blossom_url, creator_pubkey]
       if (tag.isEmpty || tag[0] != 'emoji' || tag.length < 3) continue;
       final emojiName = tag[1];
       final emojiUrl = tag[2];
+      if (emojiName.isEmpty || emojiUrl.isEmpty) continue;
+      cacheMap[emojiName] = emojiUrl;
       final publicId = emojiName.hashCode.abs().toRadixString(36).padLeft(12, '0').substring(0, 12);
       debugPrint('[Sync] Saving emoji: $emojiName -> $emojiUrl');
       try {
@@ -637,6 +667,19 @@ class ServerSyncService {
           ));
         }
       } catch (_) {}
+    }
+    // Persist to the global emoji cache so references survive leaving the server
+    if (cacheMap.isNotEmpty) {
+      final now = DateTime.now();
+      await _db.batch((batch) {
+        for (final entry in cacheMap.entries) {
+          batch.insert(
+            _db.emojiCache,
+            EmojiCacheCompanion.insert(name: entry.key, url: entry.value, lastSeenAt: now),
+            mode: InsertMode.insertOrIgnore,
+          );
+        }
+      });
     }
     await _logSyncEvent(events.first, 31754, serverId);
   }

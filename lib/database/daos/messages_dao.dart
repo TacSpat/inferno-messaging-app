@@ -189,10 +189,13 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
 
   // Mark a conversation as read
   Future<void> markConversationRead(int conversationId) async {
+    // Only update lastReadAt — do NOT touch updatedAt.
+    // updatedAt represents "last activity" and drives the conversation list
+    // ordering, which must reflect when the most recent message arrived,
+    // not when the conversation was opened.
     await (update(conversations)..where((c) => c.id.equals(conversationId)))
         .write(ConversationsCompanion(
       lastReadAt: Value(DateTime.now()),
-      updatedAt: Value(DateTime.now()),
     ));
   }
 }
