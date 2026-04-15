@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:media_kit/media_kit.dart';
+import 'package:fvp/fvp.dart' as fvp;
 import 'package:path_provider/path_provider.dart';
 import 'app.dart';
 
@@ -25,11 +25,11 @@ void main() async {
       };
 
       try {
-        sink.writeln('[${DateTime.now()}] Initializing MediaKit...');
-        MediaKit.ensureInitialized();
-        sink.writeln('[${DateTime.now()}] MediaKit OK');
+        sink.writeln('[${DateTime.now()}] Initializing fvp...');
+        fvp.registerWith();
+        sink.writeln('[${DateTime.now()}] fvp OK');
       } catch (e, st) {
-        sink.writeln('[${DateTime.now()}] MediaKit FAILED: $e\n$st');
+        sink.writeln('[${DateTime.now()}] fvp FAILED: $e\n$st');
       }
 
       sink.writeln('[${DateTime.now()}] Running app...');
@@ -41,7 +41,7 @@ void main() async {
       crashFile.writeAsStringSync('[${DateTime.now()}] CRASH: $e\n$st');
     }
   } else {
-    MediaKit.ensureInitialized();
+    fvp.registerWith();
     runApp(const ProviderScope(child: InfernoApp()));
   }
 }

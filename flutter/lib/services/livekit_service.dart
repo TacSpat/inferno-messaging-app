@@ -39,12 +39,31 @@ class LiveKitService {
     bool noiseSuppression = true,
     bool echoCancellation = true,
     bool autoGainControl = true,
-    String suppressionLevel = 'moderate',
   }) async {
+    // Try DeepFilterNet first — if it's available we DON'T want WebRTC's
+    // built-in noise suppression doing the same job, otherwise the signal is
+    // processed twice and the WebRTC APM (AGC + AEC) leaves the audio session
+    // in a quieter state that persists past the call.
+    bool useWebRtcNs = noiseSuppression;
+    if (noiseSuppression) {
+      try {
+        final processor = NoiseProcessor.instance;
+        // Single fixed level — chosen for balanced voice clarity vs. noise removal.
+        await processor.init(level: 'moderate');
+        if (processor.activeProcessor == 'deepfilter') {
+          useWebRtcNs = false;
+          debugPrint('[LiveKit] Using DeepFilterNet — disabling WebRTC NS to avoid double processing');
+        }
+        debugPrint('[LiveKit] Noise processor active: ${processor.activeProcessor}');
+      } catch (e) {
+        debugPrint('[LiveKit] Noise processor init failed: $e (using WebRTC built-in)');
+      }
+    }
+
     _room = Room(
       roomOptions: RoomOptions(
         defaultAudioCaptureOptions: AudioCaptureOptions(
-          noiseSuppression: noiseSuppression,
+          noiseSuppression: useWebRtcNs,
           echoCancellation: echoCancellation,
           autoGainControl: autoGainControl,
         ),
@@ -64,17 +83,6 @@ class LiveKitService {
     await _room!.connect(url, token);
     _connectedUrl = url;
     _currentToken = token;
-
-    // Initialize noise processor (DeepFilterNet → RNNoise → WebRTC fallback)
-    if (noiseSuppression) {
-      try {
-        final processor = NoiseProcessor.instance;
-        await processor.init(level: suppressionLevel);
-        debugPrint('[LiveKit] Noise processor active: ${processor.activeProcessor}');
-      } catch (e) {
-        debugPrint('[LiveKit] Noise processor init failed: $e (using WebRTC built-in)');
-      }
-    }
 
     // Schedule token renewal before expiry
     _scheduleTokenRefresh(token);
@@ -174,6 +182,10 @@ class LiveKitService {
     _room = null;
     _listener?.dispose();
     _listener = null;
+    // Release native FFI state — leaving it loaded means PulseAudio / the
+    // platform audio session keeps the WebRTC processing graph alive, which
+    // can leave system audio levels lowered until the app exits.
+    try { NoiseProcessor.instance.dispose(); } catch (_) {}
     _emitParticipants();
     _connectionController.add(false);
   }
@@ -199,6 +211,9 @@ class LiveKitService {
     try {
       await room.disconnect();
     } catch (_) {}
+
+    // Release native FFI state — see _onDisconnected for rationale.
+    try { NoiseProcessor.instance.dispose(); } catch (_) {}
 
     _emitParticipants();
     _connectionController.add(false);

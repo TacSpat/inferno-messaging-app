@@ -7,10 +7,12 @@ import '../crypto/nostr_key.dart';
 import '../crypto/nip44_crypto.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
+import 'emoji_resolver.dart';
 
 class GroupMessageService {
   final InfernoDatabase _db;
   final RelayPool _relayPool;
+  late final EmojiResolver _emojiResolver = EmojiResolver(_db);
 
   GroupMessageService(this._db, this._relayPool);
 
@@ -40,6 +42,12 @@ class GroupMessageService {
     // Extract @mention p-tags
     final mentionTags = await _extractMentionTags(content, channel.serverId);
     tags.addAll(mentionTags);
+
+    // Attach NIP-30 custom emoji tags so message is self-contained
+    final emojiUrls = await _emojiResolver.resolveInContent(content);
+    for (final entry in emojiUrls.entries) {
+      tags.add(['emoji', entry.key, entry.value]);
+    }
 
     String eventContent = content;
 
@@ -74,6 +82,7 @@ class GroupMessageService {
         nostrAuthorPubkey: Value(publicKeyHex),
         nostrEventId: Value(signed.id),
         nostrEventJson: Value(json.encode(signed.toJson())),
+        customEmojiUrls: emojiUrls.isNotEmpty ? Value(json.encode(emojiUrls)) : const Value.absent(),
         createdAt: now,
         updatedAt: now,
       ),
@@ -150,6 +159,18 @@ class GroupMessageService {
     final spoilerTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'spoiler').firstOrNull;
     final isSpoiler = spoilerTag != null;
 
+    // Collect NIP-30 custom emoji tags and persist to cache so they survive
+    // server deletion / user leaving the server
+    final emojiUrls = <String, String>{};
+    for (final tag in event.tags) {
+      if (tag.length >= 3 && tag[0] == 'emoji' && tag[1].isNotEmpty && tag[2].isNotEmpty) {
+        emojiUrls[tag[1]] = tag[2];
+      }
+    }
+    if (emojiUrls.isNotEmpty) {
+      await _emojiResolver.cacheAll(emojiUrls);
+    }
+
     // Skip if we already have this event (dedup relay echo)
     if (event.id != null) {
       final existing = await (_db.select(_db.messages)
@@ -171,6 +192,7 @@ class GroupMessageService {
         nostrEventId: Value(event.id),
         nostrEventJson: Value(json.encode(event.toJson())),
         parentId: Value(parentId),
+        customEmojiUrls: emojiUrls.isNotEmpty ? Value(json.encode(emojiUrls)) : const Value.absent(),
         createdAt: eventTime,
         updatedAt: DateTime.now(),
       ),

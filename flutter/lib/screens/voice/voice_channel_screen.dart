@@ -170,7 +170,6 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
       final noiseSuppression = (await storage.read(key: 'voice_noise_suppression')) != 'false';
       final echoCancellation = (await storage.read(key: 'voice_echo_cancellation')) != 'false';
       final autoGainControl = (await storage.read(key: 'voice_auto_gain_control')) != 'false';
-      final suppressionLevel = (await storage.read(key: 'voice_suppression_level')) ?? 'moderate';
 
       // Connect to LiveKit with audio processing options
       if (mounted) setState(() => _error = 'Connecting...');
@@ -179,7 +178,6 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         noiseSuppression: noiseSuppression,
         echoCancellation: echoCancellation,
         autoGainControl: autoGainControl,
-        suppressionLevel: suppressionLevel,
       );
       await livekit.setMicrophoneEnabled(_canSpeak);
 

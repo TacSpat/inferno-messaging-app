@@ -13,8 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:http/http.dart' as http;
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:media_kit/media_kit.dart';
-import 'package:media_kit_video/media_kit_video.dart' as mkv;
+import 'package:video_player/video_player.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
 import '../providers/database_provider.dart';
@@ -898,7 +897,7 @@ class _BlossomDocumentCard extends StatelessWidget {
   }
 }
 
-/// Inline video player using media_kit (max 512×384).
+/// Inline video player using video_player + fvp (libmdk backend).
 /// Global registry of active video players — disposed on hot restart to prevent
 /// native libmpv callbacks into a dead Dart isolate.
 final _activeVideoPlayers = <_InlineVideoPlayerState>{};
@@ -913,8 +912,7 @@ class _InlineVideoPlayer extends StatefulWidget {
 }
 
 class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBindingObserver {
-  Player? _player;
-  mkv.VideoController? _controller;
+  VideoPlayerController? _controller;
   bool _initialized = false;
   bool _disposed = false;
   int? _videoWidth;
@@ -956,70 +954,71 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
 
   Future<void> _initPlayer() async {
     if (_disposed) return;
-    final player = Player();
-    final controller = mkv.VideoController(
-      player,
-      configuration: const mkv.VideoControllerConfiguration(
-        vo: 'libmpv',
-        hwdec: 'no',
-        enableHardwareAcceleration: false,
-      ),
-    );
-
-    if (_disposed) { player.dispose(); return; }
-
-    _player = player;
+    final controller = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+    if (_disposed) { controller.dispose(); return; }
     _controller = controller;
+    controller.addListener(_onControllerUpdate);
 
-    _subs.add(player.stream.width.listen((w) {
-      if (w != null && mounted && !_disposed) {
-        setState(() => _videoWidth = w);
-        if (_videoHeight != null) _videoDimensionCache[widget.url] = (w, _videoHeight!);
+    try {
+      await controller.initialize();
+    } catch (_) {
+      return;
+    }
+    if (_disposed) { _teardown(); return; }
+
+    final size = controller.value.size;
+    if (size.width > 0 && size.height > 0) {
+      _videoWidth = size.width.toInt();
+      _videoHeight = size.height.toInt();
+      _videoDimensionCache[widget.url] = (_videoWidth!, _videoHeight!);
+    }
+
+    await controller.setVolume(_volume);
+    if (mounted && !_disposed) {
+      setState(() {
+        _initialized = true;
+        _duration = controller.value.duration;
+      });
+    }
+  }
+
+  /// Unified listener — video_player notifies listeners whenever any state changes.
+  void _onControllerUpdate() {
+    if (!mounted || _disposed) return;
+    final c = _controller;
+    if (c == null) return;
+    final v = c.value;
+    final newPlaying = v.isPlaying;
+    final playingChanged = newPlaying != _playing;
+    final buf = v.buffered.isNotEmpty ? v.buffered.last.end : Duration.zero;
+    setState(() {
+      if (!_seeking) _position = v.position;
+      _duration = v.duration;
+      _buffer = buf;
+      _playing = newPlaying;
+      _volume = v.volume;
+      if (v.size.width > 0 && v.size.height > 0) {
+        _videoWidth = v.size.width.toInt();
+        _videoHeight = v.size.height.toInt();
+        _videoDimensionCache[widget.url] = (_videoWidth!, _videoHeight!);
       }
-    }));
-    _subs.add(player.stream.height.listen((h) {
-      if (h != null && mounted && !_disposed) {
-        setState(() => _videoHeight = h);
-        if (_videoWidth != null) _videoDimensionCache[widget.url] = (_videoWidth!, h);
-      }
-    }));
-    _subs.add(player.stream.playing.listen((playing) {
-      if (!mounted || _disposed) return;
-      setState(() => _playing = playing);
-      if (playing) {
+    });
+    if (playingChanged) {
+      if (newPlaying) {
         _startHideTimer();
       } else {
         _hideTimer?.cancel();
         if (mounted) setState(() => _controlsVisible = true);
       }
-    }));
-    _subs.add(player.stream.position.listen((pos) {
-      if (!_seeking && mounted && !_disposed) setState(() => _position = pos);
-    }));
-    _subs.add(player.stream.duration.listen((dur) {
-      if (mounted && !_disposed) setState(() => _duration = dur);
-    }));
-    _subs.add(player.stream.buffer.listen((buf) {
-      if (mounted && !_disposed) setState(() => _buffer = buf);
-    }));
-    _subs.add(player.stream.volume.listen((vol) {
-      if (mounted && !_disposed) setState(() => _volume = vol / 100.0);
-    }));
-
-    if (_disposed) { _teardown(); return; }
-
-    // Open paused — user clicks play to start
-    await player.open(Media(widget.url), play: false);
-    if (mounted && !_disposed) setState(() => _initialized = true);
+    }
   }
 
   void _teardown() {
     _hideTimer?.cancel();
     for (final sub in _subs) { sub.cancel(); }
     _subs.clear();
-    // Cancel subs first so native callbacks hit no-ops, then dispose
-    _player?.dispose();
-    _player = null;
+    _controller?.removeListener(_onControllerUpdate);
+    _controller?.dispose();
     _controller = null;
   }
 
@@ -1050,17 +1049,21 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
   }
 
   void _togglePlay() {
-    _player?.playOrPause();
+    final c = _controller;
+    if (c == null) return;
+    if (c.value.isPlaying) {
+      c.pause();
+    } else {
+      c.play();
+    }
   }
 
   void _openFullscreen() {
-    final player = _player;
     final controller = _controller;
-    if (player == null || controller == null) return;
+    if (controller == null) return;
     Navigator.of(context, rootNavigator: true).push(PageRouteBuilder(
       opaque: true,
       pageBuilder: (_, __, ___) => _VideoFullscreen(
-        player: player,
         controller: controller,
         url: widget.url,
         colors: widget.colors,
@@ -1131,12 +1134,16 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Video surface — no controls from media_kit
-                if (_controller != null)
-                  mkv.Video(
-                    controller: _controller!,
-                    controls: mkv.NoVideoControls,
+                // Video surface — no built-in controls
+                if (_controller != null && _initialized)
+                  FittedBox(
                     fit: BoxFit.cover,
+                    clipBehavior: Clip.hardEdge,
+                    child: SizedBox(
+                      width: _controller!.value.size.width,
+                      height: _controller!.value.size.height,
+                      child: VideoPlayer(_controller!),
+                    ),
                   )
                 else
                   Container(color: Colors.black),
@@ -1236,7 +1243,7 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
       duration: _duration,
       onSeekStart: () => _seeking = true,
       onSeekUpdate: (frac) => setState(() => _position = Duration(milliseconds: (_duration.inMilliseconds * frac).round())),
-      onSeekEnd: (frac) { _seeking = false; _player?.seek(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
+      onSeekEnd: (frac) { _seeking = false; _controller?.seekTo(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
     );
   }
 
@@ -1277,7 +1284,7 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
                         child: Slider(
                           value: _volume,
                           onChangeStart: (_) => _draggingVolume = true,
-                          onChanged: (v) => _player?.setVolume(v * 100),
+                          onChanged: (v) => _controller?.setVolume(v),
                           onChangeEnd: (_) { _draggingVolume = false; _startHideTimer(); },
                         ),
                       ),
@@ -1299,9 +1306,9 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
           onTap: () {
             // Toggle mute
             if (_volume > 0) {
-              _player?.setVolume(0);
+              _controller?.setVolume(0);
             } else {
-              _player?.setVolume(100);
+              _controller?.setVolume(1.0);
             }
           },
         ),
@@ -1314,7 +1321,7 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
               child: Slider(
                 value: _volume,
                 onChangeStart: (_) => _draggingVolume = true,
-                onChanged: (v) => _player?.setVolume(v * 100),
+                onChanged: (v) => _controller?.setVolume(v),
                 onChangeEnd: (_) { _draggingVolume = false; _startHideTimer(); },
               ),
             ),
@@ -1500,13 +1507,12 @@ class _VideoSeekBarState extends State<_VideoSeekBar> {
   }
 }
 
-/// Fullscreen video overlay — reuses the existing Player instance from the inline player.
+/// Fullscreen video overlay — reuses the existing VideoPlayerController from the inline player.
 class _VideoFullscreen extends StatefulWidget {
-  final Player player;
-  final mkv.VideoController controller;
+  final VideoPlayerController controller;
   final String url;
   final InfernoColors colors;
-  const _VideoFullscreen({required this.player, required this.controller, required this.url, required this.colors});
+  const _VideoFullscreen({required this.controller, required this.url, required this.colors});
 
   @override
   State<_VideoFullscreen> createState() => _VideoFullscreenState();
@@ -1522,32 +1528,45 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
   Duration _buffer = Duration.zero;
   double _volume = 1.0;
   Timer? _hideTimer;
-  final List<StreamSubscription> _subs = [];
 
   @override
   void initState() {
     super.initState();
-    final p = widget.player;
-    // Seed current state
-    _playing = p.state.playing;
-    _position = p.state.position;
-    _duration = p.state.duration;
-    _buffer = p.state.buffer;
-    _volume = p.state.volume / 100.0;
-
-    _subs.add(p.stream.playing.listen((v) { if (mounted) setState(() => _playing = v); }));
-    _subs.add(p.stream.position.listen((v) { if (!_seeking && mounted) setState(() => _position = v); }));
-    _subs.add(p.stream.duration.listen((v) { if (mounted) setState(() => _duration = v); }));
-    _subs.add(p.stream.buffer.listen((v) { if (mounted) setState(() => _buffer = v); }));
-    _subs.add(p.stream.volume.listen((v) { if (mounted) setState(() => _volume = v / 100.0); }));
-
+    final v = widget.controller.value;
+    _playing = v.isPlaying;
+    _position = v.position;
+    _duration = v.duration;
+    _buffer = v.buffered.isNotEmpty ? v.buffered.last.end : Duration.zero;
+    _volume = v.volume;
+    widget.controller.addListener(_onUpdate);
     if (_playing) _startHideTimer();
+  }
+
+  void _onUpdate() {
+    if (!mounted) return;
+    final v = widget.controller.value;
+    setState(() {
+      _playing = v.isPlaying;
+      if (!_seeking) _position = v.position;
+      _duration = v.duration;
+      _buffer = v.buffered.isNotEmpty ? v.buffered.last.end : Duration.zero;
+      _volume = v.volume;
+    });
+  }
+
+  void _togglePlay() {
+    final c = widget.controller;
+    if (c.value.isPlaying) {
+      c.pause();
+    } else {
+      c.play();
+    }
   }
 
   @override
   void dispose() {
     _hideTimer?.cancel();
-    for (final sub in _subs) { sub.cancel(); }
+    widget.controller.removeListener(_onUpdate);
     super.dispose();
   }
 
@@ -1592,7 +1611,7 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
       onKeyEvent: (event) {
         if (event is KeyDownEvent) {
           if (event.logicalKey == LogicalKeyboardKey.escape) Navigator.of(context).pop();
-          if (event.logicalKey == LogicalKeyboardKey.space) widget.player.playOrPause();
+          if (event.logicalKey == LogicalKeyboardKey.space) _togglePlay();
         }
       },
       child: Scaffold(
@@ -1601,15 +1620,16 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
           cursor: _controlsVisible ? SystemMouseCursors.basic : SystemMouseCursors.none,
           onHover: (_) { if (!_controlsVisible) setState(() => _controlsVisible = true); _startHideTimer(); },
           child: GestureDetector(
-            onTap: () => widget.player.playOrPause(),
+            onTap: _togglePlay,
             child: Stack(
               fit: StackFit.expand,
               children: [
                 // Video surface — fills entire screen, aspect ratio preserved
-                mkv.Video(
-                  controller: widget.controller,
-                  controls: null,
-                  fit: BoxFit.contain,
+                Center(
+                  child: AspectRatio(
+                    aspectRatio: widget.controller.value.aspectRatio,
+                    child: VideoPlayer(widget.controller),
+                  ),
                 ),
 
                 // Big play button
@@ -1660,17 +1680,17 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
                               padding: const EdgeInsets.symmetric(horizontal: 16),
                               onSeekStart: () => _seeking = true,
                               onSeekUpdate: (frac) => setState(() => _position = Duration(milliseconds: (_duration.inMilliseconds * frac).round())),
-                              onSeekEnd: (frac) { _seeking = false; widget.player.seek(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
+                              onSeekEnd: (frac) { _seeking = false; widget.controller.seekTo(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
                             ),
                             // Controls row
                             Padding(
                               padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
                               child: Row(children: [
-                                _fsBtn(icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded, onTap: () => widget.player.playOrPause()),
+                                _fsBtn(icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded, onTap: _togglePlay),
                                 const SizedBox(width: 8),
                                 Text('${_fmt(_position)} / ${_fmt(_duration)}', style: TextStyle(color: c.gray400, fontSize: 13, fontFamily: 'monospace')),
                                 const Spacer(),
-                                _fsBtn(icon: volIcon, onTap: () => widget.player.setVolume(_volume > 0 ? 0 : 100)),
+                                _fsBtn(icon: volIcon, onTap: () => widget.controller.setVolume(_volume > 0 ? 0 : 1.0)),
                                 MouseRegion(
                                   cursor: SystemMouseCursors.click,
                                   child: SizedBox(
@@ -1680,7 +1700,7 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
                                       child: Slider(
                                         value: _volume,
                                         onChangeStart: (_) => _draggingVolume = true,
-                                        onChanged: (v) => widget.player.setVolume(v * 100),
+                                        onChanged: (v) => widget.controller.setVolume(v),
                                         onChangeEnd: (_) { _draggingVolume = false; _startHideTimer(); },
                                       ),
                                     ),

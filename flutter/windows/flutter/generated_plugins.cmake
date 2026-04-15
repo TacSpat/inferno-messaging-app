@@ -7,12 +7,10 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_drop
   flutter_secure_storage_windows
   flutter_webrtc
+  fvp
   livekit_client
-  media_kit_libs_windows_video
-  media_kit_video
   sqlite3_flutter_libs
   url_launcher_windows
-  volume_controller
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

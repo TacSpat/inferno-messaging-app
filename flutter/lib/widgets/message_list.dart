@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:drift/drift.dart' show Value;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -107,18 +108,33 @@ class _MessageListState extends ConsumerState<MessageList> {
   }
 
   Future<void> _loadCustomEmojis() async {
-    if (widget.channel == null) {
-      _customEmojis = {};
-      return;
-    }
     final db = ref.read(databaseProvider);
-    final emojis = await (db.select(db.serverEmojis)
-      ..where((e) => e.serverId.equals(widget.channel!.serverId)))
-      .get();
-    if (mounted) {
-      setState(() {
-        _customEmojis = {for (final e in emojis) if (e.url != null) e.name: e.url!};
-      });
+    if (widget.channel != null) {
+      // Channel: only this server's emojis
+      final emojis = await (db.select(db.serverEmojis)
+        ..where((e) => e.serverId.equals(widget.channel!.serverId)))
+        .get();
+      if (mounted) {
+        setState(() {
+          _customEmojis = {for (final e in emojis) if (e.url != null) e.name: e.url!};
+        });
+      }
+    } else {
+      // DM: merge current server emojis with the persistent emoji_cache so that
+      // :shortcode: references keep resolving even after the source server was
+      // left or the emoji was deleted server-side.
+      final serverRows = await db.select(db.serverEmojis).get();
+      final cacheRows = await db.select(db.emojiCache).get();
+      final merged = <String, String>{};
+      for (final c in cacheRows) {
+        merged[c.name] = c.url;
+      }
+      for (final e in serverRows) {
+        if (e.url != null && e.url!.isNotEmpty) merged[e.name] = e.url!;
+      }
+      if (mounted) {
+        setState(() { _customEmojis = merged; });
+      }
     }
   }
 
@@ -630,6 +646,26 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
   OverlayEntry? _reactPickerOverlay;
   final GlobalKey _reactButtonKey = GlobalKey();
 
+  /// Merge per-message custom emoji URLs (stored from NIP-30 tags / payload) with
+  /// the global map (server emoji + persistent cache). Per-message URLs win so
+  /// a message keeps rendering even if the source server deleted the emoji or
+  /// the user left that server.
+  Map<String, String> _emojisForMessage(Message msg) {
+    if (msg.customEmojiUrls == null || msg.customEmojiUrls!.isEmpty) {
+      return widget.customEmojis;
+    }
+    try {
+      final decoded = json.decode(msg.customEmojiUrls!);
+      if (decoded is! Map) return widget.customEmojis;
+      final perMsg = decoded.cast<String, dynamic>().map(
+            (k, v) => MapEntry(k, v is String ? v : ''),
+          );
+      return {...widget.customEmojis, ...perMsg};
+    } catch (_) {
+      return widget.customEmojis;
+    }
+  }
+
   void _showReactPicker() {
     _closeReactPicker();
 
@@ -944,7 +980,7 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
                             ]),
                           ),
                         if ((msg.content != null && msg.content!.isNotEmpty) || (msg.fileUrls != null && msg.fileUrls!.isNotEmpty))
-                          MessageContent(content: msg.content ?? '', colors: c, isSpoiler: msg.spoiler, customEmojis: widget.customEmojis, fileUrls: msg.fileUrls,
+                          MessageContent(content: msg.content ?? '', colors: c, isSpoiler: msg.spoiler, customEmojis: _emojisForMessage(msg), fileUrls: msg.fileUrls,
                             blurImages: widget.blurNsfwImages || (msg.hiddenReason != null && msg.hiddenReason!.contains('nsfw'))),
                         // Reactions
                         StreamBuilder<List<Reaction>>(
