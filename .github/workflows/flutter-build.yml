@@ -192,39 +192,27 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Download ONNX Runtime & compile NSFW bridge (universal)
+      - name: Download ONNX Runtime & compile NSFW bridge (arm64)
         working-directory: flutter
         run: |
+          # macos-14 runners are arm64-only. We build an arm64-only .app; an x86_64
+          # pass would require a macos-13 runner. Flutter's install_code_assets hook
+          # lipos per-arch outputs, so returning a universal dylib twice causes
+          # "same architectures" failure. Single-arch avoids this.
           ORT_VERSION="1.20.1"
-          # Download both architectures
           curl -sLO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz"
-          curl -sLO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-x86_64-${ORT_VERSION}.tgz"
           tar xzf onnxruntime-osx-arm64-${ORT_VERSION}.tgz
-          tar xzf onnxruntime-osx-x86_64-${ORT_VERSION}.tgz
-          ARM_DIR="onnxruntime-osx-arm64-${ORT_VERSION}"
-          X86_DIR="onnxruntime-osx-x86_64-${ORT_VERSION}"
+          ORT_DIR="onnxruntime-osx-arm64-${ORT_VERSION}"
 
-          # Create universal ORT dylib
-          lipo -create \
-            ${ARM_DIR}/lib/libonnxruntime.${ORT_VERSION}.dylib \
-            ${X86_DIR}/lib/libonnxruntime.${ORT_VERSION}.dylib \
-            -output native/onnxruntime/libonnxruntime.dylib
+          # Copy arm64 ORT dylib with @rpath install name
+          cp ${ORT_DIR}/lib/libonnxruntime.${ORT_VERSION}.dylib native/onnxruntime/libonnxruntime.dylib
+          install_name_tool -id @rpath/libonnxruntime.dylib native/onnxruntime/libonnxruntime.dylib
 
-          # Compile bridge for arm64
-          clang -shared -fPIC -O2 -arch arm64 -o /tmp/libnsfw_bridge_arm64.dylib \
+          # Compile NSFW bridge for arm64
+          clang -shared -fPIC -O2 -arch arm64 -o native/onnxruntime/libnsfw_bridge.dylib \
             native/onnxruntime/nsfw_bridge.c \
-            -I${ARM_DIR}/include -L${ARM_DIR}/lib -lonnxruntime \
+            -I${ORT_DIR}/include -L${ORT_DIR}/lib -lonnxruntime \
             -install_name @rpath/libnsfw_bridge.dylib
-
-          # Compile bridge for x86_64
-          clang -shared -fPIC -O2 -arch x86_64 -o /tmp/libnsfw_bridge_x86_64.dylib \
-            native/onnxruntime/nsfw_bridge.c \
-            -I${X86_DIR}/include -L${X86_DIR}/lib -lonnxruntime \
-            -install_name @rpath/libnsfw_bridge.dylib
-
-          # Create universal bridge dylib
-          lipo -create /tmp/libnsfw_bridge_arm64.dylib /tmp/libnsfw_bridge_x86_64.dylib \
-            -output native/onnxruntime/libnsfw_bridge.dylib
 
       - name: Build macOS release
         working-directory: flutter
