@@ -41,6 +41,7 @@ import 'tables/gif_favorites.dart';
 import 'tables/media_cache.dart';
 import 'tables/csam_hash_entries.dart';
 import 'tables/hidden_attachment_records.dart';
+import 'tables/emoji_cache.dart';
 
 // DAO imports
 import 'daos/messages_dao.dart';
@@ -87,6 +88,7 @@ part 'database.g.dart';
     MediaCache,
     CsamHashEntries,
     HiddenAttachmentRecords,
+    EmojiCache,
   ],
   daos: [
     MessagesDao,
@@ -100,7 +102,7 @@ class InfernoDatabase extends _$InfernoDatabase {
   InfernoDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration {
@@ -146,6 +148,10 @@ class InfernoDatabase extends _$InfernoDatabase {
           await m.addColumn(appSettings, appSettings.safetyReputationThreshold);
           await m.addColumn(appSettings, appSettings.safetySharedHashMinReporters);
           await m.addColumn(appSettings, appSettings.safetySharedHashTrustFriends);
+        }
+        if (from < 8) {
+          await m.addColumn(messages, messages.customEmojiUrls);
+          await m.createTable(emojiCache);
         }
       },
     );

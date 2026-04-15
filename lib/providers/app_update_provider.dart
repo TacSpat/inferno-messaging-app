@@ -21,6 +21,9 @@ final appVersionProvider = FutureProvider<String>((ref) async {
 final updateCheckProvider = StreamProvider<AppUpdate?>((ref) async* {
   if (kIsWeb) { yield null; return; }
   if (Platform.isAndroid || Platform.isIOS) { yield null; return; }
+  // Skip update checks in debug builds — avoids noise during local development
+  // and prevents the auto-updater from prompting against the dev binary.
+  if (kDebugMode) { yield null; return; }
 
   final svc = ref.read(appUpdateServiceProvider);
 

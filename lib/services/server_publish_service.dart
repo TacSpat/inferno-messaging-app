@@ -26,6 +26,7 @@ class ServerPublishService {
   }
 
   /// Publish Kind 31750 server metadata
+  /// Matches Rails NostrServerPublishJob#build_metadata_tags
   Future<void> publishMetadata({
     required String privateKeyHex,
     required String publicKeyHex,
@@ -36,6 +37,7 @@ class ServerPublishService {
       ['d', 'inferno-$gid'],
       ['name', server.name],
       ['about', server.description ?? ''],
+      ['owner', publicKeyHex],
     ];
 
     if (server.iconUrl != null) tags.add(['picture', server.iconUrl!]);
@@ -51,7 +53,21 @@ class ServerPublishService {
       } catch (_) {}
     }
 
+    // Welcome message settings
+    if (server.welcomeChannelId != null) {
+      final wCh = await (_db.select(_db.channels)
+            ..where((c) => c.id.equals(server.welcomeChannelId!))
+            ..limit(1))
+          .getSingleOrNull();
+      if (wCh != null) tags.add(['welcome_channel', wCh.nostrGroupId ?? '']);
+    }
+    tags.add(['welcome_message', server.welcomeMessageTemplate]);
+    tags.add(['welcome_enabled', server.welcomeMessageEnabled.toString()]);
+
+    // Visibility & classification
     tags.add(['discoverable', server.discoverable.toString()]);
+    tags.add(['server_type', server.serverType]);
+    tags.add(['age_restricted', server.ageRestricted.toString()]);
     tags.add(['voice_enabled', server.voiceEnabled.toString()]);
 
     // AFK channel settings
@@ -64,6 +80,14 @@ class ServerPublishService {
     }
     tags.add(['afk_timeout', server.afkTimeout.toString()]);
     tags.add(['afk_action', server.afkAction]);
+
+    // Voice providers
+    final voiceProviders = await (_db.select(_db.serverVoiceProviders)
+          ..where((v) => v.serverId.equals(server.id) & v.active.equals(true)))
+        .get();
+    for (final vp in voiceProviders) {
+      if (vp.providerPubkey != null) tags.add(['voice_provider', vp.providerPubkey!]);
+    }
 
     final event = nostr.NostrEvent(
       pubkey: publicKeyHex,

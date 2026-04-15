@@ -21,6 +21,7 @@ class Messages extends Table {
   TextColumn get nostrEventId => text().nullable().unique()();
   TextColumn get nostrEventJson => text().nullable()();
   TextColumn get fileUrls => text().nullable()();  // JSON array of Blossom URLs
+  TextColumn get customEmojiUrls => text().nullable()();  // JSON map of {name: url} for NIP-30 custom emojis, self-contained per message
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 }

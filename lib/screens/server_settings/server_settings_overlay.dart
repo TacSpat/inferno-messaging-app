@@ -93,14 +93,20 @@ class _ServerSettingsOverlayState extends ConsumerState<ServerSettingsOverlay> {
   @override
   Widget build(BuildContext context) {
     final c = ref.watch(infernoColorsProvider);
-    return Scaffold(
+    final db = ref.watch(databaseProvider);
+    return StreamBuilder<Server>(
+      stream: db.serversDao.watchServer(widget.server.id),
+      initialData: widget.server,
+      builder: (context, snap) {
+        final server = snap.data ?? widget.server;
+        return Scaffold(
       backgroundColor: c.gray950.withValues(alpha: 0.95),
       body: Row(children: [
         Container(
           width: 200,
           padding: const EdgeInsets.only(top: 60, left: 12, right: 4, bottom: 16),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _SectionLabel(widget.server.name.toUpperCase(), c),
+            _SectionLabel(server.name.toUpperCase(), c),
             if (_canManageServer) _NavItem('Overview', 'overview', c),
             if (_canManageServer) _NavItem('Onboarding', 'onboarding', c),
             if (_canManageServer) ...[
@@ -138,7 +144,7 @@ class _ServerSettingsOverlayState extends ConsumerState<ServerSettingsOverlay> {
         Expanded(child: Stack(children: [
           Padding(
             padding: const EdgeInsets.only(top: 60, left: 20, right: 60, bottom: 16),
-            child: _buildContent(c),
+            child: _buildContent(c, server),
           ),
           Positioned(
             top: 16, right: 16,
@@ -157,22 +163,24 @@ class _ServerSettingsOverlayState extends ConsumerState<ServerSettingsOverlay> {
         ])),
       ]),
     );
+      },
+    );
   }
-  Widget _buildContent(InfernoColors c) {
+  Widget _buildContent(InfernoColors c, Server server) {
     switch (_selectedPage) {
-      case 'overview': return _OverviewPanel(server: widget.server, colors: c);
-      case 'onboarding': return _OnboardingPanel(server: widget.server, colors: c);
-      case 'channels': return _ChannelsPanel(server: widget.server, colors: c);
-      case 'roles': return _RolesPanel(serverId: widget.server.id, server: widget.server, colors: c);
-      case 'members': return _MembersPanel(serverId: widget.server.id, server: widget.server, colors: c);
-      case 'invites': return _InvitesPanel(server: widget.server, colors: c);
-      case 'bans': return _BansPanel(serverId: widget.server.id, colors: c);
-      case 'emojis': return _EmojisPanel(server: widget.server, colors: c);
-      case 'stickers': return _StickersPanel(server: widget.server, colors: c);
-      case 'voice': return _VoicePanel(server: widget.server, colors: c);
-      case 'relays': return _RelaysPanel(server: widget.server, colors: c);
-      case 'audit_log': return _AuditLogPanel(server: widget.server, colors: c);
-      case 'delete': return _DeletePanel(server: widget.server, colors: c);
+      case 'overview': return _OverviewPanel(server: server, colors: c);
+      case 'onboarding': return _OnboardingPanel(server: server, colors: c);
+      case 'channels': return _ChannelsPanel(server: server, colors: c);
+      case 'roles': return _RolesPanel(serverId: server.id, server: server, colors: c);
+      case 'members': return _MembersPanel(serverId: server.id, server: server, colors: c);
+      case 'invites': return _InvitesPanel(server: server, colors: c);
+      case 'bans': return _BansPanel(serverId: server.id, colors: c);
+      case 'emojis': return _EmojisPanel(server: server, colors: c);
+      case 'stickers': return _StickersPanel(server: server, colors: c);
+      case 'voice': return _VoicePanel(server: server, colors: c);
+      case 'relays': return _RelaysPanel(server: server, colors: c);
+      case 'audit_log': return _AuditLogPanel(server: server, colors: c);
+      case 'delete': return _DeletePanel(server: server, colors: c);
       default: return Center(child: Text('Coming soon', style: TextStyle(color: c.gray500)));
     }
   }
@@ -288,26 +296,31 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
   }
   Future<void> _save() async {
     setState(() => _saving = true);
-    final db = ref.read(databaseProvider);
-    final auth = ref.read(authServiceProvider);
-    final now = DateTime.now();
-    await (db.update(db.servers)..where((s) => s.id.equals(widget.server.id)))
-        .write(ServersCompanion(
-      name: Value(_nameController.text.trim()),
-      description: Value(_descController.text.trim()),
-      discoverable: Value(_discoverable),
-      ageRestricted: Value(_ageRestricted),
-      welcomeMessageEnabled: Value(_welcomeMessageEnabled),
-      welcomeMessageTemplate: Value(_welcomeTemplateController.text.trim()),
-      welcomeChannelId: Value(_welcomeChannelId),
-      updatedAt: Value(now),
-    ));
-    if (auth.privateKeyHex != null) {
-      final updatedServer = await (db.select(db.servers)..where((s) => s.id.equals(widget.server.id))).getSingle();
-      final publishSvc = ref.read(serverPublishServiceProvider);
-      await publishSvc.publishMetadata(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: updatedServer);
+    try {
+      final db = ref.read(databaseProvider);
+      final auth = ref.read(authServiceProvider);
+      final now = DateTime.now();
+      await (db.update(db.servers)..where((s) => s.id.equals(widget.server.id)))
+          .write(ServersCompanion(
+        name: Value(_nameController.text.trim()),
+        description: Value(_descController.text.trim()),
+        discoverable: Value(_discoverable),
+        ageRestricted: Value(_ageRestricted),
+        welcomeMessageEnabled: Value(_welcomeMessageEnabled),
+        welcomeMessageTemplate: Value(_welcomeTemplateController.text.trim()),
+        welcomeChannelId: Value(_welcomeChannelId),
+        updatedAt: Value(now),
+      ));
+      if (auth.privateKeyHex != null) {
+        final updatedServer = await (db.select(db.servers)..where((s) => s.id.equals(widget.server.id))).getSingle();
+        final publishSvc = ref.read(serverPublishServiceProvider);
+        await publishSvc.publishMetadata(privateKeyHex: auth.privateKeyHex!, publicKeyHex: auth.publicKeyHex!, server: updatedServer);
+      }
+      if (mounted) setState(() { _dirty = false; _saving = false; });
+    } catch (e) {
+      debugPrint('[ServerSettings] Save failed: $e');
+      if (mounted) setState(() => _saving = false);
     }
-    if (mounted) setState(() { _dirty = false; _saving = false; });
   }
   @override
   Widget build(BuildContext context) {

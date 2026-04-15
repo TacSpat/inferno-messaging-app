@@ -25,6 +25,11 @@ class ServersDao extends DatabaseAccessor<InfernoDatabase>
     return query.watch().map((rows) => rows.map((r) => r.readTable(servers)).toList());
   }
 
+  // Watch a single server by ID
+  Stream<Server> watchServer(int id) {
+    return (select(servers)..where((s) => s.id.equals(id))).watchSingle();
+  }
+
   // Get a server by public ID
   Future<Server?> getByPublicId(String publicId) {
     return (select(servers)..where((s) => s.publicId.equals(publicId)))
