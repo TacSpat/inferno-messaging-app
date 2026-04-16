@@ -89,84 +89,107 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
 
     return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(flex: 2),
-              const InfernoLogo(size: 80),
-              const SizedBox(height: 16),
-              Text(
-                'Inferno',
-                style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: primary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text('Nostr-native messaging', style: TextStyle(color: Color(0xFF8899A6), fontSize: 16)),
-              const SizedBox(height: 12),
-              Text(
-                'Encrypted. Decentralized. Yours.',
-                style: TextStyle(color: primary.withValues(alpha: 0.7), fontSize: 14),
-              ),
-              if (_error != null) ...[
-                const SizedBox(height: 24),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFF3A1A1A), borderRadius: BorderRadius.circular(8)),
-                  child: Text(_error!, style: const TextStyle(color: Color(0xFFFF4D4D), fontSize: 12)),
-                ),
-              ],
-              const Spacer(flex: 2),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: ElevatedButton(
-                  onPressed: () => context.go('/auth/signup'),
-                  style: ElevatedButton.styleFrom(
-                    textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Container(color: Colors.grey[900]),
+
+          SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                child: Container(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.95),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Theme.of(context).scaffoldBackgroundColor),
                   ),
-                  child: const Text('Create Account'),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const InfernoLogo(size: 72),
+                      const SizedBox(height: 16),
+                      Text(
+                        'Inferno',
+                        style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: primary,
+                          fontFamilyFallback: [],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Encrypted · Decentralized · Yours',
+                        style: TextStyle(
+                          color: primary.withValues(alpha: 0.80),
+                          fontSize: 14,
+                          letterSpacing: 0.5,
+                          fontFamilyFallback: [],
+                        ),
+                      ),
+                      if (_error != null) ...[
+                        const SizedBox(height: 20),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF3A1A1A),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            _error!,
+                            style: const TextStyle(color: Color(0xFFFF4D4D), fontSize: 12, fontFamilyFallback: []),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 28),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () => context.go('/auth/signup'),
+                          style: ElevatedButton.styleFrom(
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          child: const Text('Create Account'),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          onPressed: () => context.go('/auth/import'),
+                          style: ElevatedButton.styleFrom(
+                            textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          child: const Text('Import Existing Identity'),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Use an encrypted backup (ncryptsec) from another Nostr client',
+                        style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 12, fontFamilyFallback: []),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 20),
+                      Consumer(builder: (context, ref, _) {
+                        final version = ref.watch(appVersionProvider);
+                        return Text(
+                          version.when(data: (v) => 'v$v', loading: () => '', error: (_, __) => ''),
+                          style: const TextStyle(color: Color(0xFF9E9E9E), fontSize: 11, fontFamilyFallback: []),
+                        );
+                      }),
+                    ],
+                  ),
                 ),
               ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                height: 52,
-                child: OutlinedButton(
-                  onPressed: () => context.go('/auth/import'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFE0E0E0),
-                    side: const BorderSide(color: Color(0xFF2A3A5C)),
-                    textStyle: const TextStyle(fontSize: 16),
-                  ),
-                  child: const Text('Import Existing Identity'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Use an encrypted backup (ncryptsec) from another Nostr client',
-                style: TextStyle(color: const Color(0xFF5C6B77), fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-              const Spacer(flex: 1),
-              // Version info
-              Consumer(builder: (context, ref, _) {
-                final version = ref.watch(appVersionProvider);
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: Text(
-                    version.when(data: (v) => 'v$v', loading: () => '', error: (_, __) => ''),
-                    style: const TextStyle(color: Color(0xFF5C6B77), fontSize: 11),
-                  ),
-                );
-              }),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
