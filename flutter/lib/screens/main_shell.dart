@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../widgets/server_rail.dart';
 import '../widgets/channel_sidebar.dart';
 import '../widgets/dm_sidebar.dart';
+import '../widgets/user_panel.dart';
 import '../widgets/member_list.dart';
 import '../widgets/friend_request_bar.dart';
 import '../database/database.dart';
@@ -13,6 +14,8 @@ import '../providers/database_provider.dart';
 import '../providers/servers_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/realtime_provider.dart';
+import '../providers/conversations_provider.dart';
+import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
 import '../widgets/message_content.dart';
@@ -49,6 +52,7 @@ class MainShellState extends ConsumerState<MainShell> {
   Channel? _channel;
   bool _showMembers = true;
   bool _showSearch = false;
+  bool _showVoiceSidechat = false;
   StreamSubscription<Channel?>? _channelSub;
 
   /// Saved scroll offsets per channel publicId — persists across channel navigation
@@ -243,13 +247,25 @@ class MainShellState extends ConsumerState<MainShell> {
               // ── Content row: sidebar + main + member list ──
               Expanded(child: Row(
                 children: [
-                  if (_activeServer != null)
-                    ChannelSidebar(
-                      server: _activeServer!,
-                      activeChannelId: widget.activeChannelId,
-                    )
-                  else
-                    const DmSidebar(),
+                  // Sidebar column: swaps between ChannelSidebar / DmSidebar on
+                  // top, but the UserPanel at the bottom is persistent so it
+                  // doesn't flicker on every transition.
+                  SizedBox(
+                    width: 240,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: _activeServer != null
+                              ? ChannelSidebar(
+                                  server: _activeServer!,
+                                  activeChannelId: widget.activeChannelId,
+                                )
+                              : const DmSidebar(),
+                        ),
+                        const UserPanel(key: ValueKey('persistent-user-panel')),
+                      ],
+                    ),
+                  ),
                   // Channel content: use IndexedStack cache for server channels,
                   // GoRouter child for everything else (conversations, etc.)
                   if (widget.activeServerId != null && widget.activeChannelId != null && _visitedChannels.isNotEmpty)
@@ -274,7 +290,10 @@ class MainShellState extends ConsumerState<MainShell> {
                       serverId: _activeServer!.id,
                       onClose: () => setState(() => _showSearch = false),
                     )
-                  else if (_activeServer != null && widget.activeChannelId != null && _showMembers)
+                  // Voice channels auto-hide the member list (the voice screen
+                  // shows participants in the main area already).
+                  else if (_activeServer != null && widget.activeChannelId != null &&
+                           _showMembers && _channel?.channelType != 1)
                     MemberList(serverId: _activeServer!.id),
                 ],
               )),
@@ -374,8 +393,12 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
           // Divider
           Container(width: 1, height: 24, color: c.gray700),
 
+          // DM conversation info — shown when viewing a /conversations/:id route
+          // so the DM screen doesn't need its own header strip.
+          if (widget.server == null)
+            Expanded(child: _DmConversationHeader(colors: c))
           // Channel info
-          if (_channel != null) ...[
+          else if (_channel != null) ...[
             const SizedBox(width: 12),
             Icon(_channel!.encrypted ? Icons.lock : Icons.tag, size: 18, color: c.gray400),
             const SizedBox(width: 6),
@@ -410,15 +433,34 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
           ] else
             const Spacer(),
 
-          // Actions
-          _HeaderBtn(icon: Icons.push_pin_outlined, tooltip: 'Pinned Messages', colors: c, onTap: () {
-            if (_channel != null) _showPinnedMessages(context, c, _channel!.id);
-          }),
-          _HeaderBtn(icon: Icons.people_outline, tooltip: 'Member List', colors: c, onTap: widget.onToggleMembers),
-          const SizedBox(width: 4),
-          // Search
-          _HeaderBtn(icon: Icons.search, tooltip: 'Search', colors: c, onTap: widget.onToggleSearch),
-          const SizedBox(width: 12),
+          // Actions — only meaningful for server channels. Hide in DM view so
+          // the unified header stays clean and doesn't show buttons that do
+          // nothing on a conversation.
+          if (widget.server != null) ...[
+            // Voice channels get a chat toggle icon instead of the member list
+            // button (participants are already visible in the voice stage).
+            if (_channel?.channelType == 1) ...[
+              Consumer(builder: (context, ref, _) {
+                final showing = ref.watch(voiceSidechatVisibleProvider);
+                return _HeaderBtn(
+                  icon: showing ? Icons.chat : Icons.chat_bubble_outline,
+                  tooltip: showing ? 'Hide chat' : 'Show chat',
+                  colors: c,
+                  onTap: () {
+                    ref.read(voiceSidechatVisibleProvider.notifier).state = !showing;
+                  },
+                );
+              }),
+            ] else ...[
+              _HeaderBtn(icon: Icons.push_pin_outlined, tooltip: 'Pinned Messages', colors: c, onTap: () {
+                if (_channel != null) _showPinnedMessages(context, c, _channel!.id);
+              }),
+              _HeaderBtn(icon: Icons.people_outline, tooltip: 'Member List', colors: c, onTap: widget.onToggleMembers),
+            ],
+            const SizedBox(width: 4),
+            _HeaderBtn(icon: Icons.search, tooltip: 'Search', colors: c, onTap: widget.onToggleSearch),
+            const SizedBox(width: 12),
+          ],
         ],
       ),
     );
@@ -475,6 +517,156 @@ class _UnifiedHeaderState extends ConsumerState<_UnifiedHeader> {
         ),
       ),
     ).then((_) => nameCtrl.dispose());
+  }
+}
+
+/// DM header slot for the unified header. Looks at the current GoRouter
+/// route — when we're viewing `/conversations/<publicId>`, it resolves the
+/// conversation and shows its name + counterparty presence. Otherwise it
+/// renders an empty Spacer so the header stays visually consistent.
+class _DmConversationHeader extends ConsumerWidget {
+  final InfernoColors colors;
+  const _DmConversationHeader({required this.colors});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final routerState = GoRouterState.of(context);
+    final segments = routerState.uri.pathSegments;
+    // Expect route shapes:
+    //   /conversations                 → contacts page, show tab pills
+    //   /conversations/<publicId>      → specific DM, show counterparty info
+    final publicId = (segments.length >= 2 && segments[0] == 'conversations')
+        ? segments[1]
+        : null;
+    if (publicId == null) {
+      // On the Contacts page — render the tab pills inline so the list
+      // screen below doesn't need its own duplicate header bar.
+      if (segments.isNotEmpty && segments[0] == 'conversations') {
+        return _ContactsTabBar(colors: colors);
+      }
+      return const SizedBox.shrink();
+    }
+
+    final db = ref.watch(databaseProvider);
+    return StreamBuilder<Conversation?>(
+      stream: (db.select(db.conversations)..where((c) => c.publicId.equals(publicId)))
+          .watchSingleOrNull(),
+      builder: (context, snap) {
+        final conv = snap.data;
+        if (conv == null) return const SizedBox.shrink();
+        final pubkey = conv.counterpartyPubkey;
+        final presenceSvc = ref.watch(presenceServiceProvider);
+        ref.watch(presenceUpdatesProvider);
+        final presence = pubkey != null
+            ? presenceSvc.getPresence(pubkey)
+            : OnlineState.offline;
+        final presenceColor = _dmPresenceColor(presence, colors);
+
+        // Resolve name from live contact row so profile updates are reflected
+        // immediately, same as the DM sidebar does.
+        return StreamBuilder<Contact?>(
+          stream: pubkey != null
+              ? (db.select(db.contacts)..where((c) => c.pubkey.equals(pubkey))).watchSingleOrNull()
+              : const Stream.empty(),
+          builder: (context, contactSnap) {
+            final contact = contactSnap.data;
+            final name = contact?.displayName
+                ?? contact?.username
+                ?? conv.counterpartyDisplayName
+                ?? conv.name
+                ?? (pubkey != null ? '${pubkey.substring(0, 12)}' : 'Unknown');
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Icon(Icons.alternate_email, size: 18, color: colors.gray400),
+                  const SizedBox(width: 6),
+                  Text(name, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15)),
+                  if (pubkey != null) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 10, height: 10,
+                      decoration: BoxDecoration(color: presenceColor, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      presence.value[0].toUpperCase() + presence.value.substring(1),
+                      style: TextStyle(color: colors.gray500, fontSize: 12),
+                    ),
+                  ],
+                  const Spacer(),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+/// Tab pills (Online / All / Pending / Blocked / Search) for the Contacts
+/// page, rendered inside the unified header. State is in [contactsTabProvider]
+/// so the list screen below stays in sync.
+class _ContactsTabBar extends ConsumerWidget {
+  final InfernoColors colors;
+  const _ContactsTabBar({required this.colors});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tab = ref.watch(contactsTabProvider);
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      child: Row(
+        children: [
+          _pill(ref, 'Online', 'online', tab),
+          const SizedBox(width: 4),
+          _pill(ref, 'All', 'all', tab),
+          const SizedBox(width: 4),
+          _pill(ref, 'Pending', 'pending', tab),
+          const SizedBox(width: 4),
+          _pill(ref, 'Blocked', 'blocked', tab),
+          const SizedBox(width: 4),
+          _pill(ref, 'Search', 'search', tab, isSearch: true),
+          const Spacer(),
+        ],
+      ),
+    );
+  }
+
+  Widget _pill(WidgetRef ref, String label, String tab, String active, {bool isSearch = false}) {
+    final isActive = tab == active;
+    return GestureDetector(
+      onTap: () => ref.read(contactsTabProvider.notifier).state = tab,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: isSearch
+                ? (isActive ? const Color(0xFF16A34A) : const Color(0xFF16A34A).withValues(alpha: 0.8))
+                : (isActive ? colors.gray600 : Colors.transparent),
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                color: isActive || isSearch ? Colors.white : colors.gray400,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              )),
+        ),
+      ),
+    );
+  }
+}
+
+Color _dmPresenceColor(OnlineState state, InfernoColors c) {
+  switch (state) {
+    case OnlineState.online: return c.online;
+    case OnlineState.idle: return c.idle;
+    case OnlineState.dnd: return c.dnd;
+    default: return c.offline;
   }
 }
 
@@ -770,35 +962,22 @@ class _PinnedPanelState extends ConsumerState<_PinnedPanel> with SingleTickerPro
                       separatorBuilder: (_, __) => const SizedBox(height: 4),
                       itemBuilder: (context, index) {
                         final msg = pinned[index];
-                        final author = msg.nostrAuthorPubkey != null ? '${msg.nostrAuthorPubkey!.substring(0, 8)}...' : 'Unknown';
                         final time = DateFormat('MM/dd h:mm a').format(msg.createdAt.toLocal());
-                        return MouseRegion(
-                          cursor: SystemMouseCursors.click,
-                          child: GestureDetector(
-                            onTap: () {
-                              final eventId = msg.nostrEventId;
-                              widget.onDismiss();
-                              if (eventId != null) {
-                                // Small delay to let panel close, then scroll
-                                Future.delayed(const Duration(milliseconds: 250), () {
-                                  MessageList.scrollToMessage(eventId);
-                                });
-                              }
-                            },
-                            child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(color: c.gray800, borderRadius: BorderRadius.circular(6)),
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Row(children: [
-                              Text(author, style: TextStyle(color: c.accent, fontWeight: FontWeight.w600, fontSize: 12)),
-                              const SizedBox(width: 6),
-                              Text(time, style: TextStyle(color: c.gray500, fontSize: 11)),
-                            ]),
-                            const SizedBox(height: 4),
-                            if (msg.content != null && msg.content!.isNotEmpty)
-                              MessageContent(content: msg.content!, colors: c, isSpoiler: msg.spoiler),
-                          ]),
-                        )));
+                        return _PinnedMessageItem(
+                          msg: msg,
+                          time: time,
+                          colors: c,
+                          db: db,
+                          onTap: () {
+                            final eventId = msg.nostrEventId;
+                            widget.onDismiss();
+                            if (eventId != null) {
+                              Future.delayed(const Duration(milliseconds: 250), () {
+                                MessageList.scrollToMessage(eventId);
+                              });
+                            }
+                          },
+                        );
                       },
                     );
                   },
@@ -809,6 +988,92 @@ class _PinnedPanelState extends ConsumerState<_PinnedPanel> with SingleTickerPro
         ),
       ),
     ]);
+  }
+}
+
+/// Single pinned message row — resolves author name + avatar from contacts /
+/// remote_members so it matches the message history display.
+class _PinnedMessageItem extends StatefulWidget {
+  final Message msg;
+  final String time;
+  final InfernoColors colors;
+  final InfernoDatabase db;
+  final VoidCallback onTap;
+  const _PinnedMessageItem({
+    required this.msg, required this.time, required this.colors,
+    required this.db, required this.onTap,
+  });
+  @override
+  State<_PinnedMessageItem> createState() => _PinnedMessageItemState();
+}
+
+class _PinnedMessageItemState extends State<_PinnedMessageItem> {
+  String _name = '';
+  String? _avatarUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _resolve();
+  }
+
+  Future<void> _resolve() async {
+    final pubkey = widget.msg.nostrAuthorPubkey;
+    if (pubkey == null) {
+      if (mounted) setState(() => _name = 'Unknown');
+      return;
+    }
+    String name = '${pubkey.substring(0, 8)}...';
+    String? avatar;
+    final contact = await (widget.db.select(widget.db.contacts)
+          ..where((c) => c.pubkey.equals(pubkey)))
+        .getSingleOrNull();
+    if (contact != null) {
+      name = contact.displayName ?? contact.username ?? name;
+      avatar = contact.avatarUrl;
+    } else {
+      final members = await (widget.db.select(widget.db.remoteMembers)
+            ..where((m) => m.pubkey.equals(pubkey))
+            ..limit(1))
+          .get();
+      if (members.isNotEmpty) {
+        name = members.first.displayName ?? members.first.username ?? name;
+        avatar = members.first.avatarUrl;
+      }
+    }
+    if (mounted) setState(() { _name = name; _avatarUrl = avatar; });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(color: c.gray800, borderRadius: BorderRadius.circular(6)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              if (_avatarUrl != null && _avatarUrl!.startsWith('http'))
+                CircleAvatar(radius: 10, backgroundImage: NetworkImage(_avatarUrl!), backgroundColor: Colors.transparent)
+              else
+                CircleAvatar(radius: 10, backgroundColor: c.gray700,
+                  child: Text(_name.isNotEmpty ? _name[0].toUpperCase() : '?',
+                    style: TextStyle(color: c.gray200, fontSize: 10, fontWeight: FontWeight.w600))),
+              const SizedBox(width: 6),
+              Text(_name, style: TextStyle(color: c.accent, fontWeight: FontWeight.w600, fontSize: 12)),
+              const SizedBox(width: 6),
+              Text(widget.time, style: TextStyle(color: c.gray500, fontSize: 11)),
+            ]),
+            const SizedBox(height: 4),
+            if (widget.msg.content != null && widget.msg.content!.isNotEmpty)
+              MessageContent(content: widget.msg.content!, colors: c, isSpoiler: widget.msg.spoiler),
+          ]),
+        ),
+      ),
+    );
   }
 }
 

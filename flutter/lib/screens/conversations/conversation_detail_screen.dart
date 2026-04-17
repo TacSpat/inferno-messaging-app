@@ -16,9 +16,6 @@ import '../../services/blossom_client.dart';
 import '../../services/content_safety_service.dart';
 import '../../services/dm_service.dart';
 import '../../services/group_message_service.dart';
-import '../../services/presence_service.dart';
-import '../../theme/all_themes.dart';
-import '../../theme/theme_provider.dart';
 
 class ConversationDetailScreen extends ConsumerStatefulWidget {
   final String conversationPublicId;
@@ -136,6 +133,18 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       fileUrls: fileUrls,
       spoiler: spoiler,
     );
+    final err = dmService.lastSendError;
+    if (err != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(err),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _sendMessage(content, spoiler: spoiler, fileUrls: fileUrls),
+          ),
+        ),
+      );
+    }
   }
 
   @override
@@ -144,54 +153,17 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       return const Center(child: CircularProgressIndicator());
     }
 
-    final c = ref.watch(infernoColorsProvider);
-    final presenceSvc = ref.watch(presenceServiceProvider);
-    ref.watch(presenceUpdatesProvider); // Trigger rebuild on presence changes
-
+    // Header lives in MainShell's unified header; this screen only renders
+    // the messages / typing / input stack so the two don't duplicate.
     final name = _conversation!.counterpartyDisplayName
         ?? _conversation!.name
         ?? _conversation!.counterpartyPubkey?.substring(0, 12)
         ?? 'Unknown';
 
-    final presence = _conversation!.counterpartyPubkey != null
-        ? presenceSvc.getPresence(_conversation!.counterpartyPubkey!)
-        : OnlineState.offline;
-
-    final messagesAsync = ref.watch(conversationMessagesProvider(_conversation!.id));
+    ref.watch(conversationMessagesProvider(_conversation!.id));
 
     return Column(
       children: [
-        // DM header (matches Rails conversation header style)
-        Container(
-          height: 48,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: c.gray700,
-            border: Border(bottom: BorderSide(color: c.gray900)),
-          ),
-          child: Row(
-            children: [
-              Icon(Icons.alternate_email, size: 20, color: c.gray400),
-              const SizedBox(width: 8),
-              Text(name, style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
-              const SizedBox(width: 8),
-              // Presence dot
-              Container(
-                width: 10, height: 10,
-                decoration: BoxDecoration(
-                  color: _presenceColor(presence, c),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(presence.value[0].toUpperCase() + presence.value.substring(1),
-                style: TextStyle(color: c.gray500, fontSize: 12)),
-              const Spacer(),
-              // Pin button placeholder
-              _HeaderAction(icon: Icons.push_pin_outlined, tooltip: 'Pinned Messages', colors: c, onTap: () {}),
-            ],
-          ),
-        ),
         // Messages — same layout as server channels
         Expanded(
           child: MessageList(conversationId: _conversation!.id),
@@ -199,7 +171,7 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
         // Typing indicator
         if (_conversation!.counterpartyPubkey != null)
           Consumer(builder: (context, ref, _) {
-            final typingAsync = ref.watch(typingUsersProvider(_conversation!.counterpartyPubkey!));
+            final typingAsync = ref.watch(dmTypingProvider(_conversation!.counterpartyPubkey!));
             return typingAsync.when(
               data: (users) {
                 final auth = ref.read(authServiceProvider);
@@ -235,10 +207,10 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
             final auth = ref.read(authServiceProvider);
             if (auth.privateKeyHex == null) return;
             final typingSvc = ref.read(typingServiceProvider);
-            typingSvc.sendTyping(
+            typingSvc.sendDmTyping(
               privateKeyHex: auth.privateKeyHex!,
               publicKeyHex: auth.publicKeyHex!,
-              channelGroupId: _conversation!.counterpartyPubkey!,
+              recipientPubkey: _conversation!.counterpartyPubkey!,
             );
           },
         ),
@@ -246,45 +218,4 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
     );
   }
 
-  static Color _presenceColor(OnlineState state, InfernoColors c) {
-    switch (state) {
-      case OnlineState.online: return c.online;
-      case OnlineState.idle: return c.idle;
-      case OnlineState.dnd: return c.dnd;
-      default: return c.offline;
-    }
-  }
-}
-
-class _HeaderAction extends StatefulWidget {
-  final IconData icon;
-  final String tooltip;
-  final InfernoColors colors;
-  final VoidCallback onTap;
-  const _HeaderAction({required this.icon, required this.tooltip, required this.colors, required this.onTap});
-  @override
-  State<_HeaderAction> createState() => _HeaderActionState();
-}
-
-class _HeaderActionState extends State<_HeaderAction> {
-  bool _hovering = false;
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: widget.tooltip,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 6),
-            child: Icon(widget.icon, size: 20,
-              color: _hovering ? widget.colors.gray200 : widget.colors.gray400),
-          ),
-        ),
-      ),
-    );
-  }
 }

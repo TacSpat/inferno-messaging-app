@@ -26,85 +26,32 @@ class ConversationsListScreen extends ConsumerStatefulWidget {
 }
 
 class _ConversationsListScreenState extends ConsumerState<ConversationsListScreen> {
-  late String _tab = widget.initialTab ?? 'all';
+  @override
+  void initState() {
+    super.initState();
+    // Seed the shared tab state if the route arrived with ?tab=...
+    if (widget.initialTab != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(contactsTabProvider.notifier).state = widget.initialTab!;
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = ref.watch(infernoColorsProvider);
+    final tab = ref.watch(contactsTabProvider);
 
     return Material(
       color: c.gray700,
-      child: Column(
-      children: [
-        // Header
-        Container(
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: c.gray900)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Icon(Icons.person, size: 20, color: c.gray400),
-                    const SizedBox(width: 8),
-                    Text('Contacts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-                child: Row(
-                  children: [
-                    _TabPill('Online', 'online', c),
-                    const SizedBox(width: 4),
-                    _TabPill('All', 'all', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Pending', 'pending', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Blocked', 'blocked', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Search', 'search', c, isSearch: true),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: _buildTabContent(c)),
-      ],
-    ),
+      child: _buildTabContent(tab, c),
     );
   }
 
-  Widget _TabPill(String label, String tab, InfernoColors c, {bool isSearch = false}) {
-    final active = _tab == tab;
-    return GestureDetector(
-      onTap: () => setState(() => _tab = tab),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: isSearch
-                ? (active ? const Color(0xFF16A34A) : const Color(0xFF16A34A).withValues(alpha: 0.8))
-                : (active ? c.gray600 : Colors.transparent),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(label, style: TextStyle(
-            color: active || isSearch ? Colors.white : c.gray400,
-            fontSize: 14, fontWeight: FontWeight.w500,
-          )),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabContent(InfernoColors c) {
-    switch (_tab) {
+  Widget _buildTabContent(String tab, InfernoColors c) {
+    switch (tab) {
       case 'search':
         return _SearchTab(colors: c);
       case 'pending':
@@ -112,7 +59,7 @@ class _ConversationsListScreenState extends ConsumerState<ConversationsListScree
       case 'blocked':
         return _BlockedTab(colors: c);
       default:
-        return _ContactsTab(tab: _tab, colors: c);
+        return _ContactsTab(tab: tab, colors: c);
     }
   }
 }

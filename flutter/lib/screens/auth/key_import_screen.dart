@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:file_picker/file_picker.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/key_management_service.dart';
 
 enum _KeyFormat { unknown, nsec, ncryptsec }
 
@@ -116,7 +118,47 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                   color: const Color(0xFF8899A6),
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+              // Import from file
+              OutlinedButton.icon(
+                onPressed: () async {
+                  try {
+                    final picked = await FilePicker.platform.pickFiles(
+                      type: FileType.custom,
+                      allowedExtensions: ['key', 'txt'],
+                    );
+                    if (picked == null || picked.files.isEmpty) return;
+                    final path = picked.files.first.path;
+                    if (path == null) return;
+                    final contents = await KeyManagementService.importFromFile(path);
+                    _keyController.text = contents;
+                    _detectFormat(contents);
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to read file: $e')),
+                      );
+                    }
+                  }
+                },
+                icon: const Icon(Icons.file_open, size: 18),
+                label: const Text('Import from File'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFE0E0E0),
+                  side: const BorderSide(color: Color(0xFF2A3A5C)),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(children: [
+                Expanded(child: Divider(color: const Color(0xFF2A3A5C))),
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: Text('or paste key', style: TextStyle(color: Color(0xFF5C6B77), fontSize: 12)),
+                ),
+                Expanded(child: Divider(color: const Color(0xFF2A3A5C))),
+              ]),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _keyController,
                 decoration: const InputDecoration(

@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show Value, TableUpdateQuery;
+import '../utils/stream_debounce.dart';
+import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -47,7 +49,11 @@ class MessageList extends ConsumerStatefulWidget {
 }
 
 class _MessageListState extends ConsumerState<MessageList> {
-  ScrollController? _scrollController;
+  // ItemScrollController lets us jump to a specific index reliably regardless
+  // of variable item heights. Paired with the ItemPositionsListener so we can
+  // keep the saved scroll restore behavior.
+  final ItemScrollController _itemController = ItemScrollController();
+  final ItemPositionsListener _itemPositions = ItemPositionsListener.create();
   // Cache resolved author info: pubkey -> {name, avatarUrl}
   final Map<String, _AuthorInfo> _authorCache = {};
   // Cached reference to MainShellState — saved early so it's safe to use in dispose()
@@ -70,6 +76,11 @@ class _MessageListState extends ConsumerState<MessageList> {
   // NSFW channel blur — null means not yet loaded from settings
   bool? _blurNsfwSetting;
 
+  // Invalidates the author resolve cache and triggers a rebuild whenever the
+  // contacts / remote_members tables change so avatars + display names update
+  // live as profile metadata streams in (matches member list behavior).
+  StreamSubscription<void>? _profileUpdatesSub;
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +89,23 @@ class _MessageListState extends ConsumerState<MessageList> {
     _loadPermissions();
     _loadNsfwBlur();
     _initScrollController();
+    _subscribeToProfileUpdates();
+  }
+
+  void _subscribeToProfileUpdates() {
+    _profileUpdatesSub?.cancel();
+    final db = ref.read(databaseProvider);
+    // Debounce profile table changes — during sync dozens of Kind 0 events
+    // fire rapidly. Only rebuild once the burst settles.
+    _profileUpdatesSub = db
+        .tableUpdates(TableUpdateQuery.onAllTables([db.contacts, db.remoteMembers]))
+        .debounce(const Duration(milliseconds: 500))
+        .listen((_) {
+      if (!mounted) return;
+      _authorCache.clear();
+      _pendingResolves.clear();
+      setState(() {});
+    });
   }
 
   @override
@@ -92,8 +120,6 @@ class _MessageListState extends ConsumerState<MessageList> {
     if (oldWidget.channelId != widget.channelId || oldWidget.conversationId != widget.conversationId) {
       // Save current scroll offset for the old channel/conversation
       _saveScrollOffset(oldWidget.channelId ?? oldWidget.conversationId ?? 0);
-      // Create new controller for the new channel
-      _scrollController?.dispose();
       _initScrollController();
       _authorCache.clear();
       _mentionInfoLoaded = false;
@@ -239,21 +265,29 @@ class _MessageListState extends ConsumerState<MessageList> {
   }
 
   void _initScrollController() {
-    final savedOffset = _mainShell?.getScrollOffset((widget.channelId ?? widget.conversationId ?? 0).toString());
-    _scrollController = ScrollController(initialScrollOffset: savedOffset ?? 0.0);
+    _savedTopIndex = _mainShell
+        ?.getScrollOffset((widget.channelId ?? widget.conversationId ?? 0).toString())
+        ?.toInt();
   }
 
+  int? _savedTopIndex;
+
   void _saveScrollOffset(int channelId) {
-    if (_scrollController != null && _scrollController!.hasClients) {
-      _mainShell?.saveScrollOffset(channelId.toString(), _scrollController!.offset);
-    }
+    // Save the top visible item index so the list can restore to roughly the
+    // same spot on the next mount. ItemPositionsListener exposes the mounted
+    // items; the one with the smallest itemLeadingEdge is at the top.
+    final positions = _itemPositions.itemPositions.value;
+    if (positions.isEmpty) return;
+    final top = positions.reduce((a, b) =>
+        a.itemLeadingEdge < b.itemLeadingEdge ? a : b);
+    _mainShell?.saveScrollOffset(channelId.toString(), top.index.toDouble());
   }
 
   @override
   void dispose() {
     if (MessageList._activeInstance == this) MessageList._activeInstance = null;
     _saveScrollOffset(widget.channelId ?? widget.conversationId ?? 0);
-    _scrollController?.dispose();
+    _profileUpdatesSub?.cancel();
     super.dispose();
   }
 
@@ -262,51 +296,27 @@ class _MessageListState extends ConsumerState<MessageList> {
 
   /// Scroll to a message by nostrEventId and highlight it briefly
   Future<void> _scrollToAndHighlight(String nostrEventId) async {
-    if (_scrollController == null || !_scrollController!.hasClients) return;
-
-    final index = _lastMessages.indexWhere((m) => m.nostrEventId == nostrEventId);
+    // If the target isn't in the currently-loaded window yet, retry a few
+    // times — the message may still be streaming in, or the user clicked a
+    // reply pointing to an older message that's about to arrive.
+    int index = _lastMessages.indexWhere((m) => m.nostrEventId == nostrEventId);
+    for (int attempt = 0; attempt < 5 && index == -1; attempt++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      if (!mounted) return;
+      index = _lastMessages.indexWhere((m) => m.nostrEventId == nostrEventId);
+    }
     if (index == -1) return;
 
     setState(() => _highlightedEventId = nostrEventId);
 
-    final maxScroll = _scrollController!.position.maxScrollExtent;
-    final totalMessages = _lastMessages.length;
-    if (totalMessages == 0) return;
-
-    // Phase 1: Quick jump to approximate area (gets message into the build tree)
-    final fraction = index / totalMessages;
-    final approxOffset = (fraction * maxScroll).clamp(0.0, maxScroll);
-    _scrollController!.jumpTo(approxOffset);
-
-    // Wait for the frame to build so the GlobalObjectKey is available
-    await _waitForBuild();
-
-    // Phase 2: Precise smooth scroll to center the actual message widget
-    for (int attempt = 0; attempt < 3; attempt++) {
-      if (!mounted) return;
-      final ctx = GlobalObjectKey('msg-$nostrEventId').currentContext;
-      if (ctx != null) {
-        await Scrollable.ensureVisible(ctx,
-          duration: const Duration(milliseconds: 500),
-          curve: Curves.easeInOutCubic,
-          alignment: 0.5, // center of viewport
-        );
-        return _scheduleHighlightClear();
-      }
-      // Not found yet — nudge the scroll and retry
-      final nudge = (attempt + 1) * 200.0;
-      final nudged = (approxOffset + nudge).clamp(0.0, maxScroll);
-      _scrollController!.jumpTo(nudged);
-      await _waitForBuild();
+    if (_itemController.isAttached) {
+      // jumpTo sidesteps the semantics-collection race that scrollTo's
+      // animation pipeline triggers in scrollable_positioned_list
+      // (`!childSemantics.renderObject._needsLayout` assertions after a few
+      // animated jumps). Instant jump = no animated frames = no bug.
+      _itemController.jumpTo(index: index);
     }
-
     _scheduleHighlightClear();
-  }
-
-  Future<void> _waitForBuild() async {
-    final completer = Completer<void>();
-    WidgetsBinding.instance.addPostFrameCallback((_) => completer.complete());
-    await completer.future;
   }
 
   void _scheduleHighlightClear() {
@@ -418,6 +428,13 @@ class _MessageListState extends ConsumerState<MessageList> {
       emoji: emoji,
       channelGroupId: widget.channel?.nostrGroupId,
     );
+    if (svc.lastAddWasBlocked && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Reaction limit reached (15 emojis per message).'),
+        ),
+      );
+    }
   }
 
   @override
@@ -467,13 +484,25 @@ class _MessageListState extends ConsumerState<MessageList> {
           );
         }
 
-        return ListView.builder(
-          controller: _scrollController,
+        final initialIndex = (_savedTopIndex != null &&
+                _savedTopIndex! >= 0 &&
+                _savedTopIndex! < messages.length)
+            ? _savedTopIndex!
+            : 0;
+        // ExcludeSemantics works around a known layout-ordering assertion in
+        // scrollable_positioned_list on Flutter 3.4x where the semantics tree
+        // is walked before child layout finishes, producing
+        // `!childSemantics.renderObject._needsLayout` failures every frame.
+        // We don't expose per-message accessibility nodes today.
+        return ExcludeSemantics(
+          child: ScrollablePositionedList.builder(
+          itemScrollController: _itemController,
+          itemPositionsListener: _itemPositions,
+          initialScrollIndex: initialIndex,
           reverse: true,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           itemCount: messages.length,
           addAutomaticKeepAlives: true,
-          cacheExtent: 2000, // keep 2000px of off-screen content alive
           itemBuilder: (context, index) {
             final msg = messages[index];
             final prevMsg = index < messages.length - 1 ? messages[index + 1] : null;
@@ -529,7 +558,7 @@ class _MessageListState extends ConsumerState<MessageList> {
               ),
             ));
           },
-        );
+        ));
       },
     );
   }
@@ -935,6 +964,16 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        // Reply indicator — mini avatar + author + snippet,
+                        // click to jump to the parent. Rendered before the
+                        // author line so it sits above the replier's name.
+                        if (msg.parentId != null)
+                          _ReplyIndicator(
+                            db: widget.db,
+                            parentId: msg.parentId!,
+                            colors: c,
+                            customEmojis: widget.customEmojis,
+                          ),
                         if (!widget.isGrouped)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 2),
@@ -967,16 +1006,6 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
                               Icon(Icons.push_pin, size: 12, color: c.idle),
                               const SizedBox(width: 4),
                               Text('Pinned', style: TextStyle(color: c.idle, fontSize: 12)),
-                            ]),
-                          ),
-                        // Reply indicator
-                        if (msg.parentId != null)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 4),
-                            child: Row(children: [
-                              Icon(Icons.reply, size: 14, color: c.gray500),
-                              const SizedBox(width: 4),
-                              Text('Reply to a message', style: TextStyle(color: c.gray500, fontSize: 12, fontStyle: FontStyle.italic)),
                             ]),
                           ),
                         if ((msg.content != null && msg.content!.isNotEmpty) || (msg.fileUrls != null && msg.fileUrls!.isNotEmpty))
@@ -1194,6 +1223,155 @@ class _SystemMessage extends StatelessWidget {
         const SizedBox(width: 8),
         Text(DateFormat('MM/dd/yyyy h:mm a').format(message.createdAt.toLocal()), style: TextStyle(color: colors.gray500, fontSize: 12)),
       ]),
+    );
+  }
+}
+
+/// Small inline preview shown above a reply: parent author avatar + name +
+/// a one-line snippet of the parent message. Tapping scrolls the list to
+/// the parent and briefly highlights it.
+class _ReplyIndicator extends StatefulWidget {
+  final InfernoDatabase db;
+  final int parentId;
+  final InfernoColors colors;
+  final Map<String, String> customEmojis;
+  const _ReplyIndicator({
+    required this.db,
+    required this.parentId,
+    required this.colors,
+    this.customEmojis = const {},
+  });
+
+  @override
+  State<_ReplyIndicator> createState() => _ReplyIndicatorState();
+}
+
+class _ReplyIndicatorState extends State<_ReplyIndicator> {
+  Message? _parent;
+  String? _authorName;
+  String? _authorAvatarUrl;
+  Color? _authorColor;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReplyIndicator old) {
+    super.didUpdateWidget(old);
+    if (old.parentId != widget.parentId) _load();
+  }
+
+  Future<void> _load() async {
+    final parent = await (widget.db.select(widget.db.messages)
+          ..where((m) => m.id.equals(widget.parentId)))
+        .getSingleOrNull();
+    if (!mounted) return;
+    if (parent == null) {
+      setState(() => _parent = null);
+      return;
+    }
+    String? name;
+    String? avatar;
+    Color? color;
+    final pubkey = parent.nostrAuthorPubkey;
+    if (pubkey != null) {
+      // Prefer a server-scoped remote_members row (gives role color) and fall
+      // back to the contacts row.
+      final members = await (widget.db.select(widget.db.remoteMembers)
+            ..where((m) => m.pubkey.equals(pubkey)))
+          .get();
+      final rm = members.isEmpty
+          ? null
+          : members.reduce((best, m) {
+              int score(RemoteMember r) => [r.displayName, r.avatarUrl, r.profileColor]
+                  .where((v) => v != null && v.isNotEmpty)
+                  .length;
+              return score(m) > score(best) ? m : best;
+            });
+      final contact = await (widget.db.select(widget.db.contacts)
+            ..where((c) => c.pubkey.equals(pubkey)))
+          .getSingleOrNull();
+      name = rm?.displayName ?? rm?.username ?? contact?.displayName ?? contact?.username;
+      avatar = rm?.avatarUrl ?? contact?.avatarUrl;
+      final colorHex = rm?.profileColor;
+      if (colorHex != null && colorHex.isNotEmpty) {
+        try {
+          color = Color(int.parse(colorHex.replaceFirst('#', 'FF'), radix: 16));
+        } catch (_) {}
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _parent = parent;
+      _authorName = name ?? (pubkey != null ? '${pubkey.substring(0, 8)}…' : 'Unknown');
+      _authorAvatarUrl = avatar;
+      _authorColor = color;
+    });
+  }
+
+  void _jumpToParent() {
+    final eventId = _parent?.nostrEventId;
+    if (eventId == null) return;
+    MessageList.scrollToMessage(eventId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    if (_parent == null) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Row(children: [
+          Icon(Icons.reply, size: 12, color: c.gray500),
+          const SizedBox(width: 4),
+          Text('Reply to a message', style: TextStyle(color: c.gray500, fontSize: 12, fontStyle: FontStyle.italic)),
+        ]),
+      );
+    }
+    final snippet = (_parent!.content ?? '').replaceAll('\n', ' ').trim();
+    final nameColor = _authorColor ?? c.accent;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: _jumpToParent,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Row(crossAxisAlignment: CrossAxisAlignment.center, children: [
+            Icon(Icons.reply, size: 12, color: c.gray500),
+            const SizedBox(width: 4),
+            CircleAvatar(
+              radius: 9,
+              backgroundColor: c.gray700,
+              backgroundImage: _authorAvatarUrl != null && _authorAvatarUrl!.startsWith('http')
+                  ? NetworkImage(_authorAvatarUrl!)
+                  : null,
+              child: (_authorAvatarUrl == null || !_authorAvatarUrl!.startsWith('http'))
+                  ? Text((_authorName ?? '?')[0].toUpperCase(),
+                      style: TextStyle(color: c.gray200, fontSize: 9, fontWeight: FontWeight.w600))
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            Text('@${_authorName ?? 'Unknown'}',
+                style: TextStyle(color: nameColor, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                snippet.isEmpty ? '(attachment)' : snippet,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: c.gray400,
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 }

@@ -22,7 +22,6 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
   String? _npub;
   String? _ncryptsec;
   bool _generating = false;
-  final _accountPasswordController = TextEditingController();
   final _backupPasswordController = TextEditingController();
 
   // Profile data
@@ -43,7 +42,6 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
 
   @override
   void dispose() {
-    _accountPasswordController.dispose();
     _backupPasswordController.dispose();
     super.dispose();
   }
@@ -182,8 +180,6 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
             Text('Export your private key encrypted with a backup password. Store the ncryptsec safely \u2014 you can import it on any compatible Nostr client.',
               style: TextStyle(color: c.gray500, fontSize: 12)),
             const SizedBox(height: 12),
-            _inputField('Account password', _accountPasswordController, c, hint: 'Your account password'),
-            const SizedBox(height: 8),
             _inputField('Backup password (min 8 characters)', _backupPasswordController, c, hint: 'Choose a strong backup password'),
             const SizedBox(height: 12),
             SizedBox(
@@ -323,11 +319,9 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
                 ),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(
-                    _displayName.isNotEmpty ? _displayName : _username,
+                    _displayName.isNotEmpty ? _displayName : 'User',
                     style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  if (_username.isNotEmpty)
-                    Text(_username, style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14)),
                   const SizedBox(height: 12),
                   Container(height: 1, color: Colors.white.withValues(alpha: 0.1)),
                   const SizedBox(height: 12),

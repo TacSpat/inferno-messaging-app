@@ -4,6 +4,7 @@ import '../tables/messages.dart';
 import '../tables/reactions.dart';
 import '../tables/channel_reads.dart';
 import '../tables/conversations.dart';
+import '../../utils/stream_debounce.dart';
 
 part 'messages_dao.g.dart';
 
@@ -21,13 +22,15 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
         .get();
   }
 
-  // Watch messages for a channel (reactive)
-  Stream<List<Message>> watchChannelMessages(int channelId, {int limit = 50}) {
+  // Watch messages for a channel (reactive). Debounced so rapid-fire inserts
+  // during relay sync collapse into a single UI rebuild once the burst settles.
+  Stream<List<Message>> watchChannelMessages(int channelId, {int limit = 500}) {
     return (select(messages)
           ..where((m) => m.channelId.equals(channelId))
           ..orderBy([(m) => OrderingTerm.desc(m.createdAt)])
           ..limit(limit))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Get messages for a conversation (DM)
@@ -42,7 +45,7 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
   // Watch messages for a conversation (reactive).
   // Filters out system DMs (voice handshakes, state sync) that were
   // stored before the ingest guard was added.
-  Stream<List<Message>> watchConversationMessages(int conversationId, {int limit = 50}) {
+  Stream<List<Message>> watchConversationMessages(int conversationId, {int limit = 500}) {
     return (select(messages)
           ..where((m) =>
               m.conversationId.equals(conversationId) &
@@ -50,7 +53,8 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
               m.content.like('{"type":"friend_%').not())
           ..orderBy([(m) => OrderingTerm.desc(m.createdAt)])
           ..limit(limit))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Get a single message by public ID
@@ -96,10 +100,11 @@ class MessagesDao extends DatabaseAccessor<InfernoDatabase>
         .watch();
   }
 
-  // Watch reactions for a message
+  // Watch reactions for a message (debounced — reactions arrive in bursts during sync)
   Stream<List<Reaction>> watchReactions(int messageId) {
     return (select(reactions)..where((r) => r.messageId.equals(messageId)))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Count messages in a channel since a timestamp (for unread badges)

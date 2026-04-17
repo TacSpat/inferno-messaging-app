@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:drift/drift.dart' show Value;
+import 'package:http/http.dart' as http;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -22,7 +23,6 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   final _displayNameController = TextEditingController();
-  final _usernameController = TextEditingController();
   final _bioController = TextEditingController();
   final _avatarUrlController = TextEditingController();
   final _bannerUrlController = TextEditingController();
@@ -62,7 +62,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     if (mounted) {
       setState(() {
         _displayNameController.text = contact?.displayName ?? contact?.username ?? '';
-        _usernameController.text = contact?.username ?? '';
         _bioController.text = contact?.bio ?? '';
         _avatarUrlController.text = contact?.avatarUrl ?? '';
         _bannerUrlController.text = contact?.bannerUrl ?? '';
@@ -78,7 +77,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   @override
   void dispose() {
     _displayNameController.dispose();
-    _usernameController.dispose();
     _bioController.dispose();
     _avatarUrlController.dispose();
     _bannerUrlController.dispose();
@@ -116,7 +114,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         final results = await profileService.publishProfile(
           privateKeyHex: auth.privateKeyHex!,
           publicKeyHex: auth.publicKeyHex!,
-          username: _usernameController.text.isNotEmpty ? _usernameController.text : 'user',
+          username: _displayNameController.text.isNotEmpty ? _displayNameController.text : 'user',
           displayName: _displayNameController.text.isNotEmpty ? _displayNameController.text : null,
           about: _bioController.text.isNotEmpty ? _bioController.text : null,
           pictureUrl: _avatarUrlController.text.isNotEmpty ? _avatarUrlController.text : null,
@@ -197,7 +195,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final avatarUrl = validImageUrl(_avatarUrlController.text.trim());
     final initial = _displayNameController.text.isNotEmpty
         ? _displayNameController.text[0].toUpperCase()
-        : _usernameController.text.isNotEmpty ? _usernameController.text[0].toUpperCase() : '?';
+        : '?';
 
     return Container(
       decoration: BoxDecoration(
@@ -379,11 +377,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           const SizedBox(height: 8),
           _textField(_displayNameController, c, suffixIcon: Icons.emoji_emotions_outlined),
           const SizedBox(height: 16),
-          // Username
-          _fieldLabel('USERNAME', c),
-          const SizedBox(height: 8),
-          _textField(_usernameController, c),
-          const SizedBox(height: 16),
           // About Me
           _fieldLabel('ABOUT ME', c),
           const SizedBox(height: 8),
@@ -474,7 +467,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
     final bannerUrl = validImageUrl(_bannerUrlController.text.trim());
     final avatarUrl = validImageUrl(_avatarUrlController.text.trim());
     final displayName = _displayNameController.text.isNotEmpty ? _displayNameController.text : 'Display Name';
-    final username = _usernameController.text;
     final bio = _bioController.text;
     final status = _statusController.text;
     final initial = displayName[0].toUpperCase();
@@ -541,8 +533,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(displayName, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-                if (username.isNotEmpty)
-                  Text(username, style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12)),
                 if (status.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Row(
@@ -648,13 +638,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           return AlertDialog(
             backgroundColor: c.gray800,
             title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16)),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Upload + crop button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Live preview of whatever URL is currently in the field so
+                  // the user can see their existing image before editing.
+                  _ImagePreview(
+                    url: urlController.text,
+                    mode: cropMode,
+                    colors: c,
+                  ),
+                  const SizedBox(height: 12),
+                  // Upload a new image + crop.
+                  OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: c.gray200,
                       side: BorderSide(color: c.gray600),
@@ -668,8 +667,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       if (picked == null || picked.files.isEmpty) return;
                       final path = picked.files.first.path;
                       if (path == null) return;
-
-                      // Read file bytes and show crop dialog
                       final bytes = await File(path).readAsBytes();
                       if (!ctx.mounted) return;
                       final cropped = await showImageCropDialog(
@@ -680,11 +677,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         accentColor: c.accent,
                       );
                       if (cropped == null || !ctx.mounted) return;
-
-                      // Upload cropped image to Blossom
                       setDialogState(() => uploading = true);
                       final auth = ref.read(authServiceProvider);
-                      if (auth.privateKeyHex == null) return;
+                      if (auth.privateKeyHex == null) {
+                        setDialogState(() => uploading = false);
+                        return;
+                      }
                       final url = await BlossomClient.upload(
                         fileBytes: cropped,
                         privateKeyHex: auth.privateKeyHex!,
@@ -693,7 +691,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                       );
                       setDialogState(() => uploading = false);
                       if (url != null) {
-                        urlController.text = url;
+                        setDialogState(() => urlController.text = url);
                       } else if (ctx.mounted) {
                         ScaffoldMessenger.of(ctx).showSnackBar(
                           const SnackBar(content: Text('Upload failed')),
@@ -705,28 +703,88 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         : const Icon(Icons.upload_file, size: 18),
                     label: Text(uploading ? 'Uploading...' : 'Upload Image'),
                   ),
-                ),
-                const SizedBox(height: 16),
-                Row(children: [
-                  Expanded(child: Divider(color: c.gray600)),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text('or paste URL', style: TextStyle(color: c.gray500, fontSize: 12)),
+                  const SizedBox(height: 8),
+                  // Edit placement on the currently-set image (fetches bytes
+                  // from the URL → crop dialog → re-uploads).
+                  if (urlController.text.trim().isNotEmpty)
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: c.gray200,
+                        side: BorderSide(color: c.gray600),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      onPressed: uploading ? null : () async {
+                        setDialogState(() => uploading = true);
+                        try {
+                          final resp = await http.get(Uri.parse(urlController.text.trim()));
+                          if (resp.statusCode != 200) throw Exception('HTTP ${resp.statusCode}');
+                          final bytes = resp.bodyBytes;
+                          if (!ctx.mounted) return;
+                          final cropped = await showImageCropDialog(
+                            ctx,
+                            imageBytes: bytes,
+                            mode: cropMode,
+                            backgroundColor: c.gray800,
+                            accentColor: c.accent,
+                          );
+                          if (cropped == null || !ctx.mounted) {
+                            setDialogState(() => uploading = false);
+                            return;
+                          }
+                          final auth = ref.read(authServiceProvider);
+                          if (auth.privateKeyHex == null) {
+                            setDialogState(() => uploading = false);
+                            return;
+                          }
+                          final url = await BlossomClient.upload(
+                            fileBytes: cropped,
+                            privateKeyHex: auth.privateKeyHex!,
+                            publicKeyHex: auth.publicKeyHex!,
+                            contentType: 'image/png',
+                          );
+                          setDialogState(() => uploading = false);
+                          if (url != null) {
+                            setDialogState(() => urlController.text = url);
+                          } else if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(content: Text('Upload failed')),
+                            );
+                          }
+                        } catch (e) {
+                          setDialogState(() => uploading = false);
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(content: Text('Could not load current image: $e')),
+                            );
+                          }
+                        }
+                      },
+                      icon: const Icon(Icons.crop, size: 18),
+                      label: const Text('Edit Placement'),
+                    ),
+                  const SizedBox(height: 16),
+                  Row(children: [
+                    Expanded(child: Divider(color: c.gray600)),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text('or paste URL', style: TextStyle(color: c.gray500, fontSize: 12)),
+                    ),
+                    Expanded(child: Divider(color: c.gray600)),
+                  ]),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: urlController,
+                    onChanged: (_) => setDialogState(() {}),
+                    style: TextStyle(color: c.gray200, fontSize: 14),
+                    decoration: InputDecoration(
+                      hintText: 'https://...',
+                      hintStyle: TextStyle(color: c.gray600),
+                      filled: true, fillColor: c.gray900,
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray600)),
+                    ),
                   ),
-                  Expanded(child: Divider(color: c.gray600)),
-                ]),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: urlController,
-                  style: TextStyle(color: c.gray200, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'https://...',
-                    hintStyle: TextStyle(color: c.gray600),
-                    filled: true, fillColor: c.gray900,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray600)),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: c.gray400))),
@@ -1020,6 +1078,76 @@ class _ColorSwatchState extends State<_ColorSwatch> {
               width: _hovering ? 2 : 1,
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Preview of the current avatar/banner image inside the edit dialog so the
+/// user can see what's already set before deciding whether to replace or
+/// re-crop it.
+class _ImagePreview extends StatelessWidget {
+  final String url;
+  final CropMode mode;
+  final InfernoColors colors;
+  const _ImagePreview({required this.url, required this.mode, required this.colors});
+
+  @override
+  Widget build(BuildContext context) {
+    final valid = validImageUrl(url);
+    final isBanner = mode == CropMode.banner;
+
+    if (valid == null) {
+      return Container(
+        height: isBanner ? 110 : 96,
+        decoration: BoxDecoration(
+          color: colors.gray900,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: colors.gray700, style: BorderStyle.solid),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          'No image set',
+          style: TextStyle(color: colors.gray500, fontSize: 13),
+        ),
+      );
+    }
+
+    if (isBanner) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: AspectRatio(
+          aspectRatio: 960 / 320,
+          child: CachedNetworkImage(
+            imageUrl: valid,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => Container(color: colors.gray900),
+            errorWidget: (_, __, ___) => Container(
+              color: colors.gray900,
+              alignment: Alignment.center,
+              child: Icon(Icons.broken_image, color: colors.gray600),
+            ),
+          ),
+        ),
+      );
+    }
+
+    // Avatar (circular)
+    return Center(
+      child: Container(
+        width: 96, height: 96,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: colors.gray900,
+          border: Border.all(color: colors.gray700),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: CachedNetworkImage(
+          imageUrl: valid,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => const SizedBox(),
+          errorWidget: (_, __, ___) => Icon(Icons.broken_image, color: colors.gray600),
         ),
       ),
     );

@@ -146,6 +146,15 @@ class ServerPublishService {
         parentPublicId = parent?.publicId ?? '';
       }
 
+      // Sidechat link: voice channels can point at a text channel on the
+      // same server that acts as their side-chat. Rails publishes its
+      // public_id in tag[12]; we do the same so other clients can resolve it.
+      String sidechatPublicId = '';
+      if (ch.sidechatChannelId != null) {
+        final sidechat = channels.where((c) => c.id == ch.sidechatChannelId).firstOrNull;
+        sidechatPublicId = sidechat?.publicId ?? '';
+      }
+
       tags.add([
         'ch',
         ch.publicId,
@@ -159,7 +168,7 @@ class ServerPublishService {
         ch.permissionsOverrides ?? '',
         ch.encrypted.toString(),
         ch.channelPublicKey ?? '',
-        '', // sidechatPublicId
+        sidechatPublicId,
         parentPublicId,
         (ch.voiceBitrate).toString(),
         (ch.voiceUserLimit).toString(),

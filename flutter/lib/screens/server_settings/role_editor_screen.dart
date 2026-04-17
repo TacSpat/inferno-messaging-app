@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../database/database.dart';
 import '../../models/permission.dart';
+import '../../providers/database_provider.dart';
 import '../../providers/server_settings_provider.dart';
+import '../../providers/servers_provider.dart';
 
 class RoleEditorScreen extends ConsumerStatefulWidget {
   final Role role;
@@ -20,18 +22,49 @@ class _RoleEditorScreenState extends ConsumerState<RoleEditorScreen> {
   late TextEditingController _nameController;
   late TextEditingController _colorController;
   bool _dirty = false;
+  bool _refreshing = true;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.role.name ?? '');
     _colorController = TextEditingController(text: widget.role.color ?? '#ffffff');
+    _permissions = _decodePermissions(widget.role.permissions);
+    // The role passed in is the last-cached snapshot — fetch Kind 31752 from
+    // relays so the permission toggles reflect what's actually published, not
+    // whatever was in the DB when the list was first loaded.
+    _refreshFromRelays();
+  }
+
+  Map<String, bool> _decodePermissions(String? raw) {
+    if (raw == null || raw.isEmpty) return {};
     try {
-      _permissions = Map<String, bool>.from(
-        json.decode(widget.role.permissions ?? '{}') as Map,
-      );
+      return Map<String, bool>.from(json.decode(raw) as Map);
     } catch (_) {
-      _permissions = {};
+      return {};
+    }
+  }
+
+  Future<void> _refreshFromRelays() async {
+    try {
+      await ref.read(serverSyncServiceProvider).refreshRoles(widget.serverId);
+      final db = ref.read(databaseProvider);
+      final fresh = await (db.select(db.roles)..where((r) => r.id.equals(widget.role.id)))
+          .getSingleOrNull();
+      if (!mounted || fresh == null) return;
+      // Don't clobber unsaved user edits.
+      if (_dirty) {
+        setState(() => _refreshing = false);
+        return;
+      }
+      setState(() {
+        _permissions = _decodePermissions(fresh.permissions);
+        _nameController.text = fresh.name ?? _nameController.text;
+        _colorController.text = fresh.color ?? _colorController.text;
+        _refreshing = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _refreshing = false);
     }
   }
 
@@ -66,6 +99,16 @@ class _RoleEditorScreenState extends ConsumerState<RoleEditorScreen> {
       appBar: AppBar(
         title: Text(widget.role.name ?? 'Edit Role'),
         actions: [
+          if (_refreshing)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 12),
+              child: Center(
+                child: SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           if (_dirty)
             TextButton(
               onPressed: _save,

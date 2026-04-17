@@ -35,6 +35,21 @@ final _blossomTypeCache = <String, String>{};
 /// so the container is pre-sized before metadata loads — prevents scroll jumps.
 final _videoDimensionCache = <String, (int, int)>{};
 
+/// Last volume + mute state applied to any inline player. The next player to
+/// spin up copies these so opening a second video doesn't reset audio to a
+/// jarring default after you'd dialed it down on the first.
+double _inlineVolumePref = 1.0;
+bool _inlineMutedPref = false;
+
+/// Per-URL playback position cache so reopening a video you watched a few
+/// minutes ago resumes near where you left off. Entries older than
+/// [_positionCacheTtl] are ignored (a "session" window, not durable storage).
+final _videoPositionCache = <String, ({Duration position, DateTime at})>{};
+const _positionCacheTtl = Duration(minutes: 15);
+// Don't resume if we're within this close to the start/end — start feels like
+// "fresh play", end feels like "completed, start over".
+const _resumeEdgePad = Duration(seconds: 3);
+
 /// Regex patterns
 final _imageUrlPattern = RegExp(r'\.(png|jpg|jpeg|gif|webp|avif|svg)(\?.*)?$', caseSensitive: false);
 final _blossomPattern = RegExp(r'https?://blossom\.\S+', caseSensitive: false);
@@ -927,12 +942,15 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
     }
   }
 
-  // Playback state
+  // Playback state. Seed volume from the shared inline pref so opening a new
+  // video inherits the last video's audio setting.
   bool _playing = false;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   Duration _buffer = Duration.zero;
-  double _volume = 1.0;
+  double _volume = _inlineMutedPref ? 0.0 : _inlineVolumePref;
+  // Pre-mute volume so unmuting can restore the last non-zero level.
+  double _preMuteVolume = _inlineVolumePref <= 0 ? 1.0 : _inlineVolumePref;
   bool _hovering = false;
   bool _controlsVisible = false;
   bool _seeking = false;
@@ -974,6 +992,21 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
     }
 
     await controller.setVolume(_volume);
+
+    // Resume near last playback position if we watched this URL recently.
+    final cached = _videoPositionCache[widget.url];
+    if (cached != null && DateTime.now().difference(cached.at) <= _positionCacheTtl) {
+      final total = controller.value.duration;
+      final pos = cached.position;
+      if (total > Duration.zero &&
+          pos > _resumeEdgePad &&
+          pos < total - _resumeEdgePad) {
+        try {
+          await controller.seekTo(pos);
+        } catch (_) {}
+      }
+    }
+
     if (mounted && !_disposed) {
       setState(() {
         _initialized = true;
@@ -996,11 +1029,30 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
       _duration = v.duration;
       _buffer = buf;
       _playing = newPlaying;
+      final prevVolume = _volume;
       _volume = v.volume;
       if (v.size.width > 0 && v.size.height > 0) {
         _videoWidth = v.size.width.toInt();
         _videoHeight = v.size.height.toInt();
         _videoDimensionCache[widget.url] = (_videoWidth!, _videoHeight!);
+      }
+      // Share the latest audio setting across inline players so the next
+      // video the user opens inherits it. Gated on `_initialized` — listener
+      // callbacks during controller init briefly report the backend default
+      // (1.0) before our `setVolume(_volume)` takes effect, which would
+      // otherwise clobber the saved pref every time a video mounts.
+      if (_initialized && _volume != prevVolume) {
+        _inlineMutedPref = _volume <= 0;
+        if (_volume > 0) {
+          _inlineVolumePref = _volume;
+          _preMuteVolume = _volume;
+        }
+      }
+      // Cache playback position for a short session window so a video
+      // reopened nearby in time resumes where we left off.
+      if (v.duration > Duration.zero && v.position > Duration.zero) {
+        _videoPositionCache[widget.url] =
+            (position: v.position, at: DateTime.now());
       }
     });
     if (playingChanged) {
@@ -1304,11 +1356,14 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
         _controlButton(
           icon: volumeIcon,
           onTap: () {
-            // Toggle mute
+            // Toggle mute — unmuting restores the last non-zero level instead
+            // of snapping to 100%.
             if (_volume > 0) {
+              _preMuteVolume = _volume;
               _controller?.setVolume(0);
             } else {
-              _controller?.setVolume(1.0);
+              final restore = _preMuteVolume > 0 ? _preMuteVolume : 1.0;
+              _controller?.setVolume(restore);
             }
           },
         ),

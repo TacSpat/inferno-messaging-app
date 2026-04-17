@@ -161,7 +161,10 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
           final c = ref.read(infernoColorsProvider);
           return AlertDialog(
             title: const Text('Log Out?'),
-            content: const Text('This will remove your key from this device. Make sure you have a backup.'),
+            content: const Text(
+              'You will be signed out of this account. '
+              'Your encrypted backup is saved and you can switch back from the login screen.',
+            ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
               ElevatedButton(
@@ -175,6 +178,9 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
       );
       if (confirmed == true && mounted) {
         final auth = ref.read(authServiceProvider);
+        // Only clear the active key — the ncryptsec stays in the account
+        // list so the user can switch back from the login screen without
+        // re-importing.
         await auth.logout();
         if (mounted) {
           Navigator.pop(context); // Close overlay

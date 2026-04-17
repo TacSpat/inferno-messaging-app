@@ -59,6 +59,16 @@ final typingUsersProvider = StreamProvider.family<List<String>, String>((ref, ch
   return typingService.watchTyping(channelGroupId);
 });
 
+/// Controls visibility of the voice channel side-chat panel. Toggled from the
+/// unified header; read by the voice channel screen.
+final voiceSidechatVisibleProvider = StateProvider<bool>((_) => false);
+
+/// Stream of typing users for a DM counterparty (keyed by counterparty pubkey).
+final dmTypingProvider = StreamProvider.family<List<String>, String>((ref, counterpartyPubkey) {
+  final typingService = ref.watch(typingServiceProvider);
+  return typingService.watchDmTyping(counterpartyPubkey);
+});
+
 /// Stream of presence updates — triggers MemberList rebuilds when any user's presence changes
 final presenceUpdatesProvider = StreamProvider<PresenceUpdate>((ref) {
   final presenceService = ref.watch(presenceServiceProvider);

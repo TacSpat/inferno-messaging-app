@@ -11,14 +11,42 @@ class ReactionService {
 
   ReactionService(this._db, this._relayPool);
 
-  /// Add a reaction to a message and publish Kind 7 to Nostr
-  Future<void> addReaction({
+  /// Max distinct emojis per message. Stacking on an existing reaction is
+  /// always allowed; only *new* emojis past this cap are rejected so a
+  /// message can't accumulate an unbounded reaction rail.
+  static const int maxDistinctReactionsPerMessage = 15;
+
+  /// Returned by [addReaction] / [toggleReaction] so callers can show a
+  /// toast when the limit is hit.
+  bool _lastAddWasBlocked = false;
+  bool get lastAddWasBlocked => _lastAddWasBlocked;
+
+  /// Add a reaction to a message and publish Kind 7 to Nostr.
+  /// Returns true if the reaction was accepted, false if the cap was hit.
+  Future<bool> addReaction({
     required String privateKeyHex,
     required String publicKeyHex,
     required Message message,
     required String emoji,
     String? channelGroupId,
   }) async {
+    _lastAddWasBlocked = false;
+
+    // Enforce the distinct-emoji cap. Stacking on an existing emoji is fine;
+    // adding a new emoji past the cap is rejected.
+    final existingEmojis = await (_db.selectOnly(_db.reactions, distinct: true)
+          ..addColumns([_db.reactions.emoji])
+          ..where(_db.reactions.messageId.equals(message.id) &
+              _db.reactions.emoji.isNotNull()))
+        .map((row) => row.read(_db.reactions.emoji))
+        .get();
+    final distinctCount = existingEmojis.whereType<String>().toSet();
+    if (!distinctCount.contains(emoji) &&
+        distinctCount.length >= maxDistinctReactionsPerMessage) {
+      _lastAddWasBlocked = true;
+      return false;
+    }
+
     // Store locally with reactor pubkey
     final now = DateTime.now();
     try {
@@ -40,6 +68,7 @@ class ReactionService {
       content: emoji,
       channelGroupId: channelGroupId,
     );
+    return true;
   }
 
   /// Toggle a reaction (add if not present, remove if present)
@@ -201,6 +230,23 @@ class ReactionService {
         _logEvent(event.id!, reactorPubkey, event.createdAt, 'inbound');
         return;
       }
+    }
+
+    // Enforce the per-message distinct-emoji cap locally too, so a remote
+    // reactor can't spam our UI beyond the limit even if the relay accepted
+    // the event.
+    final existingEmojis = await (_db.selectOnly(_db.reactions, distinct: true)
+          ..addColumns([_db.reactions.emoji])
+          ..where(_db.reactions.messageId.equals(message.id) &
+              _db.reactions.emoji.isNotNull()))
+        .map((row) => row.read(_db.reactions.emoji))
+        .get();
+    final distinct = existingEmojis.whereType<String>().toSet();
+    if (!distinct.contains(emoji) &&
+        distinct.length >= maxDistinctReactionsPerMessage) {
+      // Cap hit — don't store it, but still log so we don't re-process.
+      if (event.id != null) _logEvent(event.id!, reactorPubkey, event.createdAt, 'inbound', messageId: message.id);
+      return;
     }
 
     // Insert reaction (ignore duplicate)
