@@ -5,7 +5,6 @@ import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
 import '../../providers/realtime_provider.dart';
 import '../../providers/servers_provider.dart';
-import '../../widgets/inferno_logo.dart';
 import '../../services/app_bootstrap_service.dart';
 import '../../services/media_cache_service.dart';
 import '../../providers/conversations_provider.dart';
@@ -87,7 +86,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/auth/login'),
         ),
-        title: const Text('Create Account'),
+        title: const Text('Create Account', style: TextStyle(fontFamilyFallback: [])),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -98,21 +97,26 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 16),
-                // Icon
-                const InfernoLogo(size: 48),
-                const SizedBox(height: 16),
-                Text('Choose your identity', style: Theme.of(context).textTheme.titleLarge),
+                Text(
+                  'Choose your identity',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontFamilyFallback: [],
+                  ),
+                ),
                 const SizedBox(height: 8),
                 const Text(
                   'A Nostr keypair will be generated for you. This is your portable, censorship-resistant identity.',
-                  style: TextStyle(color: Color(0xFF8899A6)),
+                  style: TextStyle(color: Color(0xFF8899A6), fontFamilyFallback: []),
                 ),
                 const SizedBox(height: 32),
+                const Text('Username', style: TextStyle(color: Color(0xFF8899A6), fontSize: 13, fontFamilyFallback: [])),
+                const SizedBox(height: 6),
                 TextFormField(
                   controller: _usernameController,
+                  style: const TextStyle(fontFamilyFallback: []),
                   decoration: const InputDecoration(
-                    labelText: 'Username',
                     hintText: 'e.g. satoshi',
+                    hintStyle: TextStyle(fontFamilyFallback: []),
                     prefixIcon: Icon(Icons.person_outline),
                   ),
                   validator: (v) {
@@ -128,17 +132,20 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   autofocus: true,
                 ),
                 const SizedBox(height: 16),
+                const Text('Display Name (optional)', style: TextStyle(color: Color(0xFF8899A6), fontSize: 13, fontFamilyFallback: [])),
+                const SizedBox(height: 6),
                 TextFormField(
                   controller: _displayNameController,
+                  style: const TextStyle(fontFamilyFallback: []),
                   decoration: const InputDecoration(
-                    labelText: 'Display Name (optional)',
                     hintText: 'e.g. Satoshi Nakamoto',
+                    hintStyle: TextStyle(fontFamilyFallback: []),
                     prefixIcon: Icon(Icons.badge_outlined),
                   ),
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _createAccount(),
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: 16),
                 if (_error != null) ...[
                   Container(
                     padding: const EdgeInsets.all(12),
@@ -146,7 +153,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                       color: const Color(0xFF3A1A1A),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(_error!, style: const TextStyle(color: Color(0xFFFF4D4D))),
+                    child: Text(_error!, style: const TextStyle(color: Color(0xFFFF4D4D), fontFamilyFallback: [])),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -165,13 +172,13 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                           children: [
                             Icon(Icons.check_circle, color: primary, size: 20),
                             const SizedBox(width: 8),
-                            const Text('Identity created!', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold)),
+                            const Text('Identity created!', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold, fontFamilyFallback: [])),
                           ],
                         ),
                         const SizedBox(height: 8),
                         Text(
                           _generatedNpub!,
-                          style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFF8899A6)),
+                          style: const TextStyle(fontFamily: 'monospace', fontSize: 10, color: Color(0xFF8899A6), fontFamilyFallback: []),
                         ),
                         const SizedBox(height: 10),
                         Container(
@@ -189,14 +196,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                                 child: Text(
                                   'Your private key is stored securely on this device. '
                                   'Create an encrypted backup in Settings to protect your identity.',
-                                  style: TextStyle(color: Color(0xFF81C784), fontSize: 11, height: 1.4),
+                                  style: TextStyle(color: Color(0xFF81C784), fontSize: 11, height: 1.4, fontFamilyFallback: []),
                                 ),
                               ),
                             ],
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text('Connecting to relays...', style: TextStyle(color: Color(0xFF8899A6), fontSize: 12)),
+                        const Text('Connecting to relays...', style: TextStyle(color: Color(0xFF8899A6), fontSize: 12, fontFamilyFallback: [])),
                       ],
                     ),
                   ),
@@ -212,10 +219,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                             children: [
                               SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
                               SizedBox(width: 12),
-                              Text('Creating identity...'),
+                              Text('Creating identity...', style: TextStyle(fontFamilyFallback: [])),
                             ],
                           )
-                        : const Text('Generate Key & Create Account'),
+                        : const Text('Generate Key & Create Account', style: TextStyle(fontFamilyFallback: [])),
                   ),
                 ),
               ],

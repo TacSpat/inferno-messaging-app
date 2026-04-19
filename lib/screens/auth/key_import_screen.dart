@@ -96,7 +96,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () => context.go('/auth/login'),
         ),
-        title: const Text('Import Key'),
+        title: const Text('Import Key', style: TextStyle(fontFamilyFallback: [])),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -107,21 +107,27 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
               const SizedBox(height: 16),
               Text(
                 'Import your Nostr identity',
-                style: Theme.of(context).textTheme.titleLarge,
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontFamilyFallback: [],
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Paste your private key in any supported format.',
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: const Color(0xFF8899A6),
+                  fontFamilyFallback: [],
                 ),
               ),
               const SizedBox(height: 24),
+              const Text('Private Key', style: TextStyle(color: Color(0xFF8899A6), fontSize: 13, fontFamilyFallback: [])),
+              const SizedBox(height: 6),
               TextFormField(
                 controller: _keyController,
+                style: const TextStyle(fontFamilyFallback: []),
                 decoration: const InputDecoration(
-                  labelText: 'Private Key',
                   hintText: 'nsec1... or ncryptsec1...',
+                  hintStyle: TextStyle(fontFamilyFallback: []),
                   prefixIcon: Icon(Icons.key),
                   suffixIcon: Padding(
                     padding: EdgeInsets.all(12),
@@ -140,7 +146,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                     const SizedBox(width: 6),
                     Text(
                       'Detected: $_formatLabel',
-                      style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 13),
+                      style: TextStyle(color: Theme.of(context).colorScheme.primary, fontSize: 13, fontFamilyFallback: []),
                     ),
                   ],
                 ),
@@ -164,7 +170,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                           'For better security, use an ncryptsec (encrypted backup) instead. '
                           'Raw nsec keys can be leaked if your clipboard is compromised.',
                           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF90CAF9), fontSize: 12,
+                            color: const Color(0xFF90CAF9), fontSize: 12, fontFamilyFallback: [],
                           ),
                         ),
                       ),
@@ -174,11 +180,14 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
               ],
               if (_detectedFormat == _KeyFormat.ncryptsec) ...[
                 const SizedBox(height: 16),
+                const Text('Password', style: TextStyle(color: Color(0xFF8899A6), fontSize: 13, fontFamilyFallback: [])),
+                const SizedBox(height: 6),
                 TextFormField(
                   controller: _passwordController,
+                  style: const TextStyle(fontFamilyFallback: []),
                   decoration: InputDecoration(
-                    labelText: 'Password',
                     hintText: 'Enter the password used to encrypt this key',
+                    hintStyle: const TextStyle(fontFamilyFallback: []),
                     prefixIcon: const Icon(Icons.lock_outline),
                     suffixIcon: IconButton(
                       icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
@@ -189,7 +198,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                   onFieldSubmitted: (_) => _importKey(),
                 ),
               ],
-              const SizedBox(height: 24),
+              const SizedBox(height: 12),
               if (_error != null) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -197,7 +206,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                     color: const Color(0xFF3A1A1A),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(_error!, style: const TextStyle(color: Color(0xFFFF4D4D))),
+                  child: Text(_error!, style: const TextStyle(color: Color(0xFFFF4D4D), fontFamilyFallback: [])),
                 ),
                 const SizedBox(height: 16),
               ],
@@ -210,10 +219,10 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                           width: 20, height: 20,
                           child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                         )
-                      : const Text('Import Key'),
+                      : const Text('Import Key', style: TextStyle(fontFamilyFallback: [])),
                 ),
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: 12),
               // Warning box
               Container(
                 padding: const EdgeInsets.all(16),
@@ -234,6 +243,7 @@ class _KeyImportScreenState extends ConsumerState<KeyImportScreen> {
                         'Never share your private key with anyone.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: const Color(0xFFFF9800),
+                          fontFamilyFallback: [],
                         ),
                       ),
                     ),

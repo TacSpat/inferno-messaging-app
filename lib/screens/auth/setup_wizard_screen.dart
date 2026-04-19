@@ -32,6 +32,7 @@ class SetupWizardScreen extends ConsumerWidget {
                 'You\'re all set!',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
+                  fontFamilyFallback: [],
                 ),
               ),
               const SizedBox(height: 12),
@@ -39,6 +40,7 @@ class SetupWizardScreen extends ConsumerWidget {
                 'Your Nostr identity has been created.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: const Color(0xFF8899A6),
+                  fontFamilyFallback: [],
                 ),
               ),
               const SizedBox(height: 32),
@@ -53,7 +55,9 @@ class SetupWizardScreen extends ConsumerWidget {
                   children: [
                     Text(
                       'Your public key (npub)',
-                      style: Theme.of(context).textTheme.labelLarge,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        fontFamilyFallback: [],
+                      ),
                     ),
                     const SizedBox(height: 8),
                     SelectableText(
@@ -62,6 +66,7 @@ class SetupWizardScreen extends ConsumerWidget {
                         fontFamily: 'monospace',
                         fontSize: 12,
                         color: Color(0xFFE0E0E0),
+                        fontFamilyFallback: [],
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -69,11 +74,11 @@ class SetupWizardScreen extends ConsumerWidget {
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: npub));
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Copied to clipboard')),
+                          const SnackBar(content: Text('Copied to clipboard', style: TextStyle(fontFamilyFallback: []))),
                         );
                       },
                       icon: const Icon(Icons.copy, size: 16),
-                      label: const Text('Copy'),
+                      label: const Text('Copy', style: TextStyle(fontFamilyFallback: [])),
                     ),
                   ],
                 ),
@@ -84,7 +89,7 @@ class SetupWizardScreen extends ConsumerWidget {
                 height: 48,
                 child: ElevatedButton(
                   onPressed: () => context.go('/conversations'),
-                  child: const Text('Get Started'),
+                  child: const Text('Get Started', style: TextStyle(fontFamilyFallback: [])),
                 ),
               ),
             ],
