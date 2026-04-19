@@ -2,10 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/database_provider.dart';
 import '../../crypto/bech32_nostr.dart';
 import '../../crypto/nip49_crypto.dart';
+import '../../services/key_management_service.dart';
 import '../../services/relay_config_service.dart';
 import '../../theme/all_themes.dart';
 import '../../theme/theme_provider.dart';
@@ -177,7 +179,7 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
             const SizedBox(height: 16),
             _sectionLabel('ENCRYPTED BACKUP (NIP-49)', c),
             const SizedBox(height: 4),
-            Text('Export your private key encrypted with a backup password. Store the ncryptsec safely \u2014 you can import it on any compatible Nostr client.',
+            Text('Export your private key encrypted with a password. Use to transfer identity to another device.',
               style: TextStyle(color: c.gray500, fontSize: 12)),
             const SizedBox(height: 12),
             _inputField('Backup password (min 8 characters)', _backupPasswordController, c, hint: 'Choose a strong backup password'),
@@ -197,9 +199,93 @@ class _MyAccountScreenState extends ConsumerState<MyAccountScreen> {
               ),
             ),
             if (_ncryptsec != null) ...[
+              const SizedBox(height: 16),
+              // QR code
+              Center(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.all(8),
+                    child: Stack(alignment: Alignment.center, children: [
+                      QrImageView(
+                        data: _ncryptsec!,
+                        version: QrVersions.auto,
+                        errorCorrectionLevel: QrErrorCorrectLevel.H,
+                        size: 180,
+                        padding: EdgeInsets.zero,
+                        backgroundColor: Colors.white,
+                        gapless: true,
+                        eyeStyle: const QrEyeStyle(eyeShape: QrEyeShape.circle, color: Color(0xFF1A1A2E)),
+                        dataModuleStyle: const QrDataModuleStyle(dataModuleShape: QrDataModuleShape.circle, color: Color(0xFF1A1A2E)),
+                      ),
+                      Container(
+                        width: 52, height: 52,
+                        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        padding: const EdgeInsets.all(4),
+                        child: Image.asset('assets/icons/inferno_icon.png', width: 44, height: 44),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
               const SizedBox(height: 12),
               _keyRow(_ncryptsec!, 'ncryptsec', c, valueColor: c.accent),
+              const SizedBox(height: 12),
+              Row(children: [
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: () {
+                    Clipboard.setData(ClipboardData(text: _ncryptsec!));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Encrypted key copied')));
+                  },
+                  icon: Icon(Icons.copy, size: 14, color: c.gray400),
+                  label: Text('Copy', style: TextStyle(color: c.gray400, fontSize: 12)),
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: c.gray700)),
+                )),
+                const SizedBox(width: 8),
+                Expanded(child: OutlinedButton.icon(
+                  onPressed: () async {
+                    try {
+                      final path = await KeyManagementService.exportToFile(_ncryptsec!);
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Saved to $path')));
+                    } catch (e) {
+                      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+                    }
+                  },
+                  icon: Icon(Icons.save_alt, size: 14, color: c.gray400),
+                  label: Text('Save File', style: TextStyle(color: c.gray400, fontSize: 12)),
+                  style: OutlinedButton.styleFrom(side: BorderSide(color: c.gray700)),
+                )),
+              ]),
             ],
+            // nsec clipboard (hidden — never displayed)
+            const SizedBox(height: 16),
+            Container(height: 1, color: c.gray700),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Copy raw private key?'),
+                    content: const Text('Your raw nsec will be copied to the clipboard. Anyone with access can steal your identity.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                      TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Copy nsec', style: TextStyle(color: Colors.red))),
+                    ],
+                  ),
+                );
+                if (confirmed != true) return;
+                try {
+                  final nsec = await KeyManagementService.exportNsec();
+                  Clipboard.setData(ClipboardData(text: nsec));
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('nsec copied')));
+                } catch (_) {}
+              },
+              icon: Icon(Icons.warning_amber, size: 14, color: c.accent),
+              label: Text('Copy nsec to clipboard', style: TextStyle(color: c.gray500, fontSize: 12)),
+              style: OutlinedButton.styleFrom(side: BorderSide(color: c.gray700)),
+            ),
           ]),
         ),
 
