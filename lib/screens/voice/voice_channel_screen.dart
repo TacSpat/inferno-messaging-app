@@ -13,6 +13,12 @@ import '../../providers/conversations_provider.dart';
 import '../../crypto/nostr_event.dart' as nostr;
 import '../../crypto/nostr_signer.dart';
 import '../../widgets/participant_tile.dart';
+import '../../widgets/message_list.dart';
+import '../../widgets/message_input.dart';
+import '../../services/blossom_client.dart';
+import '../../services/group_message_service.dart';
+import '../../providers/servers_provider.dart';
+import 'dart:io' show File;
 import '../../models/permission.dart';
 import '../../providers/server_settings_provider.dart';
 import '../../theme/all_themes.dart';
@@ -164,20 +170,23 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
         return;
       }
 
-      // Load audio processing settings
+      // Load audio processing + device settings from Voice & Video preferences
       const storage = FlutterSecureStorage();
-      // Default to true if not set (matching Rails defaults)
       final noiseSuppression = (await storage.read(key: 'voice_noise_suppression')) != 'false';
       final echoCancellation = (await storage.read(key: 'voice_echo_cancellation')) != 'false';
       final autoGainControl = (await storage.read(key: 'voice_auto_gain_control')) != 'false';
+      final audioInputDeviceId = await storage.read(key: 'voice_input_device');
+      final audioOutputDeviceId = await storage.read(key: 'voice_output_device');
 
-      // Connect to LiveKit with audio processing options
+      // Connect to LiveKit with the exact same config shown in Voice & Video settings
       if (mounted) setState(() => _error = 'Connecting...');
       await livekit.connect(
         url: livekitUrl, token: token,
         noiseSuppression: noiseSuppression,
         echoCancellation: echoCancellation,
         autoGainControl: autoGainControl,
+        audioInputDeviceId: audioInputDeviceId,
+        audioOutputDeviceId: audioOutputDeviceId,
       );
       await livekit.setMicrophoneEnabled(_canSpeak);
 
@@ -365,33 +374,139 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
           ),
       ])),
 
-      // ── Sidechat panel (right side) — matches Rails Chat panel ──
-      if (isConnected && _channel!.sidechatChannelId != null)
-        Container(
-          width: 300,
-          decoration: BoxDecoration(
-            color: c.gray800,
-            border: Border(left: BorderSide(color: c.accent.withValues(alpha: 0.08))),
-          ),
-          child: Column(children: [
-            // Chat header
-            Container(
-              height: 40,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.3)))),
-              child: Row(children: [
-                Icon(Icons.chat_bubble_outline, size: 16, color: c.gray400),
-                const SizedBox(width: 8),
-                Text('Chat', style: TextStyle(color: c.gray200, fontSize: 14, fontWeight: FontWeight.w600)),
-              ]),
-            ),
-            // Sidechat messages placeholder
-            Expanded(child: Center(child: Text('No messages yet', style: TextStyle(color: c.gray500, fontSize: 13)))),
-          ]),
+      // ── Sidechat panel (right side) — toggled via header icon ──
+      // Uses the explicitly linked side-chat channel when one exists,
+      // otherwise falls back to the voice channel itself.
+      if (ref.watch(voiceSidechatVisibleProvider))
+        _VoiceSidechatPanel(
+          sidechatChannelId: _channel!.sidechatChannelId ?? _channel!.id,
+          colors: c,
         ),
     ]);
   }
 }
+
+/// Text side-chat panel docked to the right of the voice stage. Renders the
+/// linked text channel's messages + input so voice participants can drop
+/// links / notes without leaving the voice UI.
+class _VoiceSidechatPanel extends ConsumerStatefulWidget {
+  final int sidechatChannelId;
+  final InfernoColors colors;
+  const _VoiceSidechatPanel({required this.sidechatChannelId, required this.colors});
+
+  @override
+  ConsumerState<_VoiceSidechatPanel> createState() => _VoiceSidechatPanelState();
+}
+
+class _VoiceSidechatPanelState extends ConsumerState<_VoiceSidechatPanel> {
+  Channel? _channel;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadChannel();
+  }
+
+  @override
+  void didUpdateWidget(_VoiceSidechatPanel old) {
+    super.didUpdateWidget(old);
+    if (old.sidechatChannelId != widget.sidechatChannelId) _loadChannel();
+  }
+
+  Future<void> _loadChannel() async {
+    final db = ref.read(databaseProvider);
+    final ch = await (db.select(db.channels)
+          ..where((c) => c.id.equals(widget.sidechatChannelId)))
+        .getSingleOrNull();
+    if (mounted) setState(() => _channel = ch);
+  }
+
+  Future<void> _send(String content, {bool spoiler = false, List<String>? fileUrls}) async {
+    final ch = _channel;
+    if (ch == null) return;
+    final auth = ref.read(authServiceProvider);
+    if (auth.privateKeyHex == null || auth.publicKeyHex == null) return;
+    final svc = ref.read(groupMessageServiceProvider);
+    await svc.sendMessage(
+      privateKeyHex: auth.privateKeyHex!,
+      publicKeyHex: auth.publicKeyHex!,
+      channel: ch,
+      content: content,
+      spoiler: spoiler,
+    );
+    if (!mounted) return;
+    final err = svc.lastSendError;
+    if (err != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    return Container(
+      width: 320,
+      decoration: BoxDecoration(
+        color: c.gray800,
+        border: Border(left: BorderSide(color: c.accent.withValues(alpha: 0.08))),
+      ),
+      child: Column(children: [
+        Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.3))),
+          ),
+          child: Row(children: [
+            Icon(Icons.chat_bubble_outline, size: 16, color: c.gray400),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _channel?.name ?? 'Chat',
+                style: TextStyle(color: c.gray200, fontSize: 14, fontWeight: FontWeight.w600),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ]),
+        ),
+        if (_channel == null)
+          Expanded(child: Center(child: Text('Loading…', style: TextStyle(color: c.gray500, fontSize: 13))))
+        else ...[
+          Expanded(
+            child: MessageList(
+              channelId: _channel!.id,
+              channel: _channel,
+            ),
+          ),
+          MessageInput(
+            compact: true,
+            onSend: _send,
+            onSendWithMeta: (content, {spoiler = false, fileUrls}) =>
+                _send(content, spoiler: spoiler, fileUrls: fileUrls),
+            onUploadFiles: (files) async {
+              final auth = ref.read(authServiceProvider);
+              if (auth.privateKeyHex == null) return <String>[];
+              final urls = <String>[];
+              for (final f in files) {
+                final url = await BlossomClient.uploadFile(
+                  filePath: f.path,
+                  privateKeyHex: auth.privateKeyHex!,
+                  publicKeyHex: auth.publicKeyHex!,
+                );
+                if (url != null) urls.add(url);
+              }
+              return urls;
+            },
+          ),
+        ],
+      ]),
+    );
+  }
+}
+
+// silence unused-import lint for File when the codebase tree-shakes
+// ignore: unused_element
+void _keepFileImport() => File('/').path;
 
 /// Large participant card matching Rails — avatar centered, name at bottom, speaking ring
 class _ParticipantCard extends ConsumerWidget {

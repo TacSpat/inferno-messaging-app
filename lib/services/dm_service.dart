@@ -8,6 +8,7 @@ import '../crypto/nip44_crypto.dart';
 import '../crypto/nostr_key.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
+import '../nostr/nostr_filter.dart';
 import 'emoji_resolver.dart';
 
 class DmService {
@@ -116,11 +117,35 @@ class DmService {
           ..where((c) => c.id.equals(conversation.id)))
         .write(ConversationsCompanion(updatedAt: Value(now)));
 
-    // Publish to relays
-    _relayPool.publish(signed);
+    // Publish to relays and await so the caller can tell the user if every
+    // relay rejected it (rate limit / auth / etc).
+    final results = await _relayPool.publishWithDetails(signed);
+    lastSendResults = results;
+    final anyOk = results.values.any((r) => r.ok);
+    if (!anyOk) {
+      final rateLimited = results.values.any((r) => r.isRateLimited);
+      lastSendError = rateLimited
+          ? 'Rate limited by relay — try again in a few seconds.'
+          : _firstReason(results) ?? 'No relay accepted the message.';
+    } else {
+      lastSendError = null;
+    }
 
     return (_db.select(_db.messages)..where((m) => m.id.equals(msgId)))
         .getSingleOrNull();
+  }
+
+  /// Most recent send result set (for UI to inspect per-relay outcomes).
+  Map<String, PublishResult> lastSendResults = const {};
+
+  /// Human-readable failure reason from the last send, or null on success.
+  String? lastSendError;
+
+  String? _firstReason(Map<String, PublishResult> r) {
+    for (final v in r.values) {
+      if (!v.ok && v.reason != null && v.reason!.isNotEmpty) return v.reason;
+    }
+    return null;
   }
 
   /// Process an inbound Kind 14 DM event
@@ -408,7 +433,54 @@ class DmService {
       ),
     );
 
+    // First time we've seen this counterparty — kick off a Kind 0 fetch so the
+    // DM list shows their name/avatar instead of the raw pubkey.
+    unawaited(_fetchCounterpartyProfile(counterpartyPubkey));
+
     return (await (_db.select(_db.conversations)..where((c) => c.id.equals(id))).getSingle());
+  }
+
+  Future<void> _fetchCounterpartyProfile(String pubkey) async {
+    try {
+      final filter = NostrFilter(kinds: [0], authors: [pubkey], limit: 1);
+      final events = await _relayPool.fetch(filter, timeout: const Duration(seconds: 8));
+      if (events.isEmpty) return;
+      events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      final profile = json.decode(events.first.content) as Map<String, dynamic>;
+      final now = DateTime.now();
+      final existing = await (_db.select(_db.contacts)
+            ..where((c) => c.pubkey.equals(pubkey)))
+          .getSingleOrNull();
+      if (existing != null) {
+        await (_db.update(_db.contacts)..where((c) => c.pubkey.equals(pubkey)))
+            .write(ContactsCompanion(
+          username: Value(profile['name'] as String?),
+          displayName: Value(profile['display_name'] as String?),
+          bio: Value(profile['about'] as String?),
+          avatarUrl: Value(profile['picture'] as String?),
+          bannerUrl: Value(profile['banner'] as String?),
+          nip05: Value(profile['nip05'] as String?),
+          profileFetchedAt: Value(now),
+          updatedAt: Value(now),
+        ));
+      } else {
+        await _db.into(_db.contacts).insert(ContactsCompanion.insert(
+          pubkey: pubkey,
+          username: Value(profile['name'] as String?),
+          displayName: Value(profile['display_name'] as String?),
+          bio: Value(profile['about'] as String?),
+          avatarUrl: Value(profile['picture'] as String?),
+          bannerUrl: Value(profile['banner'] as String?),
+          nip05: Value(profile['nip05'] as String?),
+          friendshipStatus: const Value(0),
+          profileFetchedAt: Value(now),
+          createdAt: now,
+          updatedAt: now,
+        ));
+      }
+    } catch (e) {
+      debugPrint('[DM] Failed to fetch counterparty profile: $e');
+    }
   }
 
   void handleVoiceStateSync(Map<String, dynamic> data) {

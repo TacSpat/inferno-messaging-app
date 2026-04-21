@@ -6,6 +6,7 @@ import '../tables/categories.dart';
 import '../tables/server_memberships.dart';
 import '../tables/roles.dart';
 import '../tables/remote_members.dart';
+import '../../utils/stream_debounce.dart';
 
 part 'servers_dao.g.dart';
 
@@ -42,12 +43,14 @@ class ServersDao extends DatabaseAccessor<InfernoDatabase>
         .getSingleOrNull();
   }
 
-  // Watch channels for a server, ordered by position
+  // Watch channels for a server, ordered by position.
+  // Debounced so structure sync doesn't flicker the sidebar.
   Stream<List<Channel>> watchServerChannels(int serverId) {
     return (select(channels)
           ..where((c) => c.serverId.equals(serverId))
           ..orderBy([(c) => OrderingTerm.asc(c.position)]))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Watch categories for a server
@@ -55,7 +58,8 @@ class ServersDao extends DatabaseAccessor<InfernoDatabase>
     return (select(categories)
           ..where((c) => c.serverId.equals(serverId))
           ..orderBy([(c) => OrderingTerm.asc(c.position)]))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Watch roles for a server
@@ -63,14 +67,16 @@ class ServersDao extends DatabaseAccessor<InfernoDatabase>
     return (select(roles)
           ..where((r) => r.serverId.equals(serverId))
           ..orderBy([(r) => OrderingTerm.desc(r.position)]))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Watch remote members for a server
   Stream<List<RemoteMember>> watchRemoteMembers(int serverId) {
     return (select(remoteMembers)
           ..where((m) => m.serverId.equals(serverId)))
-        .watch();
+        .watch()
+        .debounce(const Duration(milliseconds: 300));
   }
 
   // Insert or update a server

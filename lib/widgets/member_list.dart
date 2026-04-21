@@ -8,7 +8,9 @@ import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../providers/server_settings_provider.dart';
+import '../providers/conversations_provider.dart';
 import '../services/presence_service.dart';
+import 'package:go_router/go_router.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
 import 'context_menu.dart';
@@ -457,6 +459,16 @@ class _MemberItemState extends ConsumerState<_MemberItem> {
       isTargetOwner = await _isServerOwner(widget.serverId, widget.pubkey!);
     }
 
+    // Don't offer "Add Friend" if we're already friends with this user.
+    bool alreadyFriend = false;
+    if (!isSelf && widget.pubkey != null) {
+      final db = ref.read(databaseProvider);
+      final contact = await (db.select(db.contacts)
+            ..where((c) => c.pubkey.equals(widget.pubkey!)))
+          .getSingleOrNull();
+      alreadyFriend = contact?.friendshipStatus == 3;
+    }
+
     if (!mounted) return;
 
     final timeoutSubmenu = <CtxEntry>[
@@ -482,7 +494,10 @@ class _MemberItemState extends ConsumerState<_MemberItem> {
           }
         }),
         CtxItem('Mention', Icons.alternate_email, () {}),
-        CtxItem('Message', Icons.message_outlined, () {}),
+        if (!isSelf)
+          CtxItem('Message', Icons.message_outlined, () => _openDm(context)),
+        if (!isSelf && !alreadyFriend)
+          CtxItem('Add Friend', Icons.person_add_alt_1, () => _addFriend(context)),
         if (canChangeNickname)
           CtxItem('Change Nickname', Icons.edit_outlined, () => _showNicknameDialog(context, c)),
         CtxDivider(),
@@ -500,6 +515,47 @@ class _MemberItemState extends ConsumerState<_MemberItem> {
         ],
       ],
     );
+  }
+
+  Future<void> _openDm(BuildContext context) async {
+    final pk = widget.pubkey;
+    if (pk == null) return;
+    final db = ref.read(databaseProvider);
+    var conv = await db.contactsDao.getConversationByPubkey(pk);
+    if (conv == null) {
+      final now = DateTime.now();
+      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+      final contact = await db.contactsDao.getByPubkey(pk);
+      await db.contactsDao.insertConversation(ConversationsCompanion.insert(
+        publicId: publicId,
+        kind: const Value(0),
+        counterpartyPubkey: Value(pk),
+        counterpartyDisplayName: Value(contact?.displayName ?? contact?.username),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      conv = await db.contactsDao.getConversationByPubkey(pk);
+    }
+    if (conv != null && context.mounted) {
+      GoRouter.of(context).go('/conversations/${conv.publicId}');
+    }
+  }
+
+  Future<void> _addFriend(BuildContext context) async {
+    final pk = widget.pubkey;
+    if (pk == null) return;
+    try {
+      await ref.read(contactServiceProvider).addContact(pk);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Added ${widget.name} to contacts')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to add friend: $e')),
+      );
+    }
   }
 
   Future<bool> _isServerOwner(int serverId, String targetPubkey) async {

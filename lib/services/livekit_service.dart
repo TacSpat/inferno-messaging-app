@@ -39,6 +39,8 @@ class LiveKitService {
     bool noiseSuppression = true,
     bool echoCancellation = true,
     bool autoGainControl = true,
+    String? audioInputDeviceId,
+    String? audioOutputDeviceId,
   }) async {
     // Try DeepFilterNet first — if it's available we DON'T want WebRTC's
     // built-in noise suppression doing the same job, otherwise the signal is
@@ -60,12 +62,30 @@ class LiveKitService {
       }
     }
 
+    // Apply saved audio device selections from Voice & Video settings so the
+    // user's chosen mic/speaker are used, not just the system default.
+    if (audioInputDeviceId != null) {
+      try {
+        final inputs = await Hardware.instance.audioInputs();
+        final dev = inputs.where((d) => d.deviceId == audioInputDeviceId).firstOrNull;
+        if (dev != null) await Hardware.instance.selectAudioInput(dev);
+      } catch (_) {}
+    }
+    if (audioOutputDeviceId != null) {
+      try {
+        final outputs = await Hardware.instance.audioOutputs();
+        final dev = outputs.where((d) => d.deviceId == audioOutputDeviceId).firstOrNull;
+        if (dev != null) await Hardware.instance.selectAudioOutput(dev);
+      } catch (_) {}
+    }
+
     _room = Room(
       roomOptions: RoomOptions(
         defaultAudioCaptureOptions: AudioCaptureOptions(
           noiseSuppression: useWebRtcNs,
           echoCancellation: echoCancellation,
           autoGainControl: autoGainControl,
+          deviceId: audioInputDeviceId,
         ),
       ),
     );
@@ -221,18 +241,31 @@ class LiveKitService {
 
   bool _deafened = false;
   bool get isDeafened => _deafened;
-  bool get isMuted => !(_room?.localParticipant?.isMicrophoneEnabled() ?? true);
+  bool get isMuted {
+    final pub = _room?.localParticipant?.audioTrackPublications.firstOrNull;
+    return pub?.muted ?? true;
+  }
 
-  /// Toggle mute — stops/starts publishing our audio track to the room
+  /// Toggle mute — mutes/unmutes our audio track WITHOUT releasing the
+  /// hardware mic. `stopOnMute: false` keeps the capture device open so the
+  /// OS doesn't physically mute the microphone (which would affect other
+  /// apps and require re-acquiring the device on unmute).
   Future<void> toggleMicrophone() async {
     if (_room == null) return;
-    final enabled = _room!.localParticipant?.isMicrophoneEnabled() ?? false;
-    await _room!.localParticipant?.setMicrophoneEnabled(!enabled);
+    final pub = _room!.localParticipant?.audioTrackPublications.firstOrNull;
+    if (pub == null) return;
+    if (pub.muted) {
+      await pub.unmute(stopOnMute: false);
+    } else {
+      await pub.mute(stopOnMute: false);
+    }
     _emitParticipants();
     _connectionController.add(true); // trigger UI rebuild for mute state
   }
 
-  /// Toggle deafen — stops/starts subscribing to all remote audio tracks
+  /// Toggle deafen — disables all remote audio tracks at the WebRTC layer
+  /// (app-level, doesn't touch hardware output). Also soft-mutes our own
+  /// mic when deafened (can't talk if you can't hear).
   Future<void> toggleDeafen() async {
     if (_room == null) return;
     _deafened = !_deafened;
@@ -243,9 +276,10 @@ class LiveKitService {
         }
       }
     }
-    // Also mute ourselves when deafened (can't talk if you can't hear)
+    // Also soft-mute ourselves when deafened
     if (_deafened) {
-      await _room!.localParticipant?.setMicrophoneEnabled(false);
+      final pub = _room!.localParticipant?.audioTrackPublications.firstOrNull;
+      await pub?.mute(stopOnMute: false);
     }
     _emitParticipants();
     _connectionController.add(true);
@@ -267,9 +301,16 @@ class LiveKitService {
     _emitParticipants();
   }
 
-  /// Set microphone enabled/disabled
+  /// Set microphone mute state — uses track-level mute so hardware isn't
+  /// physically released/acquired.
   Future<void> setMicrophoneEnabled(bool enabled) async {
-    await _room?.localParticipant?.setMicrophoneEnabled(enabled);
+    final pub = _room?.localParticipant?.audioTrackPublications.firstOrNull;
+    if (pub == null) return;
+    if (enabled) {
+      await pub.unmute(stopOnMute: false);
+    } else {
+      await pub.mute(stopOnMute: false);
+    }
     _emitParticipants();
   }
 

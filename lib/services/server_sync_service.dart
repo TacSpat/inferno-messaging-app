@@ -359,6 +359,7 @@ class ServerSyncService {
 
     // Collect parent mappings for second pass
     final parentMappings = <String, String>{}; // channelPublicId → parentChannelPublicId
+    final sidechatMappings = <String, String>{}; // voiceChannelPublicId → sidechatChannelPublicId
 
     // First pass: insert all categories and channels (without parent links)
     int structIdx = 0;
@@ -410,11 +411,16 @@ class ServerSyncService {
         final channelNostrGroupId = tag.length > 8 && tag[8].isNotEmpty ? tag[8] : '$nostrGroupId-${tag[1]}';
         final encrypted = tag.length > 10 && tag[10] == 'true';
         final channelPubKey = tag.length > 11 && tag[11].isNotEmpty ? tag[11] : null;
+        final sidechatPublicId = tag.length > 12 && tag[12].isNotEmpty ? tag[12] : null;
         final parentChannelPublicId = tag.length > 13 && tag[13].isNotEmpty ? tag[13] : null;
 
-        // Defer parent resolution to second pass
+        // Defer parent + sidechat resolution to second pass (both refer to
+        // sibling channels that may not exist in the DB yet during this loop).
         if (parentChannelPublicId != null) {
           parentMappings[tag[1]] = parentChannelPublicId;
+        }
+        if (sidechatPublicId != null) {
+          sidechatMappings[tag[1]] = sidechatPublicId;
         }
         int? parentChannelId; // will be set in second pass
 
@@ -491,6 +497,25 @@ class ServerSyncService {
         debugPrint('[StructureSync] Parent NOT FOUND for $childPublicId -> parentPublicId=$parentPublicId');
       }
     }
+
+    // Sidechat resolution: map voice channel → text side-chat channel id so
+    // the voice screen can show the linked text feed.
+    debugPrint('[StructureSync] Sidechat mappings: $sidechatMappings');
+    for (final entry in sidechatMappings.entries) {
+      final voicePublicId = entry.key;
+      final sidechatPublicId = entry.value;
+      final sidechat = await (_db.select(_db.channels)
+            ..where((c) => c.publicId.equals(sidechatPublicId)))
+          .getSingleOrNull();
+      if (sidechat != null) {
+        await (_db.update(_db.channels)
+              ..where((c) => c.publicId.equals(voicePublicId)))
+            .write(ChannelsCompanion(sidechatChannelId: Value(sidechat.id)));
+        debugPrint('[StructureSync] Linked voice $voicePublicId → sidechat ${sidechat.name} (id=${sidechat.id})');
+      } else {
+        debugPrint('[StructureSync] Sidechat NOT FOUND for $voicePublicId -> sidechatPublicId=$sidechatPublicId');
+      }
+    }
     // Delete channels/categories not in the latest event (handles deleted channels)
     // Exclude nil-type channels from synced set so they get cleaned up
     final syncedChannelIds = latest.tags
@@ -562,6 +587,17 @@ class ServerSyncService {
         debugPrint('[Sync] Created voice provider: ${pubkey.substring(0, 8)}');
       } catch (_) {}
     }
+  }
+
+  /// Force a fresh sync of the roles list for [serverId]. Exposed publicly so
+  /// screens like the role editor can pull the latest permission configuration
+  /// from relays without running a full server sync.
+  Future<void> refreshRoles(int serverId) async {
+    final server = await (_db.select(_db.servers)..where((s) => s.id.equals(serverId)))
+        .getSingleOrNull();
+    final gid = server?.nostrGroupId;
+    if (gid == null) return;
+    await _syncRoles(gid, serverId);
   }
 
   /// Sync Kind 31752 roles

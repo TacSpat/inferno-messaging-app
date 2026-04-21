@@ -276,6 +276,7 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
   bool _ageRestricted = false;
   bool _welcomeMessageEnabled = false;
   int? _welcomeChannelId;
+  String _serverType = 'community';
   @override
   void initState() {
     super.initState();
@@ -286,6 +287,30 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
     _ageRestricted = widget.server.ageRestricted;
     _welcomeMessageEnabled = widget.server.welcomeMessageEnabled;
     _welcomeChannelId = widget.server.welcomeChannelId;
+    _serverType = widget.server.serverType;
+  }
+  @override
+  void didUpdateWidget(covariant _OverviewPanel old) {
+    super.didUpdateWidget(old);
+    // Re-sync panel state when the streamed Server row updates, unless the
+    // user has unsaved edits — don't clobber in-flight changes.
+    if (_dirty) return;
+    if (old.server == widget.server) return;
+    if (_nameController.text != widget.server.name) {
+      _nameController.text = widget.server.name;
+    }
+    final desc = widget.server.description ?? '';
+    if (_descController.text != desc) {
+      _descController.text = desc;
+    }
+    if (_welcomeTemplateController.text != widget.server.welcomeMessageTemplate) {
+      _welcomeTemplateController.text = widget.server.welcomeMessageTemplate;
+    }
+    _discoverable = widget.server.discoverable;
+    _ageRestricted = widget.server.ageRestricted;
+    _welcomeMessageEnabled = widget.server.welcomeMessageEnabled;
+    _welcomeChannelId = widget.server.welcomeChannelId;
+    _serverType = widget.server.serverType;
   }
   @override
   void dispose() {
@@ -305,6 +330,7 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
         name: Value(_nameController.text.trim()),
         description: Value(_descController.text.trim()),
         discoverable: Value(_discoverable),
+        serverType: Value(_serverType),
         ageRestricted: Value(_ageRestricted),
         welcomeMessageEnabled: Value(_welcomeMessageEnabled),
         welcomeMessageTemplate: Value(_welcomeTemplateController.text.trim()),
@@ -378,6 +404,25 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
         TextField(controller: _descController, onChanged: (_) => setState(() => _dirty = true),
           maxLines: 3, style: TextStyle(color: Colors.white, fontSize: 14),
           decoration: _inputDecor(c, hint: "What's this server about?")),
+        const SizedBox(height: 16),
+        _label('SERVER TYPE', c),
+        const SizedBox(height: 4),
+        Text('Shown as a tag in the server catalog', style: TextStyle(color: c.gray500, fontSize: 11)),
+        const SizedBox(height: 8),
+        DropdownButtonFormField<String>(
+          value: _serverType,
+          dropdownColor: c.gray900,
+          style: TextStyle(color: c.gray200, fontSize: 14),
+          decoration: _inputDecor(c),
+          items: const [
+            DropdownMenuItem(value: 'community', child: Text('Community')),
+            DropdownMenuItem(value: 'friends_family', child: Text('Friends & Family')),
+            DropdownMenuItem(value: 'gaming', child: Text('Gaming')),
+            DropdownMenuItem(value: 'work_team', child: Text('Work & Team')),
+            DropdownMenuItem(value: 'adult', child: Text('18+')),
+          ],
+          onChanged: (v) => setState(() { _serverType = v ?? 'community'; _dirty = true; }),
+        ),
         const SizedBox(height: 24),
         Container(height: 1, color: c.gray700),
         const SizedBox(height: 24),
@@ -403,8 +448,10 @@ class _OverviewPanelState extends ConsumerState<_OverviewPanel> {
             stream: db.serversDao.watchServerChannels(widget.server.id),
             builder: (context, snap) {
               final textChannels = (snap.data ?? []).where((ch) => ch.channelType == 0).toList();
+              // Reset if the selected channel no longer exists (deleted).
+              final validId = textChannels.any((ch) => ch.id == _welcomeChannelId) ? _welcomeChannelId : null;
               return DropdownButtonFormField<int?>(
-                value: _welcomeChannelId,
+                value: validId,
                 dropdownColor: c.gray900,
                 style: TextStyle(color: c.gray200, fontSize: 14),
                 decoration: _inputDecor(c),
@@ -1167,6 +1214,7 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
   int voiceUserLimit = editing?.voiceUserLimit ?? 0;
   bool videoEnabled = editing?.videoEnabled ?? false;
   int? parentChannelId = editing?.parentChannelId;
+  int? sidechatChannelId = editing?.sidechatChannelId;
   final userLimitCtrl = TextEditingController(text: voiceUserLimit.toString());
   Set<String> allowedRoleIds = {};
   if (editing?.permissionsOverrides != null) {
@@ -1184,6 +1232,11 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
       .get();
   final voiceChannels = await (db.select(db.channels)
         ..where((ch) => ch.serverId.equals(server.id) & ch.channelType.equals(1))
+        ..orderBy([(ch) => OrderingTerm.asc(ch.position)]))
+      .get();
+  // Text channels on this server — candidates for a voice channel's side-chat.
+  final textChannels = await (db.select(db.channels)
+        ..where((ch) => ch.serverId.equals(server.id) & ch.channelType.equals(0))
         ..orderBy([(ch) => OrderingTerm.asc(ch.position)]))
       .get();
   final filteredRoles = roles.where((r) => r.name != '@everyone').toList();
@@ -1276,6 +1329,22 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
                     onChanged: (v) => ss(() => parentChannelId = v),
                   ),
                   Text('Audio from the hearth radiates down to all its embers', style: TextStyle(color: c.gray600, fontSize: 11)),
+                  const SizedBox(height: 12),
+                  _dialogLabel(c, 'SIDE CHAT'),
+                  DropdownButtonFormField<int?>(
+                    value: sidechatChannelId,
+                    dropdownColor: c.gray900,
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                    decoration: _inputDecor(c),
+                    items: [
+                      DropdownMenuItem<int?>(value: null, child: Text('None', style: TextStyle(color: c.gray400))),
+                      ...textChannels.map((tc) =>
+                          DropdownMenuItem<int?>(value: tc.id, child: Text('# ${tc.name}'))),
+                    ],
+                    onChanged: (v) => ss(() => sidechatChannelId = v),
+                  ),
+                  Text('Linked text channel shown alongside the voice stage.',
+                      style: TextStyle(color: c.gray600, fontSize: 11)),
                   const SizedBox(height: 8),
                   _dialogCheckbox(c, 'Enable video', videoEnabled, (v) => ss(() => videoEnabled = v)),
                 ]),
@@ -1370,6 +1439,7 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
                     'voiceUserLimit': voiceUserLimit,
                     'videoEnabled': videoEnabled,
                     'parentChannelId': parentChannelId,
+                    'sidechatChannelId': sidechatChannelId,
                     'allowedRoleIds': allowedRoleIds.toList(),
                   }),
                   child: Text(isEditing ? 'Save Changes' : 'Create', style: const TextStyle(color: Colors.white))),
@@ -1413,6 +1483,7 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
       voiceUserLimit: Value(result['voiceUserLimit'] as int),
       videoEnabled: Value(result['videoEnabled'] as bool),
       parentChannelId: Value(result['parentChannelId'] as int?),
+      sidechatChannelId: Value(result['sidechatChannelId'] as int?),
       updatedAt: Value(DateTime.now()),
     ));
   } else {
@@ -1422,6 +1493,33 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
     final channelGroupId = gid != null ? '$gid-$publicId' : null;
     final channels = await (db.select(db.channels)..where((ch) => ch.serverId.equals(server.id))).get();
     final maxPos = channels.fold<int>(0, (max, ch) => (ch.position ?? 0) > max ? (ch.position ?? 0) : max);
+    int? sidechatId = result['sidechatChannelId'] as int?;
+
+    // If creating a voice channel without an explicit side-chat, auto-create
+    // a paired hidden text channel and link it. Matches Rails' behavior where
+    // every voice channel ships with a companion chat.
+    if ((result['type'] as int) == 1 && sidechatId == null) {
+      final sidechatPublicId = (now.microsecondsSinceEpoch + 1)
+          .toRadixString(36)
+          .padLeft(12, '0')
+          .substring(0, 12);
+      final sidechatGroupId = gid != null ? '$gid-$sidechatPublicId' : null;
+      sidechatId = await db.into(db.channels).insert(ChannelsCompanion.insert(
+        publicId: sidechatPublicId,
+        serverId: server.id,
+        name: '$name-chat',
+        channelType: 0,
+        position: Value(maxPos + 2),
+        nostrGroupId: Value(sidechatGroupId),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      await db.into(db.channelReads).insert(ChannelReadsCompanion.insert(
+        channelId: sidechatId, userId: 0,
+        lastReadAt: now, createdAt: now, updatedAt: now,
+      ), onConflict: DoNothing());
+    }
+
     final chRowId = await db.into(db.channels).insert(ChannelsCompanion.insert(
       publicId: publicId, serverId: server.id,
       name: name, channelType: result['type'] as int,
@@ -1434,6 +1532,7 @@ Future<void> showChannelDialog(BuildContext context, WidgetRef ref, {required Se
       voiceUserLimit: Value(result['voiceUserLimit'] as int),
       videoEnabled: Value(result['videoEnabled'] as bool),
       parentChannelId: Value(result['parentChannelId'] as int?),
+      sidechatChannelId: Value(sidechatId),
       nostrGroupId: Value(channelGroupId),
       createdAt: now, updatedAt: now,
     ));
@@ -1927,6 +2026,9 @@ class _RoleEditorState extends ConsumerState<_RoleEditor> {
   void initState() {
     super.initState();
     _initFromRole();
+    // Pull fresh role data from relays so permissions reflect the latest
+    // published configuration rather than a potentially stale DB snapshot.
+    _refreshFromRelays();
   }
   void _initFromRole() {
     _nameCtrl = TextEditingController(text: widget.role.name ?? '');
@@ -1935,6 +2037,27 @@ class _RoleEditorState extends ConsumerState<_RoleEditor> {
     _hoist = widget.role.hoist;
     _perms = _parsePermissions(widget.role.permissions);
     _loadMyProfile();
+  }
+  Future<void> _refreshFromRelays() async {
+    try {
+      await ref.read(serverSyncServiceProvider).refreshRoles(widget.serverId);
+      if (!mounted || _dirty) return;
+      final db = ref.read(databaseProvider);
+      final fresh = await (db.select(db.roles)..where((r) => r.id.equals(widget.role.id)))
+          .getSingleOrNull();
+      if (!mounted || fresh == null || _dirty) return;
+      setState(() {
+        _perms = _parsePermissions(fresh.permissions);
+        if (_nameCtrl.text == (widget.role.name ?? '')) {
+          _nameCtrl.text = fresh.name ?? _nameCtrl.text;
+        }
+        _color = fresh.color ?? _color;
+        if (_colorCtrl.text == (widget.role.color ?? '#9E9E9E')) {
+          _colorCtrl.text = _color;
+        }
+        _hoist = fresh.hoist;
+      });
+    } catch (_) {}
   }
   Future<void> _loadMyProfile() async {
     final auth = ref.read(authServiceProvider);
@@ -1954,6 +2077,16 @@ class _RoleEditorState extends ConsumerState<_RoleEditor> {
       final map = (jsonDecode(json) as Map<String, dynamic>);
       return map.map((k, v) => MapEntry(k, v == true));
     } catch (_) { return {}; }
+  }
+
+  /// Default ON/OFF state for a permission key (matches [Permission.defaultValue]).
+  /// Used when a role has no explicit entry for a given permission so toggles
+  /// render their real default instead of forcing every unset value to false.
+  bool _defaultForKey(String key) {
+    for (final p in Permission.values) {
+      if (p.key == key) return p.defaultValue;
+    }
+    return false;
   }
   @override
   void didUpdateWidget(_RoleEditor old) {
@@ -2111,7 +2244,11 @@ class _RoleEditorState extends ConsumerState<_RoleEditor> {
                 Text(perm.value, style: TextStyle(color: c.gray500, fontSize: 11)),
               ])),
               Switch(
-                value: _perms[perm.key] == true,
+                // Fall back to the permission's default when no explicit value
+                // is stored so a freshly-synced @everyone with empty
+                // permissions renders Read Messages / Send Messages / etc.
+                // ON instead of every toggle looking disabled.
+                value: _perms[perm.key] ?? _defaultForKey(perm.key),
                 activeColor: c.accent,
                 onChanged: (v) => setState(() { _perms[perm.key] = v; _dirty = true; }),
               ),
@@ -2472,19 +2609,22 @@ class _MemberRowState extends ConsumerState<_MemberRow> {
           const SizedBox(width: 12),
           Expanded(flex: 3, child: Wrap(spacing: 4, runSpacing: 4, children: [
             for (final role in memberRoles)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: _parseColor(role.color).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: _parseColor(role.color).withValues(alpha: 0.4)),
+              if (role.name?.toLowerCase() != '@everyone' &&
+                  role.name?.toLowerCase() != 'everyone' &&
+                  role.name?.toLowerCase() != 'owner')
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: c.gray800,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: c.gray700),
+                  ),
+                  child: Row(mainAxisSize: MainAxisSize.min, children: [
+                    Container(width: 8, height: 8, decoration: BoxDecoration(color: _parseColor(role.color), shape: BoxShape.circle)),
+                    const SizedBox(width: 5),
+                    Text(role.name ?? '', style: TextStyle(color: c.gray200, fontSize: 11, fontWeight: FontWeight.w500)),
+                  ]),
                 ),
-                child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Container(width: 8, height: 8, decoration: BoxDecoration(color: _parseColor(role.color), shape: BoxShape.circle)),
-                  const SizedBox(width: 5),
-                  Text(role.name ?? '', style: TextStyle(color: _parseColor(role.color), fontSize: 11, fontWeight: FontWeight.w500)),
-                ]),
-              ),
           ])),
           if (_hovering) ...[
             _linkBtn('History', c.gray400, () => _showHistory(context)),
@@ -3981,4 +4121,4 @@ Widget _tabBtn(String label, bool active, InfernoColors c, VoidCallback onTap) =
 
 Widget _linkBtn(String label, Color color, VoidCallback onTap) => Padding(padding: const EdgeInsets.only(left: 6),
   child: GestureDetector(onTap: onTap, child: MouseRegion(cursor: SystemMouseCursors.click,
-    child: Text(label, style: TextStyle(color: color, fontSize: 12, decoration: TextDecoration.underline)))));
+    child: Text(label, style: TextStyle(color: color, fontSize: 12)))));

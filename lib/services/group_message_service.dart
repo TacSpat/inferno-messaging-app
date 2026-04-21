@@ -70,6 +70,17 @@ class GroupMessageService {
     final signer = NostrSigner(privateKeyHex: privateKeyHex);
     final signed = signer.sign(event);
 
+    // Resolve parent message id for local storage so the sender sees the
+    // same reply preview everyone else does. The inbound handler does this
+    // from the `e` tag, but our own outbound insert needs to do it too.
+    int? localParentId;
+    if (parentEventId != null) {
+      final parent = await (_db.select(_db.messages)
+            ..where((m) => m.nostrEventId.equals(parentEventId)))
+          .getSingleOrNull();
+      localParentId = parent?.id;
+    }
+
     // Store locally
     final publicId = NostrKey.bytesToHex(NostrKey.hexToBytes(signed.id!).sublist(0, 6));
     final now = DateTime.now();
@@ -78,6 +89,7 @@ class GroupMessageService {
         publicId: publicId,
         content: Value(content),
         channelId: Value(channel.id),
+        parentId: Value(localParentId),
         spoiler: Value(spoiler),
         nostrAuthorPubkey: Value(publicKeyHex),
         nostrEventId: Value(signed.id),
@@ -88,13 +100,33 @@ class GroupMessageService {
       ),
     );
 
-    // Publish and log results
-    final results = await _relayPool.publish(signed);
-    results.forEach((url, success) {
-      debugPrint('[GroupMessage] ${success ? "OK" : "FAIL"} $url');
+    // Publish and surface failure reason so the UI can toast rate limits /
+    // auth rejections instead of silently pretending the send went through.
+    final results = await _relayPool.publishWithDetails(signed);
+    results.forEach((url, r) {
+      debugPrint('[GroupMessage] ${r.ok ? "OK" : "FAIL(${r.reason})"} $url');
     });
+    final anyOk = results.values.any((r) => r.ok);
+    if (!anyOk) {
+      final rateLimited = results.values.any((r) => r.isRateLimited);
+      lastSendError = rateLimited
+          ? 'Rate limited by relay — try again in a few seconds.'
+          : _firstReason(results) ?? 'No relay accepted the message.';
+    } else {
+      lastSendError = null;
+    }
 
     return (_db.select(_db.messages)..where((m) => m.id.equals(msgId))).getSingleOrNull();
+  }
+
+  /// Human-readable failure reason from the last send, or null on success.
+  String? lastSendError;
+
+  String? _firstReason(Map<String, PublishResult> r) {
+    for (final v in r.values) {
+      if (!v.ok && v.reason != null && v.reason!.isNotEmpty) return v.reason;
+    }
+    return null;
   }
 
   /// Process inbound Kind 9 group message

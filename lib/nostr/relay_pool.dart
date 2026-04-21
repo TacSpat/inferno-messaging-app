@@ -36,7 +36,7 @@ class RelayPool {
   final Set<String> _processedEventIds = {};
 
   // OK response completers for publish tracking
-  final Map<String, Completer<bool>> _publishCompleters = {};
+  final Map<String, Completer<PublishResult>> _publishResultCompleters = {};
 
   // Track relay failures for fetchFresh — skip after 3 consecutive failures
   final Map<String, int> _freshFetchFailures = {};
@@ -124,30 +124,37 @@ class RelayPool {
   /// Publish a signed event to all connected relays
   /// Returns a map of relay URL -> success boolean
   Future<Map<String, bool>> publish(NostrEvent signedEvent) async {
-    final results = <String, bool>{};
+    final detailed = await publishWithDetails(signedEvent);
+    return detailed.map((url, r) => MapEntry(url, r.ok));
+  }
+
+  /// Publish and return per-relay success + rejection reason (NIP-20 OK message
+  /// reason field). Use this when the caller wants to distinguish "rate limited"
+  /// / "invalid" / offline so the UI can surface something actionable.
+  Future<Map<String, PublishResult>> publishWithDetails(NostrEvent signedEvent) async {
+    final results = <String, PublishResult>{};
     final futures = <Future>[];
 
     for (final conn in _connections.values) {
       if (!conn.isConnected) {
-        results[conn.url] = false;
+        results[conn.url] = const PublishResult(ok: false, reason: 'offline');
         continue;
       }
 
-      final completer = Completer<bool>();
+      final completer = Completer<PublishResult>();
       final eventId = signedEvent.id!;
       final key = '${conn.url}:$eventId';
-      _publishCompleters[key] = completer;
+      _publishResultCompleters[key] = completer;
 
       conn.sendEvent(signedEvent);
 
-      // Timeout after 15 seconds
       futures.add(
         completer.future.timeout(
           const Duration(seconds: 15),
-          onTimeout: () => false,
-        ).then((success) {
-          results[conn.url] = success;
-          _publishCompleters.remove(key);
+          onTimeout: () => const PublishResult(ok: false, reason: 'timeout'),
+        ).then((r) {
+          results[conn.url] = r;
+          _publishResultCompleters.remove(key);
         }),
       );
     }
@@ -427,8 +434,10 @@ class RelayPool {
       debugPrint('[RelayPool] OK:false from $relayUrl for $eventId: $reason');
     }
     final key = '$relayUrl:$eventId';
-    _publishCompleters[key]?.complete(success);
-    _publishCompleters.remove(key);
+    _publishResultCompleters[key]?.complete(
+      PublishResult(ok: success, reason: reason),
+    );
+    _publishResultCompleters.remove(key);
   }
 
   void _handleAuthMessage(String relayUrl, List<dynamic> message) {
@@ -447,5 +456,20 @@ class RelayPool {
 
   void _handleStateChange(String relayUrl, rc.RelayConnectionState state) {
     // Could emit to a stream for UI consumption
+  }
+}
+
+/// Per-relay result of a publish call. [reason] is the NIP-20 OK message
+/// reason prefix (e.g. "rate-limited: too fast") when [ok] is false.
+class PublishResult {
+  final bool ok;
+  final String? reason;
+  const PublishResult({required this.ok, this.reason});
+
+  /// True if the rejection reason looks like a relay rate limit.
+  bool get isRateLimited {
+    if (ok) return false;
+    final r = reason?.toLowerCase() ?? '';
+    return r.contains('rate') || r.contains('slow') || r.contains('too fast');
   }
 }

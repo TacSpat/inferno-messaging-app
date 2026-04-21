@@ -128,6 +128,11 @@ class _ReactionChipState extends State<_ReactionChip> {
     );
   }
 
+  static const _textEmojiSize = 16.0;
+  // Text emoji at fontSize 16 renders ~24px tall with Noto Color Emoji's
+  // built-in padding. Match that for custom images.
+  static const _imageEmojiSize = 24.0;
+
   Widget _buildEmoji() {
     final emoji = widget.emoji;
     // Custom server emoji: :shortcode: format
@@ -135,16 +140,18 @@ class _ReactionChipState extends State<_ReactionChip> {
       final shortcode = emoji.substring(1, emoji.length - 1);
       final url = widget.customEmojis[shortcode];
       if (url != null) {
-        return CachedNetworkImage(
-          imageUrl: url,
-          width: 18,
-          height: 18,
-          fit: BoxFit.contain,
-          errorWidget: (_, __, ___) => Text(emoji, style: const TextStyle(fontSize: 14, fontFamilyFallback: ['NotoColorEmoji'])),
+        return SizedBox(
+          width: _imageEmojiSize,
+          height: _imageEmojiSize,
+          child: CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.contain,
+            errorWidget: (_, __, ___) => Text(emoji, style: const TextStyle(fontSize: _textEmojiSize, fontFamilyFallback: ['NotoColorEmoji'])),
+          ),
         );
       }
-      return Text(emoji, style: const TextStyle(fontSize: 14, fontFamilyFallback: ['NotoColorEmoji']));
+      return Text(emoji, style: const TextStyle(fontSize: _textEmojiSize, fontFamilyFallback: ['NotoColorEmoji']));
     }
-    return Text(emoji, style: const TextStyle(fontSize: 16, fontFamilyFallback: ['NotoColorEmoji']));
+    return Text(emoji, style: const TextStyle(fontSize: _textEmojiSize, fontFamilyFallback: ['NotoColorEmoji']));
   }
 }

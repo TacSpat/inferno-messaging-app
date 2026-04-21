@@ -9,15 +9,34 @@ class TypingService {
   // Track who is typing where: channelGroupId -> {pubkey: expiry}
   final Map<String, Map<String, DateTime>> _typingState = {};
 
-  // Debounce our own typing events
+  // Debounce our own typing events. Keyed by channelGroupId (or the
+  // counterparty pubkey for DMs).
   Timer? _typingTimer;
-  String? _lastTypingChannel;
-  DateTime? _lastTypingSent;
+  final Map<String, DateTime> _lastSentByKey = {};
+
+  // Minimum interval between our own typing events on the same key. Raised
+  // from 7s so typing consumes less of a relay's rate budget and doesn't
+  // crowd out real message sends.
+  static const _typingInterval = Duration(seconds: 15);
+
+  // After a real message is sent, block further typing events on that key
+  // for this long so the two don't race into a rate limit.
+  static const _postSendSuppression = Duration(seconds: 10);
 
   final _typingController = StreamController<TypingUpdate>.broadcast();
   Stream<TypingUpdate> get typingUpdates => _typingController.stream;
 
   TypingService(this._relayPool);
+
+  /// Called by senders right before publishing a real message so the next
+  /// typing heartbeat doesn't race the message into a relay's rate limit.
+  void suppressAfterSend(String key) {
+    // Pretend the last typing send happened far enough in the future that
+    // the interval gate below blocks new sends for [_postSendSuppression].
+    _lastSentByKey[key] = DateTime.now()
+        .add(_postSendSuppression)
+        .subtract(_typingInterval);
+  }
 
   /// Send a typing indicator for a channel
   void sendTyping({
@@ -25,15 +44,12 @@ class TypingService {
     required String publicKeyHex,
     required String channelGroupId,
   }) {
-    // Rate limit: at most one typing event every 7 seconds per channel
     final now = DateTime.now();
-    if (_lastTypingChannel == channelGroupId &&
-        _lastTypingSent != null &&
-        now.difference(_lastTypingSent!).inSeconds < 7) return;
-    _lastTypingChannel = channelGroupId;
-    _lastTypingSent = now;
+    final last = _lastSentByKey[channelGroupId];
+    if (last != null && now.difference(last) < _typingInterval) return;
+    _lastSentByKey[channelGroupId] = now;
     _typingTimer?.cancel();
-    _typingTimer = Timer(const Duration(seconds: 7), () {});
+    _typingTimer = Timer(_typingInterval, () {});
 
     final event = nostr.NostrEvent(
       pubkey: publicKeyHex,
@@ -48,32 +64,73 @@ class TypingService {
     _relayPool.publish(signed);
   }
 
-  /// Process inbound Kind 25050 typing indicator
-  void processInboundTyping(nostr.NostrEvent event) {
+  /// Send a typing indicator to a DM counterparty. Uses the same ephemeral
+  /// kind 25050 but scopes it with a `p` tag so only the recipient reacts.
+  /// We key rate-limit state under a "dm:<pubkey>" prefix so it doesn't
+  /// collide with channel typing state.
+  void sendDmTyping({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String recipientPubkey,
+  }) {
+    final key = _dmKey(recipientPubkey);
+    final now = DateTime.now();
+    final last = _lastSentByKey[key];
+    if (last != null && now.difference(last) < _typingInterval) return;
+    _lastSentByKey[key] = now;
+
+    final event = nostr.NostrEvent(
+      pubkey: publicKeyHex,
+      createdAt: nostr.NostrEvent.now(),
+      kind: 25050,
+      tags: [['p', recipientPubkey]],
+      content: '',
+    );
+    final signer = NostrSigner(privateKeyHex: privateKeyHex);
+    final signed = signer.sign(event);
+    _relayPool.publish(signed);
+  }
+
+  /// Process inbound Kind 25050 typing indicator (channel or DM).
+  void processInboundTyping(nostr.NostrEvent event, {String? selfPubkey}) {
+    // Channel typing carries an `h` (group id) tag; DM typing carries a `p`
+    // tag addressed to us.
     final hTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'h').firstOrNull;
-    if (hTag == null || hTag.length < 2) return;
+    if (hTag != null && hTag.length >= 2) {
+      _recordTyping(hTag[1], event.pubkey);
+      return;
+    }
+    if (selfPubkey != null) {
+      final pTag = event.tags.where((t) => t.isNotEmpty && t[0] == 'p').firstOrNull;
+      if (pTag != null && pTag.length >= 2 && pTag[1] == selfPubkey) {
+        // Route DM typing under the sender pubkey so DM UI can watch it.
+        _recordTyping(_dmKey(event.pubkey), event.pubkey);
+      }
+    }
+  }
 
-    final channelGroupId = hTag[1];
-    final pubkey = event.pubkey;
+  void _recordTyping(String key, String pubkey) {
     final expiry = DateTime.now().add(const Duration(seconds: 5));
-
-    _typingState.putIfAbsent(channelGroupId, () => {});
-    _typingState[channelGroupId]![pubkey] = expiry;
-
+    _typingState.putIfAbsent(key, () => {});
+    _typingState[key]![pubkey] = expiry;
     _typingController.add(TypingUpdate(
-      channelGroupId: channelGroupId,
-      typingPubkeys: getTypingUsers(channelGroupId),
+      channelGroupId: key,
+      typingPubkeys: getTypingUsers(key),
     ));
-
-    // Auto-clear after 5 seconds
     Future.delayed(const Duration(seconds: 5), () {
-      _typingState[channelGroupId]?.remove(pubkey);
+      _typingState[key]?.remove(pubkey);
       _typingController.add(TypingUpdate(
-        channelGroupId: channelGroupId,
-        typingPubkeys: getTypingUsers(channelGroupId),
+        channelGroupId: key,
+        typingPubkeys: getTypingUsers(key),
       ));
     });
   }
+
+  String _dmKey(String pubkey) => 'dm:$pubkey';
+
+  /// Watch typing users for a DM counterparty.
+  Stream<List<String>> watchDmTyping(String counterpartyPubkey) =>
+      watchTyping(_dmKey(counterpartyPubkey));
 
   /// Get currently typing users for a channel
   List<String> getTypingUsers(String channelGroupId) {

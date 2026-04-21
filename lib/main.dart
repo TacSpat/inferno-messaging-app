@@ -9,6 +9,23 @@ import 'app.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // scrollable_positioned_list has a known semantics-layout race on Flutter
+  // 3.4x where `flushSemantics` visits child render objects before layout
+  // completes. In debug mode this is a fatal assertion; in release it's
+  // silently ignored. We install an error handler that swallows ONLY this
+  // specific assertion so the app survives in debug while keeping all other
+  // errors loud.
+  final defaultOnError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    final msg = details.exceptionAsString();
+    if (msg.contains('childSemantics.renderObject._needsLayout') ||
+        msg.contains('semantics.parentDataDirty')) {
+      // Swallow — package bug, harmless in practice.
+      return;
+    }
+    defaultOnError?.call(details);
+  };
+
   // Log to file on Windows for debugging (no console available)
   if (Platform.isWindows && !kDebugMode) {
     try {
@@ -26,7 +43,13 @@ void main() async {
 
       try {
         sink.writeln('[${DateTime.now()}] Initializing fvp...');
-        fvp.registerWith();
+        fvp.registerWith(options: {
+          // Quiet fvp/mdk's native logs. By default it calls
+          // `setGlobalOption("log", "all")` which spams messages like
+          // "texture and fbo are not created yet" into stderr during the
+          // brief window between controller creation and texture allocation.
+          'global': {'log': 'error'},
+        });
         sink.writeln('[${DateTime.now()}] fvp OK');
       } catch (e, st) {
         sink.writeln('[${DateTime.now()}] fvp FAILED: $e\n$st');
@@ -41,7 +64,13 @@ void main() async {
       crashFile.writeAsStringSync('[${DateTime.now()}] CRASH: $e\n$st');
     }
   } else {
-    fvp.registerWith();
+    fvp.registerWith(options: {
+          // Quiet fvp/mdk's native logs. By default it calls
+          // `setGlobalOption("log", "all")` which spams messages like
+          // "texture and fbo are not created yet" into stderr during the
+          // brief window between controller creation and texture allocation.
+          'global': {'log': 'error'},
+        });
     runApp(const ProviderScope(child: InfernoApp()));
   }
 }

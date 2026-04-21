@@ -17,6 +17,8 @@ import '../../services/backfill_service.dart';
 import '../../services/blossom_client.dart';
 import '../../services/content_safety_service.dart';
 import '../../services/dm_service.dart';
+import '../../providers/conversations_provider.dart';
+import 'package:go_router/go_router.dart';
 import '../main_shell.dart';
 
 class TextChannelScreen extends ConsumerStatefulWidget {
@@ -201,6 +203,22 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
         parentEventId: _replyMessageId,
         spoiler: spoiler,
       );
+      final err = groupMsgService.lastSendError;
+      if (err != null && mounted) {
+        final replyId = _replyMessageId;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(err),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () {
+                _replyMessageId = replyId;
+                _sendMessage(content, spoiler: spoiler, fileUrls: null);
+              },
+            ),
+          ),
+        );
+      }
     }
 
     // Clear reply/edit after sending
@@ -375,6 +393,10 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
       children: [
         Column(
           children: [
+            // If this channel is the side-chat for a voice channel, show a
+            // banner with the count of users currently in that voice call so
+            // members chatting here can see activity + join quickly.
+            _VoiceSidechatBanner(textChannel: _channel!, colors: c),
             Expanded(
               child: MessageList(
                 channelId: _channel!.id,
@@ -567,6 +589,118 @@ class _HeaderActionState extends State<_HeaderAction> {
               color: _hovering ? widget.colors.gray200 : widget.colors.gray400),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Banner shown atop a text channel when that channel is the side-chat of a
+/// voice channel. Tells you how many people are currently in the linked
+/// voice call and lets you jump in with one click. Matches the Rails pattern
+/// where side-chat viewers always know when the voice side is active.
+class _VoiceSidechatBanner extends ConsumerStatefulWidget {
+  final Channel textChannel;
+  final InfernoColors colors;
+  const _VoiceSidechatBanner({required this.textChannel, required this.colors});
+
+  @override
+  ConsumerState<_VoiceSidechatBanner> createState() => _VoiceSidechatBannerState();
+}
+
+class _VoiceSidechatBannerState extends ConsumerState<_VoiceSidechatBanner> {
+  Channel? _linkedVoiceChannel;
+  Timer? _refreshTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    // Voice state updates come from Nostr events into dm_service's in-memory
+    // map — there's no stream on the map, so poll at a gentle cadence to pick
+    // up join/leave changes while the banner is visible.
+    _refreshTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void didUpdateWidget(_VoiceSidechatBanner old) {
+    super.didUpdateWidget(old);
+    if (old.textChannel.id != widget.textChannel.id) _load();
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final db = ref.read(databaseProvider);
+    final voice = await (db.select(db.channels)
+          ..where((c) => c.sidechatChannelId.equals(widget.textChannel.id))
+          ..limit(1))
+        .getSingleOrNull();
+    if (!mounted) return;
+    setState(() => _linkedVoiceChannel = voice);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final voice = _linkedVoiceChannel;
+    if (voice == null) return const SizedBox.shrink();
+    final dm = ref.watch(dmServiceProvider);
+    final states = dm.remoteVoiceStates[voice.publicId] ?? const [];
+    final count = states.length;
+    final c = widget.colors;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: c.accent.withValues(alpha: 0.08),
+        border: Border(bottom: BorderSide(color: c.accent.withValues(alpha: 0.25))),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.volume_up, size: 16, color: c.accent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                style: TextStyle(color: c.gray200, fontSize: 13),
+                children: [
+                  if (count == 0)
+                    const TextSpan(text: 'No one in voice right now — ')
+                  else
+                    TextSpan(
+                      text: count == 1 ? '1 person in ' : '$count people in ',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  TextSpan(
+                    text: voice.name,
+                    style: TextStyle(color: c.accent, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: c.accent,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            ),
+            icon: const Icon(Icons.login, size: 14),
+            label: Text(count == 0 ? 'Join' : 'Jump in'),
+            onPressed: () async {
+              final db = ref.read(databaseProvider);
+              final server = await (db.select(db.servers)
+                    ..where((s) => s.id.equals(widget.textChannel.serverId)))
+                  .getSingleOrNull();
+              if (server == null || !context.mounted) return;
+              context.go('/servers/${server.publicId}/channels/${voice.publicId}');
+            },
+          ),
+        ],
       ),
     );
   }
