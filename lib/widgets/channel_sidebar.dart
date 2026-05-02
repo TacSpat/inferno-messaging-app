@@ -9,14 +9,10 @@ import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
 import '../providers/servers_provider.dart';
 import '../providers/server_settings_provider.dart';
-import '../services/auth_service.dart';
 import '../services/invite_service.dart';
-import '../services/presence_service.dart';
 import '../providers/realtime_provider.dart';
-import '../providers/app_update_provider.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
-import '../screens/settings/settings_overlay.dart';
 import '../screens/server_settings/server_settings_overlay.dart';
 import 'channel_reorder.dart';
 
@@ -99,11 +95,9 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
   @override
   Widget build(BuildContext context) {
     final db = ref.watch(databaseProvider);
-    final auth = ref.watch(authServiceProvider);
     final c = ref.watch(infernoColorsProvider);
 
     return Container(
-      width: 240,
       decoration: BoxDecoration(
         color: c.gray800,
         border: Border(
@@ -198,7 +192,6 @@ class _ChannelSidebarState extends ConsumerState<ChannelSidebar> {
               Container(height: 1, color: c.gray700.withValues(alpha: 0.5)),
             ]);
           }); }),
-          _UserPanel(auth: auth, colors: c),
         ],
       ),
     );
@@ -1065,109 +1058,9 @@ class _DropdownItemState extends State<_DropdownItem> {
   }
 }
 
-class _UserPanel extends ConsumerWidget {
-  final AuthService auth;
-  final InfernoColors colors;
-  const _UserPanel({required this.auth, required this.colors});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final pubkey = auth.publicKeyHex;
-    final db = ref.watch(databaseProvider);
-    final presenceSvc = ref.watch(presenceServiceProvider);
-    final currentState = presenceSvc.currentState;
-    final statusColor = _presenceColor(currentState, colors);
-    final statusText = currentState.value[0].toUpperCase() + currentState.value.substring(1);
-
-    return StreamBuilder<List<Contact>>(
-      stream: pubkey != null
-          ? (db.select(db.contacts)..where((c) => c.pubkey.equals(pubkey))).watch()
-          : const Stream.empty(),
-      builder: (context, snap) {
-        final contact = snap.data?.firstOrNull;
-        final displayName = contact?.displayName ?? contact?.username ?? (pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User');
-        final avatarUrl = contact?.avatarUrl;
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 2, 2, 4),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        decoration: BoxDecoration(
-          color: colors.gray950,
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Row(
-          children: [
-            Stack(
-              children: [
-                Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: avatarUrl != null && avatarUrl.startsWith('http') ? Colors.transparent : colors.gray700,
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: avatarUrl != null && avatarUrl.startsWith('http')
-                      ? Image.network(avatarUrl, fit: BoxFit.cover, width: 32, height: 32)
-                      : Center(child: Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14, fontWeight: FontWeight.w600))),
-                ),
-                Positioned(
-                  right: 0, bottom: 0,
-                  child: Container(
-                    width: 12, height: 12,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(color: colors.gray600, width: 2),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(displayName,
-                    style: TextStyle(color: colors.gray200, fontSize: 13, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis),
-                  Text(statusText,
-                    style: TextStyle(color: colors.gray500, fontSize: 11)),
-                ],
-              ),
-            ),
-            ref.watch(appVersionProvider).when(
-              data: (v) => Text('v$v', style: TextStyle(color: colors.gray500, fontSize: 10)),
-              loading: () => const SizedBox.shrink(),
-              error: (_, __) => const SizedBox.shrink(),
-            ),
-            const SizedBox(width: 6),
-            MouseRegion(
-              cursor: SystemMouseCursors.click,
-              child: GestureDetector(
-                onTap: () => showSettingsOverlay(context),
-                child: Icon(Icons.settings, color: colors.gray400, size: 18),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-      },
-    );
-  }
-
-  static Color _presenceColor(OnlineState state, InfernoColors c) {
-    switch (state) {
-      case OnlineState.online: return c.online;
-      case OnlineState.idle: return c.idle;
-      case OnlineState.dnd: return c.dnd;
-      default: return c.offline;
-    }
-  }
-}
+// _UserPanel lives in widgets/user_panel.dart and is now rendered once by
+// MainShell so it doesn't flicker when the sidebar swaps between channels and
+// DMs.
 
 /// Discord-style invite dialog with member list and auto-generated link.
 class _InviteGenerateDialog extends StatefulWidget {

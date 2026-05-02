@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../services/key_management_service.dart';
 import '../../theme/all_themes.dart';
 import '../../theme/theme_provider.dart';
 
@@ -15,7 +16,19 @@ class _PasswordScreenState extends ConsumerState<PasswordScreen> {
   final _newController = TextEditingController();
   final _confirmController = TextEditingController();
   String? _error;
-  bool _saved = false;
+  bool _hasExisting = true; // assume yes until checked
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkExisting();
+  }
+
+  Future<void> _checkExisting() async {
+    final has = await KeyManagementService.hasBackupPassword();
+    if (mounted) setState(() { _hasExisting = has; _loading = false; });
+  }
 
   @override
   void dispose() {
@@ -25,12 +38,21 @@ class _PasswordScreenState extends ConsumerState<PasswordScreen> {
     super.dispose();
   }
 
-  void _updatePassword() {
+  Future<void> _updatePassword() async {
     final newPw = _newController.text;
     final confirmPw = _confirmController.text;
 
-    if (newPw.length < 6) {
-      setState(() => _error = 'New password must be at least 6 characters.');
+    // Verify current password if one exists.
+    if (_hasExisting) {
+      final ok = await KeyManagementService.verifyBackupPassword(_currentController.text);
+      if (!ok) {
+        setState(() => _error = 'Current password is incorrect.');
+        return;
+      }
+    }
+
+    if (newPw.length < 8) {
+      setState(() => _error = 'New password must be at least 8 characters.');
       return;
     }
     if (newPw != confirmPw) {
@@ -38,47 +60,71 @@ class _PasswordScreenState extends ConsumerState<PasswordScreen> {
       return;
     }
 
-    // TODO: Implement actual password update (re-encrypt private key with new password)
-    setState(() {
-      _error = null;
-      _saved = true;
-    });
+    // Validate the key can be re-encrypted with the new password.
+    try {
+      await KeyManagementService.exportNcryptsec(newPw);
+    } catch (e) {
+      setState(() => _error = 'Failed to re-encrypt key: $e');
+      return;
+    }
+
+    // Store the new password hash.
+    await KeyManagementService.setBackupPasswordHash(newPw);
+
+    setState(() => _error = null);
     _currentController.clear();
     _newController.clear();
     _confirmController.clear();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Password updated successfully.')),
-    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Backup password updated. Use the new password next time you export.')),
+      );
+      // Refresh state — now we have a password.
+      _checkExisting();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final c = ref.watch(infernoColorsProvider);
 
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        Text('Change Password', style: TextStyle(color: c.gray50, fontSize: 20, fontWeight: FontWeight.w600)),
+        Text(_hasExisting ? 'Change Backup Password' : 'Set Backup Password',
+            style: TextStyle(color: c.gray50, fontSize: 20, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        Text(
+          _hasExisting
+              ? 'Change the password used to encrypt your key backup (ncryptsec).'
+              : 'Set a password so you can create encrypted backups of your identity.',
+          style: TextStyle(color: c.gray500, fontSize: 13),
+        ),
         const SizedBox(height: 24),
         Container(
           constraints: const BoxConstraints(maxWidth: 448),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: c.gray900,
-            borderRadius: BorderRadius.circular(8),
+            color: c.gray900, borderRadius: BorderRadius.circular(8),
             border: Border.all(color: c.gray700),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _fieldLabel('CURRENT PASSWORD', c),
-            const SizedBox(height: 6),
-            _passwordField(_currentController, c),
-            const SizedBox(height: 20),
+            if (_hasExisting) ...[
+              _fieldLabel('CURRENT PASSWORD', c),
+              const SizedBox(height: 6),
+              _passwordField(_currentController, c),
+              const SizedBox(height: 20),
+            ],
             _fieldLabel('NEW PASSWORD', c),
             const SizedBox(height: 6),
             _passwordField(_newController, c),
             const SizedBox(height: 4),
-            Text('Minimum 6 characters', style: TextStyle(color: c.gray500, fontSize: 12)),
+            Text('Minimum 8 characters', style: TextStyle(color: c.gray500, fontSize: 12)),
             const SizedBox(height: 20),
             _fieldLabel('CONFIRM NEW PASSWORD', c),
             const SizedBox(height: 6),
@@ -93,12 +139,12 @@ class _PasswordScreenState extends ConsumerState<PasswordScreen> {
               child: ElevatedButton(
                 onPressed: _updatePassword,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: c.accent,
-                  foregroundColor: Colors.white,
+                  backgroundColor: c.accent, foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                 ),
-                child: const Text('Update Password', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: Text(_hasExisting ? 'Update Password' : 'Set Password',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
               ),
             ),
           ]),
@@ -114,8 +160,7 @@ class _PasswordScreenState extends ConsumerState<PasswordScreen> {
 
   Widget _passwordField(TextEditingController controller, InfernoColors c) {
     return TextField(
-      controller: controller,
-      obscureText: true,
+      controller: controller, obscureText: true,
       style: TextStyle(color: c.gray200, fontSize: 14),
       decoration: InputDecoration(
         filled: true, fillColor: c.gray950,

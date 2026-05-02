@@ -178,20 +178,34 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
         }).toList();
       }
 
-      // Filter out servers where user has an active membership
-      final memberships = await db.select(db.serverMemberships).get();
-      final memberServerIds = memberships.map((m) => m.serverId).toSet();
+      // Mark servers the user has already joined so the catalog can show
+      // them as "Joined" without offering a re-join action. Normalize GIDs
+      // to strip the double inferno- prefix that varies between sources.
+      String normalizeGid(String gid) {
+        var s = gid;
+        while (s.startsWith('inferno-')) s = s.substring(8);
+        return s; // raw ID without any prefix
+      }
+
       final allServers = await db.select(db.servers).get();
-      final joinedGids = allServers
-          .where((s) => s.nostrGroupId != null && memberServerIds.contains(s.id))
-          .map((s) => s.nostrGroupId!)
+      final joinedRawIds = allServers
+          .where((s) => s.nostrGroupId != null)
+          .map((s) => normalizeGid(s.nostrGroupId!))
           .toSet();
 
-      final available = (_discoveryCache ?? [])
-          .where((s) => !joinedGids.contains(s['nostr_group_id'] as String))
-          .toList();
+      final all = (_discoveryCache ?? []).map((s) {
+        final gid = s['nostr_group_id'] as String;
+        return {...s, 'joined': joinedRawIds.contains(normalizeGid(gid))};
+      }).toList();
 
-      if (mounted) setState(() { _discoveredServers = available; _discovering = false; });
+      // Sort: unjoined first, then joined
+      all.sort((a, b) {
+        final aj = a['joined'] == true ? 1 : 0;
+        final bj = b['joined'] == true ? 1 : 0;
+        return aj.compareTo(bj);
+      });
+
+      if (mounted) setState(() { _discoveredServers = all; _discovering = false; });
     } catch (_) {
       if (mounted) setState(() => _discovering = false);
     }
@@ -404,229 +418,283 @@ class _AddServerDialogState extends ConsumerState<AddServerDialog> {
     }
   }
 
+  int _tab = 0; // 0 = Browse, 1 = Create
+
   @override
   Widget build(BuildContext context) {
     final c = ref.watch(infernoColorsProvider);
+    final inputDecor = InputDecoration(
+      hintStyle: TextStyle(color: c.gray500),
+      fillColor: c.gray900, filled: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
+    );
 
     return Dialog(
       backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(24),
       child: Container(
-        width: 440,
-        constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+        width: MediaQuery.of(context).size.width * 0.85,
+        constraints: BoxConstraints(
+          maxWidth: 900,
+          maxHeight: MediaQuery.of(context).size.height * 0.9,
+        ),
         decoration: BoxDecoration(
           color: c.gray800,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: c.gray700.withValues(alpha: 0.5)),
         ),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                Row(
-                  children: [
-                    Text('Add a Server', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                    const Spacer(),
-                    GestureDetector(
-                      onTap: () => Navigator.pop(context),
-                      child: Container(
-                        width: 32, height: 32,
-                        decoration: BoxDecoration(color: c.gray700, shape: BoxShape.circle),
-                        child: Icon(Icons.close, size: 16, color: c.gray400),
-                      ),
-                    ),
-                  ],
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // ── Header + Tabs ──
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 16, 0),
+            child: Row(children: [
+              Text('Add a Server', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              const Spacer(),
+              GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  width: 32, height: 32,
+                  decoration: BoxDecoration(color: c.gray700, shape: BoxShape.circle),
+                  child: Icon(Icons.close, size: 16, color: c.gray400),
                 ),
-                const SizedBox(height: 16),
+              ),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(children: [
+              _TabBtn(label: 'Browse', active: _tab == 0, colors: c, onTap: () => setState(() => _tab = 0)),
+              const SizedBox(width: 8),
+              _TabBtn(label: 'Create', active: _tab == 1, colors: c, onTap: () => setState(() => _tab = 1)),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          Container(height: 1, color: c.gray700.withValues(alpha: 0.5)),
 
-                // === JOIN ===
-                Text('Enter an invite link or server ID to join', style: TextStyle(color: c.gray400, fontSize: 14)),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _inviteController,
-                        style: TextStyle(color: Colors.white, fontSize: 14),
-                        onSubmitted: (_) => _resolveInvite(),
-                        decoration: InputDecoration(
-                          hintText: 'Paste invite link or code...',
-                          hintStyle: TextStyle(color: c.gray500),
-                          fillColor: c.gray900,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    SizedBox(
-                      height: 48,
-                      child: ElevatedButton(
-                        onPressed: _resolving ? null : _resolveInvite,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: c.accent,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        child: _resolving
-                            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                            : const Text('Join', style: TextStyle(fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                  ],
-                ),
-                // Invite preview card
-                if (_inviteResolution != null) ...[
-                  const SizedBox(height: 12),
-                  _InvitePreviewCard(resolution: _inviteResolution!, colors: c, onJoin: _acceptResolvedInvite),
-                ],
-                const SizedBox(height: 20),
-
-                // === DISCOVER ===
-                _Divider('Discover', c),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Text('SERVERS ON YOUR RELAYS', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                  const Spacer(),
-                  MouseRegion(
-                    cursor: SystemMouseCursors.click,
-                    child: GestureDetector(
-                      onTap: _discovering ? null : () { _discoveryCache = null; _discoverServers(); },
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        child: Icon(Icons.refresh, size: 16, color: _discovering ? c.gray600 : c.gray400),
-                      ),
-                    ),
-                  ),
-                ]),
-                const SizedBox(height: 8),
-                if (_discovering)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Center(child: SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: c.gray400))),
-                  )
-                else if (_discoveredServers.isEmpty)
-                  GestureDetector(
-                    onTap: _discoverServers,
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          Icon(Icons.search, size: 40, color: c.gray500),
-                          const SizedBox(height: 8),
-                          Text('No servers found on your relays', style: TextStyle(color: c.gray400, fontSize: 14)),
-                          Text('Tap to retry', style: TextStyle(color: c.accent, fontSize: 12)),
-                        ],
-                      ),
-                    ),
-                  )
-                else
-                  ...List.generate(_discoveredServers.length, (i) {
-                    final server = _discoveredServers[i];
-                    return _DiscoverServerItem(
-                      server: server,
-                      colors: c,
-                      onJoin: () => _joinDiscoveredServer(server),
-                    );
-                  }),
-                const SizedBox(height: 16),
-
-                // === CREATE ===
-                _Divider('Or create your own', c),
-                const SizedBox(height: 12),
-
-                // Icon + Name + Description
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Icon placeholder
-                    Container(
-                      width: 56, height: 56,
-                      decoration: BoxDecoration(
-                        color: c.gray900,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: c.gray600, style: BorderStyle.solid),
-                      ),
-                      child: Icon(Icons.add_photo_alternate, size: 24, color: c.gray500),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        children: [
-                          TextField(
-                            controller: _nameController,
-                            style: TextStyle(color: Colors.white, fontSize: 14),
-                            decoration: InputDecoration(
-                              hintText: 'Server name',
-                              hintStyle: TextStyle(color: c.gray500),
-                              fillColor: c.gray900,
-                              isDense: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          TextField(
-                            controller: _descController,
-                            maxLines: 2,
-                            style: TextStyle(color: Colors.white, fontSize: 14),
-                            decoration: InputDecoration(
-                              hintText: 'Description (optional)',
-                              hintStyle: TextStyle(color: c.gray500),
-                              fillColor: c.gray900,
-                              isDense: true,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
-                              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: c.accent.withValues(alpha: 0.5))),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-
-                // Server type
-                Text('SERVER TYPE', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6, runSpacing: 6,
-                  children: [
-                    _TypeCard('Community', 'community', Icons.people, c.accent, c),
-                    _TypeCard('Friends', 'friends_family', Icons.home, const Color(0xFF16A34A), c),
-                    _TypeCard('Gaming', 'gaming', Icons.sports_esports, const Color(0xFF7C3AED), c),
-                    _TypeCard('Work', 'work_team', Icons.work, const Color(0xFF2563EB), c),
-                    _TypeCard('18+', 'adult', Icons.warning_amber, c.accent, c),
-                  ],
-                ),
-
-                if (_error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(_error!, style: TextStyle(color: c.accent, fontSize: 13)),
-                ],
-                const SizedBox(height: 16),
-
-                SizedBox(
-                  height: 44,
-                  child: ElevatedButton(
-                    onPressed: _loading ? null : _createServer,
-                    child: _loading
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Create Server', style: TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                ),
-              ],
+          // ── Tab Content ──
+          Flexible(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: _tab == 0 ? _buildBrowseTab(c, inputDecor) : _buildCreateTab(c, inputDecor),
             ),
           ),
-        ),
+        ]),
       ),
     );
+  }
+
+  // ─── Browse Tab ──────────────────────────────────────────
+
+  Widget _buildBrowseTab(InfernoColors c, InputDecoration inputDecor) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // Invite link
+      Text('Have an invite?', style: TextStyle(color: c.gray200, fontSize: 14, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(
+          child: TextField(
+            controller: _inviteController,
+            style: TextStyle(color: Colors.white, fontSize: 14),
+            onSubmitted: (_) => _resolveInvite(),
+            decoration: inputDecor.copyWith(hintText: 'Paste invite link or code...'),
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          height: 48,
+          child: ElevatedButton(
+            onPressed: _resolving ? null : _resolveInvite,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: c.accent, foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: _resolving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                : const Text('Join', style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ),
+      ]),
+      if (_inviteResolution != null) ...[
+        const SizedBox(height: 12),
+        _InvitePreviewCard(resolution: _inviteResolution!, colors: c, onJoin: _acceptResolvedInvite),
+      ],
+      const SizedBox(height: 20),
+
+      // Discover catalog
+      Row(children: [
+        Icon(Icons.explore, size: 16, color: c.accent),
+        const SizedBox(width: 6),
+        Text('DISCOVER SERVERS', style: TextStyle(color: c.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+        const Spacer(),
+        MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: _discovering ? null : () { _discoveryCache = null; _discoverServers(); },
+            child: Icon(Icons.refresh, size: 16, color: _discovering ? c.gray600 : c.gray400),
+          ),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      if (_discovering)
+        const Padding(
+          padding: EdgeInsets.all(48),
+          child: Center(child: SizedBox(width: 28, height: 28, child: CircularProgressIndicator(strokeWidth: 2))),
+        )
+      else if (_discoveredServers.isEmpty)
+        GestureDetector(
+          onTap: _discoverServers,
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 48),
+            child: Column(children: [
+              Icon(Icons.dns_outlined, size: 48, color: c.gray600),
+              const SizedBox(height: 12),
+              Text('No servers found on your relays', style: TextStyle(color: c.gray500, fontSize: 15)),
+              const SizedBox(height: 4),
+              Text('Tap to retry', style: TextStyle(color: c.accent, fontSize: 13)),
+            ]),
+          ),
+        )
+      else
+        LayoutBuilder(builder: (context, constraints) {
+          final cols = constraints.maxWidth > 600 ? 3 : (constraints.maxWidth > 380 ? 2 : 1);
+          final cards = _discoveredServers.map((s) =>
+            _ServerCatalogCard(server: s, colors: c, onJoin: () => _joinDiscoveredServer(s)),
+          ).toList();
+          return Wrap(
+            spacing: 12, runSpacing: 12,
+            children: cards.map((card) => SizedBox(
+              width: (constraints.maxWidth - (cols - 1) * 12) / cols,
+              child: card,
+            )).toList(),
+          );
+        }),
+    ]);
+  }
+
+  // ─── Create Tab ──────────────────────────────────────────
+
+  String? _selectedTemplate;
+
+  static const _templates = [
+    {'id': 'blank', 'name': 'Create My Own', 'desc': 'Start from scratch with an empty server', 'icon': Icons.add_circle_outline, 'color': 0xFF6E7681},
+    {'id': 'community', 'name': 'Community', 'desc': 'General chat, announcements, voice channels', 'icon': Icons.people, 'color': 0xFFE85D3A},
+    {'id': 'friends', 'name': 'Friends & Family', 'desc': 'Private hangout with voice and media', 'icon': Icons.home, 'color': 0xFF16A34A},
+    {'id': 'gaming', 'name': 'Gaming', 'desc': 'LFG, strategy, voice chat for sessions', 'icon': Icons.sports_esports, 'color': 0xFF7C3AED},
+    {'id': 'work', 'name': 'Work & Team', 'desc': 'Projects, standups, encrypted channels', 'icon': Icons.work, 'color': 0xFF2563EB},
+  ];
+
+  Widget _buildCreateTab(InfernoColors c, InputDecoration inputDecor) {
+    // Step 1: Pick template. Step 2: Customize.
+    if (_selectedTemplate == null) {
+      return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Text('What kind of server?', style: TextStyle(color: c.gray200, fontSize: 16, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text('Pick a template or start from scratch. You can customize everything later.',
+            style: TextStyle(color: c.gray500, fontSize: 13)),
+        const SizedBox(height: 20),
+        ...List.generate(_templates.length, (i) {
+          final t = _templates[i];
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _TemplateCard(
+              name: t['name'] as String,
+              desc: t['desc'] as String,
+              icon: t['icon'] as IconData,
+              color: Color(t['color'] as int),
+              colors: c,
+              onTap: () {
+                final id = t['id'] as String;
+                setState(() {
+                  _selectedTemplate = id;
+                  _serverType = id == 'blank' ? 'community' : id;
+                });
+              },
+            ),
+          );
+        }),
+      ]);
+    }
+
+    // Step 2: Customize
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      // Back to templates
+      MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: () => setState(() => _selectedTemplate = null),
+          child: Row(children: [
+            Icon(Icons.arrow_back, size: 16, color: c.gray400),
+            const SizedBox(width: 6),
+            Text('Back to templates', style: TextStyle(color: c.gray400, fontSize: 13)),
+          ]),
+        ),
+      ),
+      const SizedBox(height: 16),
+      Text('Customize your server', style: TextStyle(color: c.gray200, fontSize: 16, fontWeight: FontWeight.w600)),
+      const SizedBox(height: 16),
+
+      // Icon + Name + Description
+      Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 56, height: 56,
+          decoration: BoxDecoration(
+            color: c.gray900, borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: c.gray600),
+          ),
+          child: Icon(Icons.add_photo_alternate, size: 24, color: c.gray500),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(children: [
+          TextField(
+            controller: _nameController,
+            style: TextStyle(color: Colors.white, fontSize: 14),
+            decoration: inputDecor.copyWith(hintText: 'Server name'),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _descController, maxLines: 2,
+            style: TextStyle(color: Colors.white, fontSize: 14),
+            decoration: inputDecor.copyWith(hintText: 'Description (optional)'),
+          ),
+        ])),
+      ]),
+      const SizedBox(height: 16),
+
+      // Server type
+      Text('SERVER TYPE', style: TextStyle(color: c.gray500, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+      const SizedBox(height: 8),
+      Wrap(spacing: 6, runSpacing: 6, children: [
+        _TypeCard('Community', 'community', Icons.people, c.accent, c),
+        _TypeCard('Friends', 'friends_family', Icons.home, const Color(0xFF16A34A), c),
+        _TypeCard('Gaming', 'gaming', Icons.sports_esports, const Color(0xFF7C3AED), c),
+        _TypeCard('Work', 'work_team', Icons.work, const Color(0xFF2563EB), c),
+        _TypeCard('18+', 'adult', Icons.warning_amber, c.accent, c),
+      ]),
+
+      if (_error != null) ...[
+        const SizedBox(height: 12),
+        Text(_error!, style: TextStyle(color: c.accent, fontSize: 13)),
+      ],
+      const SizedBox(height: 20),
+
+      SizedBox(
+        height: 44,
+        child: ElevatedButton(
+          onPressed: _loading ? null : _createServer,
+          style: ElevatedButton.styleFrom(
+            backgroundColor: c.accent, foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: _loading
+              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+              : const Text('Create Server', style: TextStyle(fontWeight: FontWeight.w600)),
+        ),
+      ),
+    ]);
   }
 
   Widget _TypeCard(String label, String type, IconData icon, Color color, InfernoColors c) {
@@ -751,6 +819,235 @@ class _DiscoverServerItemState extends State<_DiscoverServerItem> {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Tab button for Browse/Create switcher.
+class _TabBtn extends StatelessWidget {
+  final String label;
+  final bool active;
+  final InfernoColors colors;
+  final VoidCallback onTap;
+  const _TabBtn({required this.label, required this.active, required this.colors, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: active ? colors.accent.withValues(alpha: 0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: active ? colors.accent.withValues(alpha: 0.4) : colors.gray700),
+          ),
+          child: Text(label, style: TextStyle(
+            color: active ? colors.accent : colors.gray400,
+            fontSize: 13, fontWeight: active ? FontWeight.w600 : FontWeight.w500,
+          )),
+        ),
+      ),
+    );
+  }
+}
+
+/// Template card for the Create tab's first step.
+class _TemplateCard extends StatefulWidget {
+  final String name;
+  final String desc;
+  final IconData icon;
+  final Color color;
+  final InfernoColors colors;
+  final VoidCallback onTap;
+  const _TemplateCard({required this.name, required this.desc, required this.icon,
+    required this.color, required this.colors, required this.onTap});
+  @override
+  State<_TemplateCard> createState() => _TemplateCardState();
+}
+
+class _TemplateCardState extends State<_TemplateCard> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: BoxDecoration(
+            color: _hovering ? widget.color.withValues(alpha: 0.08) : c.gray900,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _hovering ? widget.color.withValues(alpha: 0.4) : c.gray700.withValues(alpha: 0.5)),
+          ),
+          child: Row(children: [
+            Container(
+              width: 40, height: 40,
+              decoration: BoxDecoration(
+                color: widget.color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(widget.icon, size: 22, color: widget.color),
+            ),
+            const SizedBox(width: 14),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(widget.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
+              Text(widget.desc, style: TextStyle(color: c.gray400, fontSize: 12)),
+            ])),
+            Icon(Icons.arrow_forward_ios, size: 14, color: _hovering ? widget.color : c.gray600),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// Server catalog card — banner image + icon overlay + name + description + tags.
+/// Designed for a grid layout like a game store catalog.
+class _ServerCatalogCard extends StatefulWidget {
+  final Map<String, dynamic> server;
+  final InfernoColors colors;
+  final VoidCallback onJoin;
+  const _ServerCatalogCard({required this.server, required this.colors, required this.onJoin});
+
+  @override
+  State<_ServerCatalogCard> createState() => _ServerCatalogCardState();
+}
+
+class _ServerCatalogCardState extends State<_ServerCatalogCard> {
+  bool _hovering = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.colors;
+    final s = widget.server;
+    final name = s['name'] as String? ?? 'Unknown';
+    final desc = s['description'] as String?;
+    final iconUrl = s['icon_url'] as String?;
+    final bannerUrl = s['banner_url'] as String?;
+    final serverType = s['server_type'] as String?;
+    final ageRestricted = s['age_restricted'] == true;
+    final joined = s['joined'] == true;
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: joined ? null : widget.onJoin,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: c.gray900,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: joined
+                  ? c.online.withValues(alpha: 0.3)
+                  : (_hovering ? c.accent.withValues(alpha: 0.4) : c.gray700.withValues(alpha: 0.4)),
+              width: _hovering && !joined ? 1.5 : 1,
+            ),
+            boxShadow: _hovering && !joined ? [
+              BoxShadow(color: c.accent.withValues(alpha: 0.08), blurRadius: 12),
+            ] : null,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            // Banner area
+            Container(
+              height: 100,
+              decoration: BoxDecoration(
+                color: c.gray700,
+                image: bannerUrl != null
+                    ? DecorationImage(image: NetworkImage(bannerUrl), fit: BoxFit.cover)
+                    : (iconUrl != null
+                        ? DecorationImage(image: NetworkImage(iconUrl), fit: BoxFit.cover,
+                            colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.4), BlendMode.darken))
+                        : null),
+              ),
+              child: Stack(children: [
+                if (bannerUrl == null && iconUrl == null)
+                  Center(child: Text(name[0].toUpperCase(),
+                      style: TextStyle(color: c.gray400, fontSize: 36, fontWeight: FontWeight.bold))),
+                if (joined)
+                  Positioned(
+                    top: 8, right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: c.online.withValues(alpha: 0.9),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.check, size: 12, color: Colors.white),
+                        SizedBox(width: 4),
+                        Text('Joined', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                      ]),
+                    ),
+                  ),
+              ]),
+            ),
+            // Info section
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Row(children: [
+                  // Small server icon
+                  Container(
+                    width: 32, height: 32,
+                    decoration: BoxDecoration(
+                      color: c.gray700,
+                      borderRadius: BorderRadius.circular(8),
+                      image: iconUrl != null
+                          ? DecorationImage(image: NetworkImage(iconUrl), fit: BoxFit.cover)
+                          : null,
+                    ),
+                    child: iconUrl == null
+                        ? Center(child: Text(name[0].toUpperCase(),
+                            style: TextStyle(color: c.gray200, fontWeight: FontWeight.bold, fontSize: 14)))
+                        : null,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(name,
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                        maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ]),
+                if (desc != null && desc.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(desc,
+                      style: TextStyle(color: c.gray400, fontSize: 12, height: 1.3),
+                      maxLines: 2, overflow: TextOverflow.ellipsis),
+                ],
+                const SizedBox(height: 8),
+                // Tags
+                Wrap(spacing: 4, runSpacing: 4, children: [
+                  if (serverType != null && serverType.isNotEmpty)
+                    _tag(serverType.replaceAll('_', ' '), c.gray700, c.gray200),
+                  if (ageRestricted)
+                    _tag('18+', c.accent.withValues(alpha: 0.2), c.accent),
+                ]),
+              ]),
+            ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _tag(String label, Color bg, Color fg) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+      child: Text(label, style: TextStyle(color: fg, fontSize: 10, fontWeight: FontWeight.w600)),
     );
   }
 }

@@ -93,6 +93,9 @@ class MessageInput extends ConsumerStatefulWidget {
   /// Whether this input is currently the active/visible one (for IndexedStack).
   /// When false, drop targets are disabled to prevent duplicate file drops.
   final bool isActive;
+  /// Compact mode hides the spoiler toggle and tightens padding. Used in
+  /// narrow contexts like the voice sidechat panel.
+  final bool compact;
 
   const MessageInput({
     super.key,
@@ -107,6 +110,7 @@ class MessageInput extends ConsumerStatefulWidget {
     this.customEmojis = const {},
     this.serverId,
     this.isActive = true,
+    this.compact = false,
   });
 
   @override
@@ -768,7 +772,9 @@ class _MessageInputState extends ConsumerState<MessageInput> {
           CompositedTransformTarget(
             link: _mentionLayerLink,
             child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+            padding: widget.compact
+                ? const EdgeInsets.fromLTRB(8, 4, 8, 4)
+                : const EdgeInsets.fromLTRB(16, 8, 16, 6),
             child: _wrapWithEffects(c, AnimatedContainer(
               duration: const Duration(milliseconds: 250),
               decoration: BoxDecoration(
@@ -840,20 +846,21 @@ class _MessageInputState extends ConsumerState<MessageInput> {
                       ),
                     ),
                   ),
-                  // Spoiler toggle
-                  Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: IconButton(
-                      icon: Icon(
-                        _isSpoiler ? Icons.visibility_off : Icons.visibility_off_outlined,
-                        color: _isSpoiler ? c.accent : c.gray400,
-                        size: 20,
+                  // Spoiler toggle (hidden in compact / sidechat mode)
+                  if (!widget.compact)
+                    Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: IconButton(
+                        icon: Icon(
+                          _isSpoiler ? Icons.visibility_off : Icons.visibility_off_outlined,
+                          color: _isSpoiler ? c.accent : c.gray400,
+                          size: 20,
+                        ),
+                        onPressed: () => setState(() => _isSpoiler = !_isSpoiler),
+                        tooltip: _isSpoiler ? 'Remove spoiler' : 'Mark as spoiler',
+                        splashRadius: 18,
                       ),
-                      onPressed: () => setState(() => _isSpoiler = !_isSpoiler),
-                      tooltip: _isSpoiler ? 'Remove spoiler' : 'Mark as spoiler',
-                      splashRadius: 18,
                     ),
-                  ),
                   // Emoji/Picker toggle
                   CompositedTransformTarget(
                     link: _pickerLayerLink,

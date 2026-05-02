@@ -64,13 +64,16 @@ dependencies:
 
   # Media playback — video_player + fvp (libmdk backend, cross-platform incl. Linux)
   video_player: ^2.9.2
-  fvp: ^0.26.0
+  fvp: ^0.35.2
 
   # Audio playback
   just_audio: ^0.9.42
 
   # Preferences
   shared_preferences: ^2.3.4
+
+  # QR code display for key backup/transfer
+  qr_flutter: ^4.1.0
 
   # Utilities
   uuid: ^4.5.1
@@ -81,12 +84,16 @@ dependencies:
   image: ^4.3.0
   freezed_annotation: ^2.4.4
   json_annotation: ^4.9.0
+  scrollable_positioned_list: ^0.3.8
 
   # Voice/Video (LiveKit)
   livekit_client: ^2.3.3
 
   # JWT for LiveKit tokens
   dart_jsonwebtoken: ^2.14.1
+
+  # Audio recording (mic test in voice/video settings)
+  record: ^6.2.0
 
   cupertino_icons: ^1.0.8
   in_app_update: ^4.2.5

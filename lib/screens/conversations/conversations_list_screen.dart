@@ -26,85 +26,31 @@ class ConversationsListScreen extends ConsumerStatefulWidget {
 }
 
 class _ConversationsListScreenState extends ConsumerState<ConversationsListScreen> {
-  late String _tab = widget.initialTab ?? 'all';
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialTab != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          ref.read(contactsTabProvider.notifier).state = widget.initialTab!;
+        }
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = ref.watch(infernoColorsProvider);
+    final tab = ref.watch(contactsTabProvider);
 
     return Material(
       color: c.gray700,
-      child: Column(
-      children: [
-        // Header
-        Container(
-          decoration: BoxDecoration(
-            border: Border(bottom: BorderSide(color: c.gray900)),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                height: 48,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Icon(Icons.person, size: 20, color: c.gray400),
-                    const SizedBox(width: 8),
-                    Text('Contacts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 16)),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.only(left: 16, right: 16, bottom: 8),
-                child: Row(
-                  children: [
-                    _TabPill('Online', 'online', c),
-                    const SizedBox(width: 4),
-                    _TabPill('All', 'all', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Pending', 'pending', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Blocked', 'blocked', c),
-                    const SizedBox(width: 4),
-                    _TabPill('Search', 'search', c, isSearch: true),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(child: _buildTabContent(c)),
-      ],
-    ),
+      child: _buildTabContent(tab, c),
     );
   }
 
-  Widget _TabPill(String label, String tab, InfernoColors c, {bool isSearch = false}) {
-    final active = _tab == tab;
-    return GestureDetector(
-      onTap: () => setState(() => _tab = tab),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: isSearch
-                ? (active ? const Color(0xFF16A34A) : const Color(0xFF16A34A).withValues(alpha: 0.8))
-                : (active ? c.gray600 : Colors.transparent),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Text(label, style: TextStyle(
-            color: active || isSearch ? Colors.white : c.gray400,
-            fontSize: 14, fontWeight: FontWeight.w500,
-          )),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabContent(InfernoColors c) {
-    switch (_tab) {
+  Widget _buildTabContent(String tab, InfernoColors c) {
+    switch (tab) {
       case 'search':
         return _SearchTab(colors: c);
       case 'pending':
@@ -112,7 +58,7 @@ class _ConversationsListScreenState extends ConsumerState<ConversationsListScree
       case 'blocked':
         return _BlockedTab(colors: c);
       default:
-        return _ContactsTab(tab: _tab, colors: c);
+        return _ContactsTab(tab: tab, colors: c);
     }
   }
 }
@@ -122,67 +68,121 @@ class _ContactsTab extends ConsumerWidget {
   final InfernoColors colors;
   const _ContactsTab({required this.tab, required this.colors});
 
+  Future<void> _openSavedMessages(BuildContext context, WidgetRef ref) async {
+    final auth = ref.read(authServiceProvider);
+    final db = ref.read(databaseProvider);
+    final ownPubkey = auth.publicKeyHex!;
+    var conv = await db.contactsDao.getConversationByPubkey(ownPubkey);
+    if (conv == null) {
+      final now = DateTime.now();
+      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+      await db.contactsDao.insertConversation(ConversationsCompanion.insert(
+        publicId: publicId,
+        kind: const Value(0),
+        counterpartyPubkey: Value(ownPubkey),
+        counterpartyDisplayName: const Value('Saved Messages'),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      conv = await db.contactsDao.getConversationByPubkey(ownPubkey);
+    }
+    if (conv != null && context.mounted) {
+      GoRouter.of(context).go('/conversations/${conv.publicId}');
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final friendsAsync = ref.watch(friendsStreamProvider);
     final presenceSvc = ref.watch(presenceServiceProvider);
+    final c = colors;
+
+    Widget savedMessagesRow = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: () => _openSavedMessages(context, ref),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          decoration: BoxDecoration(
+            border: Border(bottom: BorderSide(color: c.gray700.withValues(alpha: 0.5))),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primary,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: const Icon(Icons.bookmark, size: 20, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Text('Saved Messages', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ),
+      ),
+    );
 
     return friendsAsync.when(
       data: (allContacts) {
-        // Filter by online status if on the Online tab
         final contacts = tab == 'online'
             ? allContacts.where((c) => presenceSvc.getPresence(c.pubkey) != OnlineState.offline).toList()
             : allContacts;
 
-        if (contacts.isEmpty) {
-          return _EmptyState(
-            icon: Icons.people_outline,
-            text: tab == 'online'
-                ? "No contacts are online right now."
-                : "You don't have any contacts yet. Add some!",
-            colors: colors,
-          );
-        }
         return ListView(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 8, bottom: 8),
-              child: Text(
-                '${tab == 'online' ? 'ONLINE' : 'ALL CONTACTS'} \u2014 ${contacts.length}',
-                style: TextStyle(color: colors.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+            savedMessagesRow,
+            if (contacts.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 32),
+                child: Center(
+                  child: Text(
+                    tab == 'online' ? "No contacts are online right now." : "You don't have any contacts yet. Add some!",
+                    style: TextStyle(color: c.gray400, fontSize: 14),
+                  ),
+                ),
+              )
+            else ...[
+              Padding(
+                padding: const EdgeInsets.only(left: 8, top: 16, bottom: 8),
+                child: Text(
+                  '${tab == 'online' ? 'ONLINE' : 'ALL CONTACTS'} \u2014 ${contacts.length}',
+                  style: TextStyle(color: c.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5),
+                ),
               ),
-            ),
-            ...contacts.map((contact) => _ContactItem(
-              contact: contact,
-              colors: colors,
-              presenceState: presenceSvc.getPresence(contact.pubkey),
-              onTap: () async {
-                // Open or create a DM conversation
-                final db = ref.read(databaseProvider);
-                var conv = await db.contactsDao.getConversationByPubkey(contact.pubkey);
-                if (conv == null) {
-                  final now = DateTime.now();
-                  final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
-                  await db.contactsDao.insertConversation(ConversationsCompanion.insert(
-                    publicId: publicId,
-                    kind: const Value(0),
-                    counterpartyPubkey: Value(contact.pubkey),
-                    counterpartyDisplayName: Value(contact.displayName ?? contact.username),
-                    createdAt: now,
-                    updatedAt: now,
-                  ));
-                  conv = await db.contactsDao.getConversationByPubkey(contact.pubkey);
-                }
-                if (conv != null && context.mounted) {
-                  GoRouter.of(context).go('/conversations/${conv.publicId}');
-                }
-              },
-              onRemove: () async {
-                final contactService = ref.read(contactServiceProvider);
-                await contactService.removeContact(contact.pubkey);
-              },
-            )),
+              ...contacts.map((contact) => _ContactItem(
+                contact: contact,
+                colors: c,
+                presenceState: presenceSvc.getPresence(contact.pubkey),
+                onTap: () async {
+                  final db = ref.read(databaseProvider);
+                  var conv = await db.contactsDao.getConversationByPubkey(contact.pubkey);
+                  if (conv == null) {
+                    final now = DateTime.now();
+                    final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+                    await db.contactsDao.insertConversation(ConversationsCompanion.insert(
+                      publicId: publicId,
+                      kind: const Value(0),
+                      counterpartyPubkey: Value(contact.pubkey),
+                      counterpartyDisplayName: Value(contact.displayName ?? contact.username),
+                      createdAt: now,
+                      updatedAt: now,
+                    ));
+                    conv = await db.contactsDao.getConversationByPubkey(contact.pubkey);
+                  }
+                  if (conv != null && context.mounted) {
+                    GoRouter.of(context).go('/conversations/${conv.publicId}');
+                  }
+                },
+                onRemove: () async {
+                  final contactService = ref.read(contactServiceProvider);
+                  await contactService.removeContact(contact.pubkey);
+                },
+              )),
+            ],
           ],
         );
       },
@@ -669,8 +669,7 @@ class _SearchTabState extends ConsumerState<_SearchTab> {
   }
 
   List<Map<String, dynamic>> _finalize(Map<String, Map<String, dynamic>> results, dynamic auth, dynamic db) {
-    final ownPubkey = auth.publicKeyHex;
-    return results.values.where((r) => r['pubkey'] != ownPubkey).toList();
+    return results.values.toList();
   }
 
   @override
@@ -738,7 +737,7 @@ class _SearchResultItem extends StatefulWidget {
 }
 
 class _SearchResultItemState extends State<_SearchResultItem> {
-  String _buttonState = 'add'; // add, sending, sent, friend, pending
+  String _buttonState = 'add'; // add, sending, sent, friend, pending, self
 
   @override
   void initState() {
@@ -747,6 +746,11 @@ class _SearchResultItemState extends State<_SearchResultItem> {
   }
 
   Future<void> _checkContactStatus() async {
+    final auth = widget.ref.read(authServiceProvider);
+    if (widget.result['pubkey'] == auth.publicKeyHex) {
+      if (mounted) setState(() => _buttonState = 'self');
+      return;
+    }
     final db = widget.ref.read(databaseProvider);
     final contact = await db.contactsDao.getByPubkey(widget.result['pubkey']);
     if (contact == null || !mounted) return;
@@ -836,8 +840,47 @@ class _SearchResultItemState extends State<_SearchResultItem> {
     return '${npub.substring(0, 16)}...${npub.substring(npub.length - 5)}';
   }
 
+  Future<void> _openSelfDm() async {
+    final db = widget.ref.read(databaseProvider);
+    final auth = widget.ref.read(authServiceProvider);
+    final ownPubkey = auth.publicKeyHex!;
+    var conv = await db.contactsDao.getConversationByPubkey(ownPubkey);
+    if (conv == null) {
+      final now = DateTime.now();
+      final publicId = now.microsecondsSinceEpoch.toRadixString(36).padLeft(12, '0').substring(0, 12);
+      await db.contactsDao.insertConversation(ConversationsCompanion.insert(
+        publicId: publicId,
+        kind: const Value(0),
+        counterpartyPubkey: Value(ownPubkey),
+        counterpartyDisplayName: const Value('Saved Messages'),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      conv = await db.contactsDao.getConversationByPubkey(ownPubkey);
+    }
+    if (conv != null && context.mounted) {
+      GoRouter.of(context).go('/conversations/${conv.publicId}');
+    }
+  }
+
   Widget _buildActionButton(InfernoColors c) {
     switch (_buttonState) {
+      case 'self':
+        return MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: Material(
+            color: const Color(0xFF2563EB),
+            borderRadius: BorderRadius.circular(4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(4),
+              onTap: _openSelfDm,
+              child: const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: Text('Message', style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ),
+        );
       case 'friend':
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

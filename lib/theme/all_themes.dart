@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 class InfernoThemes {
   /// Bundled emoji font ensures consistent rendering across all platforms.
   static const _emojiFallback = ['NotoColorEmoji'];
+
   static ThemeData inferno() => _buildTheme(
     primary: const Color(0xFFDC2626),
     primaryLight: const Color(0xFFF87171),

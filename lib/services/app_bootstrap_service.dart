@@ -18,6 +18,9 @@ import '../services/server_sync_service.dart';
 import '../services/invite_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/content_safety_service.dart';
+import '../services/config_sync_service.dart';
+import '../services/relay_sync_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/shared_hash_service.dart';
 import '../services/nsfw_detector.dart';
 
@@ -39,6 +42,10 @@ class AppBootstrapService {
   late final ContentSafetyService contentSafety;
   late final SharedHashService sharedHashService;
   Timer? _resyncTimer;
+
+  /// Tracks the latest Kind 0 `createdAt` (Nostr unix seconds) we've applied
+  /// per pubkey so older events from slow relays don't overwrite newer data.
+  final Map<String, int> _latestKind0 = {};
 
   AppBootstrapService({
     required this.db,
@@ -116,9 +123,24 @@ class AppBootstrapService {
       if (server.nostrGroupId == null) continue;
       // Yield between servers so UI stays responsive during multi-server resync
       await Future.delayed(Duration.zero);
+      // If any voice channel on this server has no sidechat link yet, force
+      // a fresh sync so existing installs pick up sidechat publications that
+      // were made before the Flutter client learned how to parse tag[12].
+      final voiceWithoutSidechat = await (db.select(db.channels)
+            ..where((c) => c.serverId.equals(server.id) &
+                c.channelType.equals(1) &
+                c.sidechatChannelId.isNull())
+            ..limit(1))
+          .getSingleOrNull();
+      final shouldForce = voiceWithoutSidechat != null;
       try {
-        // Periodic resync uses 30-minute throttle — skips if recently synced
-        await syncService.syncServer(server.nostrGroupId!, minInterval: const Duration(minutes: 30));
+        // Periodic resync uses 30-minute throttle — skips if recently synced,
+        // unless we need a fresh structure pull for sidechat backfill.
+        await syncService.syncServer(
+          server.nostrGroupId!,
+          force: shouldForce,
+          minInterval: const Duration(minutes: 30),
+        );
       } catch (e) {
         debugPrint('[Resync] Failed to sync ${server.name}: $e');
       }
@@ -222,9 +244,18 @@ class AppBootstrapService {
       }
     });
 
-    // Kind 0: Profile updates — cache in contacts AND update remote_members
+    // Kind 0: Profile updates — cache in contacts AND update remote_members.
+    // Kind 0 is a Nostr "replaceable" event: only the latest (highest
+    // createdAt) should be applied. Multiple relays may deliver stale copies
+    // out of order, so we track the newest we've seen per pubkey and skip
+    // anything older to avoid overwriting fresh data (especially our OWN
+    // profile) with an outdated event from a slow relay.
     relayPool.onKind(0, (relayUrl, event) async {
       try {
+        final latest = _latestKind0[event.pubkey] ?? 0;
+        if (event.createdAt <= latest) return; // stale — skip
+        _latestKind0[event.pubkey] = event.createdAt;
+
         final profile = json.decode(event.content) as Map<String, dynamic>;
         final now = DateTime.now();
         // Upsert contact (check-then-insert/update to avoid unique constraint on pubkey)
@@ -516,9 +547,12 @@ class AppBootstrapService {
       presenceService.processInboundPresence(event);
     });
 
-    // Kind 25050: Typing indicators
+    // Kind 25050: Typing indicators (channel + DM)
     relayPool.onKind(25050, (relayUrl, event) {
-      typingService.processInboundTyping(event);
+      typingService.processInboundTyping(
+        event,
+        selfPubkey: authService.publicKeyHex,
+      );
     });
 
     // Kind 10070: Public voice state events (join/leave/update)
@@ -797,6 +831,101 @@ class AppBootstrapService {
 
     // Fetch own profile from relays so user panel shows resolved name
     _fetchOwnProfile(pubKey);
+
+    // Catch-up fetch for DM counterparties whose contact row is missing name
+    // or avatar — the live subscription only gets future Kind 0 events so
+    // stale conversations would otherwise show raw pubkeys forever.
+    _backfillDmCounterpartyProfiles();
+
+    // Cross-device config sync: fetch relay list + app config + server list
+    // from relays so a fresh device bootstraps with the same setup.
+    _syncConfigFromRelays(pubKey, authService.privateKeyHex);
+  }
+
+  Future<void> _syncConfigFromRelays(String pubKey, String? privKey) async {
+    if (privKey == null) return;
+    try {
+      final configSvc = ConfigSyncService(relayPool);
+      final relaySvc = RelaySyncService(relayPool);
+
+      // NIP-65 relay list
+      final relayList = await relaySvc.fetchRelayList(pubKey);
+      if (relayList.isNotEmpty) {
+        debugPrint('[ConfigSync] Fetched ${relayList.length} relays from NIP-65');
+        // Merge with local relay config — add any relays we don't already have.
+        for (final r in relayList) {
+          // addRelay is a no-op if already connected.
+          relayPool.addRelay(r.url);
+        }
+      }
+
+      // Server list — discover which servers to sync on a fresh device
+      final serverIds = await configSvc.fetchServerList(
+        privateKeyHex: privKey, publicKeyHex: pubKey,
+      );
+      if (serverIds.isNotEmpty) {
+        debugPrint('[ConfigSync] Fetched ${serverIds.length} servers from config');
+        final syncService = ServerSyncService(db, relayPool);
+        for (final gid in serverIds) {
+          final existing = await (db.select(db.servers)..where((s) => s.nostrGroupId.equals(gid))).getSingleOrNull();
+          if (existing == null) {
+            try {
+              await syncService.syncServer(gid, force: true);
+            } catch (e) {
+              debugPrint('[ConfigSync] Server sync failed for $gid: $e');
+            }
+          }
+        }
+      }
+
+      // App settings — theme, audio, safety
+      final config = await configSvc.fetchConfig(
+        privateKeyHex: privKey, publicKeyHex: pubKey,
+      );
+      if (config != null) {
+        debugPrint('[ConfigSync] Fetched app config from Kind 30078');
+        // Store in secure storage for settings screens to read.
+        // Only apply if we don't already have local overrides.
+        final audio = config['audio'] as Map<String, dynamic>?;
+        if (audio != null) {
+          const storage = FlutterSecureStorage();
+          final keys = {
+            'voice_noise_suppression': audio['noiseSuppression'],
+            'voice_echo_cancellation': audio['echoCancellation'],
+            'voice_auto_gain_control': audio['autoGainControl'],
+          };
+          for (final entry in keys.entries) {
+            final existing = await storage.read(key: entry.key);
+            if (existing == null && entry.value != null) {
+              await storage.write(key: entry.key, value: entry.value.toString());
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[ConfigSync] Config sync failed: $e');
+    }
+  }
+
+  Future<void> _backfillDmCounterpartyProfiles() async {
+    try {
+      final conversations = await db.select(db.conversations).get();
+      final pending = <String>[];
+      for (final conv in conversations) {
+        final pk = conv.counterpartyPubkey;
+        if (pk == null) continue;
+        final contact = await (db.select(db.contacts)
+              ..where((c) => c.pubkey.equals(pk)))
+            .getSingleOrNull();
+        final hasName = (contact?.displayName?.isNotEmpty ?? false) ||
+            (contact?.username?.isNotEmpty ?? false);
+        if (!hasName) pending.add(pk);
+      }
+      if (pending.isEmpty) return;
+      await contactService.fetchProfiles(pending);
+    } catch (e) {
+      debugPrint('[Bootstrap] DM profile backfill failed: $e');
+    }
   }
 
   /// Collect all known pubkeys (contacts + remote members + own) for presence subscription.

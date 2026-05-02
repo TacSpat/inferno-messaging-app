@@ -2,33 +2,30 @@ import 'package:drift/drift.dart' hide Column;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../providers/auth_provider.dart';
 import '../providers/conversations_provider.dart';
 import '../providers/database_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../providers/unread_provider.dart';
-import '../providers/app_update_provider.dart';
 import '../database/database.dart';
-import '../services/auth_service.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
 import '../theme/theme_provider.dart';
-import '../screens/settings/settings_overlay.dart';
 
 class DmSidebar extends ConsumerWidget {
   const DmSidebar({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final auth = ref.watch(authServiceProvider);
     final conversationsAsync = ref.watch(conversationsStreamProvider);
     final c = ref.watch(infernoColorsProvider);
     final currentPath = GoRouterState.of(context).uri.toString();
     final isFriendsActive = currentPath == '/conversations';
     final presenceSvc = ref.watch(presenceServiceProvider);
+    // Rebuild whenever any presence changes so conversation status dots stay
+    // in sync with the member list instead of needing a route change.
+    ref.watch(presenceUpdatesProvider);
 
     return Container(
-      width: 240,
       decoration: BoxDecoration(
         color: c.gray800,
         border: Border(right: BorderSide(color: c.accent.withValues(alpha: 0.08), width: 1)),
@@ -84,8 +81,6 @@ class DmSidebar extends ConsumerWidget {
             ),
           ),
 
-          // User panel
-          _UserPanel(auth: auth, colors: c),
         ],
       ),
     );
@@ -297,13 +292,20 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
             gradient: (active || _hovering) ? LinearGradient(colors: [c.accent.withValues(alpha: active ? 0.12 : 0.08), Colors.transparent]) : null,
             borderRadius: BorderRadius.circular(4),
           ),
-          child: Row(
-            children: [
-              StreamBuilder<Contact?>(
-                stream: contactStream,
-                builder: (context, snap) {
-                  final avatarUrl = snap.data?.avatarUrl;
-                  return Stack(
+          child: StreamBuilder<Contact?>(
+            stream: contactStream,
+            builder: (context, snap) {
+              final contact = snap.data;
+              final avatarUrl = contact?.avatarUrl;
+              // Resolve the display name from the live contact row first so
+              // profile metadata that arrives after the conversation was
+              // created (Kind 0 updates) is picked up without a restart.
+              final resolvedName = contact?.displayName ??
+                  contact?.username ??
+                  widget.name;
+              return Row(
+                children: [
+                  Stack(
                     children: [
                       CircleAvatar(
                         radius: 16,
@@ -316,7 +318,7 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
                         child: widget.isGroup
                             ? Icon(Icons.group, size: 16, color: c.accentLight)
                             : (avatarUrl == null || avatarUrl.isEmpty
-                                ? Text(widget.name[0].toUpperCase(),
+                                ? Text(resolvedName[0].toUpperCase(),
                                     style: TextStyle(color: c.gray200, fontSize: 13, fontWeight: FontWeight.bold))
                                 : null),
                       ),
@@ -333,29 +335,29 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
                           ),
                         ),
                     ],
-                  );
-                },
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(widget.name, style: TextStyle(
-                  color: active ? Colors.white : (hasUnread ? Colors.white : (_hovering ? c.gray200 : c.gray400)),
-                  fontSize: 14, fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
-                ), overflow: TextOverflow.ellipsis),
-              ),
-              // Unread badge
-              if (hasUnread)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                  decoration: BoxDecoration(
-                    color: c.gray600,
-                    borderRadius: BorderRadius.circular(9),
                   ),
-                  child: Text('$unreadCount', style: const TextStyle(
-                    color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600,
-                  )),
-                ),
-            ],
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(resolvedName, style: TextStyle(
+                      color: active ? Colors.white : (hasUnread ? Colors.white : (_hovering ? c.gray200 : c.gray400)),
+                      fontSize: 14, fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
+                    ), overflow: TextOverflow.ellipsis),
+                  ),
+                  // Unread badge
+                  if (hasUnread)
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: c.gray600,
+                        borderRadius: BorderRadius.circular(9),
+                      ),
+                      child: Text('$unreadCount', style: const TextStyle(
+                        color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600,
+                      )),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),
@@ -363,95 +365,6 @@ class _ConversationItemState extends ConsumerState<_ConversationItem> {
   }
 }
 
-class _UserPanel extends ConsumerWidget {
-  final AuthService auth;
-  final InfernoColors colors;
-  const _UserPanel({required this.auth, required this.colors});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final pubkey = auth.publicKeyHex;
-    final db = ref.watch(databaseProvider);
-    final presenceSvc = ref.watch(presenceServiceProvider);
-    final currentState = presenceSvc.currentState;
-    final statusColor = _presenceColor(currentState, colors);
-    final statusText = currentState.value[0].toUpperCase() + currentState.value.substring(1);
-
-    return StreamBuilder<List<Contact>>(
-      stream: pubkey != null
-          ? (db.select(db.contacts)..where((c) => c.pubkey.equals(pubkey))).watch()
-          : const Stream.empty(),
-      builder: (context, snap) {
-        final contact = snap.data?.firstOrNull;
-        final displayName = contact?.displayName ?? contact?.username ?? (pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User');
-        final avatarUrl = contact?.avatarUrl;
-
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-          decoration: BoxDecoration(
-            color: colors.gray950,
-            border: Border(top: BorderSide(color: colors.gray900)),
-          ),
-          child: Row(
-            children: [
-              Stack(
-                children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Colors.transparent,
-                    backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                    child: avatarUrl == null
-                        ? Text(displayName[0].toUpperCase(), style: TextStyle(color: colors.gray200, fontSize: 14))
-                        : null,
-                  ),
-                  Positioned(
-                    right: -1, bottom: -1,
-                    child: Container(
-                      width: 14, height: 14,
-                      decoration: BoxDecoration(
-                        color: statusColor,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: colors.gray950, width: 2),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(displayName, style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-                      overflow: TextOverflow.ellipsis),
-                    Text(statusText, style: TextStyle(color: colors.gray400, fontSize: 11)),
-                  ],
-                ),
-              ),
-              ref.watch(appVersionProvider).when(
-                data: (v) => Text('v$v', style: TextStyle(color: colors.gray500, fontSize: 10)),
-                loading: () => const SizedBox.shrink(),
-                error: (_, __) => const SizedBox.shrink(),
-              ),
-              const SizedBox(width: 6),
-              GestureDetector(
-                onTap: () => showSettingsOverlay(context),
-                child: Icon(Icons.settings, color: colors.gray400, size: 16),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  static Color _presenceColor(OnlineState state, InfernoColors c) {
-    switch (state) {
-      case OnlineState.online: return c.online;
-      case OnlineState.idle: return c.idle;
-      case OnlineState.dnd: return c.dnd;
-      default: return c.offline;
-    }
-  }
-}
+// _UserPanel lives in widgets/user_panel.dart and is now rendered once by
+// MainShell so it doesn't flicker when the sidebar swaps between channels and
+// DMs.

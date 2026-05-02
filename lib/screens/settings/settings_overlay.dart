@@ -11,6 +11,7 @@ import 'appearance_screen.dart';
 import 'relays_screen.dart';
 import 'storage_screen.dart';
 import 'my_account_screen.dart';
+import 'key_export_screen.dart';
 import 'password_screen.dart';
 import 'notifications_screen.dart';
 import 'voice_video_screen.dart';
@@ -61,7 +62,6 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
                 _NavItem('My Account', 'account', c),
                 _NavItem('Profile', 'profile', c),
                 _NavItem('Appearance', 'appearance', c),
-                _NavItem('Password', 'password', c),
                 const SizedBox(height: 12),
                 _SectionLabel('APP SETTINGS', c),
                 _NavItem('Voice & Video', 'voice', c),
@@ -80,6 +80,8 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
                   child: Container(height: 1, color: c.gray800),
                 ),
+                // Switch Account
+                _NavItem('Switch Account', 'switch_account', c),
                 // Log Out
                 _NavItem('Log Out', 'logout', c, color: c.accent),
               ],
@@ -122,6 +124,8 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
     switch (_selectedPage) {
       case 'account':
         return MyAccountScreen(onNavigate: (p) => setState(() => _selectedPage = p));
+      case 'key_backup':
+        return const KeyExportScreen();
       case 'password':
         return const PasswordScreen();
       case 'profile':
@@ -141,6 +145,16 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
       case 'logout':
         _handleLogout();
         return const SizedBox();
+      case 'switch_account':
+        // Navigate to login screen which has the account picker.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final auth = ref.read(authServiceProvider);
+          auth.logout();
+          Navigator.pop(context);
+          GoRouter.of(context).go('/auth/login');
+        });
+        return Center(child: CircularProgressIndicator(color: ref.read(infernoColorsProvider).accent));
       default:
         return Center(
           child: Text(
@@ -161,7 +175,10 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
           final c = ref.read(infernoColorsProvider);
           return AlertDialog(
             title: const Text('Log Out?'),
-            content: const Text('This will remove your key from this device. Make sure you have a backup.'),
+            content: const Text(
+              'You will be signed out of this account. '
+              'Your encrypted backup is saved and you can switch back from the login screen.',
+            ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
               ElevatedButton(
@@ -175,6 +192,9 @@ class _SettingsOverlayState extends ConsumerState<SettingsOverlay> {
       );
       if (confirmed == true && mounted) {
         final auth = ref.read(authServiceProvider);
+        // Only clear the active key — the ncryptsec stays in the account
+        // list so the user can switch back from the login screen without
+        // re-importing.
         await auth.logout();
         if (mounted) {
           Navigator.pop(context); // Close overlay

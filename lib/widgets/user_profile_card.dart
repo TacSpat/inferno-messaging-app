@@ -5,6 +5,7 @@ import 'package:drift/drift.dart' show Value;
 import '../database/database.dart';
 import '../providers/database_provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/conversations_provider.dart';
 import '../providers/realtime_provider.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
@@ -76,37 +77,56 @@ class _ProfileCardOverlayState extends ConsumerState<_ProfileCardOverlay> with S
     final presence = presenceSvc.getPresence(widget.pubkey);
     final screen = MediaQuery.of(context).size;
 
-    // Matches Rails profile_card_controller.js positioning:
-    // 1. left = element.left - 288 (to the LEFT of the element)
-    // 2. top = element.top (aligned to element top)
-    // 3. If goes off left: flip to element.right + 8
-    // 4. If goes off bottom: shift up
+    // Matches Rails profile_card_controller.js positioning, with tighter
+    // bounds handling so the card never clips off any edge of the window —
+    // if it would overflow, we flip sides or shift it inward.
     const cardW = 300.0;
-    const estH = 400.0;
+    // Conservative estimate; the card is capped via a maxHeight constraint
+    // below so if the real rendered content exceeds this, the card scrolls
+    // internally instead of overflowing the screen.
+    const estH = 520.0;
     final elemLeft = widget.anchor.dx;
     final elemRight = elemLeft + widget.anchorSize.width;
     final elemTop = widget.anchor.dy;
+    final elemCenterY = elemTop + widget.anchorSize.height / 2;
 
-    // Try positioning to the LEFT of the element
-    double left = elemLeft - cardW - 8;
-    double top = elemTop;
-    double alignX = 1.0; // animate from right (toward the element)
-    double alignY = -1.0;
-
-    // If card goes off the left edge, flip to the RIGHT of the element
-    if (left < 8) {
+    // Try positioning to the LEFT of the element first (matches member list
+    // on the right edge); flip to the right if there's more room.
+    final spaceLeft = elemLeft - 8;
+    final spaceRight = screen.width - elemRight - 8;
+    double left;
+    double alignX;
+    if (spaceLeft >= cardW + 8 || spaceLeft >= spaceRight) {
+      // Prefer left
+      left = elemLeft - cardW - 8;
+      alignX = 1.0;
+      if (left < 8) {
+        // Not enough room on the left either — flip right.
+        left = elemRight + 8;
+        alignX = -1.0;
+      }
+    } else {
       left = elemRight + 8;
-      alignX = -1.0; // animate from left (toward the element)
+      alignX = -1.0;
     }
 
-    // If card goes off the bottom, shift up
-    if (top + estH > screen.height - 8) {
-      top = screen.height - estH - 8;
+    // Vertical: prefer top-aligned to the anchor, but if there isn't enough
+    // room below, anchor to the bottom of the viewport minus the card height.
+    final maxCardH = (screen.height - 16).clamp(200.0, estH);
+    double top = elemCenterY - maxCardH / 2; // center vertically on anchor
+    double alignY = 0.0;
+    if (top + maxCardH > screen.height - 8) {
+      top = screen.height - maxCardH - 8;
+      alignY = 1.0;
+    }
+    if (top < 8) {
+      top = 8;
+      alignY = -1.0;
     }
 
-    // Final clamps
-    left = left.clamp(8.0, screen.width - cardW - 8);
-    top = top.clamp(8.0, screen.height - estH - 8);
+    // Final clamps in case the screen is tiny
+    left = left.clamp(8.0, (screen.width - cardW - 8).clamp(8.0, double.infinity));
+    top = top.clamp(8.0, (screen.height - maxCardH - 8).clamp(8.0, double.infinity));
 
     return Stack(children: [
       Positioned.fill(child: GestureDetector(
@@ -122,9 +142,12 @@ class _ProfileCardOverlayState extends ConsumerState<_ProfileCardOverlay> with S
         ),
         child: Material(
           color: Colors.transparent,
-          child: _CardContent(
-            pubkey: widget.pubkey, db: db, presenceSvc: presenceSvc,
-            presence: presence, colors: c, onDismiss: _dismiss,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxHeight: maxCardH, maxWidth: cardW),
+            child: _CardContent(
+              pubkey: widget.pubkey, db: db, presenceSvc: presenceSvc,
+              presence: presence, colors: c, onDismiss: _dismiss,
+            ),
           ),
         ),
       )),
@@ -132,7 +155,7 @@ class _ProfileCardOverlayState extends ConsumerState<_ProfileCardOverlay> with S
   }
 }
 
-class _CardContent extends StatelessWidget {
+class _CardContent extends ConsumerStatefulWidget {
   final String pubkey;
   final InfernoDatabase db;
   final PresenceService presenceSvc;
@@ -141,6 +164,30 @@ class _CardContent extends StatelessWidget {
   final VoidCallback onDismiss;
   const _CardContent({required this.pubkey, required this.db, required this.presenceSvc,
     required this.presence, required this.colors, required this.onDismiss});
+
+  @override
+  ConsumerState<_CardContent> createState() => _CardContentState();
+}
+
+class _CardContentState extends ConsumerState<_CardContent> {
+  String get pubkey => widget.pubkey;
+  InfernoDatabase get db => widget.db;
+  PresenceService get presenceSvc => widget.presenceSvc;
+  OnlineState get presence => widget.presence;
+  InfernoColors get colors => widget.colors;
+  VoidCallback get onDismiss => widget.onDismiss;
+
+  @override
+  void initState() {
+    super.initState();
+    // Fire-and-forget profile refresh so stale / missing Kind 0 gets filled in
+    // when the card is opened (covers DM counterparties we've never fetched).
+    Future.microtask(() async {
+      try {
+        await ref.read(contactServiceProvider).fetchContactProfile(pubkey);
+      } catch (_) {}
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -170,7 +217,12 @@ class _CardContent extends StatelessWidget {
               border: Border.all(color: c.gray700.withValues(alpha: 0.6)),
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.5), blurRadius: 24, offset: const Offset(0, 8))],
             ),
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
+            // Scroll internally when the content exceeds the outer maxHeight
+            // constraint so the card can never be clipped off the screen edge.
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
               // Banner area (taller)
               Container(
                 height: 90,
@@ -225,8 +277,6 @@ class _CardContent extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   // Name + username + status
                   Text(data.displayName, style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                  if (data.username != null && data.username != data.displayName)
-                    Text(data.username!, style: TextStyle(color: c.gray400, fontSize: 13)),
                   if (data.status != null && data.status!.isNotEmpty) ...[
                     const SizedBox(height: 4),
                     Text('${data.statusEmoji ?? ''} ${data.status!}'.trim(),
@@ -274,21 +324,53 @@ class _CardContent extends StatelessWidget {
                     Text('${_months[data.joinedAt!.month - 1]} ${data.joinedAt!.day}, ${data.joinedAt!.year}',
                       style: TextStyle(color: c.gray200, fontSize: 13)),
                   ],
+                  // Friends since — only when the viewer has accepted friendship.
+                  if (data.isFriend && data.friendsSinceAt != null) ...[
+                    const SizedBox(height: 12),
+                    Container(height: 1, color: c.gray700.withValues(alpha: 0.5)),
+                    const SizedBox(height: 10),
+                    Text('FRIENDS SINCE', style: TextStyle(color: c.gray400, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5)),
+                    const SizedBox(height: 4),
+                    Text('${_months[data.friendsSinceAt!.month - 1]} ${data.friendsSinceAt!.day}, ${data.friendsSinceAt!.year}',
+                      style: TextStyle(color: c.gray200, fontSize: 13)),
+                  ],
                 ]),
               ),
-              // Actions outside the dark card, on the gradient
+              // Actions outside the dark card, on the gradient. Message /
+              // Add Friend don't make sense for self, and Add Friend is hidden
+              // once friendship is already accepted. Use Wrap so buttons flow
+              // to a new line when the card is too narrow instead of
+              // overflowing.
               Padding(
                 padding: const EdgeInsets.only(left: 12, right: 12, bottom: 12),
-                child: Row(children: [
-                  _CardButton(label: 'Message', icon: Icons.message_outlined, colors: c, onTap: () => _openDm(context)),
-                  const SizedBox(width: 8),
-                  _CardButton(label: 'Copy ID', icon: Icons.copy, colors: c, onTap: () {
-                    Clipboard.setData(ClipboardData(text: pubkey));
-                    onDismiss();
-                  }),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (!data.isSelf)
+                      _CardButton(label: 'Message', icon: Icons.message_outlined, colors: c, onTap: () => _openDm(context)),
+                    if (!data.isSelf && !data.isFriend)
+                      _CardButton(label: 'Add Friend', icon: Icons.person_add_alt_1, colors: c, onTap: () async {
+                        try {
+                          await ref.read(contactServiceProvider).addContact(pubkey);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Added to contacts')),
+                            );
+                          }
+                        } catch (_) {}
+                        onDismiss();
+                      }),
+                    _CardButton(label: 'Copy ID', icon: Icons.copy, colors: c, onTap: () {
+                      Clipboard.setData(ClipboardData(text: pubkey));
+                      onDismiss();
+                    }),
+                  ],
+                ),
+              ),
                 ]),
               ),
-            ]),
+            ),
           ),
         );
       },
@@ -367,11 +449,19 @@ class _CardContent extends StatelessWidget {
 
     final joinedAt = member?.joinedAt != null && member!.joinedAt!.year > 2000 ? member.joinedAt : member?.createdAt;
 
+    final ownPubkey = ref.read(authServiceProvider).publicKeyHex;
+    final isSelf = ownPubkey != null && ownPubkey == pubkey;
+    final isFriend = !isSelf && (contact?.friendshipStatus == 3);
+    // No dedicated friends_since column — use the contact row's updatedAt as
+    // a proxy (it's touched when friendshipStatus flips to accepted).
+    final friendsSinceAt = isFriend ? contact?.updatedAt : null;
+
     return _ProfileData(
       displayName: displayName, username: username, avatarUrl: avatarUrl,
       bannerUrl: bannerUrl, bio: bio, status: status, statusEmoji: statusEmoji,
       profileColor: profileColor, profileColor2: profileColor2,
       roles: roles, joinedAt: joinedAt,
+      isSelf: isSelf, isFriend: isFriend, friendsSinceAt: friendsSinceAt,
     );
   }
 
@@ -397,9 +487,13 @@ class _ProfileData {
   final String? username, avatarUrl, bannerUrl, bio, status, statusEmoji, profileColor, profileColor2;
   final List<Role> roles;
   final DateTime? joinedAt;
+  final bool isSelf;
+  final bool isFriend;
+  final DateTime? friendsSinceAt;
   _ProfileData({required this.displayName, this.username, this.avatarUrl, this.bannerUrl,
     this.bio, this.status, this.statusEmoji, this.profileColor, this.profileColor2,
-    required this.roles, this.joinedAt});
+    required this.roles, this.joinedAt,
+    this.isSelf = false, this.isFriend = false, this.friendsSinceAt});
 }
 
 class _CardButton extends StatefulWidget {

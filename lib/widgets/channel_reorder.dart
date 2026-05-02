@@ -772,13 +772,26 @@ class _ChannelItemWidgetState extends ConsumerState<_ChannelItemWidget> {
           // Typing indicators — show small avatar bubbles for users typing in this channel
           if (widget.channel.nostrGroupId != null && !widget.isVoice)
             _TypingAvatars(channelGroupId: widget.channel.nostrGroupId!, colors: c),
-          // Chat button for voice channels (not AFK)
+          // Chat button for voice channels (not AFK). Toggles the sidechat
+          // panel on the voice screen via the shared provider.
           if (widget.isVoice && !widget.isAfk && _hovering)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: Tooltip(
-                message: 'Open chat',
-                child: Icon(Icons.chat_bubble_outline, size: 14, color: c.gray400),
+                message: 'Toggle chat',
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      // Navigate to the voice channel first (so the screen is active),
+                      // then open the sidechat panel.
+                      context.go('/servers/${widget.serverId}/channels/${widget.channel.publicId}');
+                      ref.read(voiceSidechatVisibleProvider.notifier).state = true;
+                    },
+                    child: Icon(Icons.chat_bubble_outline, size: 14, color: c.gray400),
+                  ),
+                ),
               ),
             ),
         ],
