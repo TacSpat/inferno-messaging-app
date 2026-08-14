@@ -51,19 +51,24 @@ class NsfwDetector {
         dataName: 'nsfw_marqo.onnx.data',
       );
 
-      final pfPtr = prefilterPath.toNativeUtf8();
-
-      try {
-        // Prefilter-only mode: pass nullptr for confirmation model
-        _handle = ort.nsfwInit(pfPtr, nullptr);
-        if (_handle == null || _handle == nullptr) {
-          throw Exception('nsfw_init returned null');
-        }
-        _available = true;
-        debugPrint('[NsfwDetector] Initialized (prefilter-only mode)');
-      } finally {
-        calloc.free(pfPtr);
+      // nsfwInit is a synchronous FFI call that makes ONNX Runtime parse a
+      // 22 MB model. Run on the main isolate it blocks the UI thread for the
+      // whole load and the app appears frozen at startup.
+      //
+      // This only started mattering once the models were actually bundled:
+      // before that the extraction above threw, so init never reached the FFI
+      // call and the cost was invisible. Inference was already offloaded via
+      // compute(); init was the one path that never had to be.
+      //
+      // The handle crosses the isolate boundary as an integer address, exactly
+      // as _runInference already does — same process, same address space.
+      final handleAddress = await compute(_initNative, prefilterPath);
+      if (handleAddress == 0) {
+        throw Exception('nsfw_init returned null');
       }
+      _handle = Pointer<ort.NsfwHandle>.fromAddress(handleAddress);
+      _available = true;
+      debugPrint('[NsfwDetector] Initialized (prefilter-only mode)');
     } catch (e) {
       debugPrint('[NsfwDetector] Not available: $e');
       _available = false;
@@ -215,6 +220,23 @@ class NsfwDetector {
 }
 
 /// Run ONNX inference on a separate isolate.
+/// Loads the ONNX session on a background isolate and returns the handle
+/// address, or 0 on failure. Top-level so it can be passed to compute().
+///
+/// Only needs a file path, so it does not touch rootBundle or path_provider
+/// and needs no BackgroundIsolateBinaryMessenger setup.
+int _initNative(String modelPath) {
+  final pathPtr = modelPath.toNativeUtf8();
+  try {
+    final handle = ort.nsfwInit(pathPtr, nullptr);
+    return handle == nullptr ? 0 : handle.address;
+  } catch (_) {
+    return 0;
+  } finally {
+    calloc.free(pathPtr);
+  }
+}
+
 NsfwClassification _runInference(_InferenceRequest req) {
   final handle = Pointer<ort.NsfwHandle>.fromAddress(req.handleAddress);
 

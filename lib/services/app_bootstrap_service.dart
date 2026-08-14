@@ -74,10 +74,14 @@ class AppBootstrapService {
     await relayConfig.ensureDefaultRelays();
     await _ensureLocalUser();
 
-    // 1b. Warm the device id before any handler runs. The Kind 10070 handler
-    // reads DeviceId.cached synchronously to tell our own echo apart from the
-    // same identity in voice on another device.
-    await DeviceId.get();
+    // 1b. Warm the device id, but never block startup on it. It reads secure
+    // storage, which on Linux goes through libsecret and can stall on a locked
+    // or absent keyring — bootstrap must not be able to hang there.
+    //
+    // The Kind 10070 handler reads DeviceId.cached synchronously and already
+    // treats a null value as "ours", so a slow warm-up degrades to the old
+    // behaviour instead of misattributing another device's voice state.
+    unawaited(DeviceId.get());
 
     // 2. Connect to relays in parallel (don't wait sequentially)
     final urls = await relayConfig.getActiveRelayUrls();
