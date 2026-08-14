@@ -225,5 +225,67 @@ void main() {
       expect(received.length, 1); // Deduplicated
       pool.stop();
     });
+
+    // Regression: the pool-wide dedup set used to be consulted before
+    // per-subscription dispatch, so any event delivered once could never
+    // reach a later subscription. fetch() collects results only through that
+    // callback, so every one-shot query after the first came back empty.
+    test('a later subscription still receives an already-processed event', () async {
+      final pool = RelayPool();
+      Map<String, dynamic> evt() => {
+            'id': 'shared-id',
+            'pubkey': 'a' * 64,
+            'created_at': 1234567890,
+            'kind': 1,
+            'tags': [],
+            'content': 'hello',
+            'sig': 'b' * 128,
+          };
+
+      final globalSeen = <String>[];
+      pool.onEvent((relayUrl, event) => globalSeen.add(event.id!));
+
+      // First delivery marks the event processed pool-wide.
+      pool.handleRelayMessageForTest('wss://r1', ['EVENT', 'sub-a', evt()]);
+      await pumpEventQueue();
+
+      // A subscription created afterwards must still see it.
+      final received = <String>[];
+      final subId = pool.subscribe(
+        filters: [NostrFilter(kinds: [1])],
+        onEvent: (relayUrl, event) => received.add(event.id!),
+      );
+      pool.handleRelayMessageForTest('wss://r2', ['EVENT', subId, evt()]);
+      await pumpEventQueue();
+
+      expect(received, ['shared-id'], reason: 'per-subscription dispatch must not be gated by the dedup set');
+      expect(globalSeen.length, 1, reason: 'global handlers must still dedup');
+      pool.stop();
+    });
+
+    // Regression: server sync re-subscribed hourly without closing the
+    // previous REQ, so subscriptions grew without bound on every relay.
+    test('a keyed subscription replaces the previous one instead of stacking', () {
+      final pool = RelayPool();
+      final filters = [NostrFilter(kinds: [9])];
+
+      final first = pool.subscribe(key: 'server-channels:1', filters: filters);
+      expect(pool.subscriptionCount, 1);
+
+      final second = pool.subscribe(key: 'server-channels:1', filters: filters);
+      expect(second, isNot(first));
+      expect(pool.subscriptionCount, 1, reason: 'same key must replace, not accumulate');
+
+      // A different key is a genuinely different subscription.
+      pool.subscribe(key: 'server-channels:2', filters: filters);
+      expect(pool.subscriptionCount, 2);
+
+      // Unkeyed subscriptions keep their existing add-every-time behaviour.
+      pool.subscribe(filters: filters);
+      pool.subscribe(filters: filters);
+      expect(pool.subscriptionCount, 4);
+
+      pool.stop();
+    });
   });
 }

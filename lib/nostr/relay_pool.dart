@@ -30,6 +30,11 @@ class RelayPool {
   final List<EventHandler> _globalHandlers = [];
   // EOSE handlers
   final Map<String, EoseHandler> _eoseHandlers = {};
+  // Per-subscription event handlers registered through subscribe()
+  final Map<String, EventHandler> _subEventHandlers = {};
+  // Logical subscription key -> current subscription ID, so re-subscribing
+  // under the same key replaces the old REQ instead of stacking another one.
+  final Map<String, String> _keyedSubscriptions = {};
   // AUTH handler
   void Function(String relayUrl, String challenge)? onAuthChallenge;
   // Deduplication: set of event IDs already processed
@@ -83,21 +88,42 @@ class RelayPool {
     }
     _connections.clear();
     _subscriptions.clear();
+    _subEventHandlers.clear();
+    _keyedSubscriptions.clear();
     _processedEventIds.clear();
   }
 
   /// Subscribe to events matching filters on all connected relays
   /// Returns the subscription ID
+  /// [key] names a logical, long-lived subscription. Subscribing again with
+  /// the same key CLOSEs the previous one first, so repeated calls replace
+  /// rather than accumulate. Without it, callers that re-subscribe on a timer
+  /// (server sync runs hourly per server) pile up REQs on every relay until
+  /// the relay starts rejecting them for exceeding its subscription limit —
+  /// and RelayConnection re-sends every tracked subscription on reconnect,
+  /// so the leak survives reconnects too.
+  ///
+  /// Mirrors Rails' RelaySubscriptionManager#refresh_subscriptions, which
+  /// CLOSEs each tracked subscription before re-subscribing.
   String subscribe({
     required List<NostrFilter> filters,
     EventHandler? onEvent,
     EoseHandler? onEose,
+    String? key,
   }) {
-    final sub = Subscription(filters: filters);
+    if (key != null) {
+      final previous = _keyedSubscriptions[key];
+      if (previous != null) unsubscribe(previous);
+    }
 
+    final sub = Subscription(filters: filters);
+    if (key != null) _keyedSubscriptions[key] = sub.id;
+
+    // Previously this stashed an empty list under a sentinel kind of -1 and
+    // dropped `onEvent` on the floor, so every caller that passed a handler
+    // silently received nothing.
     if (onEvent != null) {
-      _kindHandlers.putIfAbsent(-1, () => []);
-      // Store per-subscription handler via a wrapper
+      _subEventHandlers[sub.id] = onEvent;
     }
     if (onEose != null) {
       _eoseHandlers[sub.id] = onEose;
@@ -116,10 +142,16 @@ class RelayPool {
   void unsubscribe(String subscriptionId) {
     _subscriptions.remove(subscriptionId);
     _eoseHandlers.remove(subscriptionId);
+    _subEventHandlers.remove(subscriptionId);
+    _keyedSubscriptions.removeWhere((_, id) => id == subscriptionId);
     for (final conn in _connections.values) {
       conn.unsubscribe(subscriptionId);
     }
   }
+
+  /// Number of subscriptions the pool currently tracks. Exposed so a leak
+  /// shows up as a number rather than as relay rate-limit rejections.
+  int get subscriptionCount => _subscriptions.length;
 
   /// Publish a signed event to all connected relays
   /// Returns a map of relay URL -> success boolean
@@ -320,6 +352,12 @@ class RelayPool {
     }
     _connections.clear();
     _subscriptions.clear();
+    _subEventHandlers.clear();
+    _keyedSubscriptions.clear();
+    // Reconnecting exists to re-receive events on fresh sockets, so the
+    // dedup set has to go with the old connections. Keeping it meant every
+    // replayed event was discarded as "already processed".
+    _processedEventIds.clear();
     // Wait for WebSockets to fully close
     await Future.delayed(const Duration(milliseconds: 500));
     // Create brand new connections
@@ -394,13 +432,25 @@ class RelayPool {
     try {
       final event = NostrEvent.fromJson(Map<String, dynamic>.from(eventData));
 
-      // Deduplication
-      if (event.id != null && _processedEventIds.contains(event.id)) return;
-      if (event.id != null) _processedEventIds.add(event.id!);
-
-      // Per-subscription handler
+      // Per-subscription handlers fire BEFORE the global dedup check.
+      //
+      // The dedup set is process-wide and lives for the whole session, so
+      // checking it first meant any event delivered once could never be
+      // handed to a later subscription. fetch() collects results solely
+      // through this callback, so every one-shot query after the first
+      // returned empty or partial results. Subscriptions that need dedup do
+      // it themselves — fetch() keys its own results map by event ID, which
+      // also collapses the copies arriving from multiple relays.
       final sub = _subscriptions[subId];
       sub?.onEvent?.call(event);
+      _subEventHandlers[subId]?.call(relayUrl, event);
+
+      // Global and per-kind handlers persist to the database, so they must
+      // not run twice when several relays deliver the same event.
+      if (event.id != null) {
+        if (_processedEventIds.contains(event.id)) return;
+        _processedEventIds.add(event.id!);
+      }
 
       // Dispatch handlers asynchronously — don't block the relay stream
       // This lets the WebSocket listener return immediately and process more

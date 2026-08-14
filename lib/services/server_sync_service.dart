@@ -1264,8 +1264,14 @@ class ServerSyncService {
     if (groupIds.isEmpty) return;
 
     final since = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch ~/ 1000;
-    _relayPool.subscribe(filters: [
-      NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: since),
-    ]);
+    // Keyed per server: syncServer() runs hourly and used to issue a fresh REQ
+    // every time without closing the last one, so subscriptions grew without
+    // bound on every relay until they started rejecting them.
+    _relayPool.subscribe(
+      key: 'server-channels:$serverId',
+      filters: [
+        NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: since),
+      ],
+    );
   }
 }

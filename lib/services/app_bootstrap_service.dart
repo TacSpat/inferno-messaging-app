@@ -801,12 +801,12 @@ class AppBootstrapService {
     final catchupSince = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch ~/ 1000;
 
     // Subscribe to inbound DMs
-    relayPool.subscribe(filters: [
+    relayPool.subscribe(key: 'dms-inbound', filters: [
       NostrFilter(kinds: [14, 1059], tags: {'#p': [pubKey]}, since: catchupSince),
     ]);
 
     // Subscribe to own outbound DMs (from other devices)
-    relayPool.subscribe(filters: [
+    relayPool.subscribe(key: 'dms-outbound', filters: [
       NostrFilter(kinds: [14, 1059], authors: [pubKey], since: catchupSince),
     ]);
 
@@ -817,12 +817,12 @@ class AppBootstrapService {
     final knownPubkeys = await _collectKnownPubkeys(pubKey);
     if (knownPubkeys.isNotEmpty) {
       // Profiles + contact lists: fetch from known authors only (efficient)
-      relayPool.subscribe(filters: [
+      relayPool.subscribe(key: 'profiles-contacts', filters: [
         NostrFilter(kinds: [0, 3], authors: knownPubkeys),
       ]);
     }
     // Presence + member events: subscribe broadly for live updates
-    relayPool.subscribe(filters: [
+    relayPool.subscribe(key: 'presence-members', filters: [
       NostrFilter(kinds: [30315, 31750, 31751, 31752, 31753, 31754, 31755, 31756, 31757], since: catchupSince),
     ]);
 
@@ -969,7 +969,9 @@ class AppBootstrapService {
         .map((s) => s.nostrGroupId!)
         .toList();
 
-    relayPool.subscribe(filters: [
+    // Keyed: _subscribeToChannels is re-run whenever the joined-channel set
+    // changes, so it must replace its REQ rather than add another.
+    relayPool.subscribe(key: 'joined-channels', filters: [
       NostrFilter(kinds: [9, 9005, 9006, 7, 25050], tags: {'#h': groupIds}, since: catchupSince),
       if (serverGroupIds.isNotEmpty)
         NostrFilter(kinds: [10070], tags: {'#h': serverGroupIds}, since: catchupSince),
