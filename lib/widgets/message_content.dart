@@ -492,7 +492,11 @@ class MessageContent extends ConsumerWidget {
 
     return MarkdownBody(
       data: processed,
-      selectable: true,
+      // Selection is provided by the SelectionArea wrapping the message list.
+      // selectable: true here built a SelectableText.rich per markdown block,
+      // which was the bulk of the per-row rebuild cost on a theme change and
+      // also confined a selection to a single message.
+      selectable: false,
       softLineBreak: true,
       builders: {
         'code': _CodeBlockBuilder(colors: colors),

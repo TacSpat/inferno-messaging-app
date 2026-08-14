@@ -501,7 +501,14 @@ class _MessageListState extends ConsumerState<MessageList> {
         // is walked before child layout finishes, producing
         // `!childSemantics.renderObject._needsLayout` failures every frame.
         // We don't expose per-message accessibility nodes today.
-        return ExcludeSemantics(
+        // SelectionArea replaces flutter_markdown's per-block selectable: true.
+        // That built a SelectableText.rich for every markdown block, each with
+        // its own selection machinery and gesture recognisers — measured at
+        // roughly 4ms a row on a theme swap. One region over the whole list is
+        // cheaper, and it also lets a selection span messages instead of
+        // stopping at each one.
+        return SelectionArea(
+          child: ExcludeSemantics(
           child: ScrollablePositionedList.builder(
           itemScrollController: _itemController,
           itemPositionsListener: _itemPositions,
@@ -576,7 +583,7 @@ class _MessageListState extends ConsumerState<MessageList> {
               ),
             ));
           },
-        ));
+        )));
       },
     );
   }
