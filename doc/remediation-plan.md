@@ -230,4 +230,22 @@ Shipping a binary built from a tree containing both, without stating which gover
 
 ## Already fixed since the audit
 
-Three `IgnorePointer` sites in `lib/widgets/message_content.dart` — the inline video controls bar, the fullscreen close button, and the fullscreen controls bar. Faded-out controls remained hit-testable, swallowing clicks on the video surface and throwing `Cannot hit test a render box that has never been laid out`. Confirmed resolved by the reporter.
+### Found by the audit
+
+P0 and P1 are complete and P2 is substantially done — see roadmap #118 for the closed list.
+
+### Found by running the app, not by the audit
+
+Five defects surfaced only in use. **None of them appear anywhere in the 95 audit findings**, which is worth knowing about the audit's reach: static review found dead code, wrong paths and missing calls well, and found none of these. Three are visual or timing faults that require motion to observe, and two were regressions introduced by the remediation itself.
+
+| Fix | Cause |
+|---|---|
+| `77cd57f` video controls | Faded-out controls stayed hit-testable — `AnimatedOpacity` gates painting, not pointer events. Threw `Cannot hit test a render box that has never been laid out`. |
+| `ddb63f4` startup freeze | **Regression from `b1b5952`.** Shipping the models turned a dead path live and exposed `nsfwInit` — synchronous FFI parsing a 22 MB model — running on the main isolate. |
+| `ab87f3d` state reverting on sync | Replaceable events were sorted newest-first *within a batch* and applied unconditionally. A stale relay's copy overwrote newer local state. The version needed to detect this was already recorded in `nostr_event_logs.eventCreatedAt` and read back nowhere. |
+| `004db37` hover reflow | Grouped rows swapped an empty `SizedBox` for a `Text` on hover, and the timestamp exceeded the 40px gutter so it wrapped. Rails reserves the space and toggles opacity. |
+| `c798a40` list blinking | Every row carried a `GlobalObjectKey`. `GlobalKey` re-parents its element when position changes, so each sync deactivated and reactivated rows mid-frame, recreating avatar `Image` state. Nothing used the key — scroll-to is index-based. |
+
+**Lesson for the remaining phases:** P3 is entirely perf and rendering. Nothing in it can be signed off from a diff — each item needs a build in front of a human. The freeze in particular was invisible to tests, analyzer and CI, all of which stayed green throughout.
+
+Confirmed by the reporter at runtime: no blinking, hover fixed, startup responsive, presence panel correct.
