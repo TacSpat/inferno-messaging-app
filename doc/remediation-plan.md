@@ -126,6 +126,51 @@ Unread badges are local-only and hardcoded to `userId 0`, and newly-synced chann
 
 ---
 
+## P3 findings — measured, not assumed
+
+The theme "stutter" was three separate things. Two are fixed; the third is the
+real one and is recorded here so nobody re-derives it.
+
+**Fixed.** Switching a theme cost three full-tree rebuilds (the spinner overlay
+was watched at the root) plus 200ms of hardcoded sleep, behind a full-window
+black overlay. One rebuild now, no overlay, `MaterialApp`'s own `AnimatedTheme`
+enabled. `InfernoThemes.forName` was already memoised, so `ThemeData`
+construction was never a cost — that part of the original issue was wrong.
+
+**Where the time actually goes**, from instrumenting the swap:
+
+| | |
+|---|---|
+| no message rows on screen | **3ms** |
+| 31 message rows | **~128ms** |
+| per row | **~4ms** |
+
+Message rows are ~97% of a theme swap. Everything else in the app is already
+fast enough to animate.
+
+**Why no colour tween appears.** The swap blocks the UI thread for 130-256ms
+while the animation is 220ms. No frames are produced while blocked, so when one
+finally runs the controller's elapsed time is already past the duration and it
+jumps to `t = 1`. Verified by printing the palette a widget receives per build
+during one swap: exactly one line, carrying the destination colour.
+
+`InfernoColors.of(context)` is therefore correctly wired — it would return
+interpolated palettes if any frame existed to receive them. **A missing fade is
+a symptom of row cost, not of the accessor.** Make rows cheap and the fade
+appears on its own, for everything read through `Theme`.
+
+**The remaining chain**, in the order it has to be broken: the row rebuilds
+because colours are passed into it → `MessageContent` rebuilds → `MarkdownBody`
+rebuilds → markdown is re-parsed. Breaking it means `MessageContent` not
+depending on colours, which is a sizeable change to a 2000-line file on the
+most-used screen. It is the only remaining path to an app-wide lerp.
+
+Comparison worth keeping in mind: Rails is fast here because CSS custom
+properties make a theme change a *repaint* over an already-parsed DOM, and
+because Redcarpet renders markdown once server-side (`app/models/message.rb:68`).
+Flutter gives neither for free — the separation between content and presentation
+has to be built deliberately.
+
 ## P3 — Performance and the theme stutter
 
 ### #35 / #36 / #37 — Theme switching
