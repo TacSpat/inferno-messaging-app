@@ -79,21 +79,6 @@ class ServersDao extends DatabaseAccessor<InfernoDatabase>
         .debounce(const Duration(milliseconds: 300));
   }
 
-  // Insert or update a server
-  Future<int> upsertServer(ServersCompanion server) {
-    return into(servers).insertOnConflictUpdate(server);
-  }
-
-  // Insert or update a channel
-  Future<int> upsertChannel(ChannelsCompanion channel) {
-    return into(channels).insertOnConflictUpdate(channel);
-  }
-
-  // Insert or update a category
-  Future<int> upsertCategory(CategoriesCompanion category) {
-    return into(categories).insertOnConflictUpdate(category);
-  }
-
   // Get membership for a user in a server
   Future<ServerMembership?> getMembership(int userId, int serverId) {
     return (select(serverMemberships)

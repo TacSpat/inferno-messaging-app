@@ -46,11 +46,6 @@ class ContactsDao extends DatabaseAccessor<InfernoDatabase>
         .getSingleOrNull();
   }
 
-  // Insert or update a contact
-  Future<int> upsertContact(ContactsCompanion contact) {
-    return into(contacts).insertOnConflictUpdate(contact);
-  }
-
   // Watch all conversations
   Stream<List<Conversation>> watchConversations() {
     return (select(conversations)

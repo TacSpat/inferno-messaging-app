@@ -988,21 +988,54 @@ class AppBootstrapService {
       if (events.isNotEmpty) {
         final event = events.first;
         final profile = json.decode(event.content) as Map<String, dynamic>;
-        await db.into(db.contacts).insertOnConflictUpdate(
-          ContactsCompanion.insert(
-            pubkey: pubKey,
-            username: Value(profile['name'] as String?),
-            displayName: Value(profile['display_name'] as String?),
-            bio: Value(profile['about'] as String?),
-            avatarUrl: Value(profile['picture'] as String?),
-            bannerUrl: Value(profile['banner'] as String?),
-            nip05: Value(profile['nip05'] as String?),
-            profileFetchedAt: Value(DateTime.now()),
-            createdAt: DateTime.now(),
-            updatedAt: DateTime.now(),
-          ),
-        );
+
+        // Check-then-insert/update, NOT insertOnConflictUpdate.
+        //
+        // contacts.pubkey is a unique index but the primary key is the
+        // autoIncrement id, and Drift builds ON CONFLICT against the primary
+        // key only. Once a row for this pubkey existed, the insert raised a
+        // unique-constraint error that the bare catch below swallowed, so the
+        // user's own display name and avatar silently never updated again
+        // after the first fetch.
+        final existing = await (db.select(db.contacts)
+              ..where((c) => c.pubkey.equals(pubKey)))
+            .getSingleOrNull();
+
+        if (existing == null) {
+          await db.into(db.contacts).insert(
+                ContactsCompanion.insert(
+                  pubkey: pubKey,
+                  username: Value(profile['name'] as String?),
+                  displayName: Value(profile['display_name'] as String?),
+                  bio: Value(profile['about'] as String?),
+                  avatarUrl: Value(profile['picture'] as String?),
+                  bannerUrl: Value(profile['banner'] as String?),
+                  nip05: Value(profile['nip05'] as String?),
+                  profileFetchedAt: Value(DateTime.now()),
+                  createdAt: DateTime.now(),
+                  updatedAt: DateTime.now(),
+                ),
+              );
+        } else {
+          await (db.update(db.contacts)..where((c) => c.pubkey.equals(pubKey)))
+              .write(
+            ContactsCompanion(
+              username: Value(profile['name'] as String?),
+              displayName: Value(profile['display_name'] as String?),
+              bio: Value(profile['about'] as String?),
+              avatarUrl: Value(profile['picture'] as String?),
+              bannerUrl: Value(profile['banner'] as String?),
+              nip05: Value(profile['nip05'] as String?),
+              profileFetchedAt: Value(DateTime.now()),
+              updatedAt: Value(DateTime.now()),
+            ),
+          );
+        }
       }
-    } catch (_) {}
+    } catch (e) {
+      // Previously a bare `catch (_) {}`, which is how the unique-constraint
+      // failure above stayed invisible for so long.
+      debugPrint('[AppBootstrap] _fetchOwnProfile failed: $e');
+    }
   }
 }
