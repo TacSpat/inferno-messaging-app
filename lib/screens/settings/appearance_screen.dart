@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../theme/theme_provider.dart';
 import '../../theme/all_themes.dart';
 import '../../theme/ui_effects.dart';
+import '../../widgets/message_list.dart';
 
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
@@ -26,9 +27,11 @@ class AppearanceScreen extends ConsumerWidget {
     ref.read(themeSwapInFlightProvider.notifier).state = true;
     try {
       final sw = Stopwatch()..start();
+      MessageRowBuildCounter.reset();
       swap();
       await SchedulerBinding.instance.endOfFrame;
-      debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms');
+      debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms '
+          '(${MessageRowBuildCounter.value} message rows rebuilt)');
       // Hold until the tween finishes so swaps cannot overlap.
       await Future.delayed(kThemeSwapDuration);
     } finally {

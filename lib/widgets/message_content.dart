@@ -436,8 +436,27 @@ class MessageContent extends ConsumerWidget {
     return Text.rich(TextSpan(children: children));
   }
 
+  /// Memoised results of [_preprocessContent].
+  ///
+  /// The transform is several regex passes over the message body and depends
+  /// only on the text and the custom-emoji map, not on colours — so a theme
+  /// swap was re-running it for every visible row for no reason. Bounded so a
+  /// long session cannot grow it without limit.
+  static final Map<String, String> _preprocessCache = {};
+  static const _preprocessCacheLimit = 500;
+
   /// Pre-process text to replace custom emoji and mention patterns before markdown
   String _preprocessContent(String text) {
+    final cacheKey = '${customEmojis?.length ?? 0}\u0000$text';
+    final cached = _preprocessCache[cacheKey];
+    if (cached != null) return cached;
+    final computed = _preprocessContentUncached(text);
+    if (_preprocessCache.length >= _preprocessCacheLimit) _preprocessCache.clear();
+    _preprocessCache[cacheKey] = computed;
+    return computed;
+  }
+
+  String _preprocessContentUncached(String text) {
     var processed = text;
 
     // Replace custom emoji :name: with inline image markdown (if emoji map provided)

@@ -24,6 +24,13 @@ import 'context_menu.dart';
 import '../services/gif_favorites_service.dart';
 import '../screens/main_shell.dart';
 
+/// TEMPORARY: exposes how many message rows rebuilt, so a theme swap can
+/// report it. Remove once the rebuild cost is pinned down.
+class MessageRowBuildCounter {
+  static int value = 0;
+  static void reset() => value = 0;
+}
+
 typedef MessageReplyCallback = void Function(Message message, String authorName, String preview);
 
 typedef MessageEditCallback = void Function(Message message);
@@ -780,13 +787,24 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
   /// Only keep alive messages with media content (images, video, audio, embeds).
   /// Plain text messages are cheap to rebuild — keeping them all alive bloats
   /// memory and causes stutter when the theme changes (every kept-alive widget rebuilds).
+  /// Only messages holding *playable* media stay alive — a video or audio
+  /// player has position and buffer state worth preserving across scroll.
+  ///
+  /// This used to return true for anything containing "http", which is most
+  /// chat messages, so scrolled-past rows accumulated and every one of them
+  /// rebuilt on a theme change. Measured at 31 rows rebuilding when roughly a
+  /// dozen were on screen, ~7ms each.
+  ///
+  /// Images and plain links are deliberately not kept alive: CachedNetworkImage
+  /// serves them from cache on remount, so there is no state to lose.
+  static final _playableMedia =
+      RegExp(r'\.(mp4|webm|mov|ogv|mp3|ogg|wav|m4a)(\?|$)', caseSensitive: false);
+
   @override
   bool get wantKeepAlive {
-    final content = widget.message.content ?? '';
-    final hasFiles = widget.message.fileUrls != null && widget.message.fileUrls!.isNotEmpty;
-    if (hasFiles) return true;
-    // Check for URLs that would create heavy embed widgets
-    return content.contains('http://') || content.contains('https://');
+    final urls = widget.message.fileUrls ?? '';
+    if (_playableMedia.hasMatch(urls)) return true;
+    return _playableMedia.hasMatch(widget.message.content ?? '');
   }
 
   /// Detect GIF URL in a message — checks tenor media, .gif extension, tenor view pages
@@ -913,6 +931,7 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
   @override
   Widget build(BuildContext context) {
     super.build(context); // required by AutomaticKeepAliveClientMixin
+    MessageRowBuildCounter.value++;
     final c = widget.colors;
     final msg = widget.message;
     // In DMs/group chats, don't color names — use neutral white for all
