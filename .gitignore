@@ -61,3 +61,6 @@ assets/models/*.onnx
 
 # Screenshots / temp images
 flutter_01.png
+
+# graphify knowledge graph output (regenerable)
+graphify-out/

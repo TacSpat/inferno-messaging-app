@@ -1204,13 +1204,18 @@ class _InlineVideoPlayerState extends State<_InlineVideoPlayer> with WidgetsBind
                 if (!_playing)
                   Center(child: _VideoBigPlayButton(size: 56, iconSize: 36)),
 
-                // Controls bar — bottom gradient overlay
+                // Controls bar — bottom gradient overlay.
+                // IgnorePointer is required: without it the faded-out controls
+                // stay hit-testable and swallow clicks/hover on the video surface.
                 Positioned(
                   bottom: 0, left: 0, right: 0,
-                  child: AnimatedOpacity(
-                    opacity: _controlsVisible ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 250),
-                    child: _buildControls(c, accent, displayW),
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 250),
+                      child: _buildControls(c, accent, displayW),
+                    ),
                   ),
                 ),
               ],
@@ -1691,81 +1696,92 @@ class _VideoFullscreenState extends State<_VideoFullscreen> {
                 if (!_playing)
                   Center(child: _VideoBigPlayButton(size: 72, iconSize: 48)),
 
-                // Close button — top right
+                // Close button — top right.
+                // IgnorePointer: a faded-out close button stays clickable
+                // otherwise, so a stray corner click exits fullscreen.
                 Positioned(
                   top: 16, right: 16,
-                  child: AnimatedOpacity(
-                    opacity: _controlsVisible ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 200),
-                    child: MouseRegion(
-                      cursor: SystemMouseCursors.click,
-                      child: IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                        onPressed: () => Navigator.of(context).pop(),
-                        style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 200),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                          onPressed: () => Navigator.of(context).pop(),
+                          style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // Controls bar — bottom
+                // Controls bar — bottom.
+                // IgnorePointer: the GestureDetector below deliberately absorbs
+                // taps, so while faded out it would eat every click on the
+                // bottom strip of the video instead of toggling playback.
                 Positioned(
                   bottom: 0, left: 0, right: 0,
-                  child: AnimatedOpacity(
-                    opacity: _controlsVisible ? 1.0 : 0.0,
-                    duration: const Duration(milliseconds: 250),
-                    child: GestureDetector(
-                      onTap: () {}, // absorb
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.bottomCenter, end: Alignment.topCenter,
-                            colors: [Color(0xCC000000), Colors.transparent],
-                          ),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Seek bar
-                            _VideoSeekBar(
-                              accent: accent,
-                              bufferFraction: bufferFrac,
-                              progressFraction: progressFrac,
-                              duration: _duration,
-                              padding: const EdgeInsets.symmetric(horizontal: 16),
-                              onSeekStart: () => _seeking = true,
-                              onSeekUpdate: (frac) => setState(() => _position = Duration(milliseconds: (_duration.inMilliseconds * frac).round())),
-                              onSeekEnd: (frac) { _seeking = false; widget.controller.seekTo(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
+                  child: IgnorePointer(
+                    ignoring: !_controlsVisible,
+                    child: AnimatedOpacity(
+                      opacity: _controlsVisible ? 1.0 : 0.0,
+                      duration: const Duration(milliseconds: 250),
+                      child: GestureDetector(
+                        onTap: () {}, // absorb
+                        child: Container(
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.bottomCenter, end: Alignment.topCenter,
+                              colors: [Color(0xCC000000), Colors.transparent],
                             ),
-                            // Controls row
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-                              child: Row(children: [
-                                _fsBtn(icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded, onTap: _togglePlay),
-                                const SizedBox(width: 8),
-                                Text('${_fmt(_position)} / ${_fmt(_duration)}', style: TextStyle(color: c.gray400, fontSize: 13, fontFamily: 'monospace')),
-                                const Spacer(),
-                                _fsBtn(icon: volIcon, onTap: () => widget.controller.setVolume(_volume > 0 ? 0 : 1.0)),
-                                MouseRegion(
-                                  cursor: SystemMouseCursors.click,
-                                  child: SizedBox(
-                                    width: 80,
-                                    child: SliderTheme(
-                                      data: sliderTheme,
-                                      child: Slider(
-                                        value: _volume,
-                                        onChangeStart: (_) => _draggingVolume = true,
-                                        onChanged: (v) => widget.controller.setVolume(v),
-                                        onChangeEnd: (_) { _draggingVolume = false; _startHideTimer(); },
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Seek bar
+                              _VideoSeekBar(
+                                accent: accent,
+                                bufferFraction: bufferFrac,
+                                progressFraction: progressFrac,
+                                duration: _duration,
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                                onSeekStart: () => _seeking = true,
+                                onSeekUpdate: (frac) => setState(() => _position = Duration(milliseconds: (_duration.inMilliseconds * frac).round())),
+                                onSeekEnd: (frac) { _seeking = false; widget.controller.seekTo(Duration(milliseconds: (_duration.inMilliseconds * frac).round())); },
+                              ),
+                              // Controls row
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                                child: Row(children: [
+                                  _fsBtn(icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded, onTap: _togglePlay),
+                                  const SizedBox(width: 8),
+                                  Text('${_fmt(_position)} / ${_fmt(_duration)}', style: TextStyle(color: c.gray400, fontSize: 13, fontFamily: 'monospace')),
+                                  const Spacer(),
+                                  _fsBtn(icon: volIcon, onTap: () => widget.controller.setVolume(_volume > 0 ? 0 : 1.0)),
+                                  MouseRegion(
+                                    cursor: SystemMouseCursors.click,
+                                    child: SizedBox(
+                                      width: 80,
+                                      child: SliderTheme(
+                                        data: sliderTheme,
+                                        child: Slider(
+                                          value: _volume,
+                                          onChangeStart: (_) => _draggingVolume = true,
+                                          onChanged: (v) => widget.controller.setVolume(v),
+                                          onChangeEnd: (_) { _draggingVolume = false; _startHideTimer(); },
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                _fsBtn(icon: Icons.fullscreen_exit_rounded, onTap: () => Navigator.of(context).pop()),
-                              ]),
-                            ),
-                          ],
+                                  const SizedBox(width: 8),
+                                  _fsBtn(icon: Icons.fullscreen_exit_rounded, onTap: () => Navigator.of(context).pop()),
+                                ]),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
