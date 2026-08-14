@@ -115,11 +115,24 @@ class ServerSyncService {
       );
       if (metadataEvents.isNotEmpty) {
         metadataEvents.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        await _processMetadata(metadataEvents.first, nostrGroupId);
-        await _logSyncEvent(metadataEvents.first, 31750, server.id);
-        server = await (_db.select(_db.servers)
-              ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
-            .getSingleOrNull();
+        // Only apply if this is genuinely newer than what we already hold —
+        // otherwise a stale relay's copy reverts name, icon, banner and relay
+        // list until the next sync happens to reach a current relay.
+        final stale = await _relayConfig.hasAppliedNewerOrEqual(
+          kind: 31750,
+          serverId: server.id,
+          eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(
+              metadataEvents.first.createdAt * 1000),
+        );
+        if (!stale) {
+          await _processMetadata(metadataEvents.first, nostrGroupId);
+          await _logSyncEvent(metadataEvents.first, 31750, server.id);
+          server = await (_db.select(_db.servers)
+                ..where((s) => s.nostrGroupId.equals(nostrGroupId)))
+              .getSingleOrNull();
+        } else {
+          debugPrint('[SyncServer] SKIP metadata — already applied one at or newer than this');
+        }
       }
     }
 
@@ -345,6 +358,19 @@ class ServerSyncService {
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final latest = events.first;
+
+    // Sorting only orders this batch. If a stale relay answered and the one
+    // holding the newest copy timed out, `latest` is still older than what we
+    // already applied — and 31751 carries the whole channel/category tree, so
+    // applying it visibly reverts the sidebar until a later sync corrects it.
+    if (await _relayConfig.hasAppliedNewerOrEqual(
+      kind: 31751,
+      serverId: serverId,
+      eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(latest.createdAt * 1000),
+    )) {
+      debugPrint('[StructureSync] SKIP — already applied a structure event at or newer than this one');
+      return;
+    }
 
     // Debug: log all tags from the latest structure event
     final chTags = latest.tags.where((t) => t.isNotEmpty && t[0] == 'ch').toList();
@@ -614,6 +640,17 @@ class ServerSyncService {
 
     events.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     final latest = events.first;
+
+    // Same guard as structure: 31752 replaces the whole role set, so an older
+    // copy resurrects deleted roles and reverts renames and permissions.
+    if (await _relayConfig.hasAppliedNewerOrEqual(
+      kind: 31752,
+      serverId: serverId,
+      eventCreatedAt: DateTime.fromMillisecondsSinceEpoch(latest.createdAt * 1000),
+    )) {
+      debugPrint('[RolesSync] SKIP — already applied a roles event at or newer than this one');
+      return;
+    }
 
     for (final tag in latest.tags) {
       if (tag.isEmpty || tag[0] != 'role' || tag.length < 3) continue;

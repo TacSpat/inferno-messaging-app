@@ -151,6 +151,60 @@ class RelayConfigService {
     );
   }
 
+  /// True if we have already applied an event of [kind] for [serverId] whose
+  /// created_at is at least as new as [eventCreatedAt].
+  ///
+  /// Replaceable events (31750-31757) carry the whole state, so applying an
+  /// older copy reverts everything it covers. Sync sorts each fetch batch
+  /// newest-first, but that only orders events *within* one response — if a
+  /// stale relay answers and the relay holding the newest copy times out, the
+  /// batch's newest is still older than what we already have, and applying it
+  /// rolls the UI back until some later sync corrects it.
+  ///
+  /// Scoped by (kind, serverId) rather than including pubkey: the d-tag
+  /// identifies the stream, and scoping by publisher would treat a second
+  /// admin's update as a separate history.
+  Future<bool> hasAppliedNewerOrEqual({
+    required int kind,
+    required int serverId,
+    required DateTime eventCreatedAt,
+  }) async {
+    final query = _db.selectOnly(_db.nostrEventLogs)
+      ..addColumns([_db.nostrEventLogs.eventCreatedAt.max()])
+      ..where(_db.nostrEventLogs.kind.equals(kind) &
+          _db.nostrEventLogs.serverId.equals(serverId) &
+          _db.nostrEventLogs.direction.equals('inbound'));
+
+    final latest = await query
+        .map((row) => row.read(_db.nostrEventLogs.eventCreatedAt.max()))
+        .getSingleOrNull();
+
+    // Equal counts as already-applied: re-applying an identical replaceable
+    // event is pure churn, and every periodic sync refetches the same one.
+    return latest != null && !latest.isBefore(eventCreatedAt);
+  }
+
+  /// Newest created_at we have applied for [kind] from [pubkey], or null.
+  ///
+  /// Used to survive a restart: in-memory "latest seen" tracking starts empty
+  /// every launch, so the first copy of a replaceable event to arrive wins
+  /// even when it is a stale one from a slow relay — which shows up as
+  /// profiles reverting to old values and then correcting themselves.
+  Future<DateTime?> latestAppliedCreatedAt({
+    required int kind,
+    required String pubkey,
+  }) async {
+    final query = _db.selectOnly(_db.nostrEventLogs)
+      ..addColumns([_db.nostrEventLogs.eventCreatedAt.max()])
+      ..where(_db.nostrEventLogs.kind.equals(kind) &
+          _db.nostrEventLogs.pubkey.equals(pubkey) &
+          _db.nostrEventLogs.direction.equals('inbound'));
+
+    return query
+        .map((row) => row.read(_db.nostrEventLogs.eventCreatedAt.max()))
+        .getSingleOrNull();
+  }
+
   /// Batch check which event IDs have already been processed
   Future<Set<String>> filterProcessedEvents(List<String> eventIds) async {
     if (eventIds.isEmpty) return {};

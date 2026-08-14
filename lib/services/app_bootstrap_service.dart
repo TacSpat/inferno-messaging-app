@@ -262,7 +262,22 @@ class AppBootstrapService {
     // profile) with an outdated event from a slow relay.
     relayPool.onKind(0, (relayUrl, event) async {
       try {
-        final latest = _latestKind0[event.pubkey] ?? 0;
+        // _latestKind0 is in-memory, so it starts empty on every launch. Seed
+        // it from what we previously applied, otherwise the FIRST Kind 0 to
+        // arrive after a restart wins unconditionally — including a stale copy
+        // from a slow relay, which reverts the profile until a newer event
+        // arrives and corrects it.
+        var latest = _latestKind0[event.pubkey] ?? 0;
+        if (latest == 0) {
+          final applied = await relayConfig.latestAppliedCreatedAt(
+            kind: 0,
+            pubkey: event.pubkey,
+          );
+          if (applied != null) {
+            latest = applied.millisecondsSinceEpoch ~/ 1000;
+            _latestKind0[event.pubkey] = latest;
+          }
+        }
         if (event.createdAt <= latest) return; // stale — skip
         _latestKind0[event.pubkey] = event.createdAt;
 
@@ -319,6 +334,20 @@ class AppBootstrapService {
           profileFetchedAt: Value(now),
           updatedAt: Value(now),
         ));
+
+        // Record the version we applied so the ordering guard survives a
+        // restart. profileFetchedAt is when we fetched, not the event's
+        // created_at, so it cannot serve as the version.
+        if (event.id != null) {
+          await relayConfig.markEventProcessed(
+            eventId: event.id!,
+            direction: 'inbound',
+            kind: 0,
+            pubkey: event.pubkey,
+            eventCreatedAt:
+                DateTime.fromMillisecondsSinceEpoch(event.createdAt * 1000),
+          );
+        }
       } catch (_) {}
     });
 
