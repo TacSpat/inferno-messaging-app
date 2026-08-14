@@ -23,6 +23,7 @@ import '../../models/permission.dart';
 import '../../providers/server_settings_provider.dart';
 import '../../theme/all_themes.dart';
 import '../../theme/theme_provider.dart';
+import '../../utils/device_id.dart';
 
 class VoiceChannelScreen extends ConsumerStatefulWidget {
   final String channelPublicId;
@@ -251,17 +252,32 @@ class _VoiceChannelScreenState extends ConsumerState<VoiceChannelScreen> {
       'channel_id': widget.channelPublicId,
       'user_id': auth.publicKeyHex!.substring(0, 12),
       'user_pubkey': auth.publicKeyHex,
+      // Distinguishes this install from the user's other devices. The pubkey
+      // is identical everywhere they are signed in, so without this a device
+      // cannot tell its own voice state from another device's.
+      'device_id': await DeviceId.get(),
       'username': displayName,
       'avatar_url': contact?.avatarUrl,
       'self_mute': livekit.isMuted,
       'self_deaf': livekit.isDeafened,
     });
 
+    // NIP-40 expiration. Kind 10070 is replaceable, so a "join" stays the
+    // user's current voice state until something replaces it — a crash or a
+    // force-quit never sends the matching "leave", leaving the user shown as
+    // in-voice to everyone indefinitely. Two hours comfortably outlives a real
+    // session while bounding the stale case.
+    final expiresAt =
+        DateTime.now().add(const Duration(hours: 2)).millisecondsSinceEpoch ~/ 1000;
+
     final event = nostr.NostrEvent(
       pubkey: auth.publicKeyHex!,
       createdAt: nostr.NostrEvent.now(),
       kind: 10070,
-      tags: [['h', server.nostrGroupId!]],
+      tags: [
+        ['h', server.nostrGroupId!],
+        ['expiration', '$expiresAt'],
+      ],
       content: payload,
     );
 

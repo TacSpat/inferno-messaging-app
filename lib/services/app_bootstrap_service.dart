@@ -20,6 +20,7 @@ import '../services/media_cache_service.dart';
 import '../services/content_safety_service.dart';
 import '../services/config_sync_service.dart';
 import '../services/relay_sync_service.dart';
+import '../utils/device_id.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import '../services/shared_hash_service.dart';
 import '../services/nsfw_detector.dart';
@@ -72,6 +73,11 @@ class AppBootstrapService {
     // 1. Ensure default relays + local user (fast, DB only)
     await relayConfig.ensureDefaultRelays();
     await _ensureLocalUser();
+
+    // 1b. Warm the device id before any handler runs. The Kind 10070 handler
+    // reads DeviceId.cached synchronously to tell our own echo apart from the
+    // same identity in voice on another device.
+    await DeviceId.get();
 
     // 2. Connect to relays in parallel (don't wait sequentially)
     final urls = await relayConfig.getActiveRelayUrls();
@@ -557,13 +563,27 @@ class AppBootstrapService {
 
     // Kind 10070: Public voice state events (join/leave/update)
     relayPool.onKind(10070, (relayUrl, event) {
-      // Don't process our own voice state events
-      if (event.pubkey == authService.publicKeyHex) return;
       try {
         final parsed = json.decode(event.content) as Map<String, dynamic>;
-        if (parsed['type'] == 'voice_state_sync') {
-          dmService.handleVoiceStateSync(parsed);
+        if (parsed['type'] != 'voice_state_sync') return;
+
+        // Skip only this device's own echo, not every event from our pubkey.
+        // Previously any event authored by us was dropped, which meant a
+        // device could never see that the same identity was in voice on
+        // another device — the case that matters, since LiveKit will evict
+        // one of them (#66).
+        if (event.pubkey == authService.publicKeyHex) {
+          final eventDevice = parsed['device_id'] as String?;
+          final thisDevice = DeviceId.cached;
+          // Events without a device_id predate this field; treat them as ours
+          // and drop them, matching the old behaviour rather than surfacing a
+          // phantom second session.
+          if (eventDevice == null || thisDevice == null || eventDevice == thisDevice) {
+            return;
+          }
         }
+
+        dmService.handleVoiceStateSync(parsed);
       } catch (_) {}
     });
 
