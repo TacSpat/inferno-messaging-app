@@ -4,6 +4,7 @@ import '../crypto/nostr_event.dart' as nostr;
 import '../crypto/nostr_signer.dart';
 import '../database/database.dart';
 import '../nostr/relay_pool.dart';
+import 'dm_service.dart';
 
 class ReactionService {
   final InfernoDatabase _db;
@@ -66,6 +67,7 @@ class ReactionService {
       publicKeyHex: publicKeyHex,
       message: message,
       content: emoji,
+      emoji: emoji,
       channelGroupId: channelGroupId,
     );
     return true;
@@ -131,20 +133,51 @@ class ReactionService {
       publicKeyHex: publicKeyHex,
       message: message,
       content: '-',
+      emoji: emoji,
       channelGroupId: channelGroupId,
     );
   }
 
   /// Publish a Kind 7 Nostr event (reaction add or removal)
+  /// [content] is the emoji for an add, or "-" for a removal (NIP-25).
+  /// [emoji] always carries the actual emoji, which the encrypted DM path
+  /// needs on removal since "-" does not identify what to remove.
   Future<void> _publishKind7({
     required String privateKeyHex,
     required String publicKeyHex,
     required Message message,
     required String content,
+    required String emoji,
     String? channelGroupId,
   }) async {
     if (message.nostrEventId == null) {
       debugPrint('[ReactionService] Cannot publish Kind 7: message has no nostrEventId');
+      return;
+    }
+
+    // Reactions on a DM go out encrypted, never as a public Kind 7. A public
+    // reaction carries an `e` tag naming the DM's event ID and a `p` tag
+    // naming the counterparty, which leaks who is talking to whom and which
+    // message was reacted to — the message body being encrypted does not help.
+    if (message.conversationId != null) {
+      final conversation = await (_db.select(_db.conversations)
+            ..where((c) => c.id.equals(message.conversationId!)))
+          .getSingleOrNull();
+      final counterparty = conversation?.counterpartyPubkey;
+      if (counterparty == null) {
+        // Group DM: no single counterparty, and there is no encrypted
+        // group-reaction path yet. Keep it local rather than leak it.
+        debugPrint('[ReactionService] Group DM reaction kept local (no encrypted fan-out yet)');
+        return;
+      }
+      await DmService(_db, _relayPool).sendReaction(
+        privateKeyHex: privateKeyHex,
+        publicKeyHex: publicKeyHex,
+        recipientPubkey: counterparty,
+        targetEventId: message.nostrEventId!,
+        emoji: emoji,
+        action: content == '-' ? 'remove' : 'add',
+      );
       return;
     }
 

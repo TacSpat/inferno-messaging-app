@@ -203,6 +203,9 @@ class DmService {
         case 'message_delete':
           await _handleMessageDelete(parsed);
           return;
+        case 'reaction':
+          await _handleReaction(parsed, event.pubkey);
+          return;
         case 'voice_token_response':
           debugPrint('[DM] Received voice_token_response request_id=${parsed['request_id']}');
           _voiceTokenResponses[parsed['request_id'] as String] = parsed;
@@ -305,6 +308,45 @@ class DmService {
   }
 
   /// Send a friend request
+  /// Send a reaction to a DM as an encrypted Kind 14 control message.
+  ///
+  /// Reactions inside a conversation must never go out as public Kind 7
+  /// events: those carry an `e` tag naming the DM's event ID and a `p` tag
+  /// naming the counterparty, so anyone scraping relays learns who is
+  /// talking to whom and which message was reacted to, even though the
+  /// message body itself is encrypted.
+  ///
+  /// [action] is 'add' or 'remove'.
+  Future<void> sendReaction({
+    required String privateKeyHex,
+    required String publicKeyHex,
+    required String recipientPubkey,
+    required String targetEventId,
+    required String emoji,
+    required String action,
+  }) async {
+    final payload = json.encode({
+      'type': 'reaction',
+      'action': action,
+      'e': targetEventId,
+      'emoji': emoji,
+    });
+    final convKey = Nip44Crypto.conversationKey(privateKeyHex, recipientPubkey);
+    final encrypted = Nip44Crypto.encrypt(payload, convKey);
+
+    final event = nostr.NostrEvent(
+      pubkey: publicKeyHex,
+      createdAt: nostr.NostrEvent.now(),
+      kind: 14,
+      tags: [['p', recipientPubkey]],
+      content: encrypted,
+    );
+
+    final signer = NostrSigner(privateKeyHex: privateKeyHex);
+    final signed = signer.sign(event);
+    await _relayPool.publish(signed);
+  }
+
   Future<void> sendFriendRequest({
     required String privateKeyHex,
     required String publicKeyHex,
@@ -604,5 +646,45 @@ class DmService {
     await (_db.delete(_db.messages)
           ..where((m) => m.nostrEventId.equals(eventId)))
         .go();
+  }
+
+  /// Apply a reaction delivered as an encrypted Kind 14 control message.
+  /// [reactorPubkey] is the event author, so a reaction from either side of
+  /// the conversation is attributed correctly.
+  Future<void> _handleReaction(Map<String, dynamic> parsed, String reactorPubkey) async {
+    final eventId = parsed['e'] as String?;
+    final emoji = parsed['emoji'] as String?;
+    final action = parsed['action'] as String? ?? 'add';
+    if (eventId == null || emoji == null) return;
+
+    final message = await (_db.select(_db.messages)
+          ..where((m) => m.nostrEventId.equals(eventId)))
+        .getSingleOrNull();
+    if (message == null) return;
+
+    if (action == 'remove') {
+      await (_db.delete(_db.reactions)
+            ..where((r) =>
+                r.messageId.equals(message.id) &
+                r.emoji.equals(emoji) &
+                r.reactorPubkey.equals(reactorPubkey)))
+          .go();
+      return;
+    }
+
+    // insertOrIgnore, not insertOnConflictUpdate: the uniqueness here is the
+    // composite {reactorPubkey, messageId, emoji}, not the primary key.
+    final now = DateTime.now();
+    await _db.into(_db.reactions).insert(
+          ReactionsCompanion.insert(
+            messageId: message.id,
+            userId: 0,
+            emoji: Value(emoji),
+            reactorPubkey: Value(reactorPubkey),
+            createdAt: now,
+            updatedAt: now,
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
   }
 }
