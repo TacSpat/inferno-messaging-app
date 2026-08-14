@@ -31,8 +31,10 @@ class ThemeNameNotifier extends StateNotifier<String> {
   }
 }
 
-/// True while theme is swapping — shows spinner overlay in app.dart
-final themeTransitionProvider = StateProvider<bool>((ref) => false);
+// themeTransitionProvider removed. It gated a full-window black spinner
+// overlay during theme swaps, which made the app go black for the length of
+// the rebuild and then pop into the new colours. MaterialApp's AnimatedTheme
+// now tweens the swap instead — see app.dart.
 
 /// Direct color provider — widgets watch THIS instead of Theme.of(context).
 /// Changing theme only rebuilds widgets that ref.watch this, NOT the entire tree.

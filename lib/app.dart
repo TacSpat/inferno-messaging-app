@@ -12,19 +12,23 @@ class InfernoApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // Only themeNameProvider is watched here. themeTransitionProvider used to
-    // be watched at this level too, which meant raising and lowering the
-    // spinner each rebuilt MaterialApp.router and everything under it — so a
-    // theme switch cost three full-tree rebuilds (flag on, swap, flag off)
-    // when only the middle one changes anything. The overlay now watches the
-    // flag itself, so the two bookend rebuilds are confined to it.
+    // Only themeNameProvider is watched here, so a theme switch costs exactly
+    // one rebuild of this subtree. It previously also watched
+    // themeTransitionProvider to drive a black spinner overlay, which meant
+    // raising and lowering the spinner each rebuilt MaterialApp.router and
+    // everything beneath it — three full-tree rebuilds where one suffices.
     final themeName = ref.watch(themeNameProvider);
     final themeData = InfernoThemes.forName(themeName);
 
     return MaterialApp.router(
       title: 'Inferno',
       theme: themeData,
-      themeAnimationDuration: Duration.zero,
+      // Was Duration.zero, which disabled MaterialApp's built-in AnimatedTheme
+      // entirely — the swap was instant and a black overlay hid the rebuild.
+      // InfernoColors implements lerp for every colour (all_themes.dart:301),
+      // so with a duration the whole ThemeData, extension included, tweens.
+      themeAnimationDuration: const Duration(milliseconds: 220),
+      themeAnimationCurve: Curves.easeInOut,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
@@ -40,44 +44,8 @@ class InfernoApp extends ConsumerWidget {
             child: content,
           );
         }
-        return Stack(
-          children: [
-            content,
-            const _ThemeTransitionOverlay(),
-          ],
-        );
+        return content;
       },
-    );
-  }
-}
-
-/// Covers the app while the theme swaps.
-///
-/// Deliberately its own ConsumerWidget: it is the only thing that watches
-/// themeTransitionProvider, so raising and lowering the spinner rebuilds this
-/// widget alone rather than MaterialApp.router and the entire page stack
-/// beneath it.
-class _ThemeTransitionOverlay extends ConsumerWidget {
-  const _ThemeTransitionOverlay();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    if (!ref.watch(themeTransitionProvider)) return const SizedBox.shrink();
-
-    return Positioned.fill(
-      child: ColoredBox(
-        color: Colors.black,
-        child: Center(
-          child: SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              color: Colors.white.withValues(alpha: 0.6),
-            ),
-          ),
-        ),
-      ),
     );
   }
 }

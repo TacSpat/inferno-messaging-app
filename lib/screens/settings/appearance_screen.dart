@@ -8,28 +8,24 @@ import '../../theme/ui_effects.dart';
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
 
-  /// Show the overlay, swap, then hide once the rebuilt frame has actually
-  /// been drawn.
+  /// Swap the theme in a single frame and let MaterialApp's AnimatedTheme
+  /// tween the colours.
   ///
-  /// This used to sleep 50ms before the swap and 150ms after, guessing at how
-  /// long the rebuild would take. That 200ms was pure dead time the user sat
-  /// through on every theme change, and it was a guess in both directions —
-  /// too long on a fast machine, potentially too short on a slow one.
-  /// Awaiting endOfFrame waits for exactly the work that matters.
+  /// There used to be a full-window black overlay with a spinner here, held up
+  /// across the swap. It did not hide the cost so much as advertise it: the
+  /// screen went black for as long as the rebuild took, then the new theme
+  /// popped in. InfernoColors implements lerp for every colour, so with
+  /// themeAnimationDuration set the transition animates instead.
+  ///
+  /// The timing print is temporary: it reports how long the one rebuild
+  /// actually takes, which decides whether the remaining P3 work (rebuild
+  /// cost) is needed before the tween can cover the riverpod-driven colours
+  /// too.
   Future<void> _withTransition(WidgetRef ref, void Function() swap) async {
-    if (ref.read(themeTransitionProvider)) return;
-    ref.read(themeTransitionProvider.notifier).state = true;
-
-    // Let the overlay paint before the swap begins.
-    await SchedulerBinding.instance.endOfFrame;
-
+    final sw = Stopwatch()..start();
     swap();
-
-    // The swap marked the tree dirty and scheduled a frame; wait for that
-    // frame to finish rather than assuming a duration.
     await SchedulerBinding.instance.endOfFrame;
-
-    ref.read(themeTransitionProvider.notifier).state = false;
+    debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms');
   }
 
   Future<void> _switchTheme(WidgetRef ref, String name) =>
