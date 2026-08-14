@@ -119,6 +119,19 @@ class _MemberListState extends ConsumerState<MemberList> {
                 return contactMap[auth.publicKeyHex!]?.avatarUrl;
               }
 
+              /// Our own custom status, resolved the same way resolveStatus()
+              /// does for everyone else.
+              String? localUserStatus() {
+                final contact = contactMap[auth.publicKeyHex ?? ''];
+                final emoji = contact?.statusEmoji;
+                final text = contact?.status;
+                if (emoji != null && emoji.isNotEmpty && text != null && text.isNotEmpty) {
+                  return '$emoji $text';
+                }
+                if (emoji != null && emoji.isNotEmpty) return emoji;
+                return text;
+              }
+
               // Watch roles + role assignments reactively for hoisted groups
               return StreamBuilder<List<Role>>(
                 stream: (db.select(db.roles)
@@ -205,14 +218,24 @@ class _MemberListState extends ConsumerState<MemberList> {
                           if (unhoistedOnline.isNotEmpty || (!hasLocalUser && auth.publicKeyHex != null)) ...[
                             _SectionHeader(label: 'ONLINE', count: unhoistedOnline.length + (hasLocalUser ? 0 : 1), colors: c),
                             if (!hasLocalUser && auth.publicKeyHex != null)
+                              // Read our own presence from the same source as
+                              // every other member. These used to be the
+                              // literals c.online / 'Online' / false, so the
+                              // local user could never appear idle, dnd or
+                              // offline here and their custom status never
+                              // showed — which is also why this disagreed with
+                              // the user panel.
                               _MemberItem(
                                 name: localUserName(),
                                 avatarUrl: localUserAvatar(),
                                 pubkey: auth.publicKeyHex,
-                                statusColor: c.online,
+                                statusColor: _presenceColor(
+                                    presenceSvc.getPresence(auth.publicKeyHex!), c),
                                 roleColor: null,
-                                statusText: 'Online',
-                                isOffline: false,
+                                statusText: localUserStatus(),
+                                isOffline: presenceSvc
+                                        .getPresence(auth.publicKeyHex!) ==
+                                    OnlineState.offline,
                                 colors: c,
                                 serverId: widget.serverId,
                               ),

@@ -28,14 +28,17 @@ class UserPanel extends ConsumerWidget {
     // Subscribe to presence updates so the panel re-renders when our own
     // state changes (idle detection, manual status change, etc).
     ref.watch(presenceUpdatesProvider);
-    // Use the same source as the member list so the two indicators never
-    // disagree. `getPresence` returns the value in the shared tracking map,
-    // which is kept in sync for self + everyone else.
+    // Same source as the member list, which now also calls getPresence() for
+    // the local user instead of hardcoding it. presenceUpdatesProvider replays
+    // its last event to new subscribers, so this no longer depends on catching
+    // the single startup emission — previously, building before
+    // startPeriodicPublish() ran left this pinned to offline for the session.
     final currentState = pubkey != null
         ? presenceSvc.getPresence(pubkey)
         : presenceSvc.currentState;
     final statusColor = _presenceColor(currentState, colors);
-    final statusText = currentState.value[0].toUpperCase() + currentState.value.substring(1);
+    final presenceLabel =
+        currentState.value[0].toUpperCase() + currentState.value.substring(1);
 
     return StreamBuilder<List<Contact>>(
       stream: pubkey != null
@@ -47,6 +50,24 @@ class UserPanel extends ConsumerWidget {
             contact?.username ??
             (pubkey != null ? '${pubkey.substring(0, 8)}...' : 'User');
         final avatarUrl = contact?.avatarUrl;
+
+        // Prefer the user's own custom status, matching how the member list
+        // renders everyone else. Falls back to the presence label when no
+        // status is set. Previously this line could only ever show the
+        // OnlineState enum, so a status like "🔥 Slowly Making Inferno"
+        // rendered as "Offline".
+        final statusEmoji = contact?.statusEmoji;
+        final statusMsg = contact?.status;
+        final String statusText;
+        if (statusEmoji != null && statusEmoji.isNotEmpty && statusMsg != null && statusMsg.isNotEmpty) {
+          statusText = '$statusEmoji $statusMsg';
+        } else if (statusMsg != null && statusMsg.isNotEmpty) {
+          statusText = statusMsg;
+        } else if (statusEmoji != null && statusEmoji.isNotEmpty) {
+          statusText = statusEmoji;
+        } else {
+          statusText = presenceLabel;
+        }
 
         return Container(
           // Match the sidebar above so the user panel blends into the column

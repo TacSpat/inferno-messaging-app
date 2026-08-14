@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:drift/drift.dart';
-import 'package:flutter/foundation.dart';
 import '../crypto/nostr_event.dart' as nostr;
 import '../crypto/nostr_signer.dart';
 import '../database/database.dart';
@@ -41,7 +40,25 @@ class PresenceService {
   OnlineState _currentState = OnlineState.online;
 
   final _presenceController = StreamController<PresenceUpdate>.broadcast();
-  Stream<PresenceUpdate> get presenceUpdates => _presenceController.stream;
+  PresenceUpdate? _lastUpdate;
+
+  /// Presence updates, replaying the most recent one to each new subscriber.
+  ///
+  /// A plain broadcast stream drops everything emitted before a listener
+  /// attaches. Our own transition to online is emitted exactly once, during
+  /// startPeriodicPublish(), so a widget that first built before that ran
+  /// never learned about it and stayed pinned to the default (offline) for
+  /// the rest of the session.
+  Stream<PresenceUpdate> get presenceUpdates async* {
+    final seed = _lastUpdate;
+    if (seed != null) yield seed;
+    yield* _presenceController.stream;
+  }
+
+  void _emit(PresenceUpdate update) {
+    _lastUpdate = update;
+    _presenceController.add(update);
+  }
 
   PresenceService(this._relayPool);
 
@@ -62,7 +79,7 @@ class PresenceService {
     // Update our own presence in the tracking map so getPresence() works for local user
     _presenceState[publicKeyHex] = state;
     _lastSeenAt[publicKeyHex] = DateTime.now();
-    _presenceController.add(PresenceUpdate(pubkey: publicKeyHex, state: state));
+    _emit(PresenceUpdate(pubkey: publicKeyHex, state: state));
     _persistPresence(publicKeyHex, state);
     await _publishPresence(privateKeyHex, publicKeyHex, state);
   }
@@ -74,13 +91,16 @@ class PresenceService {
     _currentState = OnlineState.online;
     _presenceState[publicKeyHex] = OnlineState.online;
     _lastSeenAt[publicKeyHex] = DateTime.now();
-    _presenceController.add(PresenceUpdate(pubkey: publicKeyHex, state: OnlineState.online));
+    _emit(PresenceUpdate(pubkey: publicKeyHex, state: OnlineState.online));
     _persistPresence(publicKeyHex, OnlineState.online);
 
     _publishTimer = Timer.periodic(const Duration(minutes: 2), (_) {
       if (_currentState != OnlineState.invisible) {
         _presenceState[publicKeyHex] = _currentState;
         _lastSeenAt[publicKeyHex] = DateTime.now();
+        // Re-emit so the UI keeps reflecting our own state. Without this the
+        // republish updated the map silently and nothing ever rebuilt.
+        _emit(PresenceUpdate(pubkey: publicKeyHex, state: _currentState));
         _publishPresence(privateKeyHex, publicKeyHex, _currentState);
       }
     });
@@ -118,7 +138,7 @@ class PresenceService {
     _lastSeenAt[event.pubkey] = DateTime.now();
 
     if (oldState != state) {
-      _presenceController.add(PresenceUpdate(
+      _emit(PresenceUpdate(
         pubkey: event.pubkey,
         state: state,
       ));
