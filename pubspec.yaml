@@ -64,7 +64,7 @@ dependencies:
 
   # Media playback — video_player + fvp (libmdk backend, cross-platform incl. Linux)
   video_player: ^2.9.2
-  fvp: ^0.35.2
+  fvp: ^0.37.3
 
   # Audio playback
   just_audio: ^0.9.42

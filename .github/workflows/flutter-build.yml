@@ -170,7 +170,7 @@ jobs:
 
   # ─── macOS ─────────────────────────────────────────────────
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
@@ -189,10 +189,10 @@ jobs:
 
       - name: Download ONNX Runtime & compile NSFW bridge (arm64)
         run: |
-          # macos-14 runners are arm64-only. We build an arm64-only .app; an x86_64
-          # pass would require a macos-13 runner. Flutter's install_code_assets hook
-          # lipos per-arch outputs, so returning a universal dylib twice causes
-          # "same architectures" failure. Single-arch avoids this.
+          # macOS runners here are arm64-only. We build an arm64-only .app; an
+          # x86_64 pass would need an Intel runner. Flutter's install_code_assets
+          # hook lipos per-arch outputs, so returning a universal dylib twice
+          # causes a "same architectures" failure. Single-arch avoids this.
           ORT_VERSION="1.20.1"
           curl -sLO "https://github.com/microsoft/onnxruntime/releases/download/v${ORT_VERSION}/onnxruntime-osx-arm64-${ORT_VERSION}.tgz"
           tar xzf onnxruntime-osx-arm64-${ORT_VERSION}.tgz
