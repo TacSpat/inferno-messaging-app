@@ -58,42 +58,14 @@ class MainShellState extends ConsumerState<MainShell> {
   /// Saved scroll offsets per channel publicId — persists across channel navigation
   final Map<String, double> _channelScrollOffsets = {};
 
-  /// Cached channel entries for IndexedStack — keeps visited channels alive in memory.
-  /// Most-recently-used at the end. Capped at 10 to limit memory.
-  static const _maxCachedChannels = 10;
-  final List<({String channelId, String serverId})> _visitedChannels = [];
-  String? _cachedServerId; // tracks which server the cache belongs to
-
-  int get _activeChannelIndex {
-    final idx = _visitedChannels.indexWhere((e) => e.channelId == widget.activeChannelId);
-    return idx >= 0 ? idx : 0;
-  }
-
-  void _updateChannelCache() {
-    final chId = widget.activeChannelId;
-    final srvId = widget.activeServerId;
-    if (chId == null || srvId == null) return;
-
-    // Clear cache when switching servers
-    if (_cachedServerId != null && _cachedServerId != srvId) {
-      _visitedChannels.clear();
-    }
-    _cachedServerId = srvId;
-
-    // Promote existing entry or add new one
-    final existing = _visitedChannels.indexWhere((e) => e.channelId == chId);
-    if (existing >= 0) {
-      // Already cached — no reorder needed, IndexedStack just changes index
-      return;
-    }
-
-    // Evict LRU if at capacity
-    if (_visitedChannels.length >= _maxCachedChannels) {
-      _visitedChannels.removeAt(0);
-    }
-
-    _visitedChannels.add((channelId: chId, serverId: srvId));
-  }
+  // The IndexedStack channel cache that used to live here is gone. It kept up
+  // to ten channels mounted so revisiting one was instant, but IndexedStack
+  // builds every child, so it also made each rebuild of this subtree ten times
+  // more expensive — ~195ms on a theme swap, nine tenths of it invisible.
+  //
+  // It was not buying scroll preservation either: that lives in
+  // _channelScrollOffsets, written from MessageList.dispose() and read back
+  // through initialScrollIndex.
 
   void toggleMemberList() {
     setState(() => _showMembers = !_showMembers);
@@ -124,7 +96,6 @@ class MainShellState extends ConsumerState<MainShell> {
     }
     if (oldWidget.activeChannelId != widget.activeChannelId) {
       _loadChannel();
-      _updateChannelCache();
       // Close search when switching channels
       if (_showSearch) setState(() => _showSearch = false);
     }
@@ -135,7 +106,6 @@ class MainShellState extends ConsumerState<MainShell> {
     super.initState();
     _loadServer();
     _loadChannel();
-    _updateChannelCache();
     _startIdleDetection();
   }
 
@@ -268,18 +238,26 @@ class MainShellState extends ConsumerState<MainShell> {
                   ),
                   // Channel content: use IndexedStack cache for server channels,
                   // GoRouter child for everything else (conversations, etc.)
-                  if (widget.activeServerId != null && widget.activeChannelId != null && _visitedChannels.isNotEmpty)
+                  // Only the channel actually on screen is mounted.
+                  //
+                  // This was an IndexedStack over up to ten cached channels,
+                  // which builds every child, not just the visible one. So any
+                  // rebuild of this subtree — a theme swap above all — rebuilt
+                  // ten channels and their message lists, nine of them
+                  // invisible. Measured at ~195ms per theme switch, which is
+                  // the freeze.
+                  //
+                  // Nothing is lost by unmounting: scroll position is not held
+                  // by the widget, it is saved into _channelScrollOffsets from
+                  // MessageList.dispose() and restored through
+                  // initialScrollIndex on the next mount.
+                  if (widget.activeServerId != null && widget.activeChannelId != null)
                     Expanded(
-                      child: IndexedStack(
-                        index: _activeChannelIndex,
-                        children: _visitedChannels.map((entry) =>
-                          ChannelTypeRouter(
-                            key: ValueKey('cached-${entry.channelId}'),
-                            channelPublicId: entry.channelId,
-                            serverPublicId: entry.serverId,
-                            isActive: entry.channelId == widget.activeChannelId,
-                          ),
-                        ).toList(),
+                      child: ChannelTypeRouter(
+                        key: ValueKey('channel-${widget.activeChannelId}'),
+                        channelPublicId: widget.activeChannelId!,
+                        serverPublicId: widget.activeServerId!,
+                        isActive: true,
                       ),
                     )
                   else
