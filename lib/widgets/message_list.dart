@@ -521,7 +521,18 @@ class _MessageListState extends ConsumerState<MessageList> {
             final author = _getAuthorSync(msg.nostrAuthorPubkey ?? auth.publicKeyHex ?? '');
 
             return RepaintBoundary(child: _HighlightWrap(
-              key: msg.nostrEventId != null ? GlobalObjectKey('msg-${msg.nostrEventId}') : null,
+              // ValueKey, not GlobalObjectKey. A GlobalKey makes Flutter treat
+              // the element as globally unique and RE-PARENT it whenever its
+              // position changes — so every sync that inserts a message shifted
+              // indices, deactivated and reactivated these elements in the same
+              // frame, and rebuilt their subtrees. That recreated the avatar
+              // Image state and made the list visibly blink while syncing.
+              //
+              // Nothing needed the global key: scroll-to-message is index-based
+              // via _itemController.jumpTo (see _scrollToAndHighlight), not a
+              // key lookup. A ValueKey gives the child-matching algorithm the
+              // identity it needs to reuse elements in place.
+              key: msg.nostrEventId != null ? ValueKey('msg-${msg.nostrEventId}') : null,
               highlighted: isHighlighted,
               accentColor: c.accent,
               child: _ChannelMessage(
@@ -974,7 +985,19 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
                             child: MouseRegion(cursor: SystemMouseCursors.click, child: CircleAvatar(
                               radius: 20,
                               backgroundColor: Colors.transparent,
-                              backgroundImage: widget.authorAvatarUrl != null && widget.authorAvatarUrl!.startsWith('http') ? NetworkImage(widget.authorAvatarUrl!) : null,
+                              // ResizeImage caps the decode at the size actually
+                              // drawn (radius 20 = 40dp, allowing 3x DPR) instead
+                              // of decoding a full-resolution avatar for a 40dp
+                              // circle. Cheaper in memory, and makes any decode
+                              // fast enough not to be seen. Part of #42.
+                              backgroundImage: widget.authorAvatarUrl != null && widget.authorAvatarUrl!.startsWith('http')
+                                  ? ResizeImage(
+                                      NetworkImage(widget.authorAvatarUrl!),
+                                      width: 120,
+                                      height: 120,
+                                      policy: ResizeImagePolicy.fit,
+                                    )
+                                  : null,
                               child: (widget.authorAvatarUrl == null || !widget.authorAvatarUrl!.startsWith('http'))
                                   ? Text(widget.authorName[0].toUpperCase(), style: TextStyle(color: c.gray200, fontSize: 16))
                                   : null,
