@@ -938,9 +938,31 @@ class _ChannelMessageState extends State<_ChannelMessage> with AutomaticKeepAliv
                   SizedBox(
                     width: 40,
                     child: widget.isGrouped
-                        ? (_hovering
-                            ? Center(child: Text(DateFormat('h:mm a').format(msg.createdAt.toLocal()), style: TextStyle(color: c.gray500, fontSize: 10)))
-                            : const SizedBox())
+                        // Always laid out; only opacity changes. Swapping
+                        // between an empty SizedBox and a Text made the row
+                        // reflow on hover: "10:30 PM" at fontSize 10 is wider
+                        // than this 40px gutter, so it wrapped to two lines and
+                        // grew the row. Rails avoids this the same way — a
+                        // fixed w-10 spacer whose span is always present with
+                        // opacity-0 / group-hover:opacity-100.
+                        //
+                        // scaleDown keeps a long timestamp on one line without
+                        // overflowing the gutter, and never scales up, so the
+                        // common case still renders at exactly fontSize 10.
+                        ? Center(
+                            child: Opacity(
+                              opacity: _hovering ? 1.0 : 0.0,
+                              child: FittedBox(
+                                fit: BoxFit.scaleDown,
+                                child: Text(
+                                  DateFormat('h:mm a').format(msg.createdAt.toLocal()),
+                                  maxLines: 1,
+                                  softWrap: false,
+                                  style: TextStyle(color: c.gray500, fontSize: 10),
+                                ),
+                              ),
+                            ),
+                          )
                         : GestureDetector(
                             onTap: () {
                               final box = context.findRenderObject() as RenderBox?;
