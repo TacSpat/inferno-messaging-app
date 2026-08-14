@@ -77,10 +77,12 @@ class _ConversationDetailScreenState extends ConsumerState<ConversationDetailScr
       final dmSvc = DmService(db, pool);
       final contentSafety = ContentSafetyService(db);
       final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc, contentSafety);
+      // Honour the user's configured window rather than a hardcoded 30.
+      final settings = await (db.select(db.appSettings)..limit(1)).getSingleOrNull();
       await backfill.backfillConversation(
         ownPubkey: auth.publicKeyHex!,
         counterpartyPubkey: conv.counterpartyPubkey!,
-        backfillDays: 30,
+        backfillDays: (settings?.backfillDays ?? 30).clamp(1, 3650),
         privateKeyHex: auth.privateKeyHex!,
       );
       // Stamp last backfill time in DB so we don't re-backfill on restart

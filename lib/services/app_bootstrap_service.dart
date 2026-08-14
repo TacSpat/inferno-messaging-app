@@ -817,8 +817,18 @@ class AppBootstrapService {
     if (authService.publicKeyHex == null) return;
     final pubKey = authService.publicKeyHex!;
 
-    // Catchup window: fetch events since last 24 hours (matches Rails catchup_since)
-    final catchupSince = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch ~/ 1000;
+    // Catch-up window. This was a hardcoded 24 hours, which silently lost
+    // history on any device not opened daily — a laptop used weekly saw only
+    // the last day, with no indication of the gap, and the hole was only
+    // repaired if the user happened to click into each channel or DM.
+    //
+    // app_settings.backfillDays already existed for exactly this (default 30)
+    // and was read nowhere. Bounded below at one day so a misconfigured 0 does
+    // not disable catch-up entirely.
+    final settings = await (db.select(db.appSettings)..limit(1)).getSingleOrNull();
+    final backfillDays = (settings?.backfillDays ?? 30).clamp(1, 3650);
+    final catchupSince =
+        DateTime.now().subtract(Duration(days: backfillDays)).millisecondsSinceEpoch ~/ 1000;
 
     // Subscribe to inbound DMs
     relayPool.subscribe(key: 'dms-inbound', filters: [

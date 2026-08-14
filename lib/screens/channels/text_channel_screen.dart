@@ -161,9 +161,11 @@ class _TextChannelScreenState extends ConsumerState<TextChannelScreen> {
     final contentSafety = ContentSafetyService(db);
     final backfill = BackfillService(db, pool, groupMsgSvc, dmSvc, contentSafety);
     try {
+      // Honour the user's configured window rather than a hardcoded 30.
+      final settings = await (db.select(db.appSettings)..limit(1)).getSingleOrNull();
       await backfill.backfillChannel(
         channelGroupId: channel.nostrGroupId!,
-        backfillDays: 30,
+        backfillDays: (settings?.backfillDays ?? 30).clamp(1, 3650),
         privateKeyHex: auth.privateKeyHex,
       );
       // Stamp last backfill time in DB so we don't re-backfill on restart
