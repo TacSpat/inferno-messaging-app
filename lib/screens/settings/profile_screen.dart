@@ -115,12 +115,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           privateKeyHex: auth.privateKeyHex!,
           publicKeyHex: auth.publicKeyHex!,
           username: _displayNameController.text.isNotEmpty ? _displayNameController.text : 'user',
-          displayName: _displayNameController.text.isNotEmpty ? _displayNameController.text : null,
-          about: _bioController.text.isNotEmpty ? _bioController.text : null,
-          pictureUrl: _avatarUrlController.text.isNotEmpty ? _avatarUrlController.text : null,
-          bannerUrl: _bannerUrlController.text.isNotEmpty ? _bannerUrlController.text : null,
-          status: _statusController.text.isNotEmpty ? _statusController.text : null,
-          statusEmoji: _statusEmoji.isNotEmpty ? _statusEmoji : null,
+          // Pass the raw field values, empty string included. publishProfile
+          // now treats '' as "the user cleared this, remove it" and null as
+          // "leave whatever is published alone". Passing null for an empty
+          // field would make clearing impossible, and nip05 is deliberately
+          // not passed here because this screen does not edit it — it must
+          // survive a save rather than being dropped.
+          displayName: _displayNameController.text,
+          about: _bioController.text,
+          pictureUrl: _avatarUrlController.text,
+          bannerUrl: _bannerUrlController.text,
+          status: _statusController.text,
+          statusEmoji: _statusEmoji,
         );
         final okCount = results.values.where((v) => v).length;
         if (mounted) {

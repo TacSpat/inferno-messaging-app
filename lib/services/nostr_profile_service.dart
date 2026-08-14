@@ -29,30 +29,52 @@ class NostrProfileService {
     String? status,
     String? statusEmoji,
   }) async {
-    final profileData = <String, dynamic>{
-      'name': username,
-    };
-    if (displayName != null && displayName.isNotEmpty) {
-      profileData['display_name'] = displayName;
+    // Kind 0 is replaceable: the published content object replaces the
+    // previous one wholesale. Building it from only the fields passed in
+    // therefore DELETED every field the caller omitted — the profile screen
+    // never passes nip05, so every save silently dropped it, and a device
+    // with a stale cache would wipe whatever another device had set.
+    //
+    // Start from the currently published profile and overlay onto it.
+    // Anything we do not manage (including fields from NIPs this client does
+    // not know about) survives untouched.
+    final profileData = <String, dynamic>{};
+    try {
+      final existing = await _relayPool.fetch(
+        NostrFilter(kinds: [0], authors: [publicKeyHex], limit: 1),
+        timeout: const Duration(seconds: 5),
+      );
+      if (existing.isNotEmpty) {
+        final decoded = json.decode(existing.first.content);
+        if (decoded is Map<String, dynamic>) profileData.addAll(decoded);
+      }
+    } catch (e) {
+      // Fall through to a fresh object. Publishing the fields we do have beats
+      // failing the save outright, but log it — this is the path where a
+      // partial profile can still overwrite a richer one.
+      debugPrint('[Profile] Could not read existing profile to merge: $e');
     }
-    if (about != null && about.isNotEmpty) {
-      profileData['about'] = about;
+
+    /// null  -> leave whatever is already published untouched
+    /// ''    -> the user cleared this field, so remove it
+    /// value -> set it
+    void apply(String key, String? value) {
+      if (value == null) return;
+      if (value.isEmpty) {
+        profileData.remove(key);
+      } else {
+        profileData[key] = value;
+      }
     }
-    if (pictureUrl != null && pictureUrl.isNotEmpty) {
-      profileData['picture'] = pictureUrl;
-    }
-    if (bannerUrl != null && bannerUrl.isNotEmpty) {
-      profileData['banner'] = bannerUrl;
-    }
-    if (nip05 != null && nip05.isNotEmpty) {
-      profileData['nip05'] = nip05;
-    }
-    if (status != null && status.isNotEmpty) {
-      profileData['status'] = status;
-    }
-    if (statusEmoji != null && statusEmoji.isNotEmpty) {
-      profileData['status_emoji'] = statusEmoji;
-    }
+
+    profileData['name'] = username;
+    apply('display_name', displayName);
+    apply('about', about);
+    apply('picture', pictureUrl);
+    apply('banner', bannerUrl);
+    apply('nip05', nip05);
+    apply('status', status);
+    apply('status_emoji', statusEmoji);
 
     final event = crypto.NostrEvent(
       pubkey: publicKeyHex,
