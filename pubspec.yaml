@@ -122,7 +122,6 @@ flutter:
   assets:
     - assets/icons/
     - assets/models/
-    - assets/images/
   fonts:
     - family: NotoColorEmoji
       fonts:

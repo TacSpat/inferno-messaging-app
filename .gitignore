@@ -58,6 +58,7 @@ native/rnnoise/.tmp/
 # ML models (downloaded by setup script)
 assets/models/*.tar.gz
 assets/models/*.onnx
+assets/models/*.onnx.data
 
 # Screenshots / temp images
 flutter_01.png
