@@ -7,7 +7,6 @@ import '../providers/app_update_provider.dart';
 import '../database/database.dart';
 import '../services/presence_service.dart';
 import '../theme/all_themes.dart';
-import '../theme/theme_provider.dart';
 import '../screens/settings/settings_overlay.dart';
 
 /// Bottom-left user pill (avatar / name / presence / settings).
@@ -21,7 +20,13 @@ class UserPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authServiceProvider);
-    final colors = ref.watch(infernoColorsProvider);
+    // Pilot for the Theme-based colour migration (#43). Reading through
+    // InfernoColors.of(context) instead of the Riverpod provider means this
+    // panel receives the *interpolated* palette during a theme swap, so it
+    // tweens while everything still on the provider snaps. That difference is
+    // the point: it is how we can see the mechanism working before committing
+    // to migrating the remaining call sites.
+    final colors = InfernoColors.of(context);
     final pubkey = auth.publicKeyHex;
     final db = ref.watch(databaseProvider);
     final presenceSvc = ref.watch(presenceServiceProvider);

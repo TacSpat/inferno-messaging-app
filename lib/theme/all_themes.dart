@@ -267,6 +267,38 @@ class InfernoThemes {
 
 /// Custom theme extension for accessing the full gray palette
 class InfernoColors extends ThemeExtension<InfernoColors> {
+  /// Read the palette from the enclosing [Theme].
+  ///
+  /// Prefer this over `ref.watch(infernoColorsProvider)`. The provider returns
+  /// the memoised palette for a theme *name*, so it is disconnected from
+  /// Flutter's theme system: it changes in one step, and MaterialApp's
+  /// AnimatedTheme — which lerps ThemeData including this extension — has
+  /// nothing listening to it. That is why a theme swap snaps rather than
+  /// animating even with themeAnimationDuration set.
+  ///
+  /// Reading through Theme instead means:
+  ///   * during a swap this returns the *interpolated* palette each frame, so
+  ///     widgets using it genuinely tween;
+  ///   * the dependency is registered with the framework, so Flutter decides
+  ///     what to rebuild rather than Riverpod rebuilding every watcher.
+  ///
+  /// The cost is the flip side of the same coin: a widget reading this rebuilds
+  /// once per frame for the duration of the animation. That is fine for
+  /// panels, rails and sidebars, and is the reason the message list — 31 rows
+  /// at roughly 4ms each — should be migrated last and measured, not assumed.
+  static InfernoColors of(BuildContext context) {
+    final colors = Theme.of(context).extension<InfernoColors>();
+    assert(colors != null,
+        'No InfernoColors in the enclosing Theme. Every theme built by '
+        'InfernoThemes registers one; a bare ThemeData will not.');
+    return colors!;
+  }
+
+  /// Like [of], but returns null instead of asserting when no theme provides
+  /// the extension — for code that may run outside the app's Theme.
+  static InfernoColors? maybeOf(BuildContext context) =>
+      Theme.of(context).extension<InfernoColors>();
+
   final Color gray950, gray900, gray800, gray700, gray600, gray500, gray400, gray200, gray50;
   final Color accent, accentLight, accentDark;
   final Color online, idle, dnd, offline;
