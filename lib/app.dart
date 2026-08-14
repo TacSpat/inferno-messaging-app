@@ -27,7 +27,7 @@ class InfernoApp extends ConsumerWidget {
       // entirely — the swap was instant and a black overlay hid the rebuild.
       // InfernoColors implements lerp for every colour (all_themes.dart:301),
       // so with a duration the whole ThemeData, extension included, tweens.
-      themeAnimationDuration: const Duration(milliseconds: 220),
+      themeAnimationDuration: kThemeSwapDuration,
       themeAnimationCurve: Curves.easeInOut,
       routerConfig: router,
       debugShowCheckedModeBanner: false,

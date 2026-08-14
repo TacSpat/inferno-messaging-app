@@ -11,21 +11,29 @@ class AppearanceScreen extends ConsumerWidget {
   /// Swap the theme in a single frame and let MaterialApp's AnimatedTheme
   /// tween the colours.
   ///
-  /// There used to be a full-window black overlay with a spinner here, held up
+  /// There used to be a full-window black overlay with a spinner held up
   /// across the swap. It did not hide the cost so much as advertise it: the
   /// screen went black for as long as the rebuild took, then the new theme
   /// popped in. InfernoColors implements lerp for every colour, so with
   /// themeAnimationDuration set the transition animates instead.
   ///
-  /// The timing print is temporary: it reports how long the one rebuild
-  /// actually takes, which decides whether the remaining P3 work (rebuild
-  /// cost) is needed before the tween can cover the riverpod-driven colours
-  /// too.
+  /// The in-flight guard matters as much as the animation. Each accepted
+  /// switch rebuilds the whole tree — including every channel MainShell keeps
+  /// mounted in its IndexedStack, up to ten — so without it, clicking through
+  /// themes quickly queues one full rebuild per click and pins the CPU.
   Future<void> _withTransition(WidgetRef ref, void Function() swap) async {
-    final sw = Stopwatch()..start();
-    swap();
-    await SchedulerBinding.instance.endOfFrame;
-    debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms');
+    if (ref.read(themeSwapInFlightProvider)) return;
+    ref.read(themeSwapInFlightProvider.notifier).state = true;
+    try {
+      final sw = Stopwatch()..start();
+      swap();
+      await SchedulerBinding.instance.endOfFrame;
+      debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms');
+      // Hold until the tween finishes so swaps cannot overlap.
+      await Future.delayed(kThemeSwapDuration);
+    } finally {
+      ref.read(themeSwapInFlightProvider.notifier).state = false;
+    }
   }
 
   Future<void> _switchTheme(WidgetRef ref, String name) =>
