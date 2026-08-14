@@ -1,9 +1,0 @@
-#include "../../Flutter/Flutter-Release.xcconfig"
-#include "Warnings.xcconfig"
-
-// Single-architecture release build. Flutter's install_code_assets runs the
-// native build hook once per arch and lipos the outputs; our hook returns a
-// single-arch dylib, so a universal build fails with "same architectures".
-// Pinning to arm64 sidesteps that until we ship an x86_64 variant.
-ARCHS = arm64
-ONLY_ACTIVE_ARCH = YES
