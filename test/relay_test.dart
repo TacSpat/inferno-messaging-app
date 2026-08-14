@@ -188,7 +188,10 @@ void main() {
       pool.stop();
     });
 
-    test('deduplication prevents double processing', () {
+    // Global handlers are dispatched via Future.microtask (relay_pool.dart:414),
+    // so this must await the event queue before asserting — a synchronous
+    // expect() here sees an empty list and the dedup is never actually observed.
+    test('deduplication prevents double processing', () async {
       final pool = RelayPool();
       final received = <String>[];
 
@@ -216,6 +219,8 @@ void main() {
         'content': 'hello',
         'sig': 'b' * 128,
       }]);
+
+      await pumpEventQueue();
 
       expect(received.length, 1); // Deduplicated
       pool.stop();
