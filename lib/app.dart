@@ -12,9 +12,14 @@ class InfernoApp extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Only themeNameProvider is watched here. themeTransitionProvider used to
+    // be watched at this level too, which meant raising and lowering the
+    // spinner each rebuilt MaterialApp.router and everything under it — so a
+    // theme switch cost three full-tree rebuilds (flag on, swap, flag off)
+    // when only the middle one changes anything. The overlay now watches the
+    // flag itself, so the two bookend rebuilds are confined to it.
     final themeName = ref.watch(themeNameProvider);
     final themeData = InfernoThemes.forName(themeName);
-    final transitioning = ref.watch(themeTransitionProvider);
 
     return MaterialApp.router(
       title: 'Inferno',
@@ -38,25 +43,41 @@ class InfernoApp extends ConsumerWidget {
         return Stack(
           children: [
             content,
-            if (transitioning)
-              Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Center(
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            const _ThemeTransitionOverlay(),
           ],
         );
       },
+    );
+  }
+}
+
+/// Covers the app while the theme swaps.
+///
+/// Deliberately its own ConsumerWidget: it is the only thing that watches
+/// themeTransitionProvider, so raising and lowering the spinner rebuilds this
+/// widget alone rather than MaterialApp.router and the entire page stack
+/// beneath it.
+class _ThemeTransitionOverlay extends ConsumerWidget {
+  const _ThemeTransitionOverlay();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!ref.watch(themeTransitionProvider)) return const SizedBox.shrink();
+
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: SizedBox(
+            width: 24,
+            height: 24,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: Colors.white.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

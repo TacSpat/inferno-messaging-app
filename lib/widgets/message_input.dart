@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:desktop_drop/desktop_drop.dart';
@@ -117,7 +118,8 @@ class MessageInput extends ConsumerStatefulWidget {
   ConsumerState<MessageInput> createState() => _MessageInputState();
 }
 
-class _MessageInputState extends ConsumerState<MessageInput> {
+class _MessageInputState extends ConsumerState<MessageInput>
+    with SingleTickerProviderStateMixin {
   final _controller = _EmojiRichController();
   final _focusNode = FocusNode();
   bool _hasText = false;
@@ -130,6 +132,19 @@ class _MessageInputState extends ConsumerState<MessageInput> {
   bool _dragging = false;
   bool _isSpoiler = false;
   double _fireFuel = 0.0;
+
+  /// Frame-paced decay for the typing flame.
+  ///
+  /// The decay used to be scheduled from inside build(): when embers were on
+  /// and fuel remained, _wrapWithEffects fired a Future.microtask that called
+  /// setState, which rebuilt, which scheduled another microtask. That is a
+  /// self-sustaining loop, and because microtasks drain before the next frame
+  /// it could spin far faster than 60fps — burning CPU and making the decay
+  /// rate depend on how fast the machine could rebuild.
+  ///
+  /// A Ticker runs once per frame, stops when the fuel is spent, and makes the
+  /// decay take the same ~1.4s everywhere.
+  late final Ticker _fuelTicker;
   final List<File> _pendingFiles = [];
   final Set<int> _spoilerFileIndices = {};
 
@@ -151,6 +166,7 @@ class _MessageInputState extends ConsumerState<MessageInput> {
 
   @override
   void dispose() {
+    _fuelTicker.dispose();
     _hidePicker();
     _hideMentionOverlay();
     _controller.dispose();
@@ -200,6 +216,7 @@ class _MessageInputState extends ConsumerState<MessageInput> {
     super.initState();
     _controller.emojiMap = widget.customEmojis;
     _focusNode.addListener(() { if (mounted) setState(() {}); });
+    _fuelTicker = createTicker(_decayFuel);
     _checkSendPermission();
   }
 
@@ -828,6 +845,7 @@ class _MessageInputState extends ConsumerState<MessageInput> {
                           setState(() {
                             _hasText = v.trim().isNotEmpty;
                             _fireFuel = (_fireFuel + 0.15).clamp(0.0, 1.0); // each key adds a bit
+                            _startFuelDecay();
                           });
                           if (v.trim().isNotEmpty) widget.onTyping?.call();
                           _checkMention(v);
@@ -906,17 +924,29 @@ class _MessageInputState extends ConsumerState<MessageInput> {
     );
   }
 
+  void _decayFuel(Duration _) {
+    if (_fireFuel <= 0) {
+      _fuelTicker.stop();
+      return;
+    }
+    setState(() => _fireFuel = (_fireFuel - 0.012).clamp(0.0, 1.0));
+  }
+
+  /// Called when a keystroke adds fuel. Starts the ticker only if it is not
+  /// already running, so repeated keystrokes do not stack tickers.
+  ///
+  /// Skipped entirely when embers are off: the fuel is only ever read inside
+  /// the embers branch of _wrapWithEffects, so ticking would rebuild this
+  /// widget ~80 times to animate something nobody can see.
+  void _startFuelDecay() {
+    if (!ref.read(uiEffectThemeProvider).embers) return;
+    if (!_fuelTicker.isActive) _fuelTicker.start();
+  }
+
   Widget _wrapWithEffects(InfernoColors c, Widget child) {
     final effects = ref.watch(uiEffectThemeProvider);
 
     if (effects.embers) {
-      // Decay fuel each frame
-      if (_fireFuel > 0) {
-        Future.microtask(() {
-          if (mounted) setState(() => _fireFuel = (_fireFuel - 0.012).clamp(0.0, 1.0));
-        });
-      }
-
       // Electric theme uses lightning arcs — capped lower than fire
       if (effects.name == 'electric') {
         return BarElectric(

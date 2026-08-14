@@ -8,35 +8,35 @@ import '../../theme/ui_effects.dart';
 class AppearanceScreen extends ConsumerWidget {
   const AppearanceScreen({super.key});
 
-  /// Show spinner → swap theme → wait for rebuild to finish → hide spinner
-  Future<void> _switchTheme(WidgetRef ref, String name) async {
+  /// Show the overlay, swap, then hide once the rebuilt frame has actually
+  /// been drawn.
+  ///
+  /// This used to sleep 50ms before the swap and 150ms after, guessing at how
+  /// long the rebuild would take. That 200ms was pure dead time the user sat
+  /// through on every theme change, and it was a guess in both directions —
+  /// too long on a fast machine, potentially too short on a slow one.
+  /// Awaiting endOfFrame waits for exactly the work that matters.
+  Future<void> _withTransition(WidgetRef ref, void Function() swap) async {
     if (ref.read(themeTransitionProvider)) return;
     ref.read(themeTransitionProvider.notifier).state = true;
 
-    // Let spinner render
-    await Future.delayed(const Duration(milliseconds: 50));
+    // Let the overlay paint before the swap begins.
+    await SchedulerBinding.instance.endOfFrame;
 
-    // Swap theme — triggers rebuilds
-    ref.read(themeNameProvider.notifier).setTheme(name);
+    swap();
 
-    // Wait for multiple frames so all widgets finish rebuilding
-    await Future.delayed(const Duration(milliseconds: 150));
+    // The swap marked the tree dirty and scheduled a frame; wait for that
+    // frame to finish rather than assuming a duration.
+    await SchedulerBinding.instance.endOfFrame;
 
     ref.read(themeTransitionProvider.notifier).state = false;
   }
 
-  Future<void> _switchEffect(WidgetRef ref, String name) async {
-    if (ref.read(themeTransitionProvider)) return;
-    ref.read(themeTransitionProvider.notifier).state = true;
+  Future<void> _switchTheme(WidgetRef ref, String name) =>
+      _withTransition(ref, () => ref.read(themeNameProvider.notifier).setTheme(name));
 
-    await Future.delayed(const Duration(milliseconds: 50));
-
-    ref.read(effectThemeNameProvider.notifier).setEffect(name);
-
-    await Future.delayed(const Duration(milliseconds: 150));
-
-    ref.read(themeTransitionProvider.notifier).state = false;
-  }
+  Future<void> _switchEffect(WidgetRef ref, String name) =>
+      _withTransition(ref, () => ref.read(effectThemeNameProvider.notifier).setEffect(name));
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
