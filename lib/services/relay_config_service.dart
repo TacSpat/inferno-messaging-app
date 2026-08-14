@@ -24,7 +24,9 @@ class RelayConfigService {
     return _db.select(_db.relayConnections).watch();
   }
 
-  /// Add a new relay
+  /// Add a relay. Idempotent: `url` is unique, so a plain insert throws when
+  /// the relay is already known, and callers merging a NIP-65 list are
+  /// expected to re-offer relays they already have.
   Future<int> addRelay(String url) {
     return _db.into(_db.relayConnections).insert(
       RelayConnectionsCompanion.insert(
@@ -34,6 +36,7 @@ class RelayConfigService {
         createdAt: DateTime.now(),
         updatedAt: DateTime.now(),
       ),
+      mode: InsertMode.insertOrIgnore,
     );
   }
 
@@ -85,7 +88,14 @@ class RelayConfigService {
     ));
   }
 
-  /// Ensure default relays exist and remove stale ones
+  /// Seed the default relay set if any are missing.
+  ///
+  /// This only ever ADDS. It used to delete every relay outside the hardcoded
+  /// default list on each launch, which ran at bootstrap and so silently
+  /// discarded relays the user had added by hand as well as any learned from
+  /// a NIP-65 relay list. Cross-device relay sync could never persist because
+  /// the next launch wiped it. Removing a relay is an explicit user action —
+  /// see removeRelay().
   Future<void> ensureDefaultRelays() async {
     const defaultRelays = [
       'wss://relay.damus.io',
@@ -96,17 +106,11 @@ class RelayConfigService {
     final existing = await _db.select(_db.relayConnections).get();
     final existingUrls = existing.map((r) => r.url).toSet();
 
-    // Add missing defaults
+    // Add missing defaults. Deliberately no removal pass — see the doc
+    // comment above.
     for (final url in defaultRelays) {
       if (!existingUrls.contains(url)) {
         await addRelay(url);
-      }
-    }
-
-    // Remove relays not in the default set (cleanup stale entries)
-    for (final relay in existing) {
-      if (!defaultRelays.contains(relay.url)) {
-        await (_db.delete(_db.relayConnections)..where((r) => r.url.equals(relay.url))).go();
       }
     }
   }

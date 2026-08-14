@@ -856,6 +856,9 @@ class AppBootstrapService {
         for (final r in relayList) {
           // addRelay is a no-op if already connected.
           relayPool.addRelay(r.url);
+          // Persist too, or the relay is forgotten on the next launch and the
+          // NIP-65 list has to be refetched before anything can reach it.
+          await relayConfig.addRelay(r.url);
         }
       }
 
@@ -902,8 +905,50 @@ class AppBootstrapService {
           }
         }
       }
+
+      // Publish our own state back. Until now only the read half of config
+      // sync ran, so nothing was ever written and a second device on the same
+      // identity always came up empty — it queried for a Kind 30078 config and
+      // a Kind 10002 relay list that had never been published by anyone.
+      await publishConfigToRelays(pubKey, privKey);
     } catch (e) {
       debugPrint('[ConfigSync] Config sync failed: $e');
+    }
+  }
+
+  /// Publish the local server list and relay list so other devices on this
+  /// identity can discover them. Safe to call repeatedly — both are
+  /// replaceable events keyed by d-tag.
+  Future<void> publishConfigToRelays(String pubKey, String privKey) async {
+    try {
+      final configSvc = ConfigSyncService(relayPool);
+      final relaySvc = RelaySyncService(relayPool);
+
+      final servers = await db.select(db.servers).get();
+      final groupIds = servers
+          .where((s) => s.nostrGroupId != null)
+          .map((s) => s.nostrGroupId!)
+          .toList();
+      if (groupIds.isNotEmpty) {
+        await configSvc.publishServerList(
+          privateKeyHex: privKey,
+          publicKeyHex: pubKey,
+          serverGroupIds: groupIds,
+        );
+        debugPrint('[ConfigSync] Published ${groupIds.length} servers');
+      }
+
+      final relayUrls = await relayConfig.getActiveRelayUrls();
+      if (relayUrls.isNotEmpty) {
+        await relaySvc.publishRelayList(
+          privateKeyHex: privKey,
+          publicKeyHex: pubKey,
+          relays: relayUrls.map((u) => RelayEntry(url: u)).toList(),
+        );
+        debugPrint('[ConfigSync] Published ${relayUrls.length} relays (NIP-65)');
+      }
+    } catch (e) {
+      debugPrint('[ConfigSync] Publish failed: $e');
     }
   }
 
