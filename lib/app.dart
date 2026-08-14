@@ -23,12 +23,18 @@ class InfernoApp extends ConsumerWidget {
     return MaterialApp.router(
       title: 'Inferno',
       theme: themeData,
-      // Was Duration.zero, which disabled MaterialApp's built-in AnimatedTheme
-      // entirely — the swap was instant and a black overlay hid the rebuild.
-      // InfernoColors implements lerp for every colour (all_themes.dart:301),
-      // so with a duration the whole ThemeData, extension included, tweens.
-      themeAnimationDuration: kThemeSwapDuration,
-      themeAnimationCurve: Curves.easeInOut,
+      // No theme animation. InfernoColors lerps correctly and the tween is
+      // wired properly, but it never renders: a swap blocks the UI thread for
+      // 130-256ms against any reasonable animation length, so by the time a
+      // frame runs the controller is already past its duration and jumps to
+      // the end. Measured by printing the palette a widget received across one
+      // swap — a single line, carrying the destination colour.
+      //
+      // So an animation here costs a controller and a debounce window and
+      // shows nothing. Switching themes is snappier without it. Restore this
+      // once a swap fits in a frame — see the P3 findings in
+      // doc/remediation-plan.md.
+      themeAnimationDuration: Duration.zero,
       routerConfig: router,
       debugShowCheckedModeBanner: false,
       builder: (context, child) {

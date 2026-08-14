@@ -32,8 +32,7 @@ class AppearanceScreen extends ConsumerWidget {
       await SchedulerBinding.instance.endOfFrame;
       debugPrint('[Theme] swap + rebuild took ${sw.elapsedMilliseconds}ms '
           '(${MessageRowBuildCounter.value} message rows rebuilt)');
-      // Hold until the tween finishes so swaps cannot overlap.
-      await Future.delayed(kThemeSwapDuration);
+
     } finally {
       ref.read(themeSwapInFlightProvider.notifier).state = false;
     }

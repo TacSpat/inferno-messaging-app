@@ -33,23 +33,23 @@ class ThemeNameNotifier extends StateNotifier<String> {
 
 // The old themeTransitionProvider gated a full-window black spinner overlay,
 // which made the app go black for the length of the rebuild and then pop into
-// the new colours. MaterialApp's AnimatedTheme tweens the swap now instead —
-// see app.dart.
+// the new colours. The overlay is gone; the swap is now a single rebuild with
+// no animation over it — see the note on themeAnimationDuration in app.dart
+// for why animating it renders nothing today.
 //
-// It also did one thing worth keeping: it debounced the switch, so a click
+// It did do one thing worth keeping: it debounced the switch, so a click
 // during a swap was ignored. That is preserved below, minus the overlay.
 
-/// How long a theme swap animates. Shared so the debounce window and
-/// MaterialApp's themeAnimationDuration cannot drift apart.
-const kThemeSwapDuration = Duration(milliseconds: 220);
-
-/// True while a theme swap is animating.
+/// True while a theme swap is in progress.
 ///
 /// Read with ref.read only — deliberately never watched by a widget. Watching
 /// it high in the tree is what made the old overlay cost two extra full-tree
 /// rebuilds per switch. Its only job is to drop clicks that arrive mid-swap:
-/// each accepted click rebuilds the entire tree, including every channel
-/// cached in MainShell's IndexedStack, so letting them stack spikes the CPU.
+/// a swap rebuilds the whole tree and takes ~130ms, so without this, clicking
+/// through themes queues one full rebuild per click and spikes the CPU.
+///
+/// It is released as soon as the rebuild's frame completes, not after a fixed
+/// delay, so browsing themes stays responsive.
 final themeSwapInFlightProvider = StateProvider<bool>((ref) => false);
 
 /// Direct color provider — widgets watch THIS instead of Theme.of(context).
