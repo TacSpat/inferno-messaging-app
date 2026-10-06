@@ -109,6 +109,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 id: String::new(),
                 own: false,
                 author_pk: String::new(),
+                picture: None,
                 reply_to: None,
                 author: a.name.into(),
                 initial: a.name[..1].to_uppercase(),
@@ -277,6 +278,8 @@ impl Widget for MessageList {
                 let fill = rgba(msg.avatar, 1.0);
                 script_apply_eval!(cx, avatar, {draw_bg +: {color: #(fill)}});
                 row.label(cx, ids!(avatar.initial)).set_text(cx, &msg.initial);
+                let img = row.image(cx, ids!(avatar.pic));
+                crate::images::show(cx, &img, msg.picture.as_deref());
                 let mut name = row.widget(cx, ids!(content.head.name));
                 let role = rgba(msg.color, 1.0);
                 script_apply_eval!(cx, name, {draw_text +: {color: #(role)}});

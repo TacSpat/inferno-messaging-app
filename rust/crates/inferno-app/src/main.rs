@@ -9,6 +9,7 @@ mod backend;
 mod composer_lint;
 mod ctxmenu;
 mod demo;
+mod images;
 mod lists;
 mod message_format;
 mod message_text;
@@ -127,11 +128,12 @@ script_mod! {
         face := View{
             width: 32 height: 32
             flow: Overlay
-            avatar := RoundedView{
+            avatar := RoundedView{flow: Overlay 
                 width: 32 height: 32 align: Center new_batch: true
                 draw_bg.color: #x1e1c1b
                 draw_bg.border_radius: 16.0
                 initial := Txt{text: "?" draw_text.text_style.font_size: 9.5}
+                pic := Image{width: 32 height: 32 fit: ImageFit.CropToFill draw_bg.border_radius: 16.0}
             }
             badge := View{width: 32 height: 32 align: Align{x: 1.0 y: 1.0}
                 dot := RoundedView{width: 12 height: 12
@@ -286,7 +288,7 @@ script_mod! {
                 line := View{
                     width: Fill height: Fit
                     flow: Right
-                    avatar := RoundedView{cursor: MouseCursor.Hand 
+                    avatar := RoundedView{flow: Overlay cursor: MouseCursor.Hand 
                         width: 40 height: 40
                         margin: Inset{right: 16 top: 2}
                         align: Center
@@ -294,6 +296,7 @@ script_mod! {
                         draw_bg.color: #x1e1c1b
                         draw_bg.border_radius: 20.0
                         initial := Txt{text: "?" draw_text.text_style.font_size: 10.5}
+                        pic := Image{width: 40 height: 40 fit: ImageFit.CropToFill draw_bg.border_radius: 20.0}
                     }
                     content := View{
                         width: Fill height: Fit
@@ -758,14 +761,18 @@ script_mod! {
                 return sdf.result
             }
         }
-        View{width: Fill height: 80}
+        // Banner: the image covers the top 80px (rounded top corners).
+        View{width: Fill height: 80
+            banner := Image{width: Fill height: 80 fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}
+        }
         View{width: Fill height: Fit flow: Down padding: Inset{left: 12 right: 12 bottom: 12 top: 4} margin: Inset{top: -35}
             View{width: 66 height: 66 flow: Overlay margin: Inset{bottom: 8}
                 ring := RoundedView{width: 66 height: 66 padding: 5 new_batch: true
                     draw_bg.color: #x1e1c1b draw_bg.border_radius: 33.0
-                    avatar := RoundedView{width: 56 height: 56 align: Center new_batch: true
+                    avatar := RoundedView{flow: Overlay width: 56 height: 56 align: Center new_batch: true
                         draw_bg.color: #x1e1c1b draw_bg.border_radius: 28.0
                         initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                        pic := Image{width: 56 height: 56 fit: ImageFit.CropToFill draw_bg.border_radius: 28.0}
                     }
                 }
                 View{width: 66 height: 66 padding: Inset{left: 46 top: 46}
@@ -830,9 +837,10 @@ script_mod! {
                 cursor: MouseCursor.Hand
                 new_batch: true
                 draw_bg.color: #0000 draw_bg.border_radius: 4.0
-                avatar := RoundedView{width: 32 height: 32 align: Center new_batch: true
+                avatar := RoundedView{flow: Overlay width: 32 height: 32 align: Center new_batch: true
                     draw_bg.color: #x1e1c1b draw_bg.border_radius: 16.0
-                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}
+                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                    pic := Image{width: 32 height: 32 fit: ImageFit.CropToFill draw_bg.border_radius: 16.0}}
                 name := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5
                     flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
                 badge := RoundedView{visible: false width: Fit height: 18 padding: Inset{left: 5 right: 5} align: Center new_batch: true
@@ -860,9 +868,10 @@ script_mod! {
                 width: Fill height: Fit
                 padding: Inset{left: 8 right: 8 top: 10 bottom: 10}
                 flow: Right spacing: 12 align: Align{y: 0.5}
-                avatar := RoundedView{width: 36 height: 36 align: Center new_batch: true
+                avatar := RoundedView{flow: Overlay width: 36 height: 36 align: Center new_batch: true
                     draw_bg.color: gray_600 draw_bg.border_radius: 18.0
-                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}
+                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                    pic := Image{width: 36 height: 36 fit: ImageFit.CropToFill draw_bg.border_radius: 18.0}}
                 View{width: Fill height: Fit flow: Down spacing: 2
                     name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
                     sub := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
@@ -1037,9 +1046,10 @@ script_mod! {
                                 align: Align{y: 0.5}
                                 new_batch: true
                                 draw_bg.color: gray_950
-                                RoundedView{width: 32 height: 32 align: Center new_batch: true
+                                me_avatar := RoundedView{flow: Overlay width: 32 height: 32 align: Center new_batch: true
                                     draw_bg.color: #x7f1d1d draw_bg.border_radius: 16.0
-                                    me_initial := Txt{text: "" draw_text.text_style.font_size: 10.0}}
+                                    me_initial := Txt{text: "" draw_text.text_style.font_size: 10.0}
+                                    pic := Image{width: 32 height: 32 fit: ImageFit.CropToFill draw_bg.border_radius: 16.0}}
                                 profile_btn := View{width: Fill height: Fit flow: Down cursor: MouseCursor.Hand
                                     name := Txt{text: "" draw_text.color: #xffffff}
                                     status := Txt{text: "Connecting…" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
@@ -1429,6 +1439,11 @@ script_mod! {
                                     p_color := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
                                     p_color_2 := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
                                 }
+                                // Rails uploads these; until uploads land, a link.
+                                FieldLabel{text: "AVATAR"}
+                                p_picture := Field{empty_text: "https://… image link"}
+                                FieldLabel{text: "BANNER"}
+                                p_banner := Field{empty_text: "https://… image link"}
                                 View{width: Fill height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
                                     save_profile := Button{text: "Save Changes"}
                                     profile_note := Hint{text: ""}
@@ -1866,6 +1881,8 @@ pub struct App {
     /// Where the pointer last went down, for menus opened from actions.
     #[rust]
     last_press: DVec2,
+    #[rust]
+    my_picture: Option<String>,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -2731,6 +2748,10 @@ impl App {
         let mut w = self.ui.widget(cx, ids!(card.ring.avatar));
         script_apply_eval!(cx, w, {draw_bg +: {color: #(avatar)}});
         self.ui.label(cx, ids!(card.ring.avatar.initial)).set_text(cx, &card.initial);
+        let img = self.ui.image(cx, ids!(card.ring.avatar.pic));
+        images::show(cx, &img, card.picture.as_deref());
+        let img = self.ui.image(cx, ids!(card.banner));
+        images::show(cx, &img, card.banner.as_deref());
         self.ui.label(cx, ids!(card.name)).set_text(cx, &card.name);
         self.ui.label(cx, ids!(card.tag)).set_text(cx, &card.tag);
         self.ui.label(cx, ids!(card.status)).set_text(cx, &card.status);
@@ -3056,9 +3077,14 @@ impl App {
                     (ids!(p_status_emoji), &p.status_emoji),
                     (ids!(p_color), &p.color),
                     (ids!(p_color_2), &p.color_2),
+                    (ids!(p_picture), &p.picture),
+                    (ids!(p_banner), &p.banner),
                 ] {
                     self.ui.text_input(cx, path).set_text(cx, value);
                 }
+                let pic = Some(p.picture.as_str()).filter(|u| !u.is_empty());
+                let img = self.ui.image(cx, ids!(me_avatar.pic));
+                images::show(cx, &img, pic);
             }
             Update::Relays(relays) => {
                 if let Some(mut list) = self.ui.widget(cx, ids!(relay_list)).borrow_mut::<lists::RelayList>() {
@@ -3665,6 +3691,8 @@ impl MatchEvent for App {
                 status_emoji: get(&self.ui, cx, ids!(p_status_emoji)),
                 color: get(&self.ui, cx, ids!(p_color)),
                 color_2: get(&self.ui, cx, ids!(p_color_2)),
+                picture: get(&self.ui, cx, ids!(p_picture)),
+                banner: get(&self.ui, cx, ids!(p_banner)),
             };
             let is_color = |c: &str| c.len() == 7 && c.starts_with('#') && u32::from_str_radix(&c[1..], 16).is_ok();
             let bad = [&form.color, &form.color_2].into_iter().find(|c| !c.is_empty() && !is_color(c));
@@ -3770,6 +3798,22 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        if images::handle_event(cx, event) {
+            // A picture arrived: rows recorded before it need redrawing.
+            for list in [ids!(members.list), ids!(messages.list), ids!(dms.list), ids!(friend_list.list)] {
+                lists::redraw_items(cx, &self.ui.portal_list(cx, list));
+            }
+            if let Some(card) = self.ui.view(cx, ids!(card_layer)).visible().then(|| self.card.clone()) {
+                let img = self.ui.image(cx, ids!(card.ring.avatar.pic));
+                images::show(cx, &img, card.picture.as_deref());
+                let img = self.ui.image(cx, ids!(card.banner));
+                images::show(cx, &img, card.banner.as_deref());
+            }
+            let pic = self.my_picture.clone();
+            let img = self.ui.image(cx, ids!(me_avatar.pic));
+            images::show(cx, &img, pic.as_deref());
+            self.ui.redraw(cx);
+        }
         // A theme switch reapplies the DSL, which resets styling set at
         // runtime; put it back.
         if let Event::LiveEdit = event {

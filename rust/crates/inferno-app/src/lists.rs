@@ -351,8 +351,10 @@ impl Widget for MemberList {
                         row.set_text(cx, text);
                         row.draw_all(cx, &mut Scope::empty());
                     }
-                    MemberRow::Member { name, initial, color, avatar, .. } => {
+                    MemberRow::Member { name, initial, color, avatar, picture, .. } => {
                         let row = list.item(cx, i, id!(Member));
+                        let img = row.image(cx, ids!(face.avatar.pic));
+                        crate::images::show(cx, &img, picture.as_deref());
                         let mut face = row.widget(cx, ids!(face.avatar));
                         let a = rgba(*avatar, 1.0);
                         script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
@@ -881,6 +883,8 @@ impl Widget for DmList {
                 let a = rgba(r.person.avatar, 1.0);
                 script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
                 row.label(cx, ids!(avatar.initial)).set_text(cx, &r.person.initial);
+                let img = row.image(cx, ids!(avatar.pic));
+                crate::images::show(cx, &img, r.person.picture.as_deref());
                 let mut name = row.widget(cx, ids!(name));
                 let c = if active || r.unread > 0 { rgba(0xffffff, 1.0) } else { crate::theme::tok("gray_400", 1.0) };
                 script_apply_eval!(cx, name, {draw_text +: {color: #(c)}});
@@ -986,6 +990,8 @@ impl Widget for FriendList {
                         let a = rgba(person.avatar, 1.0);
                         script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
                         row.label(cx, ids!(avatar.initial)).set_text(cx, &person.initial);
+                        let img = row.image(cx, ids!(avatar.pic));
+                        crate::images::show(cx, &img, person.picture.as_deref());
                         row.label(cx, ids!(name)).set_text(cx, &person.name);
                         row.label(cx, ids!(sub)).set_text(cx, sub);
                         use FriendButton::*;

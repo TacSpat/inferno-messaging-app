@@ -111,6 +111,7 @@ pub enum MemberRow {
         initial: String,
         color: u32,
         avatar: u32,
+        picture: Option<String>,
         pubkey: String,
         roles: Vec<String>,
         owner: bool,
@@ -132,6 +133,7 @@ pub struct MessageRow {
     pub initial: String,
     pub color: u32,
     pub avatar: u32,
+    pub picture: Option<String>,
     pub at: i64,
     /// `None` = encrypted and we don't have the key.
     pub body: Option<String>,
@@ -152,6 +154,8 @@ pub struct ProfileForm {
     pub status_emoji: String,
     pub color: String,
     pub color_2: String,
+    pub picture: String,
+    pub banner: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -200,6 +204,8 @@ pub struct Person {
     pub name: String,
     pub initial: String,
     pub avatar: u32,
+    /// Profile picture URL; the letter avatar shows until (or unless) it loads.
+    pub picture: Option<String>,
 }
 
 /// A row of the DM sidebar.
@@ -241,6 +247,8 @@ pub struct Card {
     /// Avatar ring: profile_color_2, else profile_color, else `#1e1c1b`.
     pub ring: u32,
     pub avatar: u32,
+    pub picture: Option<String>,
+    pub banner: Option<String>,
     /// (name, color), in role order, without @everyone.
     pub roles: Vec<(String, u32)>,
     pub joined_at: Option<i64>,
@@ -483,6 +491,7 @@ fn member_row(state: &ServerState, pk: &PublicKey, me: &PublicKey, people: &Peop
         name: d.name,
         color: d.color,
         avatar: d.avatar,
+        picture: d.picture,
         pubkey: pk.to_hex(),
         roles: state.members.get(pk).map(|m| m.roles.clone()).unwrap_or_default(),
         owner: state.is_owner(pk),
@@ -557,6 +566,8 @@ fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey, people: &People) ->
         color_2: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
         ring: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
         avatar: d.avatar,
+        picture: profile.picture.clone(),
+        banner: profile.banner.clone(),
         roles: roles.iter().map(|r| (r.name.clone(), hex_color(&r.color).unwrap_or(0x99aab5))).collect(),
         joined_at: m.and_then(|m| m.joined_at),
         me: pk == me,
@@ -569,6 +580,7 @@ struct Display {
     name: String,
     color: u32,
     avatar: u32,
+    picture: Option<String>,
 }
 
 /// Profiles for one pass over the UI: each person's unified profile
@@ -619,7 +631,7 @@ fn display(state: &ServerState, pk: &PublicKey, people: &People) -> Display {
         })
         .unwrap_or(DEFAULT_ROLE);
     let avatar = profile.color.as_deref().and_then(hex_color).unwrap_or(DEFAULT_AVATAR);
-    Display { name, color, avatar }
+    Display { name, color, avatar, picture: profile.picture.clone() }
 }
 
 impl Backend {
@@ -774,6 +786,8 @@ impl Backend {
                         status_emoji: set(&form.status_emoji),
                         profile_color: set(&form.color),
                         profile_color_2: set(&form.color_2),
+                        picture: set(&form.picture),
+                        banner: set(&form.banner),
                         ..Default::default()
                     })
                     .await
@@ -1031,6 +1045,7 @@ impl Backend {
             initial: first_initial(&name),
             name,
             avatar: profile.color.as_deref().and_then(hex_color).unwrap_or(DEFAULT_AVATAR),
+            picture: profile.picture.clone(),
         }
     }
 
@@ -1058,6 +1073,8 @@ impl Backend {
             color_2: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
             ring: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
             avatar: p.avatar,
+            picture: profile.picture.clone(),
+            banner: profile.banner.clone(),
             roles: vec![],
             joined_at: None,
             me: *pk == self.session.keys().public_key(),
@@ -1141,6 +1158,7 @@ impl Backend {
                 author: name,
                 color: DEFAULT_ROLE,
                 avatar,
+                picture: if m.author == me { me_person.picture.clone() } else { person.picture.clone() },
                 at: m.created_at,
                 body: Some(body),
                 reply: None,
@@ -1208,6 +1226,8 @@ impl Backend {
             status_emoji: s("status_emoji"),
             color: s("profile_color"),
             color_2: s("profile_color_2"),
+            picture: s("picture"),
+            banner: s("banner"),
         };
         let name = [form.display_name.clone(), form.username.clone()]
             .into_iter()
@@ -1498,6 +1518,7 @@ impl Backend {
                 author: d.name,
                 color: d.color,
                 avatar: d.avatar,
+                picture: d.picture,
                 at: m.created_at,
                 body: m.content.clone(),
                 reply,
