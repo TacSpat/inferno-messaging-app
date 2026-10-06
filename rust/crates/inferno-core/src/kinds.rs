@@ -20,3 +20,13 @@ pub const PRESENCE: u16 = 30315;
 
 /// Cross-device config (NIP-78 app data).
 pub const APP_CONFIG: u16 = 30078;
+
+// Channel traffic (NIP-29 numbering, as Rails and Flutter use it).
+pub const CHANNEL_MESSAGE: u16 = 9;
+pub const CHANNEL_DELETE: u16 = 9005;
+pub const REACTION: u16 = 7;
+
+/// Rust-only: an encrypted channel's secret key, as the rumor inside a NIP-59
+/// gift wrap to each member. Never published bare. Rails and Flutter never
+/// distributed channel keys, so they can't read encrypted channels at all.
+pub const CHANNEL_KEY_SHARE: u16 = 31758;

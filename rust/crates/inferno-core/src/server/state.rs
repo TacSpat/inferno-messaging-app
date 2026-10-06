@@ -30,6 +30,9 @@ pub struct Member {
     pub profile: MemberProfile,
     /// Unix seconds; in the past or `None` means not timed out.
     pub timed_out_until: Option<i64>,
+    /// When the current timeout was issued, so receivers can drop messages
+    /// sent during it.
+    pub timed_out_since: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -160,11 +163,11 @@ impl ServerState {
                 .unwrap_or_default();
 
             // Timeouts only from moderators; 0 or past = cleared.
-            let timeout = newest(
+            let timeout_event = newest(
                 events.iter().copied().filter(|e| moderator(e) && wire::member(e).timed_out_until.is_some()),
-            )
-            .and_then(|e| wire::member(e).timed_out_until)
-            .filter(|&t| t > 0);
+            );
+            let timeout = timeout_event.and_then(|e| wire::member(e).timed_out_until).filter(|&t| t > 0);
+            let timeout_since = timeout.and(timeout_event).map(|e| e.created_at.as_secs() as i64);
 
             // Nickname and profile: newest from the subject or a manager.
             let profile_src = newest(events.iter().copied().filter(|e| is_self(e) || manager(e)))
@@ -180,6 +183,7 @@ impl ServerState {
                     joined_at: presence_data.joined_at.or(profile_src.joined_at),
                     profile: profile_src.profile,
                     timed_out_until: timeout,
+                    timed_out_since: timeout_since,
                 },
             );
         }
@@ -243,6 +247,15 @@ impl ServerState {
 
     pub fn timed_out_until(&self, pk: &PublicKey, now: i64) -> Option<i64> {
         self.members.get(pk)?.timed_out_until.filter(|&t| t > now)
+    }
+
+    /// True if `pk` was under a timeout at `at` (for hiding what they sent
+    /// during it, whatever their client claimed).
+    pub fn was_timed_out_at(&self, pk: &PublicKey, at: i64) -> bool {
+        self.members.get(pk).is_some_and(|m| match (m.timed_out_since, m.timed_out_until) {
+            (Some(since), Some(until)) => since <= at && at < until,
+            _ => false,
+        })
     }
 
     pub fn channel(&self, id: &str) -> Option<&Channel> {
