@@ -16,6 +16,7 @@ mod message_list;
 mod rich_input;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
+mod time_fmt;
 mod window_state;
 
 use makepad_widgets::*;

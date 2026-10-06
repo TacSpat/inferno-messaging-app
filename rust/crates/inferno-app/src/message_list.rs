@@ -95,17 +95,7 @@ impl Perf {
     }
 }
 
-fn clock(at: i64) -> String {
-    let secs = at.rem_euclid(86_400);
-    let (h, m) = (secs / 3600, (secs / 60) % 60);
-    let (h12, ampm) = match h {
-        0 => (12, "AM"),
-        1..=11 => (h, "AM"),
-        12 => (12, "PM"),
-        _ => (h - 12, "PM"),
-    };
-    format!("{h12}:{m:02} {ampm}")
-}
+use crate::time_fmt::clock;
 
 /// The synthetic history as rows, for `INFERNO_DEMO=1`.
 pub fn demo_rows() -> Vec<MessageRow> {

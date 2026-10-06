@@ -773,40 +773,7 @@ impl Widget for PeopleList {
 
 // ─── Search results ──────────────────────────────────────────────────────
 
-/// Rails' `%b %d, %Y` ("Oct 05, 2026").
-pub fn date_long(at: i64) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let (y, m, d) = civil(at.div_euclid(86_400));
-    format!("{} {d:02}, {y}", MONTHS[(m - 1) as usize])
-}
-
-/// (year, month, day) from days since 1970-01-01 (Howard Hinnant's algorithm).
-fn civil(days: i64) -> (i64, i64, i64) {
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    (y, m, d)
-}
-
-/// `MM/DD/YYYY h:MM AM`, as Rails shows message times (UTC for now).
-pub fn date_time(at: i64) -> String {
-    let (y, m, d) = civil(at.div_euclid(86_400));
-    let secs = at.rem_euclid(86_400);
-    let (h, min) = (secs / 3600, (secs / 60) % 60);
-    let (h12, ampm) = match h {
-        0 => (12, "AM"),
-        1..=11 => (h, "AM"),
-        12 => (12, "PM"),
-        _ => (h - 12, "PM"),
-    };
-    format!("{m:02}/{d:02}/{y} {h12}:{min:02} {ampm}")
-}
+pub use crate::time_fmt::{date_long, date_time};
 
 #[derive(Script, ScriptHook, Widget)]
 pub struct ResultList {
@@ -858,15 +825,6 @@ impl Widget for ResultList {
     }
 }
 
-#[cfg(test)]
-mod date_tests {
-    #[test]
-    fn rails_date_format() {
-        assert_eq!(super::date_time(0), "01/01/1970 12:00 AM");
-        assert_eq!(super::date_time(1_791_217_800), "10/05/2026 4:30 PM");
-        assert_eq!(super::date_long(1_791_217_800), "Oct 05, 2026");
-    }
-}
 
 // ─── DM sidebar ──────────────────────────────────────────────────────────
 

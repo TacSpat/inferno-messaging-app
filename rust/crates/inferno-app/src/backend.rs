@@ -896,7 +896,10 @@ impl Backend {
             }
             Command::Search(text) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
-                let query = inferno_core::search::Query::parse(&text);
+                let mut query = inferno_core::search::Query::parse(&text);
+                // before:/after:/on: name days on this device's calendar.
+                query.after = query.after.map(crate::time_fmt::local_midnight);
+                query.before = query.before.map(crate::time_fmt::local_midnight);
                 if query.is_empty() {
                     return Ok(());
                 }
