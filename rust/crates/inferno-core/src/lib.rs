@@ -7,6 +7,7 @@ pub mod keys;
 pub mod kinds;
 pub mod relay;
 pub mod store;
+pub mod vault;
 
 pub use nostr;
 pub use nostr_sdk;
