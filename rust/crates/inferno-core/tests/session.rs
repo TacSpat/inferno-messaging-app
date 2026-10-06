@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use inferno_core::channel::send::Outgoing;
 use inferno_core::nostr_sdk::prelude::*;
-use inferno_core::session::{Session, StartOptions, Update};
+use inferno_core::session::{ChannelSpec, Session, StartOptions, Update};
 use inferno_core::store::{RelaySource, Store};
 use tokio::sync::broadcast::Receiver;
 
@@ -113,7 +113,11 @@ async fn encrypted_channel_keys_reach_members_who_join_later() {
     let mut alice_rx = alice.updates();
 
     let gid = owner.create_server("secret club").await.unwrap();
-    let vault = owner.create_channel(&gid, "vault", true).await.unwrap();
+    let everyone = owner.server(&gid).unwrap().unwrap().roles.iter().find(|r| r.is_everyone()).unwrap().id.clone();
+    let vault = owner
+        .create_channel(&gid, &ChannelSpec { name: "vault".into(), encrypted: true, allowed_roles: vec![everyone], ..Default::default() })
+        .await
+        .unwrap();
     let state = owner.server(&gid).unwrap().unwrap();
     assert!(state.channel(&vault).unwrap().encrypted);
     owner.send(&gid, &vault, &Outgoing { content: "the code is 1234", ..Default::default() }).await.unwrap();
@@ -199,4 +203,41 @@ async fn a_profile_update_shows_up_for_other_members() {
         let _ = tokio::time::timeout(Duration::from_secs(1), owner_rx.recv()).await;
     }
     panic!("owner never saw Alice's profile");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn role_limited_encrypted_channel_and_ordering() {
+    use inferno_core::server::{order, publish};
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+
+    let gid = owner.create_server("x").await.unwrap();
+    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+
+    // Admin-only encrypted channel: Alice has no role, so no key, no access.
+    let admins = owner
+        .create_channel(&gid, &ChannelSpec { name: "admins".into(), encrypted: true, allowed_roles: vec!["r-nobody".into()], ..Default::default() })
+        .await
+        .unwrap();
+    let state = owner.server(&gid).unwrap().unwrap();
+    let ch = state.channel(&admins).unwrap();
+    assert!(state.can_read(&owner_keys.public_key(), ch));
+    assert!(!state.can_read(&alice.keys().public_key(), ch));
+    assert!(alice.send(&gid, &admins, &Outgoing { content: "hi", ..Default::default() }).await.is_err());
+
+    // Categories and moves.
+    let cat = owner.create_category(&gid, "Projects").await.unwrap();
+    let general = state.structure.channels.iter().find(|c| c.name == "general").unwrap().id.clone();
+    owner.move_channel(&gid, &general, Some(&cat), 0).await.unwrap();
+    let s = owner.server(&gid).unwrap().unwrap().structure;
+    assert_eq!(order::in_category(&s, &cat), vec![general.clone()]);
+    owner.rename_category(&gid, &cat, "Work").await.unwrap();
+    owner.delete_category(&gid, &cat).await.unwrap();
+    let s = owner.server(&gid).unwrap().unwrap().structure;
+    assert!(s.categories.is_empty());
+    assert!(s.channel_is_root(&general));
+    let _ = publish::new_public_id();
 }

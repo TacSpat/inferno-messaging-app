@@ -29,8 +29,36 @@ pub struct ServerItem {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidebarRow {
-    Category(String),
-    Channel { id: String, name: String, voice: bool, encrypted: bool },
+    Category { id: String, name: String },
+    Channel { id: String, name: String, voice: bool, encrypted: bool, category: Option<String> },
+}
+
+/// What we may do in the selected server (drives which controls show).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ServerPerms {
+    pub manage_channels: bool,
+    pub create_invite: bool,
+    pub owner: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RoleItem {
+    pub id: String,
+    pub name: String,
+}
+
+/// A channel as the edit dialog needs it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ChannelForm {
+    pub id: Option<String>,
+    pub name: String,
+    pub topic: String,
+    pub voice: bool,
+    pub category: Option<String>,
+    pub encrypted: bool,
+    pub allowed_roles: Vec<String>,
+    pub post_only: bool,
+    pub nsfw: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -88,7 +116,17 @@ pub enum Update {
     BackedUp(String),
     Ready { name: String, npub: String, backed_up: bool },
     Servers(Vec<ServerItem>),
-    Server { gid: String, name: String, sidebar: Vec<SidebarRow>, members: Vec<MemberRow> },
+    Server {
+        gid: String,
+        name: String,
+        sidebar: Vec<SidebarRow>,
+        members: Vec<MemberRow>,
+        perms: ServerPerms,
+        /// Roles, for encrypted-channel access.
+        roles: Vec<RoleItem>,
+        /// Every channel's editable fields, by id.
+        channels: Vec<ChannelForm>,
+    },
     Channel { gid: String, channel_id: String, name: String, topic: String, encrypted: bool },
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool },
     Invite(String),
@@ -111,6 +149,14 @@ pub enum Command {
     Backup(String),
     AddRelay(String),
     RemoveRelay(String),
+    SaveChannel(ChannelForm),
+    DeleteChannel(String),
+    CreateCategory(String),
+    RenameCategory { id: String, name: String },
+    DeleteCategory(String),
+    /// Move a channel to `index` within `category` (None = top level).
+    MoveChannel { id: String, category: Option<String>, index: usize },
+    LeaveServer,
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────
@@ -363,6 +409,84 @@ impl Backend {
                 self.session.remove_relay(&url).await.map_err(|e| e.to_string())?;
                 self.publish_relays();
             }
+            Command::SaveChannel(form) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                if form.name.trim().is_empty() {
+                    return Err("Give the channel a name.".into());
+                }
+                // Rails channel names: lowercase, spaces become dashes.
+                let name = form.name.trim().to_lowercase().replace(' ', "-");
+                match &form.id {
+                    None => {
+                        let spec = inferno_core::session::ChannelSpec {
+                            name,
+                            voice: form.voice,
+                            category: form.category.clone(),
+                            topic: form.topic.clone(),
+                            encrypted: form.encrypted,
+                            allowed_roles: form.allowed_roles.clone(),
+                            post_only: form.post_only,
+                            nsfw: form.nsfw,
+                        };
+                        let id = self.session.create_channel(&gid, &spec).await.map_err(|e| e.to_string())?;
+                        if !form.voice {
+                            self.channel = Some(id);
+                        }
+                    }
+                    Some(id) => {
+                        let f = form.clone();
+                        self.session
+                            .update_channel(&gid, id, move |c| {
+                                c.name = name;
+                                c.topic = f.topic;
+                                c.post_only = f.post_only;
+                                c.nsfw = f.nsfw;
+                                if c.encrypted {
+                                    let mut o = c.permission_overrides.clone();
+                                    o.insert("allowed_role_ids".into(), serde_json::json!(f.allowed_roles));
+                                    c.permission_overrides = o;
+                                }
+                            })
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                }
+                self.publish_server_keep_channel();
+            }
+            Command::DeleteChannel(id) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.delete_channel(&gid, &id).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::CreateCategory(name) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                if name.trim().is_empty() {
+                    return Err("Give the category a name.".into());
+                }
+                self.session.create_category(&gid, &name).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::RenameCategory { id, name } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.rename_category(&gid, &id, &name).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::DeleteCategory(id) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.delete_category(&gid, &id).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::MoveChannel { id, category, index } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.move_channel(&gid, &id, category.as_deref(), index).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::LeaveServer => {
+                let gid = self.server.take().ok_or("Pick a server first.")?;
+                self.session.leave(&gid).await.map_err(|e| e.to_string())?;
+                self.channel = None;
+                self.publish_servers();
+            }
             Command::CreateInvite => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 let link = self.session.create_invite(&gid).await.map_err(|e| e.to_string())?;
@@ -465,21 +589,36 @@ impl Backend {
         let Some(gid) = self.server.clone() else { return };
         let Ok(Some(state)) = self.session.server(&gid) else { return };
 
-        // Uncategorized channels first, then each category, by position.
-        let mut channels = state.structure.channels.clone();
-        channels.sort_by_key(|c| c.position);
-        let mut categories = state.structure.categories.clone();
-        categories.sort_by_key(|c| c.position);
+        // Rails' order: root channels and categories interleaved by
+        // position, each category's channels under it. Channels we can't
+        // read are hidden, as Rails does.
+        let me = self.session.keys().public_key();
+        let readable = |c: &inferno_core::server::wire::Channel| state.can_read(&me, c);
         let row = |c: &inferno_core::server::wire::Channel| SidebarRow::Channel {
             id: c.id.clone(),
             name: c.name.clone(),
             voice: c.kind == "voice",
             encrypted: c.encrypted,
+            category: c.category.clone(),
         };
-        let mut sidebar: Vec<SidebarRow> = channels.iter().filter(|c| c.category.is_none() && c.parent.is_none()).map(row).collect();
-        for cat in &categories {
-            sidebar.push(SidebarRow::Category(cat.name.to_uppercase()));
-            sidebar.extend(channels.iter().filter(|c| c.category.as_deref() == Some(cat.id.as_str())).map(row));
+        let mut sidebar = Vec::new();
+        for item in inferno_core::server::order::root_items(&state.structure) {
+            match item {
+                inferno_core::server::order::RootItem::Channel(id) => {
+                    if let Some(c) = state.channel(&id).filter(|c| readable(c)) {
+                        sidebar.push(row(c));
+                    }
+                }
+                inferno_core::server::order::RootItem::Category(id) => {
+                    let name = state.structure.categories.iter().find(|c| c.id == id).map(|c| c.name.to_uppercase()).unwrap_or_default();
+                    sidebar.push(SidebarRow::Category { id: id.clone(), name });
+                    for cid in inferno_core::server::order::in_category(&state.structure, &id) {
+                        if let Some(c) = state.channel(&cid).filter(|c| readable(c)) {
+                            sidebar.push(row(c));
+                        }
+                    }
+                }
+            }
         }
 
         // Members: hoisted roles first (highest position), then everyone else.
@@ -514,16 +653,44 @@ impl Backend {
             push_group(&mut members, "MEMBERS".into(), 0x878583, list);
         }
 
-        if self.channel.as_ref().is_none_or(|id| state.channel(id).is_none()) {
-            self.channel = state
-                .structure
-                .channels
-                .iter()
-                .filter(|c| c.kind != "voice")
-                .min_by_key(|c| c.position)
-                .map(|c| c.id.clone());
+        let selectable = |id: &String| state.channel(id).is_some_and(|c| c.kind != "voice" && state.can_read(&me, c));
+        if self.channel.as_ref().is_none_or(|id| !selectable(id)) {
+            self.channel = sidebar.iter().find_map(|r| match r {
+                SidebarRow::Channel { id, voice: false, .. } => Some(id.clone()),
+                _ => None,
+            });
         }
-        Cx::post_action(Update::Server { gid: gid.clone(), name: state.metadata.name.clone(), sidebar, members });
+        let perms = ServerPerms {
+            manage_channels: state.has(&me, inferno_core::server::Permission::ManageChannels),
+            create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
+            owner: state.is_owner(&me),
+        };
+        let roles = state.roles.iter().map(|r| RoleItem { id: r.id.clone(), name: r.name.clone() }).collect();
+        let channels = state
+            .structure
+            .channels
+            .iter()
+            .map(|c| ChannelForm {
+                id: Some(c.id.clone()),
+                name: c.name.clone(),
+                topic: c.topic.clone(),
+                voice: c.kind == "voice",
+                category: c.category.clone(),
+                encrypted: c.encrypted,
+                allowed_roles: inferno_core::server::state::allowed_role_ids(c),
+                post_only: c.post_only,
+                nsfw: c.nsfw,
+            })
+            .collect();
+        Cx::post_action(Update::Server {
+            gid: gid.clone(),
+            name: state.metadata.name.clone(),
+            sidebar,
+            members,
+            perms,
+            roles,
+            channels,
+        });
         self.publish_channel();
     }
 

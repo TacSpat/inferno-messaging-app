@@ -37,6 +37,7 @@ impl World {
         let everyone = json!({ "send_messages": true, "read_messages": true, "add_reactions": true }).to_string();
         let mod_perms = json!({ "manage_messages": true, "kick_members": true }).to_string();
         let enc = encrypted_pubkey.is_some().to_string();
+        let overrides = if encrypted_pubkey.is_some() { r#"{"allowed_role_ids":["r-everyone"]}"# } else { "{}" };
         let mut events = vec![
             w.ev(&w.owner, crate::kinds::SERVER_ROLES, vec![
                 s(&["d", &dtag::roles(GID)]), s(&["server", GID]),
@@ -45,7 +46,7 @@ impl World {
             ]),
             w.ev(&w.owner, crate::kinds::SERVER_STRUCTURE, vec![
                 s(&["d", &dtag::structure(GID)]), s(&["server", GID]),
-                s(&["ch", "ch1", "general", "text", "0", "", "", "false", "grp-1", "{}",
+                s(&["ch", "ch1", "general", "text", "0", "", "", "false", "grp-1", overrides,
                     &enc, encrypted_pubkey.unwrap_or(""), "", "", "64000", "0", "false", "false"]),
             ]),
         ];
@@ -214,7 +215,7 @@ fn encrypted_channel_end_to_end() {
     let state = w.state();
 
     // The owner shares the key with every reader.
-    let shares = keys::share(&w.owner, GID, "ch1", &channel_key, keys::readers(&state)).unwrap();
+    let shares = keys::share(&w.owner, GID, "ch1", &channel_key, keys::readers(&state, &w.channel())).unwrap();
     assert_eq!(shares.len(), 4, "mod, alice, bob, and the owner");
 
     let secret = send::message(&w.alice, &state, &w.channel(), &Outgoing { content: "top secret", ..Default::default() }, 0).unwrap();

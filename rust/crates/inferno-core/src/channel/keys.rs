@@ -60,13 +60,13 @@ pub fn share(
         .collect()
 }
 
-/// Who should hold a channel's key: everyone who can read messages.
-pub fn readers(state: &ServerState) -> Vec<PublicKey> {
+/// Who should hold `channel`'s key: everyone allowed to read it.
+pub fn readers(state: &ServerState, channel: &crate::server::wire::Channel) -> Vec<PublicKey> {
     let mut out: Vec<PublicKey> = state
         .members
         .keys()
         .copied()
-        .filter(|pk| state.has(pk, Permission::ReadMessages))
+        .filter(|pk| state.has(pk, Permission::ReadMessages) && state.can_read(pk, channel))
         .collect();
     if let Some(owner) = state.owner {
         if !out.contains(&owner) {

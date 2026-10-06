@@ -312,6 +312,25 @@ impl ServerState {
         self.structure.channels.iter().find(|c| c.group_id.as_deref() == Some(group_id))
     }
 
+    /// Whether `pk` may read `channel`. Rails' rule (`Channel#visible_to?`):
+    /// plain channels are open to every member; an encrypted channel only to
+    /// the owner, admins, and roles in its `allowed_role_ids` override.
+    pub fn can_read(&self, pk: &PublicKey, channel: &Channel) -> bool {
+        if !self.is_member(pk) || self.is_banned(pk) {
+            return false;
+        }
+        if !channel.encrypted || self.is_owner(pk) || self.has(pk, Permission::Administrator) {
+            return true;
+        }
+        let allowed = allowed_role_ids(channel);
+        // `@everyone` in the list means every member. (In Rails, picking it
+        // locked everyone out: it's never an assigned membership role.)
+        if self.roles.iter().any(|r| r.is_everyone() && allowed.contains(&r.id)) {
+            return true;
+        }
+        self.members.get(pk).is_some_and(|m| m.roles.iter().any(|r| allowed.contains(r)))
+    }
+
     /// Whether `pk` may post in `channel` at `now`. The send path refuses
     /// when this fails, and receivers apply the same check to hide messages.
     pub fn can_send(&self, pk: &PublicKey, channel: &Channel, now: i64) -> Result<(), SendDenied> {
@@ -324,7 +343,7 @@ impl ServerState {
         if let Some(until) = self.timed_out_until(pk, now) {
             return Err(SendDenied::TimedOut { until });
         }
-        if !self.has(pk, Permission::SendMessages) {
+        if !self.has(pk, Permission::SendMessages) || !self.can_read(pk, channel) {
             return Err(SendDenied::NoPermission);
         }
         if channel.post_only && !self.has(pk, Permission::ManageMessages) {
@@ -354,6 +373,16 @@ impl ServerState {
             .max()
             .unwrap_or(i64::MIN)
     }
+}
+
+/// Roles allowed into an encrypted channel (`{"allowed_role_ids": [...]}`).
+pub fn allowed_role_ids(channel: &Channel) -> Vec<String> {
+    channel
+        .permission_overrides
+        .get("allowed_role_ids")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        .unwrap_or_default()
 }
 
 /// Per-member kinds must carry the d-tag their `p` tag implies; anything else

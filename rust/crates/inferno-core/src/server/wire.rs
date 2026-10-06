@@ -150,6 +150,12 @@ pub struct Structure {
     pub channels: Vec<Channel>,
 }
 
+impl Structure {
+    pub fn channel_is_root(&self, id: &str) -> bool {
+        self.channels.iter().any(|c| c.id == id && c.category.is_none())
+    }
+}
+
 pub fn structure(event: &Event) -> Structure {
     let categories = rows(event, "cat")
         .filter_map(|t| {

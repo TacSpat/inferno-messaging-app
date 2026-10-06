@@ -6,6 +6,20 @@
 //! from the cache, so a restart shows the same thing a live session did.
 
 use std::collections::{HashMap, HashSet};
+
+/// What `Session::create_channel` makes.
+#[derive(Debug, Clone, Default)]
+pub struct ChannelSpec {
+    pub name: String,
+    pub voice: bool,
+    pub category: Option<String>,
+    pub topic: String,
+    pub encrypted: bool,
+    /// For encrypted channels: roles allowed in besides owner and admins.
+    pub allowed_roles: Vec<String>,
+    pub post_only: bool,
+    pub nsfw: bool,
+}
 use std::sync::{Arc, Mutex};
 
 use nostr_sdk::prelude::*;
@@ -17,7 +31,7 @@ use crate::dm::{self, IncomingDm};
 use crate::relay::{PublishReport, RelayPool};
 use crate::server::invite_link::{self, InviteLink};
 use crate::server::publish::{self, PublishError};
-use crate::server::{wire, Permission, ServerState};
+use crate::server::{order, wire, Permission, ServerState};
 use crate::store::{now_secs, Store, StoreError};
 use crate::sync::{config::ConfigSync, profile::{self, ProfileUpdate}, relays};
 use crate::{dtag, kinds};
@@ -337,55 +351,186 @@ impl Session {
         Ok(())
     }
 
-    /// Adds a text channel. For an encrypted one, the key is generated,
-    /// announced in the structure and shared with every reader before this
-    /// returns, so nobody can send to it before it has a key.
-    pub async fn create_channel(&self, gid: &str, name: &str, encrypted: bool) -> Result<String> {
+    /// Publishes a changed structure (needs manage_channels).
+    async fn publish_structure(&self, gid: &str, structure: &wire::Structure) -> Result<Event> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let event = self.fresh(publish::structure(&self.keys, &state, structure)?)?;
+        self.store.put_event(&event)?;
+        if !self.pool.publish(&event).await?.any_accepted() {
+            return Err(SessionError::NotPublished);
+        }
+        Ok(event)
+    }
+
+    async fn after_structure_change(&self, gid: &str) -> Result<()> {
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    /// Adds a channel. For an encrypted one, the key is generated, announced
+    /// in the structure and shared with every reader before the structure is
+    /// published, so nobody can send to it before it has a key.
+    pub async fn create_channel(&self, gid: &str, spec: &ChannelSpec) -> Result<String> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         let id = publish::new_public_id();
-        let key = encrypted.then(channel_keys::generate);
-        let mut structure = state.structure.clone();
-        structure.channels.push(wire::Channel {
+        let key = spec.encrypted.then(channel_keys::generate);
+        let mut overrides = serde_json::Map::new();
+        if spec.encrypted && !spec.allowed_roles.is_empty() {
+            overrides.insert("allowed_role_ids".into(), serde_json::json!(spec.allowed_roles));
+        }
+        let channel = wire::Channel {
             group_id: Some(publish::channel_group_id(gid, &id)),
             id: id.clone(),
-            name: name.into(),
-            kind: "text".into(),
-            position: structure.channels.len() as i64,
-            category: None,
-            topic: String::new(),
-            nsfw: false,
-            permission_overrides: Default::default(),
-            encrypted,
+            name: spec.name.trim().to_owned(),
+            kind: if spec.voice { "voice".into() } else { "text".into() },
+            position: 0,
+            category: spec.category.clone(),
+            topic: spec.topic.clone(),
+            nsfw: spec.nsfw,
+            permission_overrides: overrides,
+            encrypted: spec.encrypted,
             channel_pubkey: key.as_ref().map(|k| k.public_key().to_hex()),
             sidechat: None,
             parent: None,
             voice_bitrate: 64_000,
             voice_user_limit: 0,
             video_enabled: false,
-            post_only: false,
-        });
-        let event = self.fresh(publish::structure(&self.keys, &state, &structure)?)?;
-        self.store.put_event(&event)?;
+            post_only: spec.post_only,
+        };
+        let mut structure = state.structure.clone();
+        structure.channels.push(channel.clone());
+        // New channels go to the end of their category; at the top level,
+        // after the other uncategorized channels but before the first
+        // category, or they'd look like they belong to it.
+        let index = match spec.category {
+            Some(_) => usize::MAX,
+            None => order::root_items(&state.structure)
+                .iter()
+                .position(|i| matches!(i, order::RootItem::Category(_)))
+                .unwrap_or(usize::MAX),
+        };
+        order::move_channel(&mut structure, &id, spec.category.as_deref(), index);
+
         if let Some(key) = key {
-            let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
-            let wraps = channel_keys::share(&self.keys, gid, &id, &key, channel_keys::readers(&state))
+            // Readers as the new structure will define them.
+            let preview = ServerState { structure: structure.clone(), ..state.clone() };
+            let channel = preview.channel(&id).cloned().ok_or(SessionError::Unknown)?;
+            let wraps = channel_keys::share(&self.keys, gid, &id, &key, channel_keys::readers(&preview, &channel))
                 .map_err(SessionError::Other)?;
             for w in &wraps {
                 self.pool.publish(w).await?;
             }
             self.channel_keys.lock().unwrap_or_else(|e| e.into_inner()).entry(gid.into()).or_default().insert(key);
         }
-        // Only now announce it, so the key reaches members first.
-        if !self.pool.publish(&event).await?.any_accepted() {
-            return Err(SessionError::NotPublished);
-        }
-        self.resubscribe().await?;
-        let _ = self.updates.send(Update::Server(gid.into()));
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await?;
         Ok(id)
     }
 
-    /// Shares the current keys of `gid`'s encrypted channels with `member`.
-    /// Managers' sessions do this when someone joins.
+    pub async fn create_category(&self, gid: &str, name: &str) -> Result<String> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let id = publish::new_public_id();
+        let mut structure = state.structure.clone();
+        structure.categories.push(wire::Category { id: id.clone(), name: name.trim().to_owned(), position: i64::MAX });
+        let last = order::root_items(&structure).len();
+        order::move_category(&mut structure, &id, last);
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await?;
+        Ok(id)
+    }
+
+    /// Renames, re-topics or otherwise edits a channel in place. If an
+    /// encrypted channel gains readers, they're sent its current key.
+    pub async fn update_channel(&self, gid: &str, id: &str, edit: impl FnOnce(&mut wire::Channel)) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        let channel = structure.channels.iter_mut().find(|c| c.id == id).ok_or(SessionError::Unknown)?;
+        let before = channel.clone();
+        edit(channel);
+        // The key, the group and the id aren't editable here.
+        channel.id = before.id.clone();
+        channel.group_id = before.group_id.clone();
+        channel.encrypted = before.encrypted;
+        channel.channel_pubkey = before.channel_pubkey.clone();
+        let after = channel.clone();
+        self.publish_structure(gid, &structure).await?;
+
+        if after.encrypted {
+            let old: HashSet<PublicKey> = channel_keys::readers(&state, &before).into_iter().collect();
+            let new_state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+            let added: Vec<PublicKey> =
+                channel_keys::readers(&new_state, &after).into_iter().filter(|p| !old.contains(p)).collect();
+            let key = after.channel_pubkey.as_deref().and_then(|pk| {
+                self.channel_keys.lock().unwrap_or_else(|e| e.into_inner()).get(gid).and_then(|k| k.get(pk).cloned())
+            });
+            if let (Some(key), false) = (key, added.is_empty()) {
+                for w in channel_keys::share(&self.keys, gid, id, &key, added).map_err(SessionError::Other)? {
+                    self.pool.publish(&w).await?;
+                }
+            }
+        }
+        self.after_structure_change(gid).await
+    }
+
+    pub async fn rename_category(&self, gid: &str, id: &str, name: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        let cat = structure.categories.iter_mut().find(|c| c.id == id).ok_or(SessionError::Unknown)?;
+        cat.name = name.trim().to_owned();
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    /// Removes a channel from the structure. Its messages stay on relays but
+    /// no client shows a channel that isn't in the structure.
+    pub async fn delete_channel(&self, gid: &str, id: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        let before = structure.channels.len();
+        structure.channels.retain(|c| c.id != id);
+        if structure.channels.len() == before {
+            return Err(SessionError::Unknown);
+        }
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    /// Deletes a category; its channels move to the root, keeping order.
+    pub async fn delete_category(&self, gid: &str, id: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        for ch in order::in_category(&structure, id) {
+            order::move_channel(&mut structure, &ch, None, usize::MAX);
+        }
+        structure.categories.retain(|c| c.id != id);
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    /// Moves a channel to `index` within `category` (`None` = root).
+    pub async fn move_channel(&self, gid: &str, id: &str, category: Option<&str>, index: usize) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        if !order::move_channel(&mut structure, id, category, index) {
+            return Err(SessionError::Unknown);
+        }
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    pub async fn move_category(&self, gid: &str, id: &str, index: usize) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        if !order::move_category(&mut structure, id, index) {
+            return Err(SessionError::Unknown);
+        }
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    /// Shares the current keys of `gid`'s encrypted channels that `member`
+    /// may read. Managers' sessions do this when someone joins.
     async fn share_keys_with(&self, gid: &str, member: PublicKey) -> Result<()> {
         let Some(state) = self.server(gid)? else { return Ok(()) };
         if !state.has(&self.keys.public_key(), Permission::ManageChannels)
@@ -397,7 +542,7 @@ impl Session {
         {
             let all = self.channel_keys.lock().unwrap_or_else(|e| e.into_inner());
             let Some(held) = all.get(gid) else { return Ok(()) };
-            for c in state.structure.channels.iter().filter(|c| c.encrypted) {
+            for c in state.structure.channels.iter().filter(|c| c.encrypted && state.can_read(&member, c)) {
                 let Some(key) = c.channel_pubkey.as_deref().and_then(|pk| held.get(pk)) else { continue };
                 wraps.extend(channel_keys::share(&self.keys, gid, &c.id, key, [member]).map_err(SessionError::Other)?);
             }

@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod custom;
 pub mod invite_link;
+pub mod order;
 pub mod publish;
 mod cache;
 pub mod state;

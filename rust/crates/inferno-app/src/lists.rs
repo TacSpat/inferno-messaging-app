@@ -74,6 +74,27 @@ impl Widget for RailList {
 
 // ─── Channel sidebar ─────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum ChannelListAction {
+    Select(String),
+    EditChannel(String),
+    EditCategory(String),
+    Move { id: String, category: Option<String>, index: usize },
+}
+
+/// A press on a channel row that may turn into a drag.
+#[derive(Debug, Clone)]
+struct Drag {
+    row: usize,
+    start_y: f64,
+    moving: bool,
+    /// Insert position among the sidebar rows, while moving.
+    slot: Option<usize>,
+}
+
+/// Pointer travel before a press on a row becomes a drag.
+const DRAG_THRESHOLD: f64 = 5.0;
+
 #[derive(Script, ScriptHook, Widget)]
 pub struct ChannelList {
     #[deref]
@@ -82,18 +103,142 @@ pub struct ChannelList {
     pub rows: Vec<SidebarRow>,
     #[rust]
     pub selected: Option<String>,
+    /// manage_channels: gears and drag-to-reorder.
+    #[rust]
+    pub can_manage: bool,
+    #[rust]
+    hovered: Option<usize>,
+    #[rust]
+    drag: Option<Drag>,
 }
 
 impl ChannelList {
-    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<String> {
+    /// Where among the rows the pointer at `y` would drop, and the y of the
+    /// drop line, from the rows currently drawn.
+    fn slot_at(&self, cx: &Cx, y: f64) -> Option<(usize, f64)> {
         let list = self.view.portal_list(cx, ids!(list));
-        list.items_with_actions(actions)
-            .into_iter()
-            .find(|(_, item)| clicked(item, actions))
-            .and_then(|(i, _)| match self.rows.get(i) {
-                Some(SidebarRow::Channel { id, voice: false, .. }) => Some(id.clone()),
-                _ => None,
-            })
+        let list_ref = list.borrow()?;
+        let mut rects: Vec<(usize, Rect)> = list_ref
+            .items()
+            .iter()
+            .map(|(i, item)| (*i, item.widget.area().rect(cx)))
+            .filter(|(_, r)| r.size.y > 0.0)
+            .collect();
+        rects.sort_by_key(|(i, _)| *i);
+        let (first, last) = (rects.first()?, rects.last()?);
+        for (i, r) in &rects {
+            if y < r.pos.y + r.size.y / 2.0 {
+                return Some((*i, r.pos.y));
+            }
+        }
+        Some((last.0 + 1, last.1.pos.y + last.1.size.y)).filter(|_| first.0 <= last.0)
+    }
+
+    /// Turns "insert before row `slot`" into a container and index.
+    fn target(&self, dragged: usize, slot: usize) -> Option<(Option<String>, usize)> {
+        let rows: Vec<(usize, &SidebarRow)> = self.rows.iter().enumerate().filter(|(i, _)| *i != dragged).collect();
+        // Position of the slot among the remaining rows.
+        let at = rows.iter().take_while(|(i, _)| *i < slot).count();
+        let before = &rows[..at];
+        let category = match before.last() {
+            Some((_, SidebarRow::Category { id, .. })) => Some(id.clone()),
+            Some((_, SidebarRow::Channel { category, .. })) => category.clone(),
+            None => None,
+        };
+        let index = match &category {
+            Some(cat) => before
+                .iter()
+                .filter(|(_, r)| matches!(r, SidebarRow::Channel { category: Some(c), .. } if c == cat))
+                .count(),
+            // Root items: root channels and categories.
+            None => before
+                .iter()
+                .filter(|(_, r)| matches!(r, SidebarRow::Category { .. } | SidebarRow::Channel { category: None, .. }))
+                .count(),
+        };
+        Some((category, index))
+    }
+
+    fn show_drop_line(&mut self, cx: &mut Cx, y: Option<f64>) {
+        let top = self.view.area().rect(cx).pos.y;
+        let mut line = self.view.widget(cx, ids!(drop_line));
+        match y {
+            Some(y) => {
+                let off = (y - top - 1.0).max(0.0);
+                script_apply_eval!(cx, line, {margin: mod.prelude.widgets.Inset{top: #(off) left: 8 right: 8}});
+                line.set_visible(cx, true);
+            }
+            None => line.set_visible(cx, false),
+        }
+        self.view.redraw(cx);
+    }
+
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> Option<ChannelListAction> {
+        let list = self.view.portal_list(cx, ids!(list));
+        let mut out = None;
+        for (i, item) in list.items_with_actions(actions) {
+            let view = item.as_view();
+            if view.finger_hover_in(actions).is_some() {
+                self.hovered = Some(i);
+                redraw_items(cx, &list);
+            }
+            if view.finger_hover_out(actions).is_some() && self.hovered == Some(i) {
+                self.hovered = None;
+                redraw_items(cx, &list);
+            }
+            let row = self.rows.get(i).cloned();
+            if item.view(cx, ids!(gear)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                out = match row {
+                    Some(SidebarRow::Channel { id, .. }) => Some(ChannelListAction::EditChannel(id)),
+                    Some(SidebarRow::Category { id, .. }) => Some(ChannelListAction::EditCategory(id)),
+                    None => None,
+                };
+                self.drag = None;
+                continue;
+            }
+            if let Some(e) = view.finger_down(actions) {
+                if matches!(row, Some(SidebarRow::Channel { .. })) {
+                    self.drag = Some(Drag { row: i, start_y: e.abs.y, moving: false, slot: None });
+                }
+            }
+            if let Some(e) = view.finger_move(actions) {
+                if let Some(mut d) = self.drag.clone().filter(|d| d.row == i) {
+                    if self.can_manage && (e.abs.y - d.start_y).abs() > DRAG_THRESHOLD {
+                        d.moving = true;
+                    }
+                    if d.moving {
+                        let slot = self.slot_at(cx, e.abs.y);
+                        d.slot = slot.map(|(s, _)| s);
+                        self.show_drop_line(cx, slot.map(|(_, y)| y));
+                    }
+                    self.drag = Some(d);
+                }
+            }
+            if let Some(e) = view.finger_up(actions) {
+                let drag = self.drag.take();
+                self.show_drop_line(cx, None);
+                if drag.as_ref().is_some_and(|d| d.moving) {
+                    // The rows are about to move under the pointer.
+                    self.hovered = None;
+                }
+                match (drag, row) {
+                    (Some(d), Some(SidebarRow::Channel { id, .. })) if d.moving && d.row == i => {
+                        let moved = d
+                            .slot
+                            .filter(|s| *s != d.row && *s != d.row + 1)
+                            .and_then(|s| self.target(d.row, s));
+                        if let Some((category, index)) = moved {
+                            out = Some(ChannelListAction::Move { id, category, index });
+                        }
+                    }
+                    (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled => {
+                        out = Some(ChannelListAction::Select(id));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        out
     }
 }
 
@@ -104,18 +249,21 @@ impl Widget for ChannelList {
             list.set_item_range(cx, 0, self.rows.len());
             while let Some(i) = list.next_visible_item(cx) {
                 let Some(r) = self.rows.get(i) else { continue };
+                let hovered = self.hovered == Some(i);
                 match r {
-                    SidebarRow::Category(name) => {
+                    SidebarRow::Category { name, .. } => {
                         let row = list.item(cx, i, id!(Category));
                         row.label(cx, ids!(label)).set_text(cx, name);
+                        row.view(cx, ids!(gear)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
-                    SidebarRow::Channel { id, name, voice, encrypted } => {
+                    SidebarRow::Channel { id, name, voice, encrypted, .. } => {
                         let active = self.selected.as_deref() == Some(id.as_str());
                         let row = list.item(cx, i, if active { id!(ActiveChannel) } else { id!(Channel) });
                         let glyph = if *voice { "🔊" } else if *encrypted { "🔒" } else { "#" };
                         row.label(cx, ids!(item.hash)).set_text(cx, glyph);
                         row.label(cx, ids!(item.name)).set_text(cx, name);
+                        row.view(cx, ids!(item.gear)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
                 }
@@ -272,6 +420,55 @@ impl Widget for RelayList {
                     _ => "off",
                 };
                 row.label(cx, ids!(mode)).set_text(cx, mode);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+// ─── Role picker (encrypted channel access) ──────────────────────────────
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct RolePicker {
+    #[deref]
+    view: View,
+    /// (role id, name, picked)
+    #[rust]
+    pub roles: Vec<(String, String, bool)>,
+}
+
+impl RolePicker {
+    pub fn picked(&self) -> Vec<String> {
+        self.roles.iter().filter(|r| r.2).map(|r| r.0.clone()).collect()
+    }
+
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        let list = self.view.portal_list(cx, ids!(list));
+        let hit = list.items_with_actions(actions).into_iter().find(|(_, item)| clicked(item, actions));
+        if let Some((i, _)) = hit {
+            if let Some(r) = self.roles.get_mut(i) {
+                r.2 = !r.2;
+            }
+            redraw_items(cx, &list);
+        }
+    }
+}
+
+impl Widget for RolePicker {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.roles.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some((_, name, picked)) = self.roles.get(i) else { continue };
+                let row = list.item(cx, i, id!(Role));
+                row.label(cx, ids!(mark)).set_text(cx, if *picked { "✓" } else { "·" });
+                row.label(cx, ids!(name)).set_text(cx, name);
                 row.draw_all(cx, &mut Scope::empty());
             }
         }
