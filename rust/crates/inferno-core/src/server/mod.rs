@@ -3,6 +3,8 @@
 
 pub mod auth;
 pub mod custom;
+pub mod invite_link;
+pub mod publish;
 mod cache;
 pub mod state;
 pub mod wire;

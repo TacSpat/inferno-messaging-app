@@ -184,3 +184,12 @@ impl Store {
         Ok(())
     }
 }
+
+impl Store {
+    pub fn blocked_pubkeys(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT pubkey FROM blocks")?;
+        let rows = stmt.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+}

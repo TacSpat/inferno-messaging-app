@@ -21,6 +21,9 @@ pub const PRESENCE: u16 = 30315;
 /// Cross-device config (NIP-78 app data).
 pub const APP_CONFIG: u16 = 30078;
 
+/// Rails/Flutter DMs: kind 14 signed directly (read-only for us, see dm.rs).
+pub const DM_LEGACY: u16 = 14;
+
 // Channel traffic (NIP-29 numbering, as Rails and Flutter use it).
 pub const CHANNEL_MESSAGE: u16 = 9;
 pub const CHANNEL_DELETE: u16 = 9005;

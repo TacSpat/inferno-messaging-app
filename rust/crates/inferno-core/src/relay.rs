@@ -3,7 +3,9 @@
 //!
 //! - Long-lived subscriptions are keyed; re-subscribing under a key CLOSEs the
 //!   old REQ first, so periodic re-syncs can't leak subscriptions until relays
-//!   start rejecting them.
+//!   start rejecting them. Re-subscribing with the same filters sends nothing.
+//! - Rate-limited publishes are retried with backoff, only to the relays that
+//!   refused, instead of being reported as failures (or hammered).
 //! - Publishing reports each relay's outcome and its NIP-20 reason, so the UI
 //!   can say "rate limited" instead of failing silently.
 //! - Replaceable and addressable events keep only the newest copy per address,
@@ -41,8 +43,12 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
 pub struct RelayPool {
     client: Client,
-    keyed: Mutex<HashMap<String, SubscriptionId>>,
+    keyed: Mutex<HashMap<String, (SubscriptionId, Vec<Filter>)>>,
 }
+
+/// Backoff for relays that rate-limit a publish: three retries over ~7s.
+const RATE_LIMIT_BACKOFF: [Duration; 3] =
+    [Duration::from_secs(1), Duration::from_secs(2), Duration::from_secs(4)];
 
 #[derive(Debug, Default)]
 pub struct PublishReport {
@@ -57,10 +63,29 @@ impl PublishReport {
     }
 
     pub fn rate_limited(&self) -> bool {
-        self.rejected.iter().any(|(_, reason)| {
-            let r = reason.to_ascii_lowercase();
-            r.starts_with("rate-limited") || r.contains("too fast") || r.contains("slow down")
-        })
+        self.rejected.iter().any(|(_, reason)| is_rate_limit(reason))
+    }
+}
+
+fn is_rate_limit(reason: &str) -> bool {
+    let r = reason.to_ascii_lowercase();
+    r.starts_with("rate-limited") || r.contains("rate limit") || r.contains("too fast") || r.contains("slow down")
+}
+
+/// Retries `event` to the relays in `report` that rate-limited it, with
+/// backoff, folding the outcomes back into the report.
+async fn retry_rate_limited(client: &Client, event: &Event, report: &mut PublishReport) {
+    for delay in RATE_LIMIT_BACKOFF {
+        let limited: Vec<RelayUrl> =
+            report.rejected.iter().filter(|(_, r)| is_rate_limit(r)).map(|(u, _)| u.clone()).collect();
+        if limited.is_empty() {
+            return;
+        }
+        tokio::time::sleep(delay).await;
+        let Ok(out) = client.send_event(event).to(limited.iter().cloned()).await else { return };
+        report.rejected.retain(|(u, _)| !limited.contains(u));
+        report.accepted.extend(out.success.into_keys());
+        report.rejected.extend(out.failed);
     }
 }
 
@@ -92,12 +117,25 @@ impl RelayPool {
         self.client.connect().and_wait(CONNECT_WAIT).await;
     }
 
+    /// Publishes to every relay. Relays that rate-limit get retried with
+    /// backoff: in the background if another relay already took the event,
+    /// otherwise before returning, so the caller learns whether it landed.
     pub async fn publish(&self, event: &Event) -> Result<PublishReport, Error> {
         let output = self.client.send_event(event).await?;
-        Ok(PublishReport {
+        let mut report = PublishReport {
             accepted: output.success.into_keys().collect(),
             rejected: output.failed.into_iter().collect(),
-        })
+        };
+        if report.rate_limited() {
+            if report.any_accepted() {
+                let (client, event) = (self.client.clone(), event.clone());
+                let mut background = PublishReport { accepted: vec![], rejected: report.rejected.clone() };
+                tokio::spawn(async move { retry_rate_limited(&client, &event, &mut background).await });
+            } else {
+                retry_rate_limited(&self.client, event, &mut report).await;
+            }
+        }
+        Ok(report)
     }
 
     /// Opens (or replaces) the long-lived subscription named `key`. Events
@@ -108,19 +146,24 @@ impl RelayPool {
         filters: Vec<Filter>,
     ) -> Result<SubscriptionId, Error> {
         let mut keyed = self.keyed.lock().await;
-        if let Some(previous) = keyed.remove(key) {
+        if let Some((id, current)) = keyed.get(key) {
+            if *current == filters {
+                return Ok(id.clone());
+            }
+        }
+        if let Some((previous, _)) = keyed.remove(key) {
             if let Err(e) = self.client.unsubscribe(&previous).await {
                 tracing::warn!("closing subscription {key}: {e}");
             }
         }
-        let output = self.client.subscribe(filters).await?;
+        let output = self.client.subscribe(filters.clone()).await?;
         let id = output.value;
-        keyed.insert(key.to_owned(), id.clone());
+        keyed.insert(key.to_owned(), (id.clone(), filters));
         Ok(id)
     }
 
     pub async fn unsubscribe_keyed(&self, key: &str) {
-        if let Some(id) = self.keyed.lock().await.remove(key) {
+        if let Some((id, _)) = self.keyed.lock().await.remove(key) {
             if let Err(e) = self.client.unsubscribe(&id).await {
                 tracing::warn!("closing subscription {key}: {e}");
             }
@@ -262,12 +305,55 @@ mod tests {
         pool.add_relays([relay.url().await.to_string()]).await.unwrap();
         pool.connect().await;
 
-        let filter = || vec![Filter::new().kind(Kind::Custom(kinds::SERVER_METADATA))];
-        let first = pool.subscribe_keyed("server-sync", filter()).await.unwrap();
-        let second = pool.subscribe_keyed("server-sync", filter()).await.unwrap();
+        let filter = |k: u16| vec![Filter::new().kind(Kind::Custom(k))];
+        let first = pool.subscribe_keyed("server-sync", filter(kinds::SERVER_METADATA)).await.unwrap();
+        let same = pool.subscribe_keyed("server-sync", filter(kinds::SERVER_METADATA)).await.unwrap();
+        assert_eq!(first, same, "identical filters send no new REQ");
+        let second = pool.subscribe_keyed("server-sync", filter(kinds::SERVER_ROLES)).await.unwrap();
         assert_ne!(first, second);
         assert_eq!(pool.subscription_count().await, 1);
         assert_eq!(pool.client().subscriptions().await.len(), 1);
+    }
+
+    /// Rate-limits the first `n` writes, like a busy public relay.
+    #[derive(Debug)]
+    struct LimitFirst(std::sync::atomic::AtomicUsize);
+
+    impl WritePolicy for LimitFirst {
+        fn admit_event<'a>(
+            &'a self,
+            _event: &'a Event,
+            _addr: &'a std::net::SocketAddr,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = WritePolicyResult> + Send + 'a>> {
+            let left = self.0.fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |n| n.checked_sub(1),
+            );
+            Box::pin(async move {
+                match left {
+                    Ok(_) => WritePolicyResult::reject(MachineReadablePrefix::RateLimited, "slow down"),
+                    Err(_) => WritePolicyResult::Accept,
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn rate_limited_publishes_are_retried_with_backoff() {
+        let relay = LocalRelay::builder().write_policy(LimitFirst(2.into())).build();
+        relay.run().await.unwrap();
+        let keys = Keys::generate();
+        let pool = RelayPool::new(keys.clone());
+        pool.add_relays([relay.url().await.to_string()]).await.unwrap();
+        pool.connect().await;
+
+        let started = std::time::Instant::now();
+        let report = pool.publish(&server_state(&keys, 100, "x")).await.unwrap();
+        assert!(report.any_accepted(), "{report:?}");
+        assert!(report.rejected.is_empty());
+        // Two refusals: waited 1s then 2s, not hammered.
+        assert!(started.elapsed() >= Duration::from_secs(3));
     }
 
     #[tokio::test]

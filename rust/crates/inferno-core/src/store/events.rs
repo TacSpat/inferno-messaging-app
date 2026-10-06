@@ -218,3 +218,24 @@ fn apply_deletion(tx: &Transaction, deletion: &Event) -> Result<()> {
 pub(crate) fn parse(json: &str) -> Result<Event> {
     Event::from_json(json).map_err(|e| StoreError::Corrupt(e.to_string()))
 }
+
+impl Store {
+    /// Newest `created_at` among cached events of `kinds` tagged `name` with
+    /// any of `values`. Subscriptions start from here instead of re-fetching
+    /// history relays already gave us.
+    pub fn newest_tagged(&self, kinds: &[u16], name: char, values: &[String]) -> Result<Option<i64>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT max(e.created_at) FROM events e JOIN event_tags t ON t.event_id = e.id
+             WHERE t.name = ?1 AND t.value = ?2 AND e.kind = ?3",
+        )?;
+        let mut newest: Option<i64> = None;
+        for value in values {
+            for kind in kinds {
+                let at: Option<i64> = stmt.query_row(params![name.to_string(), value, kind], |r| r.get(0))?;
+                newest = newest.max(at);
+            }
+        }
+        Ok(newest)
+    }
+}

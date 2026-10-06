@@ -1,0 +1,609 @@
+//! A signed-in client: relays, cache, sync and live subscriptions tied
+//! together. The UI holds one `Session`, reads resolved state from it, and
+//! listens on [`Session::updates`] to know what to redraw.
+//!
+//! Every incoming event goes into the cache first; state is always resolved
+//! from the cache, so a restart shows the same thing a live session did.
+
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+
+use nostr_sdk::prelude::*;
+use tokio::sync::broadcast;
+
+use crate::channel::send::{self, Outgoing, SendError};
+use crate::channel::{keys as channel_keys, ChannelKeys, ChannelMessage, Timeline};
+use crate::dm::{self, IncomingDm};
+use crate::relay::{PublishReport, RelayPool};
+use crate::server::invite_link::{self, InviteLink};
+use crate::server::publish::{self, PublishError};
+use crate::server::{wire, Permission, ServerState};
+use crate::store::{now_secs, Store, StoreError};
+use crate::sync::{config::ConfigSync, relays};
+use crate::{dtag, kinds};
+
+const CHANNEL_KINDS: [u16; 4] = [kinds::CHANNEL_MESSAGE, kinds::CHANNEL_DELETE, kinds::PIN, kinds::REACTION];
+const TIMELINE_LIMIT: usize = 5_000;
+
+#[derive(Debug, Clone)]
+pub enum Update {
+    /// Server state changed (metadata, structure, roles, members, ...).
+    Server(String),
+    /// Something in this channel's timeline changed.
+    Channel { gid: String, channel_id: String },
+    Dm(IncomingDm),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum SessionError {
+    #[error(transparent)]
+    Store(#[from] StoreError),
+    #[error(transparent)]
+    Relay(#[from] nostr_sdk::prelude::Error),
+    #[error(transparent)]
+    Publish(#[from] PublishError),
+    #[error(transparent)]
+    Send(#[from] SendError),
+    #[error("not a valid invite link")]
+    BadInvite,
+    #[error("unknown server or channel")]
+    Unknown,
+    #[error("no relay accepted the event")]
+    NotPublished,
+    #[error("{0}")]
+    Other(String),
+}
+
+pub type Result<T> = std::result::Result<T, SessionError>;
+
+pub struct Session {
+    keys: Keys,
+    store: Arc<Store>,
+    pool: Arc<RelayPool>,
+    updates: broadcast::Sender<Update>,
+    /// Channel keys we hold, per server.
+    channel_keys: Mutex<HashMap<String, ChannelKeys>>,
+    /// `h` group id → (gid, channel id), for routing channel traffic.
+    groups: Mutex<HashMap<String, (String, String)>>,
+    /// Fixed for the session so the member subscription's filter is stable
+    /// (a fresh `now` each time would defeat the no-op re-subscribe).
+    started_at: Timestamp,
+    /// Wakes the background task that batches resubscribes and key rebuilds.
+    refresh: Arc<tokio::sync::Notify>,
+    /// Wakes the background task that debounces config pushes.
+    config_dirty: Arc<tokio::sync::Notify>,
+}
+
+impl Drop for Session {
+    /// Wakes the batchers so they notice the session is gone and exit.
+    fn drop(&mut self) {
+        self.refresh.notify_one();
+        self.config_dirty.notify_one();
+    }
+}
+
+/// How long state changes are batched before refreshing subscriptions, and
+/// how long config changes settle before one push (Flutter used 5s).
+const REFRESH_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
+const CONFIG_SETTLE: std::time::Duration = std::time::Duration::from_secs(5);
+/// Messages fetched for a server's channels when we first join it.
+const JOIN_BACKFILL: usize = 500;
+/// Overlap when resuming a subscription from the newest cached event, for
+/// clock skew between relays.
+const RESUME_OVERLAP_SECS: u64 = 60;
+
+#[derive(Debug, Clone)]
+pub struct StartOptions {
+    /// Add the default public relays if missing. Off for tests and for
+    /// private deployments that configure their own relays.
+    pub seed_default_relays: bool,
+}
+
+impl Default for StartOptions {
+    fn default() -> Self {
+        Self { seed_default_relays: true }
+    }
+}
+
+impl Session {
+    /// Connects, catches up on relay lists and config, and starts listening.
+    pub async fn start(keys: Keys, store: Store) -> Result<Arc<Self>> {
+        Self::start_with(keys, store, StartOptions::default()).await
+    }
+
+    pub async fn start_with(keys: Keys, store: Store, options: StartOptions) -> Result<Arc<Self>> {
+        let store = Arc::new(store);
+        if options.seed_default_relays {
+            store.seed_default_relays()?;
+        }
+        let pool = Arc::new(RelayPool::new(keys.clone()));
+        pool.add_relays(store.relays()?.iter().map(|r| r.url.clone())).await?;
+        pool.connect().await;
+
+        // Best effort: an unreachable relay list or config isn't fatal.
+        if let Err(e) = relays::pull(&pool, &store, &keys).await {
+            tracing::warn!("relay list pull failed: {e}");
+        }
+        pool.add_relays(store.relays()?.iter().map(|r| r.url.clone())).await?;
+        pool.connect().await;
+        if let Err(e) = (ConfigSync { keys: &keys, pool: &pool, store: &store }).pull().await {
+            tracing::warn!("config pull failed: {e}");
+        }
+
+        let (updates, _) = broadcast::channel(1024);
+        let session = Arc::new(Session {
+            keys,
+            store,
+            pool,
+            updates,
+            channel_keys: Mutex::new(HashMap::new()),
+            groups: Mutex::new(HashMap::new()),
+            started_at: Timestamp::now(),
+            refresh: Arc::new(tokio::sync::Notify::new()),
+            config_dirty: Arc::new(tokio::sync::Notify::new()),
+        });
+        session.rebuild_channel_keys()?;
+        session.resubscribe().await?;
+        session.spawn_listener();
+        session.spawn_batchers();
+        Ok(session)
+    }
+
+    pub fn keys(&self) -> &Keys {
+        &self.keys
+    }
+
+    pub fn store(&self) -> &Store {
+        &self.store
+    }
+
+    pub fn updates(&self) -> broadcast::Receiver<Update> {
+        self.updates.subscribe()
+    }
+
+    pub fn servers(&self) -> Result<Vec<String>> {
+        Ok(self.store.synced_servers()?.members().map(str::to_owned).collect())
+    }
+
+    pub fn server(&self, gid: &str) -> Result<Option<ServerState>> {
+        Ok(self.store.load_server(gid)?)
+    }
+
+    pub fn timeline(&self, gid: &str, channel_id: &str) -> Result<Vec<ChannelMessage>> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let channel = state.channel(channel_id).ok_or(SessionError::Unknown)?;
+        let Some(group) = channel.group_id.as_deref() else { return Ok(Vec::new()) };
+        let mut events = Vec::new();
+        for kind in CHANNEL_KINDS {
+            events.extend(self.store.events_by_tag(Kind::Custom(kind), 'h', group, TIMELINE_LIMIT)?);
+        }
+        let blocked: HashSet<PublicKey> = self.blocked()?;
+        let keys = self.channel_keys.lock().unwrap_or_else(|e| e.into_inner());
+        let empty = ChannelKeys::default();
+        let ck = keys.get(gid).unwrap_or(&empty);
+        Ok(Timeline::resolve(&state, channel, &events, ck, &blocked))
+    }
+
+    fn blocked(&self) -> Result<HashSet<PublicKey>> {
+        // Blocks are few; reading them per timeline keeps them always fresh.
+        let conn_blocked = self.store.blocked_pubkeys()?;
+        Ok(conn_blocked.iter().filter_map(|h| PublicKey::from_hex(h).ok()).collect())
+    }
+
+    // ─── Actions ─────────────────────────────────────────────────────────
+
+    /// A replaceable event must be newer than our previous copy, or relays
+    /// (and our own cache) keep the old one: two edits in the same second
+    /// otherwise lose the second about half the time.
+    fn fresh(&self, event: Event) -> Result<Event> {
+        let d = if event.kind.is_addressable() {
+            event.tags.identifier().unwrap_or_default()
+        } else if event.kind.is_replaceable() {
+            String::new()
+        } else {
+            return Ok(event);
+        };
+        let Some(prev) = self.store.get_addressable(event.kind, &event.pubkey, &d)? else { return Ok(event) };
+        if prev.created_at < event.created_at {
+            return Ok(event);
+        }
+        EventBuilder::new(event.kind, event.content.clone())
+            .tags(event.tags.clone())
+            .custom_created_at(crate::sync::publish_time(Some(prev.created_at)))
+            .finalize(&self.keys)
+            .map_err(|e| SessionError::Other(e.to_string()))
+    }
+
+    async fn publish(&self, event: &Event) -> Result<PublishReport> {
+        let event = &self.fresh(event.clone())?;
+        self.store.put_event(event)?;
+        let report = self.pool.publish(event).await?;
+        if !report.any_accepted() {
+            tracing::warn!("rejected {}: {:?}", event.id, report.rejected);
+            return Err(SessionError::NotPublished);
+        }
+        Ok(report)
+    }
+
+    /// Queues a config push; changes within a few seconds go out as one.
+    fn push_config(&self) {
+        self.config_dirty.notify_one();
+    }
+
+    /// Pushes queued config now (e.g. before shutting down).
+    pub async fn flush_config(&self) {
+        if let Err(e) = (ConfigSync { keys: &self.keys, pool: &self.pool, store: &self.store }).push().await {
+            tracing::warn!("config push failed: {e}");
+        }
+    }
+
+    fn spawn_batchers(self: &Arc<Self>) {
+        let (me, refresh) = (Arc::downgrade(self), self.refresh.clone());
+        tokio::spawn(async move {
+            loop {
+                refresh.notified().await;
+                tokio::time::sleep(REFRESH_SETTLE).await;
+                let Some(s) = me.upgrade() else { break };
+                if let Err(e) = s.resubscribe().await {
+                    tracing::warn!("resubscribe failed: {e}");
+                }
+                if let Err(e) = s.rebuild_channel_keys() {
+                    tracing::warn!("channel key rebuild failed: {e}");
+                }
+            }
+        });
+        let (me, dirty) = (Arc::downgrade(self), self.config_dirty.clone());
+        tokio::spawn(async move {
+            loop {
+                dirty.notified().await;
+                // Keep waiting while changes keep coming.
+                while tokio::time::timeout(CONFIG_SETTLE, dirty.notified()).await.is_ok() {
+                    if me.strong_count() == 0 {
+                        return;
+                    }
+                }
+                let Some(s) = me.upgrade() else { break };
+                s.flush_config().await;
+            }
+        });
+    }
+
+    pub async fn create_server(&self, name: &str) -> Result<String> {
+        let (gid, events) = publish::create_server(&self.keys, name)?;
+        self.store.pin_server_owner(&gid, &self.keys.public_key())?;
+        for e in &events {
+            self.publish(e).await?;
+        }
+        self.store.set_server_membership(&gid, true)?;
+        self.push_config();
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(gid.clone()));
+        Ok(gid)
+    }
+
+    /// Publishes an invite and returns its `nostr:naddr1…` link.
+    pub async fn create_invite(&self, gid: &str) -> Result<String> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let code = publish::new_public_id()[..8].to_owned();
+        self.publish(&publish::invite(&self.keys, &state, &code, 0, 0)?).await?;
+        invite_link::encode(gid, &code, &self.keys.public_key(), &[]).ok_or(SessionError::Unknown)
+    }
+
+    pub async fn join(&self, link: &str) -> Result<String> {
+        let link: InviteLink = invite_link::parse(link).ok_or(SessionError::BadInvite)?;
+        if !link.relays.is_empty() {
+            self.pool.add_relays(&link.relays).await?;
+            self.pool.connect().await;
+        }
+        let events = self.fetch_server(&link.gid).await?;
+        let owner = invite_link::resolve_owner(&link, &events);
+        self.store.pin_server_owner(&link.gid, &owner)?;
+
+        let state = self.server(&link.gid)?.ok_or(SessionError::Unknown)?;
+        // max_uses isn't checked: without a server counting uses, nothing
+        // trustworthy says how many times an invite has been used.
+        // The invite must be on record (not revoked) from the link's author.
+        let invite_ok = state.invites.get(&link.code).is_some_and(|i| {
+            i.created_by == link.author && (i.expires_at == 0 || i.expires_at > now_secs())
+        });
+        if !invite_ok || state.is_banned(&self.keys.public_key()) {
+            return Err(SessionError::BadInvite);
+        }
+
+        self.publish(&publish::join(&self.keys, &link.gid, "", "", now_secs())?).await?;
+        self.store.set_server_membership(&link.gid, true)?;
+        self.push_config();
+        self.backfill(&state).await?;
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(link.gid.clone()));
+        Ok(link.gid)
+    }
+
+    pub async fn leave(&self, gid: &str) -> Result<()> {
+        self.publish(&publish::leave(&self.keys, gid)?).await?;
+        self.store.set_server_membership(gid, false)?;
+        self.push_config();
+        self.resubscribe().await?;
+        Ok(())
+    }
+
+    /// Adds a text channel. For an encrypted one, the key is generated,
+    /// announced in the structure and shared with every reader before this
+    /// returns, so nobody can send to it before it has a key.
+    pub async fn create_channel(&self, gid: &str, name: &str, encrypted: bool) -> Result<String> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let id = publish::new_public_id();
+        let key = encrypted.then(channel_keys::generate);
+        let mut structure = state.structure.clone();
+        structure.channels.push(wire::Channel {
+            group_id: Some(publish::channel_group_id(gid, &id)),
+            id: id.clone(),
+            name: name.into(),
+            kind: "text".into(),
+            position: structure.channels.len() as i64,
+            category: None,
+            topic: String::new(),
+            nsfw: false,
+            permission_overrides: Default::default(),
+            encrypted,
+            channel_pubkey: key.as_ref().map(|k| k.public_key().to_hex()),
+            sidechat: None,
+            parent: None,
+            voice_bitrate: 64_000,
+            voice_user_limit: 0,
+            video_enabled: false,
+            post_only: false,
+        });
+        let event = self.fresh(publish::structure(&self.keys, &state, &structure)?)?;
+        self.store.put_event(&event)?;
+        if let Some(key) = key {
+            let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+            let wraps = channel_keys::share(&self.keys, gid, &id, &key, channel_keys::readers(&state))
+                .map_err(SessionError::Other)?;
+            for w in &wraps {
+                self.pool.publish(w).await?;
+            }
+            self.channel_keys.lock().unwrap_or_else(|e| e.into_inner()).entry(gid.into()).or_default().insert(key);
+        }
+        // Only now announce it, so the key reaches members first.
+        if !self.pool.publish(&event).await?.any_accepted() {
+            return Err(SessionError::NotPublished);
+        }
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(id)
+    }
+
+    /// Shares the current keys of `gid`'s encrypted channels with `member`.
+    /// Managers' sessions do this when someone joins.
+    async fn share_keys_with(&self, gid: &str, member: PublicKey) -> Result<()> {
+        let Some(state) = self.server(gid)? else { return Ok(()) };
+        if !state.has(&self.keys.public_key(), Permission::ManageChannels)
+            || !state.has(&member, Permission::ReadMessages)
+        {
+            return Ok(());
+        }
+        let mut wraps = Vec::new();
+        {
+            let all = self.channel_keys.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(held) = all.get(gid) else { return Ok(()) };
+            for c in state.structure.channels.iter().filter(|c| c.encrypted) {
+                let Some(key) = c.channel_pubkey.as_deref().and_then(|pk| held.get(pk)) else { continue };
+                wraps.extend(channel_keys::share(&self.keys, gid, &c.id, key, [member]).map_err(SessionError::Other)?);
+            }
+        }
+        for w in &wraps {
+            self.pool.publish(w).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn send(&self, gid: &str, channel_id: &str, msg: &Outgoing<'_>) -> Result<Event> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let channel = state.channel(channel_id).ok_or(SessionError::Unknown)?;
+        let event = send::message(&self.keys, &state, channel, msg, now_secs())?;
+        self.publish(&event).await?;
+        let _ = self.updates.send(Update::Channel { gid: gid.into(), channel_id: channel_id.into() });
+        Ok(event)
+    }
+
+    pub async fn send_dm(&self, to: PublicKey, body: &str) -> Result<()> {
+        let events = dm::build(&self.keys, to, body, vec![]).map_err(|e| SessionError::Other(e.to_string()))?;
+        for e in &events {
+            self.pool.publish(e).await?;
+        }
+        Ok(())
+    }
+
+    // ─── Subscriptions ───────────────────────────────────────────────────
+
+    async fn fetch_server(&self, gid: &str) -> Result<Vec<Event>> {
+        let exact = vec![dtag::metadata(gid), dtag::structure(gid), dtag::roles(gid), dtag::emojis(gid), dtag::stickers(gid)];
+        let state_kinds = [kinds::SERVER_METADATA, kinds::SERVER_STRUCTURE, kinds::SERVER_ROLES, kinds::SERVER_EMOJI, kinds::SERVER_STICKERS];
+        let events = self
+            .pool
+            .fetch(vec![
+                Filter::new().kinds(state_kinds.map(Kind::Custom)).identifiers(exact),
+                // Relays can't match a d-tag prefix; filter these locally.
+                Filter::new().kinds([kinds::SERVER_MEMBER, kinds::SERVER_BAN, kinds::SERVER_INVITE].map(Kind::Custom)),
+            ])
+            .await?;
+        let mut kept = Vec::new();
+        for e in events {
+            if wire::server_gid(&e).as_deref() == Some(gid) {
+                self.store.put_event(&e)?;
+                kept.push(e);
+            }
+        }
+        Ok(kept)
+    }
+
+    /// One bounded fetch of recent history for a server we just joined; the
+    /// live subscription only covers what's new from here on.
+    async fn backfill(&self, state: &ServerState) -> Result<()> {
+        let groups: Vec<String> = state.structure.channels.iter().filter_map(|c| c.group_id.clone()).collect();
+        if groups.is_empty() {
+            return Ok(());
+        }
+        let filter = Filter::new()
+            .kinds(CHANNEL_KINDS.map(Kind::Custom))
+            .custom_tags(SingleLetterTag::from_char('h').expect("h"), groups)
+            .limit(JOIN_BACKFILL);
+        for e in self.pool.fetch(vec![filter]).await? {
+            self.store.put_event(&e)?;
+        }
+        Ok(())
+    }
+
+    fn resume_from(&self, newest: Option<i64>) -> Option<Timestamp> {
+        newest.map(|at| Timestamp::from((at.max(0) as u64).saturating_sub(RESUME_OVERLAP_SECS)))
+    }
+
+    /// (Re)opens the long-lived subscriptions for what we belong to.
+    pub async fn resubscribe(&self) -> Result<()> {
+        let me = self.keys.public_key();
+        let me_hex = vec![me.to_hex()];
+        let dm_newest = self.store.newest_tagged(&[Kind::GiftWrap.as_u16(), kinds::DM_LEGACY], 'p', &me_hex)?;
+        self.pool.subscribe_keyed("dms", dm::filters(me, self.resume_from(dm_newest))).await?;
+
+        let gids = self.servers()?;
+        let mut groups = HashMap::new();
+        for gid in &gids {
+            if let Some(state) = self.server(gid)? {
+                for c in &state.structure.channels {
+                    if let Some(g) = &c.group_id {
+                        groups.insert(g.clone(), (gid.clone(), c.id.clone()));
+                    }
+                }
+            }
+        }
+        if gids.is_empty() {
+            self.pool.unsubscribe_keyed("servers").await;
+        } else {
+            let exact: Vec<String> = gids
+                .iter()
+                .flat_map(|g| [dtag::metadata(g), dtag::structure(g), dtag::roles(g), dtag::emojis(g), dtag::stickers(g)])
+                .collect();
+            let state_kinds = [kinds::SERVER_METADATA, kinds::SERVER_STRUCTURE, kinds::SERVER_ROLES, kinds::SERVER_EMOJI, kinds::SERVER_STICKERS];
+            self.pool
+                .subscribe_keyed("servers", vec![
+                    Filter::new().kinds(state_kinds.map(Kind::Custom)).identifiers(exact),
+                    Filter::new()
+                        .kinds([kinds::SERVER_MEMBER, kinds::SERVER_BAN, kinds::SERVER_INVITE].map(Kind::Custom))
+                        .since(self.started_at),
+                ])
+                .await?;
+        }
+        if groups.is_empty() {
+            self.pool.unsubscribe_keyed("channels").await;
+        } else {
+            let group_ids: Vec<String> = groups.keys().cloned().collect();
+            let mut filter = Filter::new()
+                .kinds(CHANNEL_KINDS.map(Kind::Custom))
+                .custom_tags(SingleLetterTag::from_char('h').expect("h"), group_ids.clone());
+            // Resume from what's cached; new servers get `backfill` instead.
+            // The start point is pinned per session so the filter stays equal
+            // across refreshes and re-subscribing stays a no-op.
+            let newest = self.store.newest_tagged(&CHANNEL_KINDS, 'h', &group_ids)?;
+            let since = self.resume_from(newest).map_or(self.started_at, |t| t.min(self.started_at));
+            filter = filter.since(since);
+            self.pool.subscribe_keyed("channels", vec![filter]).await?;
+        }
+        *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
+        Ok(())
+    }
+
+    fn rebuild_channel_keys(&self) -> Result<()> {
+        let wraps = self.store.events_by_tag(Kind::GiftWrap, 'p', &self.keys.public_key().to_hex(), usize::MAX >> 1)?;
+        for gid in self.servers()? {
+            let Some(state) = self.server(&gid)? else { continue };
+            let mut ck = ChannelKeys::default();
+            for w in &wraps {
+                ck.accept(&self.keys, &state, w);
+            }
+            self.channel_keys.lock().unwrap_or_else(|e| e.into_inner()).insert(gid, ck);
+        }
+        Ok(())
+    }
+
+    fn spawn_listener(self: &Arc<Self>) {
+        let me = Arc::downgrade(self);
+        let mut notifications = self.pool.notifications();
+        tokio::spawn(async move {
+            while let Some(n) = notifications.next().await {
+                let ClientNotification::Event { event, .. } = n else { continue };
+                let Some(session) = me.upgrade() else { break };
+                if let Err(e) = session.handle(&event).await {
+                    tracing::warn!("handling {}: {e}", event.id);
+                }
+            }
+        });
+    }
+
+    async fn handle(&self, event: &Event) -> Result<()> {
+        let kind = event.kind.as_u16();
+        match kind {
+            _ if event.kind == Kind::GiftWrap || event.kind == Kind::PrivateDirectMessage => {
+                if let Ok(msg) = dm::open(&self.keys, event) {
+                    self.store.put_event(event)?;
+                    if !self.blocked()?.contains(&msg.sender) {
+                        let _ = self.updates.send(Update::Dm(msg));
+                    }
+                } else if event.kind == Kind::GiftWrap {
+                    self.try_key_share(event)?;
+                }
+            }
+            kinds::SERVER_METADATA..=kinds::SERVER_INVITE => {
+                let Some(gid) = wire::server_gid(event) else { return Ok(()) };
+                if !self.servers()?.contains(&gid) {
+                    return Ok(());
+                }
+                let was_member = kind == kinds::SERVER_MEMBER
+                    && wire::target(event).is_some_and(|p| {
+                        self.server(&gid).ok().flatten().is_some_and(|s| s.is_member(&p))
+                    });
+                self.store.put_event(event)?;
+                if kind == kinds::SERVER_MEMBER && !was_member {
+                    if let Some(p) = wire::target(event) {
+                        if self.server(&gid)?.is_some_and(|s| s.is_member(&p)) {
+                            self.share_keys_with(&gid, p).await?;
+                        }
+                    }
+                }
+                if kind == kinds::SERVER_STRUCTURE || kind == kinds::SERVER_ROLES || kind == kinds::SERVER_MEMBER {
+                    // New channels or changed access: refresh routing and keys,
+                    // batched so a burst of member events is one refresh.
+                    self.refresh.notify_one();
+                }
+                let _ = self.updates.send(Update::Server(gid));
+            }
+            _ if CHANNEL_KINDS.contains(&kind) => {
+                let group = event.tags.iter().find_map(|t| {
+                    let s = t.as_slice();
+                    (s.first().map(String::as_str) == Some("h")).then(|| s.get(1).cloned()).flatten()
+                });
+                let route = group.and_then(|g| self.groups.lock().unwrap_or_else(|e| e.into_inner()).get(&g).cloned());
+                if let Some((gid, channel_id)) = route {
+                    self.store.put_event(event)?;
+                    let _ = self.updates.send(Update::Channel { gid, channel_id });
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
+    fn try_key_share(&self, wrap: &Event) -> Result<()> {
+        for gid in self.servers()? {
+            let Some(state) = self.server(&gid)? else { continue };
+            let mut all = self.channel_keys.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(channel_id) = all.entry(gid.clone()).or_default().accept(&self.keys, &state, wrap) {
+                drop(all);
+                self.store.put_event(wrap)?;
+                let _ = self.updates.send(Update::Channel { gid, channel_id });
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+}

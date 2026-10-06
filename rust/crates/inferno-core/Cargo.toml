@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tracing = "0.1"
 
 keyring-core = "1"
+rand = "0.9"
 
 # OS credential stores. Mobile (iOS protected keychain, Android keystore) is
 # wired in the mobile pass; see vault::os.

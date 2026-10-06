@@ -1299,6 +1299,7 @@ dependencies = [
  "keyring-core",
  "nostr",
  "nostr-sdk",
+ "rand 0.9.5",
  "rusqlite",
  "serde",
  "serde_json",

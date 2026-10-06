@@ -8,6 +8,7 @@ pub mod keys;
 pub mod kinds;
 pub mod relay;
 pub mod server;
+pub mod session;
 pub mod store;
 pub mod sync;
 pub mod vault;
