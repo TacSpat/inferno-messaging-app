@@ -5,6 +5,7 @@ pub mod blossom;
 pub mod channel;
 pub mod dm;
 pub mod dtag;
+pub mod gifs;
 pub mod keys;
 pub mod kinds;
 pub mod relay;

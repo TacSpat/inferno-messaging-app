@@ -14,6 +14,7 @@ use inferno_core::nostr_sdk::prelude::*;
 use inferno_core::server::wire::MemberProfile;
 use inferno_core::server::ServerState;
 use inferno_core::session::{Session, StartOptions, Update as SessionUpdate};
+use inferno_core::gifs::Gif;
 use inferno_core::social::{Friendship, Payload};
 use inferno_core::store::{RelaySource, Store};
 use inferno_core::vault::{OsKeyring, Vault};
@@ -272,6 +273,7 @@ pub enum Update {
     /// Custom emoji and stickers of every server we're in (Rails' picker
     /// offers them across servers).
     EmojiSets(Vec<crate::picker::ServerSet>),
+    GifLibrary { favorites: Vec<Gif>, collections: Vec<inferno_core::gifs::Collection> },
     /// The `Authorization` header for upload `id`, and the servers to try.
     UploadAuth { id: u64, header: String, servers: Vec<String> },
     /// The theme this account uses (synced across devices).
@@ -316,6 +318,11 @@ pub enum Command {
     Send { text: String, reply_to: Option<String>, spoiler: bool },
     /// A sticker, sent as its own message.
     SendSticker(String),
+    GifLibrary,
+    ToggleGifFavorite(Gif),
+    CreateGifCollection(String),
+    ToggleGifInCollection { id: String, gif: Gif },
+    DeleteGifCollection(String),
     Edit { id: String, text: String },
     Pin { id: String, pinned: bool },
     CreateServer(String),
@@ -442,6 +449,7 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     }
     ui.publish_me();
     ui.publish_home();
+    ui.publish_gifs();
     ui.publish_relays();
     ui.publish_servers();
 
@@ -759,6 +767,24 @@ impl Backend {
             Command::FindPeople(q) => {
                 let people = self.find_people(&q).await;
                 Cx::post_action(Update::People(people));
+            }
+            Command::GifLibrary => self.publish_gifs(),
+            Command::ToggleGifFavorite(gif) => {
+                let on = self.session.toggle_gif_favorite(gif).map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Notice(if on { "Added to favorites.".into() } else { "Removed from favorites.".into() }));
+                self.publish_gifs();
+            }
+            Command::CreateGifCollection(name) => {
+                self.session.create_gif_collection(&name).map_err(|e| e.to_string())?;
+                self.publish_gifs();
+            }
+            Command::ToggleGifInCollection { id, gif } => {
+                self.session.toggle_gif_in_collection(&id, gif).map_err(|e| e.to_string())?;
+                self.publish_gifs();
+            }
+            Command::DeleteGifCollection(id) => {
+                self.session.delete_gif_collection(&id).map_err(|e| e.to_string())?;
+                self.publish_gifs();
             }
             Command::SendSticker(url) if self.dm.is_some() => {
                 let to = self.dm.expect("checked");
@@ -1337,6 +1363,12 @@ impl Backend {
     fn refresh_all(&mut self) {
         self.publish_servers();
         self.publish_server_keep_channel();
+    }
+
+    fn publish_gifs(&mut self) {
+        if let Ok((favorites, collections)) = self.session.gif_library() {
+            Cx::post_action(Update::GifLibrary { favorites, collections });
+        }
     }
 
     fn publish_emoji_sets(&mut self) {

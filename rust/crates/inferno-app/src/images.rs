@@ -15,6 +15,28 @@ const RETRY_AFTER: Duration = Duration::from_secs(300);
 
 static TRIED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
+/// Our downloads in flight: request id → URL. Makepad's own image loader
+/// can't send a User-Agent, and some hosts (Wikimedia, for one) refuse
+/// requests without one, so we fetch and hand the bytes to its decoder.
+static PENDING: Mutex<Option<HashMap<LiveId, String>>> = Mutex::new(None);
+
+const USER_AGENT: &str = "Inferno/0.1 (Nostr chat client)";
+/// Bigger downloads are refused (animated GIFs can be large).
+const MAX_DOWNLOAD: usize = 25 * 1024 * 1024;
+
+fn pending_has(url: &str) -> bool {
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).values().any(|u| u == url)
+}
+
+fn fetch(cx: &mut Cx, url: &str) {
+    let mut req = HttpRequest::new(url.to_owned(), HttpMethod::GET);
+    req.set_header("User-Agent".into(), USER_AGENT.into());
+    req.set_max_response_body_bytes(MAX_DOWNLOAD as u64);
+    let id = LiveId::unique();
+    PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).insert(id, url.to_owned());
+    cx.http_request(id, req);
+}
+
 /// Only web images; nothing local, no data: or custom schemes.
 pub fn allowed(url: &str) -> bool {
     (url.starts_with("https://") || url.starts_with("http://")) && url.len() < 2048 && !url.contains(char::is_whitespace)
@@ -34,7 +56,7 @@ pub fn show(cx: &mut Cx, img: &ImageRef, url: Option<&str>) {
         let _ = img.load_image_http_by_url_async(cx, url);
         return;
     }
-    let loading = cx.has_global::<ImageCache>() && cx.get_global::<ImageCache>().map.contains_key(Path::new(url));
+    let loading = pending_has(url) || (cx.has_global::<ImageCache>() && cx.get_global::<ImageCache>().map.contains_key(Path::new(url)));
     if !loaded && !loading {
         let mut tried = TRIED.lock().unwrap_or_else(|e| e.into_inner());
         let tried = tried.get_or_insert_with(HashMap::new);
@@ -48,7 +70,7 @@ pub fn show(cx: &mut Cx, img: &ImageRef, url: Option<&str>) {
     }
     if !loading {
         // Starts the download; the shared cache keeps it once decoded.
-        let _ = load_image_http_by_url_async(cx, url);
+        fetch(cx, url);
     }
 }
 
@@ -59,6 +81,21 @@ pub fn handle_event(cx: &mut Cx, event: &Event) -> bool {
     match event {
         Event::NetworkResponses(e) => {
             handle_image_cache_network_responses(cx, e);
+            for r in e.iter() {
+                let (id, body) = match r {
+                    NetworkResponse::HttpResponse { request_id, response } => (
+                        *request_id,
+                        (200..300).contains(&response.status_code).then(|| response.body.clone()).flatten(),
+                    ),
+                    NetworkResponse::HttpError { request_id, .. } => (*request_id, None),
+                    _ => continue,
+                };
+                let url = PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).remove(&id);
+                let (Some(url), Some(body)) = (url, body) else { continue };
+                // Decoded off the UI thread; the result comes back as an
+                // AsyncImageLoad action (handled below).
+                let _ = load_image_from_data_async(cx, Path::new(&url), body);
+            }
             false
         }
         Event::Actions(actions) => {

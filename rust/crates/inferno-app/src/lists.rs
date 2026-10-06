@@ -1029,7 +1029,18 @@ pub enum Pick {
     Sticker(String, String),
     /// A section header: collapse or expand it.
     Toggle(String),
+    Tile(crate::picker::GifTile),
+    /// Send this GIF.
+    Gif(inferno_core::gifs::Gif),
+    /// Its 🔥: favorite or unfavorite.
+    Fire(inferno_core::gifs::Gif),
+    /// Right-click on a GIF, at a window position.
+    GifMenu(inferno_core::gifs::Gif, DVec2),
+    /// Right-click on a collection tile (its id).
+    TileMenu(String, DVec2),
 }
+
+const TILE_SLOTS: [&[LiveId]; 2] = [ids!(g0), ids!(g1)];
 
 const CELL_SLOTS: [&[LiveId]; 9] = [ids!(c0), ids!(c1), ids!(c2), ids!(c3), ids!(c4), ids!(c5), ids!(c6), ids!(c7), ids!(c8)];
 const STICKER_SLOTS: [&[LiveId]; 3] = [ids!(s0), ids!(s1), ids!(s2)];
@@ -1063,6 +1074,33 @@ impl PickerList {
                     for (k, slot) in STICKER_SLOTS.iter().enumerate() {
                         if k < st.len() && tapped(slot) {
                             return Some(Pick::Sticker(st[k].0.clone(), st[k].1.clone()));
+                        }
+                    }
+                }
+                Some(Row::Tiles(tiles)) => {
+                    for (k, slot) in TILE_SLOTS.iter().enumerate() {
+                        let Some(tile) = tiles.get(k) else { continue };
+                        if let Some(e) = item.view(cx, slot).finger_down(actions).filter(|e| !e.device.is_primary_hit()) {
+                            if let crate::picker::GifTile::Collection { id, .. } = tile {
+                                return Some(Pick::TileMenu(id.clone(), e.abs));
+                            }
+                        }
+                        if tapped(slot) {
+                            return Some(Pick::Tile(tile.clone()));
+                        }
+                    }
+                }
+                Some(Row::Gifs(gifs)) => {
+                    for (k, slot) in TILE_SLOTS.iter().enumerate() {
+                        let Some((gif, _)) = gifs.get(k) else { continue };
+                        if tapped(&[slot[0], id!(fire)]) {
+                            return Some(Pick::Fire(gif.clone()));
+                        }
+                        if let Some(e) = item.view(cx, slot).finger_down(actions).filter(|e| !e.device.is_primary_hit()) {
+                            return Some(Pick::GifMenu(gif.clone(), e.abs));
+                        }
+                        if tapped(slot) {
+                            return Some(Pick::Gif(gif.clone()));
                         }
                     }
                 }
@@ -1122,6 +1160,47 @@ impl Widget for PickerList {
                                 }
                                 None => view.set_visible(cx, false),
                             }
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(Row::Tiles(tiles)) => {
+                        use crate::picker::GifTile;
+                        let row = list.item(cx, i, id!(Tiles));
+                        for (k, slot) in TILE_SLOTS.iter().enumerate() {
+                            let view = row.view(cx, slot);
+                            let Some(tile) = tiles.get(k) else {
+                                view.set_visible(cx, false);
+                                continue;
+                            };
+                            view.set_visible(cx, true);
+                            let (icon, name, sub) = match tile {
+                                GifTile::Favorites(n) => ("🔥", "Favorites".to_owned(), format!("{n}")),
+                                GifTile::Trending => ("📈", "Trending GIFs".to_owned(), "Needs a Tenor key".to_owned()),
+                                GifTile::Collection { name, count, .. } => ("📁", name.clone(), format!("{count}")),
+                                GifTile::NewCollection => ("➕", "New collection".to_owned(), String::new()),
+                            };
+                            row.label(cx, &[slot[0], id!(icon)]).set_text(cx, icon);
+                            row.label(cx, &[slot[0], id!(name)]).set_text(cx, &name);
+                            row.label(cx, &[slot[0], id!(sub)]).set_text(cx, &sub);
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(Row::Gifs(gifs)) => {
+                        let row = list.item(cx, i, id!(Gifs));
+                        for (k, slot) in TILE_SLOTS.iter().enumerate() {
+                            let view = row.view(cx, slot);
+                            let Some((gif, fav)) = gifs.get(k) else {
+                                view.set_visible(cx, false);
+                                continue;
+                            };
+                            view.set_visible(cx, true);
+                            let img = row.image(cx, &[slot[0], id!(img)]);
+                            let preview = if gif.preview.is_empty() { &gif.url } else { &gif.preview };
+                            crate::images::show(cx, &img, Some(preview));
+                            // Rails' fire button: lit when it's a favorite.
+                            let mut fire = row.widget(cx, &[slot[0], id!(fire), id!(glyph)]);
+                            let a = if *fav { 1.0 } else { 0.35 };
+                            script_apply_eval!(cx, fire, {draw_text +: {color: #(vec4(1.0, 1.0, 1.0, a))}});
                         }
                         row.draw_all(cx, &mut Scope::empty());
                     }

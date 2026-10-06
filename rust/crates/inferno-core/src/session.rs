@@ -864,6 +864,35 @@ impl Session {
         Ok(())
     }
 
+    /// GIF favorites and collections (synced; see `gifs`).
+    pub fn gif_library(&self) -> Result<(Vec<crate::gifs::Gif>, Vec<crate::gifs::Collection>)> {
+        Ok((crate::gifs::favorites(&self.store)?, crate::gifs::collections(&self.store)?))
+    }
+
+    pub fn toggle_gif_favorite(&self, gif: crate::gifs::Gif) -> Result<bool> {
+        let on = crate::gifs::toggle_favorite(&self.store, gif)?;
+        self.push_config();
+        Ok(on)
+    }
+
+    pub fn create_gif_collection(&self, name: &str) -> Result<String> {
+        let id = crate::gifs::create_collection(&self.store, name)?;
+        self.push_config();
+        Ok(id)
+    }
+
+    pub fn toggle_gif_in_collection(&self, id: &str, gif: crate::gifs::Gif) -> Result<bool> {
+        let added = crate::gifs::toggle_in_collection(&self.store, id, gif)?;
+        self.push_config();
+        Ok(added)
+    }
+
+    pub fn delete_gif_collection(&self, id: &str) -> Result<()> {
+        crate::gifs::delete_collection(&self.store, id)?;
+        self.push_config();
+        Ok(())
+    }
+
     /// Where our uploads go: our NIP-B7 list, else Rails' defaults.
     pub fn blossom_servers(&self) -> Result<Vec<String>> {
         let listed = self

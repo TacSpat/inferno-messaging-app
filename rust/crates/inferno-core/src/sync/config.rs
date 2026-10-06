@@ -185,6 +185,13 @@ impl Store {
         Ok(settings.get(key).map(|s| s.value.clone()))
     }
 
+    /// Every synced setting whose key starts with `prefix`, with when it
+    /// was last set.
+    pub fn synced_settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, Value, i64)>, StoreError> {
+        let settings: BTreeMap<String, Setting> = self.get_setting(LOCAL_SETTINGS)?.unwrap_or_default();
+        Ok(settings.range(prefix.to_owned()..).take_while(|(k, _)| k.starts_with(prefix)).map(|(k, s)| (k.clone(), s.value.clone(), s.at)).collect())
+    }
+
     pub fn set_synced_setting(&self, key: &str, value: Value) -> Result<(), StoreError> {
         let mut settings: BTreeMap<String, Setting> = self.get_setting(LOCAL_SETTINGS)?.unwrap_or_default();
         settings.insert(key.to_owned(), Setting { value, at: now_secs() });

@@ -28,7 +28,8 @@ use makepad_widgets::*;
 use rich_input::RichInputWidgetRefExt;
 use crop::{Crop, Target};
 use uploads::Uploads;
-use picker::{Cell, ServerSet};
+use picker::{Cell, GifView, ServerSet};
+use inferno_core::gifs::{Collection as GifCollection, Gif};
 use std::collections::HashSet;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
@@ -952,6 +953,26 @@ script_mod! {
         draw_bg.color: gray_700 draw_bg.border_radius: 4.0
         img := Image{visible: false width: 108 height: 108 fit: ImageFit.Smallest}
     }
+    let GifTileView = RoundedView{
+        width: 181 height: 72 flow: Right spacing: 10 align: Align{y: 0.5} padding: Inset{left: 12 right: 12}
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_700 draw_bg.border_radius: 6.0
+        icon := Txt{text: "" draw_text.text_style.font_size: 16.0}
+        View{width: Fill height: Fit flow: Down spacing: 2
+            name := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}
+                flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+            sub := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.0}
+        }
+    }
+    let GifCell = RoundedView{
+        width: 181 height: 120 flow: Overlay align: Align{x: 1.0 y: 0.0}
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_900 draw_bg.border_radius: 6.0
+        img := Image{visible: false width: 181 height: 120 fit: ImageFit.CropToFill draw_bg.border_radius: 6.0}
+        fire := RoundedView{width: 28 height: 28 margin: 4 align: Center cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: #x00000099 draw_bg.border_radius: 14.0
+            glyph := Txt{text: "🔥" draw_text.text_style.font_size: 11.0}}
+    }
     mod.widgets.PickerListBase = #(lists::PickerList::register_widget(vm))
     mod.widgets.PickerList = set_type_default() do mod.widgets.PickerListBase{
         width: Fill height: Fill
@@ -980,6 +1001,13 @@ script_mod! {
             Stickers := View{width: Fill height: Fit flow: Right spacing: 4 margin: Inset{bottom: 4}
                 s0 := StickerCell{} s1 := StickerCell{} s2 := StickerCell{}
             }
+            // Rails' GIF home: 2-column tiles (Favorites, Trending, collections).
+            Tiles := View{width: Fill height: Fit flow: Right spacing: 6 margin: Inset{bottom: 6}
+                g0 := GifTileView{} g1 := GifTileView{}
+            }
+            Gifs := View{width: Fill height: Fit flow: Right spacing: 6 margin: Inset{bottom: 6}
+                g0 := GifCell{} g1 := GifCell{}
+            }
             Empty := Txt{width: Fill padding: 16 text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.5}
         }
     }
@@ -999,6 +1027,7 @@ script_mod! {
         draw_bg.border_size: 1.0
         draw_bg.border_color: gray_700
         tabs := View{width: Fill height: Fit flow: Right padding: Inset{left: 8 right: 8}
+            tab_gifs := PickerTab{label.text: "GIFs"}
             tab_stickers := PickerTab{label.text: "Stickers"}
             tab_emoji := PickerTab{label.text: "Emoji"}
         }
@@ -1008,6 +1037,18 @@ script_mod! {
             search := TextInput{width: Fill height: 30 empty_text: "Search..."
                 draw_bg +: {pixel: fn() { return vec4(0.0, 0.0, 0.0, 0.0) }}
                 draw_text +: {color: gray_200 color_empty: gray_500}}
+        }
+        // GIF tab: where you are, and adding without a search service.
+        gif_bar := View{visible: false width: Fill height: Fit flow: Down spacing: 6 padding: Inset{left: 8 right: 8 bottom: 6}
+            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                gif_back := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                    Txt{text: "‹ Back" draw_text.color: gray_300 draw_text.text_style.font_size: 9.0}}
+                gif_title := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
+            }
+            gif_link := TextInput{width: Fill height: 30 empty_text: "Paste a GIF link to add it to favorites"}
+        }
+        new_collection := View{visible: false width: Fill height: Fit padding: Inset{left: 8 right: 8 bottom: 6}
+            collection_name := TextInput{width: Fill height: 30 empty_text: "Name the collection, then press Enter"}
         }
         View{width: Fill height: Fill padding: Inset{left: 8 right: 8 bottom: 8}
             items := mod.widgets.PickerList{}
@@ -2157,6 +2198,12 @@ pub struct App {
     #[rust]
     emoji_sets: Vec<ServerSet>,
     #[rust]
+    gif_view: GifView,
+    #[rust]
+    gif_favorites: Vec<Gif>,
+    #[rust]
+    gif_collections: Vec<GifCollection>,
+    #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
     #[rust]
@@ -2209,6 +2256,7 @@ const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 4] = [
 const APPEARANCE_PAGE: usize = 2;
 
 /// Picker tabs (Rails' order; GIFs wait for a Tenor key decision).
+const PICKER_GIFS: usize = 0;
 const PICKER_STICKERS: usize = 1;
 const PICKER_EMOJI: usize = 2;
 
@@ -2577,6 +2625,9 @@ impl App {
                 false,
             ),
             A::Message(pk) => self.open_dm(cx, pk),
+            A::GifFavorite(gif) => self.send(backend::Command::ToggleGifFavorite(gif)),
+            A::GifCollection { id, gif } => self.send(backend::Command::ToggleGifInCollection { id, gif }),
+            A::DeleteGifCollection(id) => self.send(backend::Command::DeleteGifCollection(id)),
             A::AddFriend(pk) => self.send(backend::Command::AddFriend(pk)),
             A::AcceptFriend(pk) => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: true }),
             A::DeclineFriend(pk) => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: false }),
@@ -3410,10 +3461,28 @@ impl App {
         let (panel, items) = Self::picker_paths(status);
         let search = self.ui.text_input(cx, &[panel[0], id!(search)]).text();
         let stickers_ok = !status && (self.home || self.perms.send_custom_stickers);
-        if !stickers_ok && self.picker_tab == PICKER_STICKERS {
+        let gifs_ok = !status && (self.home || self.perms.send_gifs);
+        if (!stickers_ok && self.picker_tab == PICKER_STICKERS) || (!gifs_ok && self.picker_tab == PICKER_GIFS) {
             self.picker_tab = PICKER_EMOJI;
         }
-        let rows = if status || self.picker_tab == PICKER_EMOJI {
+        let on_gifs = !status && self.picker_tab == PICKER_GIFS;
+        self.ui.view(cx, &[panel[0], id!(gif_bar)]).set_visible(cx, on_gifs && self.gif_view != GifView::Home);
+        self.ui.view(cx, &[panel[0], id!(gif_link)]).set_visible(cx, on_gifs && self.gif_view == GifView::Favorites);
+        if on_gifs {
+            let title = match &self.gif_view {
+                GifView::Home => String::new(),
+                GifView::Favorites => "🔥 Favorites".into(),
+                GifView::Collection(id) => {
+                    format!("📁 {}", self.gif_collections.iter().find(|c| c.id == *id).map(|c| c.name.as_str()).unwrap_or(""))
+                }
+            };
+            self.ui.label(cx, &[panel[0], id!(gif_title)]).set_text(cx, &title);
+        } else {
+            self.ui.view(cx, &[panel[0], id!(new_collection)]).set_visible(cx, false);
+        }
+        let rows = if on_gifs {
+            picker::gif_rows(&self.gif_view, &search, &self.gif_favorites, &self.gif_collections)
+        } else if status || self.picker_tab == PICKER_EMOJI {
             picker::emoji_rows(&search, &self.picker_frequent, &self.emoji_sets, status || self.picker_custom_ok(), &self.picker_collapsed)
         } else {
             picker::sticker_rows(&search, &self.emoji_sets, &self.picker_collapsed)
@@ -3425,7 +3494,12 @@ impl App {
         if !status {
             // Rails showed "no permission" text; tabs you can't use are hidden (Flutter).
             self.ui.view(cx, ids!(composer_picker.tab_stickers)).set_visible(cx, stickers_ok);
-            for (path, tab) in [(ids!(composer_picker.tab_stickers), PICKER_STICKERS), (ids!(composer_picker.tab_emoji), PICKER_EMOJI)] {
+            self.ui.view(cx, ids!(composer_picker.tab_gifs)).set_visible(cx, gifs_ok);
+            for (path, tab) in [
+                (ids!(composer_picker.tab_gifs), PICKER_GIFS),
+                (ids!(composer_picker.tab_stickers), PICKER_STICKERS),
+                (ids!(composer_picker.tab_emoji), PICKER_EMOJI),
+            ] {
                 let on = self.picker_tab == tab;
                 self.ui.view(cx, &[path[0], path[1], id!(line)]).set_visible(cx, on);
                 let mut label = self.ui.widget(cx, &[path[0], path[1], id!(label)]);
@@ -3511,6 +3585,44 @@ impl App {
             lists::Pick::Sticker(_, url) => {
                 self.send(backend::Command::SendSticker(url));
                 self.close_pickers(cx);
+            }
+            lists::Pick::Tile(tile) => {
+                use picker::GifTile;
+                match tile {
+                    GifTile::Favorites(_) => self.gif_view = GifView::Favorites,
+                    GifTile::Collection { id, .. } => self.gif_view = GifView::Collection(id),
+                    GifTile::Trending => self.toast(cx, "Trending GIFs need a Tenor API key, which isn't set up yet.", Toast::Info),
+                    GifTile::NewCollection => {
+                        self.ui.view(cx, ids!(composer_picker.new_collection)).set_visible(cx, true);
+                        if let Some(mut i) = self.ui.text_input(cx, ids!(composer_picker.collection_name)).borrow_mut() {
+                            i.take_key_focus(cx);
+                        }
+                    }
+                }
+                self.refresh_picker(cx, false);
+            }
+            lists::Pick::Gif(gif) => {
+                self.send(backend::Command::Send { text: gif.url, reply_to: None, spoiler: false });
+                self.close_pickers(cx);
+            }
+            lists::Pick::Fire(gif) => self.send(backend::Command::ToggleGifFavorite(gif)),
+            lists::Pick::GifMenu(gif, at) => {
+                use ctxmenu::{Action as A, Item};
+                let mut items = vec![Item::new(if self.gif_favorites.iter().any(|g| g.url == gif.url) { "Remove from Favorites" } else { "Add to Favorites" }, A::GifFavorite(gif.clone()))];
+                if !self.gif_collections.is_empty() {
+                    items.push(Item::Separator);
+                }
+                for c in &self.gif_collections {
+                    let label = if c.gifs.iter().any(|g| g.url == gif.url) { format!("Remove from {}", c.name) } else { format!("Add to {}", c.name) };
+                    items.push(Item::new(label, A::GifCollection { id: c.id.clone(), gif: gif.clone() }));
+                }
+                items.push(Item::Separator);
+                items.push(Item::new("Copy Link", A::Copy(gif.url.clone())));
+                self.open_menu(cx, items, at);
+            }
+            lists::Pick::TileMenu(id, at) => {
+                use ctxmenu::{Action as A, Item};
+                self.open_menu(cx, vec![Item::danger("Delete Collection", A::DeleteGifCollection(id))], at);
             }
         }
     }
@@ -3696,6 +3808,18 @@ impl App {
                 self.ui.redraw(cx);
             }
             Update::Card(card) => self.show_card(cx, card),
+            Update::GifLibrary { favorites, collections } => {
+                self.gif_favorites = favorites.clone();
+                self.gif_collections = collections.clone();
+                if let GifView::Collection(id) = &self.gif_view {
+                    if !collections.iter().any(|c| c.id == *id) {
+                        self.gif_view = GifView::Home;
+                    }
+                }
+                if self.ui.view(cx, ids!(composer_picker)).visible() {
+                    self.refresh_picker(cx, false);
+                }
+            }
             Update::EmojiSets(sets) => {
                 self.emoji_sets = sets.clone();
                 self.show_status_emoji(cx);
@@ -3794,7 +3918,7 @@ impl MatchEvent for App {
         let (frequent, collapsed, tab) = picker::load();
         self.picker_frequent = frequent;
         self.picker_collapsed = collapsed;
-        self.picker_tab = if tab == PICKER_STICKERS { PICKER_STICKERS } else { PICKER_EMOJI };
+        self.picker_tab = if tab <= PICKER_EMOJI { tab } else { PICKER_EMOJI };
         let w = window_state::load();
         self.requested_pos = Some(dvec2(w.x, w.y));
         self.ui.window(cx, ids!(main_window)).configure_window(
@@ -3853,13 +3977,40 @@ impl MatchEvent for App {
         if tap(&self.ui, cx, ids!(p_status_emoji)) {
             self.open_status_picker(cx);
         }
+        if tap(&self.ui, cx, ids!(composer_picker.gif_back)) {
+            self.gif_view = GifView::Home;
+            self.refresh_picker(cx, false);
+        }
+        if let Some((link, _)) = self.ui.text_input(cx, ids!(composer_picker.gif_link)).returned(actions) {
+            let url = link.trim().to_owned();
+            if inferno_core::gifs::looks_like_gif(&url) {
+                if !self.gif_favorites.iter().any(|g| g.url == url) {
+                    self.send(backend::Command::ToggleGifFavorite(Gif { url, preview: String::new() }));
+                }
+                self.ui.text_input(cx, ids!(composer_picker.gif_link)).set_text(cx, "");
+            } else {
+                self.toast(cx, "That link isn't a GIF (try a .gif or media.tenor.com link).", Toast::Error);
+            }
+        }
+        if let Some((name, _)) = self.ui.text_input(cx, ids!(composer_picker.collection_name)).returned(actions) {
+            if !name.trim().is_empty() {
+                self.send(backend::Command::CreateGifCollection(name.trim().to_owned()));
+            }
+            self.ui.text_input(cx, ids!(composer_picker.collection_name)).set_text(cx, "");
+            self.ui.view(cx, ids!(composer_picker.new_collection)).set_visible(cx, false);
+        }
         if tap(&self.ui, cx, ids!(status_clear)) {
             self.status_emoji.clear();
             self.show_status_emoji(cx);
             self.close_pickers(cx);
         }
-        for (path, tab) in [(ids!(composer_picker.tab_stickers), PICKER_STICKERS), (ids!(composer_picker.tab_emoji), PICKER_EMOJI)] {
+        for (path, tab) in [
+            (ids!(composer_picker.tab_gifs), PICKER_GIFS),
+            (ids!(composer_picker.tab_stickers), PICKER_STICKERS),
+            (ids!(composer_picker.tab_emoji), PICKER_EMOJI),
+        ] {
             if tap(&self.ui, cx, path) {
+                self.gif_view = GifView::Home;
                 self.picker_tab = tab;
                 picker::save(&self.picker_frequent, &self.picker_collapsed, self.picker_tab);
                 self.refresh_picker(cx, false);
@@ -4514,7 +4665,15 @@ impl AppMain for App {
         }
         if images::handle_event(cx, event) {
             // A picture arrived: rows recorded before it need redrawing.
-            for list in [ids!(members.list), ids!(messages.list), ids!(dms.list), ids!(friend_list.list)] {
+            let lists: [&[LiveId]; 6] = [
+                ids!(members.list),
+                ids!(messages.list),
+                ids!(dms.list),
+                ids!(friend_list.list),
+                ids!(composer_picker.items.list),
+                ids!(status_picker.items.list),
+            ];
+            for list in lists {
                 lists::redraw_items(cx, &self.ui.portal_list(cx, list));
             }
             if let Some(card) = self.ui.view(cx, ids!(card_layer)).visible().then(|| self.card.clone()) {

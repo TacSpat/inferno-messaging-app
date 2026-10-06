@@ -39,6 +39,9 @@ pub enum Action {
     Block(String),
     MarkDmRead(String),
     CloseDm(String),
+    GifFavorite(inferno_core::gifs::Gif),
+    GifCollection { id: String, gif: inferno_core::gifs::Gif },
+    DeleteGifCollection(String),
     /// Returns to the menu this submenu came from.
     Back,
 }

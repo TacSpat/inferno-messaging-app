@@ -33,8 +33,29 @@ pub struct ServerSet {
     pub stickers: Vec<(String, String)>,
 }
 
+/// A tile on the GIF tab's home (Rails: 2 across).
+#[derive(Debug, Clone, PartialEq)]
+pub enum GifTile {
+    Favorites(usize),
+    Trending,
+    Collection { id: String, name: String, count: usize },
+    NewCollection,
+}
+
+/// Where the GIF tab is.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum GifView {
+    #[default]
+    Home,
+    Favorites,
+    Collection(String),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Row {
+    Tiles(Vec<GifTile>),
+    /// Up to two GIFs, each with whether it's a favorite.
+    Gifs(Vec<(inferno_core::gifs::Gif, bool)>),
     /// A collapsible section; `key` persists its state.
     Header { key: String, title: String, collapsed: bool },
     Cells(Vec<Cell>),
@@ -143,6 +164,42 @@ pub fn sticker_rows(search: &str, sets: &[ServerSet], collapsed: &HashSet<String
     rows
 }
 
+/// The GIF tab. Search needs a GIF service (Tenor), which isn't set up, so
+/// searching says so; favorites and collections work without one.
+pub fn gif_rows(
+    view: &GifView,
+    search: &str,
+    favorites: &[inferno_core::gifs::Gif],
+    collections: &[inferno_core::gifs::Collection],
+) -> Vec<Row> {
+    let fav: HashSet<&str> = favorites.iter().map(|g| g.url.as_str()).collect();
+    let grid = |gifs: &[inferno_core::gifs::Gif]| -> Vec<Row> {
+        gifs.chunks(2)
+            .map(|c| Row::Gifs(c.iter().map(|g| (g.clone(), fav.contains(g.url.as_str()))).collect()))
+            .collect()
+    };
+    if !search.trim().is_empty() {
+        return vec![Row::Empty("GIF search needs a Tenor API key, which isn't set up yet. Favorites and collections work without it.".into())];
+    }
+    match view {
+        GifView::Home => {
+            let mut tiles = vec![GifTile::Favorites(favorites.len()), GifTile::Trending];
+            tiles.extend(collections.iter().map(|c| GifTile::Collection { id: c.id.clone(), name: c.name.clone(), count: c.gifs.len() }));
+            tiles.push(GifTile::NewCollection);
+            chunk(&tiles, 2).into_iter().map(Row::Tiles).collect()
+        }
+        GifView::Favorites if favorites.is_empty() => {
+            vec![Row::Empty("No favorites yet. Paste a GIF link above, or press 🔥 on a GIF in chat.".into())]
+        }
+        GifView::Favorites => grid(favorites),
+        GifView::Collection(id) => match collections.iter().find(|c| c.id == *id) {
+            Some(c) if c.gifs.is_empty() => vec![Row::Empty("Nothing here yet. Right-click a GIF to add it to this collection.".into())],
+            Some(c) => grid(&c.gifs),
+            None => vec![Row::Empty("That collection is gone.".into())],
+        },
+    }
+}
+
 /// Moves `cell` to the front of the frequently used list (Rails' order).
 pub fn record_use(frequent: &mut Vec<Cell>, cell: Cell) {
     frequent.retain(|c| *c != cell);
@@ -238,6 +295,21 @@ mod tests {
         assert!(rows.iter().any(|r| matches!(r, Row::Cells(c) if c.iter().any(|x| matches!(x, Cell::Custom { name, .. } if name == "blaze")))));
         let rows = emoji_rows("blaze", &[], &[set()], false, &HashSet::new());
         assert!(matches!(&rows[0], Row::Empty(_)), "custom emoji hidden without the permission");
+    }
+
+    #[test]
+    fn gif_home_and_grids() {
+        use inferno_core::gifs::{Collection, Gif};
+        let g = |u: &str| Gif { url: u.into(), preview: u.into() };
+        let favs = vec![g("a"), g("b"), g("c")];
+        let cols = vec![Collection { id: "1".into(), name: "Lol".into(), gifs: vec![g("a")] }];
+        let home = gif_rows(&GifView::Home, "", &favs, &cols);
+        assert_eq!(home[0], Row::Tiles(vec![GifTile::Favorites(3), GifTile::Trending]));
+        assert!(matches!(&home[1], Row::Tiles(t) if t.len() == 2 && t[1] == GifTile::NewCollection));
+        let fav_rows = gif_rows(&GifView::Favorites, "", &favs, &cols);
+        assert_eq!(fav_rows.len(), 2);
+        assert!(matches!(&gif_rows(&GifView::Collection("1".into()), "", &favs, &cols)[0], Row::Gifs(v) if v[0].1));
+        assert!(matches!(&gif_rows(&GifView::Home, "cats", &favs, &cols)[0], Row::Empty(_)));
     }
 
     #[test]
