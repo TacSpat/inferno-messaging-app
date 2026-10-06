@@ -117,8 +117,12 @@ impl ServerState {
         };
         state.metadata = pick(&state, kinds::SERVER_METADATA).map(wire::metadata).unwrap_or_default();
         state.structure = pick(&state, kinds::SERVER_STRUCTURE).map(wire::structure).unwrap_or_default();
-        state.emojis = pick(&state, kinds::SERVER_EMOJI).map(wire::emojis).unwrap_or_default();
-        state.stickers = pick(&state, kinds::SERVER_STICKERS).map(wire::stickers).unwrap_or_default();
+        state.emojis = state.resolve_custom(
+            of(kinds::SERVER_EMOJI), Permission::CreateEmojis, wire::emojis, |e| (e.name.clone(), e.creator),
+        );
+        state.stickers = state.resolve_custom(
+            of(kinds::SERVER_STICKERS), Permission::CreateStickers, wire::stickers, |s| (s.name.to_lowercase(), s.creator),
+        );
         state.invites = state.resolve_invites(of(kinds::SERVER_INVITE));
         state
     }
@@ -191,6 +195,48 @@ impl ServerState {
         self.roles = new_roles;
         self.bans = new_bans;
         self.members = new_members;
+    }
+
+    /// Custom emoji or stickers. The newest list from a `manage_emojis`
+    /// holder is the base (managers add, edit and remove anything). Members
+    /// who may only create add their own items by publishing a list of their
+    /// own; from those, only items they created count, and only if their list
+    /// is newer than the base, so a manager's removal sticks. Managers
+    /// publish from this merged view, which keeps creators' items.
+    fn resolve_custom<T: Clone>(
+        &self,
+        events: &[&Event],
+        create: Permission,
+        parse: impl Fn(&Event) -> Vec<T>,
+        key: impl Fn(&T) -> (String, Option<PublicKey>),
+    ) -> Vec<T> {
+        let base = newest(events.iter().copied().filter(|e| self.has(&e.pubkey, Permission::ManageEmojis)));
+        let mut items = base.map(&parse).unwrap_or_default();
+        let mut names: HashSet<String> = items.iter().map(|i| key(i).0).collect();
+
+        let mut creators: Vec<&Event> = events
+            .iter()
+            .copied()
+            .filter(|e| !self.has(&e.pubkey, Permission::ManageEmojis) && self.has(&e.pubkey, create))
+            .filter(|e| base.is_none_or(|b| newer(e, b)))
+            .collect();
+        // One list per creator (their newest), applied oldest first.
+        creators.sort_by_key(|e| (e.created_at, std::cmp::Reverse(e.id)));
+        let mut latest_per_creator: HashMap<PublicKey, &Event> = HashMap::new();
+        for e in creators {
+            latest_per_creator.insert(e.pubkey, e);
+        }
+        let mut lists: Vec<&Event> = latest_per_creator.into_values().collect();
+        lists.sort_by_key(|e| (e.created_at, e.id));
+        for e in lists {
+            for item in parse(e) {
+                let (name, creator) = key(&item);
+                if creator == Some(e.pubkey) && names.insert(name) {
+                    items.push(item);
+                }
+            }
+        }
+        items
     }
 
     fn resolve_invites(&self, invites: &[&Event]) -> BTreeMap<String, Invite> {

@@ -2,6 +2,7 @@
 //! authority rules that decide which signers' events count.
 
 pub mod auth;
+pub mod custom;
 mod cache;
 pub mod state;
 pub mod wire;
