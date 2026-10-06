@@ -5,6 +5,7 @@
 #![allow(dead_code, clippy::all)]
 
 use makepad_widgets::{
+    image::ImageWidgetRefExt, view::ViewWidgetRefExt,
     makepad_derive_widget::*, makepad_draw::*, text_flow::TextFlow, widget::*,
 };
 
@@ -162,6 +163,9 @@ pub struct MessageText {
     /// inline widget when it closes.
     #[rust]
     open_link: Option<(String, String)>,
+    /// Images and GIFs drawn this pass: (item id, url).
+    #[rust]
+    media: Vec<(LiveId, String)>,
     /// Links and mentions drawn this pass: the range of TextFlow's tracked
     /// areas each one covers (one per row it wraps over), and its target.
     #[rust]
@@ -194,7 +198,16 @@ impl Widget for MessageText {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
-        self.text_flow.handle_event(cx, event, scope);
+        let actions = cx.capture_actions(|cx| self.text_flow.handle_event(cx, event, scope));
+        for (id, url) in self.media.clone() {
+            let item = self.text_flow.existing_item(id);
+            let tapped = |path: &[LiveId]| item.view(cx, path).finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap());
+            if tapped(&[live_id!(fire)]) {
+                cx.widget_action(self.widget_uid(), MessageTextAction::FavoriteGif(url.clone()));
+            } else if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+                cx.widget_action(self.widget_uid(), MessageTextAction::Link(url.clone()));
+            }
+        }
         for (i, (range, target)) in self.targets.clone().into_iter().enumerate() {
             for k in range {
                 let Some(area) = self.text_flow.areas_tracker.areas.get(k).copied() else { continue };
@@ -226,6 +239,7 @@ impl Widget for MessageText {
     fn draw_walk(&mut self, cx: &mut Cx2d, _scope: &mut Scope, walk: Walk) -> DrawStep {
         self.auto_id = 0;
         self.targets.clear();
+        self.media.clear();
         self.open_link = None;
 
         self.begin(cx, walk);
@@ -367,6 +381,21 @@ impl MessageText {
                     // they sit on the baseline; their rects are tracked for
                     // hover and clicks.
                     let Some((target, text)) = self.open_link.take() else { continue };
+                    // Rails' unfurl_images: an image link becomes the image
+                    // (max 384×288, rounded), on its own line.
+                    if crate::message_format::is_media(&target) {
+                        self.auto_id += 1;
+                        let id = LiveId(0x4d45_4449_0000 + self.auto_id);
+                        tf.new_line_collapsed(cx);
+                        let item = tf.item(cx, id, live_id!(media));
+                        let img = item.image(cx, ids!(img));
+                        crate::images::show(cx, &img, Some(&target));
+                        item.view(cx, ids!(fire)).set_visible(cx, inferno_core::gifs::looks_like_gif(&target));
+                        item.draw_all_unscoped(cx);
+                        tf.new_line_collapsed(cx);
+                        self.media.push((id, target));
+                        continue;
+                    }
                     let index = self.targets.len();
                     let hovered = self.hovered == Some(index);
                     let who = target.strip_prefix(crate::message_format::MENTION_SCHEME);
@@ -715,4 +744,6 @@ pub enum MessageTextAction {
     Link(String),
     /// A mention: a member's hex pubkey, `everyone`, or `role:<rrggbb>`.
     Mention(String),
+    /// The 🔥 on a GIF in a message.
+    FavoriteGif(String),
 }

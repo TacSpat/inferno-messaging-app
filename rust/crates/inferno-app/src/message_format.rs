@@ -18,6 +18,19 @@ pub fn plain(_: &str) -> Option<String> {
     None
 }
 
+/// Whether a link shows as the image itself (Rails' `unfurl_images`):
+/// image file extensions, GIF hosts, and Blossom blobs (a 64-hex path).
+pub fn is_media(url: &str) -> bool {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return false;
+    }
+    let path = url.split(['?', '#']).next().unwrap_or(url).to_lowercase();
+    let file = path.rsplit('/').next().unwrap_or("");
+    [".png", ".jpg", ".jpeg", ".gif", ".webp", ".avif", ".bmp"].iter().any(|e| file.ends_with(e))
+        || inferno_core::gifs::looks_like_gif(url)
+        || file.split('.').next().is_some_and(|stem| stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
 pub fn to_markdown(body: &str, resolve: Resolve) -> String {
     let mut out = String::with_capacity(body.len() + 16);
     let mut in_fence = false;
@@ -104,6 +117,16 @@ mod tests {
         assert_eq!(to_markdown("a\nb"), "a\\\nb");
         assert_eq!(to_markdown("a\n\nb"), "a\n\nb");
         assert_eq!(to_markdown("```\nx\ny\n```"), "```\nx\ny\n```");
+    }
+
+    #[test]
+    fn media_links() {
+        use super::is_media;
+        assert!(is_media("https://x.example/cat.PNG?w=2"));
+        assert!(is_media("https://media.tenor.com/abc/tenor.gif"));
+        assert!(is_media(&format!("https://blossom.example/{}", "a".repeat(64))));
+        assert!(!is_media("https://example.com/page"));
+        assert!(!is_media("ftp://x/cat.png"));
     }
 
     #[test]

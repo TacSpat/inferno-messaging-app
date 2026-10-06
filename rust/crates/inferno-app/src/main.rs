@@ -243,6 +243,16 @@ script_mod! {
             table_header_bg_color: gray_800
             table_border_color: gray_600
         }
+        // Rails' inline images: max-w-sm max-h-72 rounded-lg; GIFs get the fire button.
+        media := View{
+            width: Fit height: Fit flow: Overlay align: Align{x: 1.0 y: 0.0}
+            margin: Inset{top: 4 bottom: 4}
+            cursor: MouseCursor.Hand
+            img := Image{visible: false width: 384 height: 288 fit: ImageFit.Smallest draw_bg.border_radius: 8.0}
+            fire := RoundedView{visible: false width: 28 height: 28 margin: 6 align: Center cursor: MouseCursor.Hand
+                new_batch: true draw_bg.color: #x00000099 draw_bg.border_radius: 14.0
+                Txt{text: "🔥" draw_text.text_style.font_size: 11.0}}
+        }
         link_color: accent_light
         mention_color: accent
         mention_bg: accent_15
@@ -3958,6 +3968,9 @@ impl MatchEvent for App {
             match wa.cast::<message_text::MessageTextAction>() {
                 message_text::MessageTextAction::Link(url) if url.starts_with("https://") || url.starts_with("http://") => {
                     cx.open_url(&url, OpenUrlInPlace::No);
+                }
+                message_text::MessageTextAction::FavoriteGif(url) => {
+                    self.send(backend::Command::ToggleGifFavorite(Gif { url, preview: String::new() }));
                 }
                 message_text::MessageTextAction::Mention(who) if who.len() == 64 => {
                     self.card_at = Some(self.last_press + dvec2(0.0, 12.0));
