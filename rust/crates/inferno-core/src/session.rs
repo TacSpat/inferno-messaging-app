@@ -260,6 +260,18 @@ impl Session {
         self.config_dirty.notify_one();
     }
 
+    /// Sets a setting that follows the user across devices (kind 30078),
+    /// pushed with the next debounced config push.
+    pub fn set_synced_setting(&self, key: &str, value: serde_json::Value) -> Result<()> {
+        self.store.set_synced_setting(key, value)?;
+        self.push_config();
+        Ok(())
+    }
+
+    pub fn synced_setting(&self, key: &str) -> Result<Option<serde_json::Value>> {
+        Ok(self.store.synced_setting(key)?)
+    }
+
     /// Pushes queued config now (e.g. before shutting down).
     pub async fn flush_config(&self) {
         if let Err(e) = (ConfigSync { keys: &self.keys, pool: &self.pool, store: &self.store }).push().await {

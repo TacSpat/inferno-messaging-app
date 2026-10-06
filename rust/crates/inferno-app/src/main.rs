@@ -24,20 +24,35 @@ script_mod! {
     use mod.prelude.widgets.*
     use mod.widgets.*
 
-    // inferno theme tokens (theme.rs holds all seven).
-    let gray_950 = #x0a0a09
-    let gray_900 = #x141312
-    let gray_800 = #x1e1c1b
-    let gray_700 = #x2c2a29
-    let gray_600 = #x403e3c
-    let gray_500 = #x656361
-    let gray_400 = #x878583
-    let gray_300 = #xa8a7a5
-    let gray_200 = #xcccbca
-    let gray_100 = #xe1e0df
-    let accent = #xdc2626
-    let accent_light = #xf87171
-    let accent_dark = #xb91c1c
+    // Theme tokens, read from the current theme (theme.rs) every time this
+    // module runs; switching themes re-runs it (cx.request_style_reload).
+    let gray_950 = #(theme::tok("gray_950", 1.0))
+    let gray_900 = #(theme::tok("gray_900", 1.0))
+    let gray_800 = #(theme::tok("gray_800", 1.0))
+    let gray_700 = #(theme::tok("gray_700", 1.0))
+    let gray_600 = #(theme::tok("gray_600", 1.0))
+    let gray_500 = #(theme::tok("gray_500", 1.0))
+    let gray_400 = #(theme::tok("gray_400", 1.0))
+    let gray_300 = #(theme::tok("gray_300", 1.0))
+    let gray_200 = #(theme::tok("gray_200", 1.0))
+    let gray_100 = #(theme::tok("gray_100", 1.0))
+    let accent = #(theme::tok("accent", 1.0))
+    let accent_light = #(theme::tok("accent_light", 1.0))
+    let accent_dark = #(theme::tok("accent_dark", 1.0))
+    let confirm = #(theme::tok("confirm", 1.0))
+    // Tints used across the shell (spec: one faint accent glow everywhere).
+    let accent_00 = #(theme::tok("accent", 0.0))
+    let accent_06 = #(theme::tok("accent", 0.06))
+    let accent_12 = #(theme::tok("accent", 0.12))
+    let accent_15 = #(theme::tok("accent", 0.15))
+    let accent_20 = #(theme::tok("accent", 0.2))
+    let accent_25 = #(theme::tok("accent", 0.25))
+    let accent_30 = #(theme::tok("accent", 0.3))
+    let accent_40 = #(theme::tok("accent", 0.4))
+    let gray_700_00 = #(theme::tok("gray_700", 0.0))
+    let gray_700_50 = #(theme::tok("gray_700", 0.5))
+    let gray_100_60 = #(theme::tok("gray_100", 0.6))
+    let gray_400_60 = #(theme::tok("gray_400", 0.6))
 
     let Txt = Label{
         draw_text.color: gray_100
@@ -76,7 +91,7 @@ script_mod! {
         new_batch: true
         draw_bg.color: #0000
         draw_bg.border_radius: 4.0
-        hash := Txt{text: "#" draw_text.color: #x87858399 draw_text.text_style.font_size: 12.5}
+        hash := Txt{text: "#" draw_text.color: gray_400_60 draw_text.text_style.font_size: 12.5}
         name := Txt{width: Fill text: "channel" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5}
     }
 
@@ -142,13 +157,18 @@ script_mod! {
             hover: instance(0.0)
             // 0..1: jump-to flash, accent/.3 at full strength.
             flash: instance(0.0)
+            // Theme tokens reach shaders as uniforms.
+            c_clear: uniform(accent_00)
+            c_hover: uniform(accent_06)
+            c_flash: uniform(accent_30)
+            c_edge: uniform(accent_40)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
-                let fill = mix(#xdc262600, #xdc26260f, self.hover)
-                sdf.fill(mix(fill, #xdc26264d, self.flash))
+                let fill = mix(self.c_clear, self.c_hover, self.hover)
+                sdf.fill(mix(fill, self.c_flash, self.flash))
                 sdf.rect(0. 0. 2. self.rect_size.y)
-                sdf.fill(mix(#xdc262600, #xdc262666, self.hover))
+                sdf.fill(mix(self.c_clear, self.c_edge, self.hover))
                 return sdf.result
             }
         }
@@ -187,7 +207,7 @@ script_mod! {
         draw_bg.color: gray_800
         draw_bg.border_radius: 4.0
         draw_bg.border_size: 1.0
-        draw_bg.border_color: #xdc262640
+        draw_bg.border_color: accent_25
         reply_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/reply.svg")}}
         pin_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
         edit_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/edit.svg")}}
@@ -330,7 +350,7 @@ script_mod! {
                 new_batch: true
                 draw_bg.color: gray_600
                 draw_bg.border_radius: 4.0
-                item := ChannelItem{hash.draw_text.color: #xe1e0df99 name.draw_text.color: #xffffff}
+                item := ChannelItem{hash.draw_text.color: gray_100_60 name.draw_text.color: #xffffff}
                 RoundedView{width: 2 height: 33 draw_bg.color: accent draw_bg.border_radius: 1.0}
             }
         }
@@ -408,10 +428,12 @@ script_mod! {
         new_batch: true
         draw_bg +: {
             hover: instance(0.0)
+            c_clear: uniform(gray_700_00)
+            c_hover: uniform(gray_700)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
-                sdf.fill(mix(#x2c2a2900, #x2c2a29ff, self.hover))
+                sdf.fill(mix(self.c_clear, self.c_hover, self.hover))
                 return sdf.result
             }
         }
@@ -445,7 +467,7 @@ script_mod! {
         draw_bg.color: gray_800
         draw_bg.border_radius: 12.0
         draw_bg.border_size: 1.0
-        draw_bg.border_color: #x2c2a2980
+        draw_bg.border_color: gray_700_50
     }
 
     let FieldLabel = Txt{
@@ -588,6 +610,34 @@ script_mod! {
             }
             Empty := Hint{text: "Nobody here." margin: 8}
         }
+    }
+
+    // Rails' theme picker tile: 80×24 gradient swatch (135°, 0/40/100%),
+    // name under it; the picked one gets a brighter 2px border.
+    let ThemeTile = RoundedView{
+        width: Fit height: Fit flow: Down spacing: 4 padding: 8
+        cursor: MouseCursor.Hand
+        new_batch: true
+        draw_bg.color: #x00000066
+        draw_bg.border_radius: 8.0
+        draw_bg.border_size: 2.0
+        draw_bg.border_color: #xffffff1a
+        swatch := View{width: 80 height: 24 show_bg: true
+            draw_bg +: {
+                c0: uniform(vec4(0. 0. 0. 1.))
+                c1: uniform(vec4(0. 0. 0. 1.))
+                c2: uniform(vec4(0. 0. 0. 1.))
+                pixel: fn() {
+                    let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                    sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
+                    let t = (self.pos.x + self.pos.y) * 0.5
+                    let c = mix(self.c0, self.c1, clamp(t / 0.4, 0.0, 1.0))
+                    sdf.fill(mix(c, self.c2, clamp((t - 0.4) / 0.6, 0.0, 1.0)))
+                    return sdf.result
+                }
+            }
+        }
+        label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
     }
 
     mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
@@ -764,7 +814,7 @@ script_mod! {
                                         draw_icon.svg: crate_resource("self:resources/icons/search.svg")}
                                 }
                             }
-                            SolidView{width: Fill height: 1 draw_bg.color: #xdc26261f}
+                            SolidView{width: Fill height: 1 draw_bg.color: accent_12}
 
                             msg_area := View{
                                 width: Fill height: Fill
@@ -836,7 +886,7 @@ script_mod! {
                                     draw_bg.color: gray_600
                                     draw_bg.border_radius: 8.0
                                     draw_bg.border_size: 1.0
-                                    draw_bg.border_color: #xdc262633
+                                    draw_bg.border_color: accent_20
                                     View{width: Fit height: Fit padding: 8
                                         Ico{draw_icon.svg: crate_resource("self:resources/icons/plus.svg")}}
                                     composer := TextInput{
@@ -872,7 +922,7 @@ script_mod! {
                             search_results := mod.widgets.ResultList{}
                         }
                         // ── Member list: 240px, gray-800, 1px accent/.15 left border ──
-                        member_edge := SolidView{width: 1 height: Fill draw_bg.color: #xdc262626}
+                        member_edge := SolidView{width: 1 height: Fill draw_bg.color: accent_15}
                         member_col := SolidView{
                             width: 240 height: Fill
                             flow: Down
@@ -898,9 +948,10 @@ script_mod! {
                             nav_account := NavItem{label.text: "My Account"}
                             nav_profile := NavItem{label.text: "Profile"}
                             NavHeader{text: "APP SETTINGS"}
+                            nav_appearance := NavItem{label.text: "Appearance"}
                             nav_relays := NavItem{label.text: "Relays"}
                         }
-                        ScrollYView{
+                        settings_pages := ScrollYView{
                             width: Fill height: Fill
                             flow: Down
                             padding: Inset{left: 40 right: 40 top: 32 bottom: 32}
@@ -959,6 +1010,47 @@ script_mod! {
                                     add_relay := Button{text: "Add"}
                                 }
                                 relay_list := mod.widgets.RelayList{}
+                            }
+                        }
+                        // Appearance: Rails clears the overlay so the app shows
+                        // through and puts the picker in a bar along the bottom.
+                        page_appearance := View{
+                            visible: false
+                            width: Fill height: Fill
+                            align: Align{x: 0.5 y: 1.0}
+                            View{
+                                width: Fill height: Fit
+                                align: Align{x: 0.5}
+                                padding: Inset{left: 40 right: 40 top: 40 bottom: 20}
+                                show_bg: true
+                                draw_bg +: {
+                                    pixel: fn() {
+                                        // black/80 at the bottom, /60 midway, clear at the top.
+                                        let t = self.pos.y
+                                        let a = mix(0.0, 0.6, clamp(t * 2.0, 0.0, 1.0))
+                                        return vec4(0.0, 0.0, 0.0, mix(a, 0.8, clamp(t * 2.0 - 1.0, 0.0, 1.0)))
+                                    }
+                                }
+                                View{width: 768 height: Fit flow: Down
+                                    Txt{text: "THEME" margin: Inset{bottom: 12} draw_text.color: #xffffffb3
+                                        draw_text.text_style: theme.font_bold{font_size: 8.5}}
+                                    View{width: Fill height: Fit flow: Right{wrap: true} spacing: 8 margin: Inset{bottom: 16}
+                                    th_inferno := ThemeTile{label.text: "Inferno" swatch +: {draw_bg +: {c0: #x1e1c1b c1: #x2c2a29 c2: #xdc2626}}}
+                                    th_frostfire := ThemeTile{label.text: "Frostfire" swatch +: {draw_bg +: {c0: #x0f1b2d c1: #x243b53 c2: #x3b82f6}}}
+                                    th_boron := ThemeTile{label.text: "Boron" swatch +: {draw_bg +: {c0: #x0f1f15 c1: #x1a3328 c2: #x10b981}}}
+                                    th_brimstone := ThemeTile{label.text: "Brimstone" swatch +: {draw_bg +: {c0: #x1a1025 c1: #x2d1f42 c2: #xa855f7}}}
+                                    th_plasma := ThemeTile{label.text: "Plasma" swatch +: {draw_bg +: {c0: #x1c0f1c c1: #x3d2438 c2: #xec4899}}}
+                                    th_pulsar := ThemeTile{label.text: "Pulsar" swatch +: {draw_bg +: {c0: #x1e141e c1: #x3e2a3c c2: #xf9a8d4}}}
+                                    th_obsidian := ThemeTile{label.text: "Obsidian" swatch +: {draw_bg +: {c0: #x111827 c1: #x1e293b c2: #x94a3b8}}}
+                                    }
+                                    // Rails: full-width confirm gradient, py-2.5, semibold.
+                                    theme_save := RoundedView{width: Fill height: 40 align: Align{x: 0.5 y: 0.5}
+                                        cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: confirm draw_bg.border_radius: 4.0
+                                        Txt{text: "Save Changes" draw_text.color: #xffffff
+                                            draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                                    }
+                                }
                             }
                         }
                         View{width: Fit height: Fit padding: 24 flow: Down align: Align{x: 0.5} spacing: 4
@@ -1297,6 +1389,14 @@ pub struct App {
     /// A press landed in the search hints: the input's blur must not hide them.
     #[rust]
     press_in_suggest: bool,
+    /// The account's saved theme; a preview reverts to it unless saved.
+    #[rust]
+    saved_theme: String,
+    /// The settings page showing, restored after a restyle.
+    #[rust]
+    settings_page: usize,
+    #[rust]
+    srv_page: usize,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1340,10 +1440,23 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 4] = [
     (ids!(snav_bans), ids!(spage_bans)),
 ];
 
-const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 3] = [
+const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 4] = [
     (ids!(nav_account), ids!(page_account)),
     (ids!(nav_profile), ids!(page_profile)),
+    (ids!(nav_appearance), ids!(page_appearance)),
     (ids!(nav_relays), ids!(page_relays)),
+];
+
+const APPEARANCE_PAGE: usize = 2;
+
+const THEME_TILES: [(&[LiveId], &str); 7] = [
+    (ids!(th_inferno), "inferno"),
+    (ids!(th_frostfire), "frostfire"),
+    (ids!(th_boron), "boron"),
+    (ids!(th_brimstone), "brimstone"),
+    (ids!(th_plasma), "plasma"),
+    (ids!(th_pulsar), "pulsar"),
+    (ids!(th_obsidian), "obsidian"),
 ];
 
 /// Sets an input's text with the caret at the end, where typing continues.
@@ -1415,15 +1528,40 @@ impl App {
         self.ui.redraw(cx);
     }
 
+    /// Switches the drawn theme. The DSL reads its tokens when it runs, so a
+    /// style reload re-runs it and reapplies the tree in place.
+    fn apply_theme(&mut self, cx: &mut Cx, name: &str) {
+        if theme::set_current(name) {
+            cx.request_style_reload();
+        }
+    }
+
+    fn mark_theme_tiles(&mut self, cx: &mut Cx) {
+        let current = theme::current().name;
+        for (path, name) in THEME_TILES {
+            let border = if name == current { lists::rgba(0xffffff, 0.6) } else { lists::rgba(0xffffff, 0.1) };
+            let mut tile = self.ui.widget(cx, path);
+            script_apply_eval!(cx, tile, {draw_bg +: {border_color: #(border)}});
+        }
+    }
+
     fn show_settings_page(&mut self, cx: &mut Cx, page: usize) {
+        self.settings_page = page;
+        self.mark_theme_tiles(cx);
+        // Appearance shows the app through the overlay (Rails' theme-picker).
+        let appearance = page == APPEARANCE_PAGE;
+        self.ui.view(cx, ids!(settings_pages)).set_visible(cx, !appearance);
+        let mut overlay = self.ui.widget(cx, ids!(settings));
+        let bg = if appearance { lists::rgba(0, 0.0) } else { theme::tok("gray_900", 1.0) };
+        script_apply_eval!(cx, overlay, {draw_bg +: {color: #(bg)}});
         for (i, (nav, view)) in SETTINGS_PAGES.iter().enumerate() {
             let active = i == page;
             self.ui.view(cx, view).set_visible(cx, active);
             let mut item = self.ui.widget(cx, nav);
             let (bg, fg) = if active {
-                (lists::rgba(0x403e3c, 1.0), lists::rgba(0xffffff, 1.0))
+                (theme::tok("gray_600", 1.0), lists::rgba(0xffffff, 1.0))
             } else {
-                (lists::rgba(0x000000, 0.0), lists::rgba(0x878583, 1.0))
+                (lists::rgba(0x000000, 0.0), theme::tok("gray_400", 1.0))
             };
             script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
             let mut label = self.ui.widget(cx, &[nav[0], id!(label)]);
@@ -1436,6 +1574,10 @@ impl App {
         self.ui.view(cx, ids!(settings)).set_visible(cx, open);
         if open {
             self.show_settings_page(cx, 0);
+        } else {
+            // An unsaved preview goes back to the saved theme.
+            let saved = if self.saved_theme.is_empty() { "inferno".to_owned() } else { self.saved_theme.clone() };
+            self.apply_theme(cx, &saved);
         }
         self.ui.redraw(cx);
     }
@@ -1540,7 +1682,7 @@ impl App {
                     slot.set_visible(cx, true);
                     self.ui.view(cx, &[id!(ctx_menu), *slot_id, id!(sep)]).set_visible(cx, d.sep);
                     let mut label = self.ui.widget(cx, &[id!(ctx_menu), *slot_id, id!(item), id!(label)]);
-                    let color = if d.danger { lists::rgba(0xf87171, 1.0) } else { lists::rgba(0xa8a7a5, 1.0) };
+                    let color = if d.danger { lists::rgba(0xf87171, 1.0) } else { theme::tok("gray_300", 1.0) };
                     script_apply_eval!(cx, label, {draw_text +: {color: #(color)}});
                     label.set_text(cx, &d.label);
                 }
@@ -1883,14 +2025,15 @@ impl App {
     }
 
     fn show_srv_page(&mut self, cx: &mut Cx, page: usize) {
+        self.srv_page = page;
         for (i, (nav, view)) in SRV_PAGES.iter().enumerate() {
             let active = i == page;
             self.ui.view(cx, view).set_visible(cx, active);
             let mut item = self.ui.widget(cx, nav);
             let (bg, fg) = if active {
-                (lists::rgba(0x403e3c, 1.0), lists::rgba(0xffffff, 1.0))
+                (theme::tok("gray_600", 1.0), lists::rgba(0xffffff, 1.0))
             } else {
-                (lists::rgba(0x000000, 0.0), lists::rgba(0x878583, 1.0))
+                (lists::rgba(0x000000, 0.0), theme::tok("gray_400", 1.0))
             };
             script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
             let mut label = self.ui.widget(cx, &[nav[0], id!(label)]);
@@ -2141,6 +2284,10 @@ impl App {
                 );
                 self.ui.view(cx, ids!(backup_form)).set_visible(cx, false);
                 self.ui.redraw(cx);
+            }
+            Update::Theme(name) => {
+                self.saved_theme = name.clone();
+                self.apply_theme(cx, name);
             }
             Update::SearchResults { query, rows } => {
                 let n = rows.len();
@@ -2508,6 +2655,18 @@ impl MatchEvent for App {
         if tapped(&self.ui, cx, ids!(close_settings)) {
             self.set_settings_open(cx, false);
         }
+        for (path, name) in THEME_TILES {
+            if tapped(&self.ui, cx, path) {
+                self.apply_theme(cx, name);
+                self.mark_theme_tiles(cx);
+            }
+        }
+        if tapped(&self.ui, cx, ids!(theme_save)) {
+            let name = theme::current().name.to_owned();
+            self.saved_theme = name.clone();
+            self.send(backend::Command::SetTheme(name));
+            self.notice(cx, "Theme saved.");
+        }
         for (i, (nav, _)) in SETTINGS_PAGES.iter().enumerate() {
             if tapped(&self.ui, cx, nav) {
                 self.show_settings_page(cx, i);
@@ -2625,6 +2784,16 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        // A theme switch reapplies the DSL, which resets styling set at
+        // runtime; put it back.
+        if let Event::LiveEdit = event {
+            if self.ui.view(cx, ids!(settings)).visible() {
+                self.show_settings_page(cx, self.settings_page);
+            }
+            if self.ui.view(cx, ids!(srv_settings)).visible() {
+                self.show_srv_page(cx, self.srv_page);
+            }
+        }
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {

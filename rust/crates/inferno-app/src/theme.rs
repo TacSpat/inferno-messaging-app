@@ -96,3 +96,75 @@ mod tests {
         assert_eq!(Rgb(0xff0080).vec4(1.0), [1.0, 0.0, 128.0 / 255.0, 1.0]);
     }
 }
+
+// ─── The theme in use ────────────────────────────────────────────────────
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static CURRENT: AtomicUsize = AtomicUsize::new(usize::MAX);
+
+fn ui_file() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))?;
+    let name = match std::env::var("INFERNO_PROFILE") {
+        Ok(p) if !p.is_empty() => format!("theme-{p}"),
+        _ => "theme".to_owned(),
+    };
+    Some(base.join("inferno").join(name))
+}
+
+/// The theme the UI is drawn with. Starts from the last one picked on this
+/// device (so the first frame is right), then follows the synced setting.
+pub fn current() -> &'static Theme {
+    let mut i = CURRENT.load(Ordering::Relaxed);
+    if i == usize::MAX {
+        let saved = ui_file().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        i = THEMES.iter().position(|t| t.name == saved.trim()).unwrap_or(0);
+        CURRENT.store(i, Ordering::Relaxed);
+    }
+    &THEMES[i.min(THEMES.len() - 1)]
+}
+
+/// Picks a theme by name; false if unknown or unchanged. The caller then
+/// requests a style reload so the DSL re-reads the tokens.
+pub fn set_current(name: &str) -> bool {
+    let Some(i) = THEMES.iter().position(|t| t.name == name) else { return false };
+    if CURRENT.swap(i, Ordering::Relaxed) == i {
+        return false;
+    }
+    if let Some(p) = ui_file() {
+        let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
+        let _ = std::fs::write(p, name);
+    }
+    true
+}
+
+impl Theme {
+    pub fn token(&self, name: &str) -> Rgb {
+        match name {
+            "gray_950" => self.gray_950,
+            "gray_900" => self.gray_900,
+            "gray_800" => self.gray_800,
+            "gray_700" => self.gray_700,
+            "gray_600" => self.gray_600,
+            "gray_500" => self.gray_500,
+            "gray_400" => self.gray_400,
+            "gray_300" => self.gray_300,
+            "gray_200" => self.gray_200,
+            "gray_100" => self.gray_100,
+            "accent" => self.accent,
+            "accent_light" => self.accent_light,
+            "accent_dark" => self.accent_dark,
+            "confirm" => self.confirm,
+            "danger" => self.danger,
+            other => panic!("unknown theme token {other}"),
+        }
+    }
+}
+
+/// A token of the current theme at `alpha`, for the DSL.
+pub fn tok(name: &str, alpha: f32) -> makepad_widgets::Vec4 {
+    let [r, g, b, a] = current().token(name).vec4(alpha);
+    makepad_widgets::vec4(r, g, b, a)
+}

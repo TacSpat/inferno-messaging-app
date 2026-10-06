@@ -170,6 +170,8 @@ pub struct SearchRow {
 
 #[derive(Debug, Clone)]
 pub enum Update {
+    /// The theme this account uses (synced across devices).
+    Theme(String),
     SearchResults { query: String, rows: Vec<SearchRow> },
     ServerSettings(ServerSettings),
     Profile(ProfileForm),
@@ -224,6 +226,7 @@ pub enum Command {
     MarkRead(String),
     DeleteMessage(String),
     Search(String),
+    SetTheme(String),
     SaveOverview(ServerSettings),
     SaveRoles(Vec<RoleForm>),
     Unban(String),
@@ -306,6 +309,9 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     let session = Session::start_with(keys, store, options).await.map_err(|e| e.to_string())?;
 
     let mut ui = Backend { session: session.clone(), server: None, channel: None, vault, npub: identity.npub(), backed_up };
+    if let Ok(Some(serde_json::Value::String(theme))) = session.synced_setting("theme") {
+        Cx::post_action(Update::Theme(theme));
+    }
     ui.publish_me();
     ui.publish_relays();
     ui.publish_servers();
@@ -613,6 +619,9 @@ impl Backend {
                 self.session.delete_server(&gid).await.map_err(|e| e.to_string())?;
                 self.channel = None;
                 self.publish_servers();
+            }
+            Command::SetTheme(name) => {
+                self.session.set_synced_setting("theme", serde_json::json!(name)).map_err(|e| e.to_string())?;
             }
             Command::Search(text) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
