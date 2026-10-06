@@ -42,6 +42,8 @@ pub enum MessageAction {
     Pin(usize),
     /// Right-click on a row at a window position.
     Context(usize, DVec2),
+    /// Click on the author's avatar or name, at a window position.
+    Author(usize, DVec2),
 }
 
 /// Spec: a jumped-to message flashes accent/.3, fading over 4s.
@@ -108,6 +110,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
             MessageRow {
                 id: String::new(),
                 own: false,
+                author_pk: String::new(),
                 reply_to: None,
                 author: a.name.into(),
                 initial: a.name[..1].to_uppercase(),
@@ -174,6 +177,14 @@ impl MessageList {
                 if !e.device.is_primary_hit() && self.rows.get(index).is_some_and(|r| !r.id.is_empty()) {
                     out = Some(MessageAction::Context(index, e.abs));
                     continue;
+                }
+            }
+            let author_paths: [&[LiveId]; 2] = [ids!(line.avatar), ids!(line.content.head.who)];
+            for path in author_paths {
+                if let Some(e) = item.view(cx, path).finger_up(actions).filter(|e| !e.cancelled && e.was_tap()) {
+                    if self.rows.get(index).is_some_and(|r| !r.author_pk.is_empty()) {
+                        out = Some(MessageAction::Author(index, e.abs));
+                    }
                 }
             }
             let clicked = |path: &[LiveId]| item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);

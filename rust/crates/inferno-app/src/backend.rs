@@ -122,6 +122,8 @@ pub struct MessageRow {
     pub id: String,
     /// Sent by us: offers Edit.
     pub own: bool,
+    /// The author's pubkey (hex), for the profile card.
+    pub author_pk: String,
     /// The parent's event id, for jump-to-reply.
     pub reply_to: Option<String>,
     pub author: String,
@@ -168,8 +170,32 @@ pub struct SearchRow {
     pub body: String,
 }
 
+/// Rails' profile card (`users/_card`), for one member of the open server.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Card {
+    pub pubkey: String,
+    pub npub: String,
+    pub name: String,
+    /// Rails' `tag`: the username.
+    pub tag: String,
+    pub initial: String,
+    pub status: String,
+    pub about: String,
+    /// Body: profile_color → profile_color_2 at 135° (`#1e1c1b` without one).
+    pub color: u32,
+    pub color_2: u32,
+    /// Avatar ring: profile_color_2, else profile_color, else `#1e1c1b`.
+    pub ring: u32,
+    pub avatar: u32,
+    /// (name, color), in role order, without @everyone.
+    pub roles: Vec<(String, u32)>,
+    pub joined_at: Option<i64>,
+    pub me: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Update {
+    Card(Card),
     /// The theme this account uses (synced across devices).
     Theme(String),
     SearchResults { query: String, rows: Vec<SearchRow> },
@@ -227,6 +253,8 @@ pub enum Command {
     DeleteMessage(String),
     Search(String),
     SetTheme(String),
+    /// Opens the profile card of a member (hex pubkey).
+    Card(String),
     SaveOverview(ServerSettings),
     SaveRoles(Vec<RoleForm>),
     Unban(String),
@@ -378,6 +406,43 @@ fn hex_color(s: &str) -> Option<u32> {
 
 const DEFAULT_ROLE: u32 = 0xcccbca; // gray-200, Rails' color for no role
 const DEFAULT_AVATAR: u32 = 0x1e1c1b;
+
+fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> Card {
+    let d = display(state, pk);
+    let m = state.members.get(pk);
+    let profile = m.map(|m| m.profile.clone()).unwrap_or_default();
+    let c1 = profile.color.as_deref().and_then(hex_color);
+    let c2 = profile.color_2.as_deref().and_then(hex_color);
+    let mut roles: Vec<_> = state
+        .roles
+        .iter()
+        .filter(|r| !r.is_everyone() && m.is_some_and(|m| m.roles.contains(&r.id)))
+        .collect();
+    roles.sort_by_key(|r| std::cmp::Reverse(r.position));
+    let status = [profile.status_emoji.as_str(), profile.status.as_str()]
+        .iter()
+        .filter(|s| !s.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let npub = inferno_core::nostr::nips::nip19::ToBech32::to_bech32(pk).unwrap_or_default();
+    Card {
+        pubkey: pk.to_hex(),
+        tag: if profile.name.is_empty() { format!("{}…", &npub[..16.min(npub.len())]) } else { profile.name.clone() },
+        npub,
+        initial: first_initial(&d.name),
+        name: d.name,
+        status,
+        about: profile.about.clone(),
+        color: c1.unwrap_or(DEFAULT_AVATAR),
+        color_2: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
+        ring: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
+        avatar: d.avatar,
+        roles: roles.iter().map(|r| (r.name.clone(), hex_color(&r.color).unwrap_or(0x99aab5))).collect(),
+        joined_at: m.and_then(|m| m.joined_at),
+        me: pk == me,
+    }
+}
 
 struct Display {
     name: String,
@@ -619,6 +684,12 @@ impl Backend {
                 self.session.delete_server(&gid).await.map_err(|e| e.to_string())?;
                 self.channel = None;
                 self.publish_servers();
+            }
+            Command::Card(pk) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let state = self.session.server(&gid).map_err(|e| e.to_string())?.ok_or("Unknown server")?;
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Card(card(&state, &pk, &self.session.keys().public_key())));
             }
             Command::SetTheme(name) => {
                 self.session.set_synced_setting("theme", serde_json::json!(name)).map_err(|e| e.to_string())?;
@@ -975,6 +1046,7 @@ impl Backend {
             rows.push(MessageRow {
                 id: m.id.to_hex(),
                 own: m.author == self.session.keys().public_key(),
+                author_pk: m.author.to_hex(),
                 reply_to: m.reply_to.map(|r| r.to_hex()),
                 initial: first_initial(&d.name),
                 author: d.name,

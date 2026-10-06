@@ -16,7 +16,7 @@ mod window_state;
 
 use makepad_widgets::*;
 
-use backend::{ServerPerms, ServerSettings};
+use backend::{Card, ServerPerms, ServerSettings};
 
 app_main!(App);
 
@@ -110,6 +110,7 @@ script_mod! {
     // ─── Member list ─────────────────────────────────────────────────
     let MemberItem = RoundedView{
         width: Fill height: Fit
+        cursor: MouseCursor.Hand
         padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
         flow: Right spacing: 12
         align: Align{y: 0.5}
@@ -241,7 +242,7 @@ script_mod! {
                 line := View{
                     width: Fill height: Fit
                     flow: Right
-                    avatar := RoundedView{
+                    avatar := RoundedView{cursor: MouseCursor.Hand 
                         width: 40 height: 40
                         margin: Inset{right: 16 top: 2}
                         align: Center
@@ -261,7 +262,8 @@ script_mod! {
                             width: Fill height: Fit
                             flow: Right spacing: 8
                             align: Align{y: 0.5}
-                            name := Txt{text: "name" draw_text.text_style.font_size: 10.5}
+                            who := View{width: Fit height: Fit cursor: MouseCursor.Hand
+                                name := Txt{text: "name" draw_text.text_style.font_size: 10.5}}
                             time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
                         }
                         body := Body{text: ""}
@@ -638,6 +640,87 @@ script_mod! {
             }
         }
         label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
+    }
+
+    // Rails' profile card (users/_card): w-72, 80px banner, 66px avatar
+    // ring overlapping it by 35px, black/30 panel, uppercase section heads.
+    let CardSection = View{width: Fill height: Fit flow: Down spacing: 4
+        SolidView{width: Fill height: 1 margin: Inset{bottom: 4} draw_bg.color: #xffffff1a}
+    }
+    let CardHead = Txt{draw_text.color: #xffffff80 draw_text.text_style: theme.font_bold{font_size: 7.5}}
+    let RoleChip = RoundedView{visible: false width: Fit height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+        padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true
+        draw_bg.color: #x0000004d draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xffffff1a
+        dot := RoundedView{width: 8 height: 8 draw_bg.color: #x99aab5 draw_bg.border_radius: 4.0}
+        label := Txt{text: "" draw_text.color: #xffffffcc draw_text.text_style.font_size: 8.5}
+    }
+    let ProfileCard = RoundedView{
+        width: 288 height: Fit
+        flow: Down
+        new_batch: true
+        draw_bg +: {
+            c0: uniform(vec4(0.118 0.11 0.106 1.))
+            c1: uniform(vec4(0.118 0.11 0.106 1.))
+            banner: uniform(vec4(0.17 0.16 0.16 1.))
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y 8.0)
+                let t = clamp((self.pos.x + self.pos.y) * 0.5, 0.0, 1.0)
+                let body = mix(self.c0, self.c1, t)
+                let px = self.pos.y * self.rect_size.y
+                sdf.fill_keep(mix(self.banner, body, step(80.0, px)))
+                // Stands in for Rails' shadow-2xl: the banner is gray-700,
+                // the same as the chat behind it.
+                sdf.stroke(vec4(0.0, 0.0, 0.0, 0.5), 1.5)
+                return sdf.result
+            }
+        }
+        View{width: Fill height: 80}
+        View{width: Fill height: Fit flow: Down padding: Inset{left: 12 right: 12 bottom: 12 top: 4} margin: Inset{top: -35}
+            View{width: 66 height: 66 flow: Overlay margin: Inset{bottom: 8}
+                ring := RoundedView{width: 66 height: 66 padding: 5 new_batch: true
+                    draw_bg.color: #x1e1c1b draw_bg.border_radius: 33.0
+                    avatar := RoundedView{width: 56 height: 56 align: Center new_batch: true
+                        draw_bg.color: #x1e1c1b draw_bg.border_radius: 28.0
+                        initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                    }
+                }
+                View{width: 66 height: 66 padding: Inset{left: 46 top: 46}
+                    dot := RoundedView{width: 18 height: 18 new_batch: true
+                        draw_bg.color: #x22c55e draw_bg.border_radius: 9.0
+                        draw_bg.border_size: 3.0 draw_bg.border_color: #x1e1c1b}
+                }
+            }
+            RoundedView{width: Fill height: Fit flow: Down spacing: 8 padding: 12 new_batch: true
+                draw_bg.color: #x0000004d draw_bg.border_radius: 8.0
+                View{width: Fill height: Fit flow: Down spacing: 2
+                    name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 12.0}}
+                    tag := Txt{text: "" draw_text.color: #xffffff99 draw_text.text_style.font_size: 8.5}
+                    status := Txt{text: "" draw_text.color: #xffffffb3 draw_text.text_style.font_size: 8.5}
+                }
+                about_box := CardSection{
+                    CardHead{text: "ABOUT ME"}
+                    about := Txt{width: Fill text: "" draw_text.color: #xffffffcc draw_text.text_style.font_size: 9.0}
+                }
+                roles_box := CardSection{
+                    CardHead{text: "ROLES"}
+                    View{width: Fill height: Fit flow: Right{wrap: true} spacing: 4
+                        r0 := RoleChip{} r1 := RoleChip{} r2 := RoleChip{} r3 := RoleChip{} r4 := RoleChip{}
+                        r5 := RoleChip{} r6 := RoleChip{} r7 := RoleChip{} r8 := RoleChip{} r9 := RoleChip{}
+                    }
+                }
+                CardSection{
+                    CardHead{text: "MEMBER SINCE"}
+                    since := Txt{text: "" draw_text.color: #xffffffcc draw_text.text_style.font_size: 9.0}
+                }
+                // Flutter's shortcuts on the card.
+                View{width: Fill height: Fit flow: Right spacing: 8 margin: Inset{top: 4}
+                    card_copy := RoundedView{width: Fill height: 30 align: Center cursor: MouseCursor.Hand new_batch: true
+                        draw_bg.color: #x00000066 draw_bg.border_radius: 4.0
+                        Txt{text: "Copy User ID" draw_text.color: #xffffffcc draw_text.text_style.font_size: 9.0}}
+                }
+            }
+        }
     }
 
     mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
@@ -1248,6 +1331,11 @@ script_mod! {
                     }
 
                     // Context menus, opened at the pointer (ctxmenu.rs).
+                    card_layer := View{
+                        visible: false
+                        width: Fill height: Fill
+                        card := ProfileCard{}
+                    }
                     ctx_layer := View{
                         visible: false
                         width: Fill height: Fill
@@ -1397,6 +1485,11 @@ pub struct App {
     settings_page: usize,
     #[rust]
     srv_page: usize,
+    /// Where the next profile card opens (its top left).
+    #[rust]
+    card_at: Option<DVec2>,
+    #[rust]
+    card: Card,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1496,12 +1589,21 @@ impl App {
             .borrow::<message_list::MessageList>()
             .and_then(|l| {
                 let i = match action {
-                    MessageAction::Reply(i) | MessageAction::Edit(i) | MessageAction::Pin(i) | MessageAction::Context(i, _) => i,
+                    MessageAction::Reply(i)
+                    | MessageAction::Edit(i)
+                    | MessageAction::Pin(i)
+                    | MessageAction::Context(i, _)
+                    | MessageAction::Author(i, _) => i,
                 };
                 l.row(i).cloned()
             });
         let Some(row) = row else { return };
         match action {
+            MessageAction::Author(_, at) => {
+                // Rails: below the click, left-aligned.
+                self.card_at = Some(at + dvec2(0.0, 8.0));
+                self.send(backend::Command::Card(row.author_pk.clone()));
+            }
             MessageAction::Reply(_) => {
                 self.clear_bars(cx);
                 self.reply_to = Some(row.id.clone());
@@ -2156,6 +2258,66 @@ impl App {
         }
     }
 
+    fn show_card(&mut self, cx: &mut Cx, card: &backend::Card) {
+        let Some(at) = self.card_at.take() else { return };
+        self.close_menu(cx);
+        self.card = card.clone();
+        let c = self.ui.widget(cx, ids!(card));
+        let mut bg = c.clone();
+        let (c0, c1) = (lists::rgba(card.color, 1.0), lists::rgba(card.color_2, 1.0));
+        let banner = theme::tok("gray_700", 1.0);
+        script_apply_eval!(cx, bg, {draw_bg +: {c0: #(c0) c1: #(c1) banner: #(banner)}});
+        let ring = lists::rgba(card.ring, 1.0);
+        let mut w = self.ui.widget(cx, ids!(card.ring));
+        script_apply_eval!(cx, w, {draw_bg +: {color: #(ring)}});
+        let mut w = self.ui.widget(cx, ids!(card.dot));
+        script_apply_eval!(cx, w, {draw_bg +: {border_color: #(ring)}});
+        let avatar = lists::rgba(card.avatar, 1.0);
+        let mut w = self.ui.widget(cx, ids!(card.ring.avatar));
+        script_apply_eval!(cx, w, {draw_bg +: {color: #(avatar)}});
+        self.ui.label(cx, ids!(card.ring.avatar.initial)).set_text(cx, &card.initial);
+        self.ui.label(cx, ids!(card.name)).set_text(cx, &card.name);
+        self.ui.label(cx, ids!(card.tag)).set_text(cx, &card.tag);
+        self.ui.label(cx, ids!(card.status)).set_text(cx, &card.status);
+        self.ui.widget(cx, ids!(card.status)).set_visible(cx, !card.status.is_empty());
+        self.ui.label(cx, ids!(card.about)).set_text(cx, &card.about);
+        self.ui.view(cx, ids!(card.about_box)).set_visible(cx, !card.about.is_empty());
+        self.ui.view(cx, ids!(card.roles_box)).set_visible(cx, !card.roles.is_empty());
+        for (i, chip) in [ids!(r0), ids!(r1), ids!(r2), ids!(r3), ids!(r4), ids!(r5), ids!(r6), ids!(r7), ids!(r8), ids!(r9)]
+            .into_iter()
+            .enumerate()
+        {
+            let view = self.ui.view(cx, &[id!(card), chip[0]]);
+            match card.roles.get(i) {
+                Some((name, color)) => {
+                    view.set_visible(cx, true);
+                    self.ui.label(cx, &[id!(card), chip[0], id!(label)]).set_text(cx, name);
+                    let mut dot = self.ui.widget(cx, &[id!(card), chip[0], id!(dot)]);
+                    let c = lists::rgba(*color, 1.0);
+                    script_apply_eval!(cx, dot, {draw_bg +: {color: #(c)}});
+                }
+                None => view.set_visible(cx, false),
+            }
+        }
+        let since = card.joined_at.map(lists::date_long).unwrap_or_else(|| "Unknown".into());
+        self.ui.label(cx, ids!(card.since)).set_text(cx, &since);
+        // Keep it on screen; Rails clamps against 400px of height.
+        let win = self.ui.view(cx, ids!(card_layer)).area().rect(cx).size;
+        let win = if win.x > 0.0 { win } else { dvec2(1400.0, 860.0) };
+        let (x, y) = ctxmenu::place((at.x, at.y), (288.0, 400.0), (win.x, win.y));
+        let mut w = self.ui.widget(cx, ids!(card));
+        script_apply_eval!(cx, w, {margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ui.view(cx, ids!(card_layer)).set_visible(cx, true);
+        self.ui.redraw(cx);
+    }
+
+    fn close_card(&mut self, cx: &mut Cx) {
+        if self.ui.view(cx, ids!(card_layer)).visible() {
+            self.ui.view(cx, ids!(card_layer)).set_visible(cx, false);
+            self.ui.redraw(cx);
+        }
+    }
+
     fn show_search_panel(&mut self, cx: &mut Cx, open: bool) {
         self.ui.view(cx, ids!(search_panel)).set_visible(cx, open);
         self.ui.view(cx, ids!(member_col)).set_visible(cx, !open);
@@ -2285,6 +2447,7 @@ impl App {
                 self.ui.view(cx, ids!(backup_form)).set_visible(cx, false);
                 self.ui.redraw(cx);
             }
+            Update::Card(card) => self.show_card(cx, card),
             Update::Theme(name) => {
                 self.saved_theme = name.clone();
                 self.apply_theme(cx, name);
@@ -2358,6 +2521,20 @@ impl MatchEvent for App {
         let rail_click = self.ui.widget(cx, ids!(rail)).borrow::<lists::RailList>().and_then(|r| r.clicked(cx, actions));
         if let Some(gid) = rail_click {
             self.send(backend::Command::SelectServer(gid));
+        }
+        let member_click = self.ui.widget(cx, ids!(members)).borrow::<lists::MemberList>().and_then(|l| l.clicked_member(cx, actions));
+        if let Some((i, at)) = member_click {
+            if let Some(backend::MemberRow::Member { pubkey, .. }) = self.members.get(i).cloned() {
+                // Rails: to the left of the member list, level with the click.
+                let left = self.ui.view(cx, ids!(member_col)).area().rect(cx).pos.x;
+                self.card_at = Some(dvec2(left - 288.0 - 8.0, at.y - 24.0));
+                self.send(backend::Command::Card(pubkey));
+            }
+        }
+        if self.ui.view(cx, ids!(card_copy)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+            cx.copy_to_clipboard(&self.card.npub);
+            self.notice(cx, "User ID copied.");
+            self.close_card(cx);
         }
         let member_ctx = self.ui.widget(cx, ids!(members)).borrow::<lists::MemberList>().and_then(|l| l.context(cx, actions));
         if let Some((i, at)) = member_ctx {
@@ -2797,7 +2974,9 @@ impl AppMain for App {
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {
-                if self.ui.view(cx, ids!(ctx_layer)).visible() {
+                if self.ui.view(cx, ids!(card_layer)).visible() {
+                    self.close_card(cx);
+                } else if self.ui.view(cx, ids!(ctx_layer)).visible() {
                     self.close_menu(cx);
                 } else if self.ui.view(cx, ids!(channel_page)).visible() || self.ui.view(cx, ids!(category_page)).visible() {
                     self.close_pages(cx);
@@ -2830,6 +3009,9 @@ impl AppMain for App {
         if let Event::MouseDown(m) = event {
             let suggest = self.ui.view(cx, ids!(search_suggest));
             self.press_in_suggest = suggest.visible() && suggest.area().rect(cx).contains(m.abs);
+            if self.ui.view(cx, ids!(card_layer)).visible() && !self.ui.view(cx, ids!(card)).area().rect(cx).contains(m.abs) {
+                self.close_card(cx);
+            }
             if self.ui.view(cx, ids!(ctx_layer)).visible() && !self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).contains(m.abs) {
                 self.close_menu(cx);
             }
