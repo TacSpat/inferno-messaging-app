@@ -1288,6 +1288,8 @@ version = "0.1.0"
 dependencies = [
  "inferno-core",
  "makepad-widgets",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

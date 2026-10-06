@@ -9,6 +9,7 @@ mod demo;
 mod message_list;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
+mod window_state;
 
 use makepad_widgets::*;
 
@@ -225,7 +226,6 @@ script_mod! {
         ui: Root{
             main_window := Window{
                 window.title: "Inferno"
-                window.inner_size: vec2(1400, 860)
                 pass.clear_color: gray_700
                 body +: {
                     SolidView{
@@ -444,9 +444,28 @@ script_mod! {
 pub struct App {
     #[live]
     ui: WidgetRef,
+    /// Where we asked the window to be, to learn the decoration offset.
+    #[rust]
+    requested_pos: Option<DVec2>,
+    /// The OS reports the inner position but places by the frame; subtract
+    /// the difference when saving or the window creeps down every launch.
+    #[rust]
+    frame_offset: Option<DVec2>,
 }
 
 impl MatchEvent for App {
+    fn handle_startup(&mut self, cx: &mut Cx) {
+        let w = window_state::load();
+        self.requested_pos = Some(dvec2(w.x, w.y));
+        self.ui.window(cx, ids!(main_window)).configure_window(
+            cx,
+            dvec2(w.width, w.height),
+            dvec2(w.x, w.y),
+            w.maximized,
+            "Inferno".into(),
+        );
+    }
+
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         let composer = self.ui.text_input(cx, ids!(composer));
         if let Some((text, _)) = composer.returned(actions) {
@@ -467,6 +486,21 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        if let Event::WindowGeomChange(e) = event {
+            let g = &e.new_geom;
+            let offset = *self.frame_offset.get_or_insert_with(|| {
+                let d = self.requested_pos.map_or(dvec2(0.0, 0.0), |r| g.position - r);
+                // Only a title bar's worth; anything bigger is the WM moving us.
+                if d.x.abs() < 80.0 && d.y.abs() < 80.0 { d } else { dvec2(0.0, 0.0) }
+            });
+            window_state::save(&window_state::WindowState {
+                x: g.position.x - offset.x,
+                y: g.position.y - offset.y,
+                width: g.inner_size.x,
+                height: g.inner_size.y,
+                maximized: g.is_fullscreen,
+            });
+        }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
     }
