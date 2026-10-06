@@ -400,3 +400,39 @@ async fn friends_dms_requests_blocks_and_saved_messages() {
     assert_eq!(a.friendship(&bpk).unwrap(), Friendship::None);
     wait_for(&mut brx, "removed", |_| b.friendship(&apk).unwrap() == Friendship::None).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_profile_per_person_follows_their_changes() {
+    use inferno_core::sync::profile::ProfileUpdate;
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let (ak, bk) = (Keys::generate(), Keys::generate());
+    let a = session(&ak, Store::open_in_memory().unwrap(), &url).await;
+    let b = session(&bk, Store::open_in_memory().unwrap(), &url).await;
+    let gid = a.create_server("x").await.unwrap();
+    let link = a.create_invite(&gid).await.unwrap();
+    let mut arx = a.updates();
+    b.join(&link).await.unwrap();
+    wait_for(&mut arx, "b joins", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+    // A sees B through the server now; B's later kind 0 must reach A live.
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let set = |v: &str| Some(Some(v.to_owned()));
+    b.update_profile(&ProfileUpdate {
+        name: set("bee"),
+        display_name: set("Bee"),
+        status: set("on a break"),
+        banner: set("https://example.com/banner.png"),
+        profile_color: set("#123456"),
+        ..Default::default()
+    })
+    .await
+    .unwrap();
+    let bpk = bk.public_key();
+    wait_for(&mut arx, "b's profile", |u| matches!(u, Update::Profile(p) if *p == bpk)).await;
+    let p = a.profile(&bpk).unwrap();
+    assert_eq!(p.display_name, "Bee");
+    assert_eq!(p.status, "on a break");
+    assert_eq!(p.banner.as_deref(), Some("https://example.com/banner.png"));
+    assert_eq!(p.color.as_deref(), Some("#123456"));
+    assert!(a.known_people().unwrap().contains(&bpk));
+}

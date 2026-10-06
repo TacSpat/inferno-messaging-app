@@ -238,4 +238,21 @@ impl Store {
         }
         Ok(newest)
     }
+
+    /// Of `authors`, those with a stored event of `kind`, and the newest such
+    /// event's time: the point a catch-up fetch can resume from.
+    pub fn authors_with(&self, kind: u16, authors: &[String]) -> Result<(std::collections::HashSet<String>, Option<i64>)> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached("SELECT max(created_at) FROM events WHERE kind = ?1 AND pubkey = ?2")?;
+        let mut have = std::collections::HashSet::new();
+        let mut newest = None;
+        for a in authors {
+            let at: Option<i64> = stmt.query_row(params![kind, a], |r| r.get(0))?;
+            if at.is_some() {
+                have.insert(a.clone());
+                newest = newest.max(at);
+            }
+        }
+        Ok((have, newest))
+    }
 }

@@ -128,6 +128,33 @@ pub fn member_profile(profile: &Map<String, Value>) -> crate::server::wire::Memb
     }
 }
 
+/// One person's profile: their kind 0, with any field it lacks taken from
+/// the profiles they carry in servers (Rails puts colours there, not in
+/// kind 0). See `Session::profile`.
+pub fn merge<'a>(
+    kind0: Option<crate::server::wire::MemberProfile>,
+    servers: impl IntoIterator<Item = &'a crate::server::wire::MemberProfile>,
+) -> crate::server::wire::MemberProfile {
+    let mut p = kind0.unwrap_or_default();
+    for f in servers {
+        let fill = |a: &mut String, b: &String| {
+            if a.is_empty() {
+                a.clone_from(b);
+            }
+        };
+        fill(&mut p.name, &f.name);
+        fill(&mut p.display_name, &f.display_name);
+        fill(&mut p.about, &f.about);
+        fill(&mut p.status, &f.status);
+        fill(&mut p.status_emoji, &f.status_emoji);
+        p.picture = p.picture.take().or_else(|| f.picture.clone());
+        p.banner = p.banner.take().or_else(|| f.banner.clone());
+        p.color = p.color.take().or_else(|| f.color.clone());
+        p.color_2 = p.color_2.take().or_else(|| f.color_2.clone());
+    }
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

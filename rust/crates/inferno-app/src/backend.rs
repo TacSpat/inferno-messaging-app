@@ -11,6 +11,7 @@ use std::sync::Arc;
 use inferno_core::channel::send::Outgoing;
 use inferno_core::keys::Identity;
 use inferno_core::nostr_sdk::prelude::*;
+use inferno_core::server::wire::MemberProfile;
 use inferno_core::server::ServerState;
 use inferno_core::session::{Session, StartOptions, Update as SessionUpdate};
 use inferno_core::social::{Friendship, Payload};
@@ -422,6 +423,8 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     ui.publish_servers();
 
     let mut updates = session.updates();
+    // Profiles arrive in bursts (hundreds at startup): one refresh per burst.
+    let mut people_due: Option<tokio::time::Instant> = None;
     loop {
         tokio::select! {
             cmd = commands.recv() => {
@@ -430,7 +433,14 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
                     Cx::post_action(Update::Error(e));
                 }
             }
+            _ = async { tokio::time::sleep_until(people_due.expect("guarded")).await }, if people_due.is_some() => {
+                people_due = None;
+                ui.refresh_people();
+            }
             update = updates.recv() => match update {
+                Ok(SessionUpdate::Profile(_)) => {
+                    people_due.get_or_insert_with(|| tokio::time::Instant::now() + std::time::Duration::from_millis(300));
+                }
                 Ok(u) => ui.session_update(u),
                 // Fell behind a burst: just redraw everything once.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ui.refresh_all(),
@@ -466,8 +476,8 @@ fn first_initial(name: &str) -> String {
     name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into())
 }
 
-fn member_row(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> MemberRow {
-    let d = display(state, pk);
+fn member_row(state: &ServerState, pk: &PublicKey, me: &PublicKey, people: &People) -> MemberRow {
+    let d = display(state, pk, people);
     MemberRow::Member {
         initial: first_initial(&d.name),
         name: d.name,
@@ -495,7 +505,7 @@ fn is_word(name: &str) -> bool {
 /// Rails styles `@username` for members and `@role` for roles (in the role's
 /// colour). Display names and nicknames that are one word count too, since
 /// that's what our Mention inserts.
-fn server_mentions(state: &ServerState) -> Vec<(String, String)> {
+fn server_mentions(state: &ServerState, people: &People) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for role in state.roles.iter().filter(|r| !r.is_everyone()) {
         let name = role.name.trim_start_matches('@');
@@ -506,7 +516,8 @@ fn server_mentions(state: &ServerState) -> Vec<(String, String)> {
         }
     }
     for (pk, m) in &state.members {
-        for name in [Some(&m.profile.name), Some(&m.profile.display_name), m.nickname.as_ref()].into_iter().flatten() {
+        let p = people.get(pk);
+        for name in [Some(&p.name), Some(&p.display_name), m.nickname.as_ref()].into_iter().flatten() {
             if is_word(name) {
                 out.push((name.to_lowercase(), pk.to_hex()));
             }
@@ -515,10 +526,10 @@ fn server_mentions(state: &ServerState) -> Vec<(String, String)> {
     out
 }
 
-fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> Card {
-    let d = display(state, pk);
+fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey, people: &People) -> Card {
+    let d = display(state, pk, people);
     let m = state.members.get(pk);
-    let profile = m.map(|m| m.profile.clone()).unwrap_or_default();
+    let profile = people.get(pk);
     let c1 = profile.color.as_deref().and_then(hex_color);
     let c2 = profile.color_2.as_deref().and_then(hex_color);
     let mut roles: Vec<_> = state
@@ -560,14 +571,42 @@ struct Display {
     avatar: u32,
 }
 
+/// Profiles for one pass over the UI: each person's unified profile
+/// (`profile::merge`), with the server states loaded once.
+struct People<'a> {
+    session: &'a Session,
+    states: Vec<ServerState>,
+    cache: std::cell::RefCell<HashMap<PublicKey, MemberProfile>>,
+}
+
+impl<'a> People<'a> {
+    fn new(session: &'a Session) -> Self {
+        let states = session.servers().unwrap_or_default().iter().filter_map(|g| session.server(g).ok().flatten()).collect();
+        People { session, states, cache: Default::default() }
+    }
+
+    fn get(&self, pk: &PublicKey) -> MemberProfile {
+        if let Some(p) = self.cache.borrow().get(pk) {
+            return p.clone();
+        }
+        let p = inferno_core::sync::profile::merge(
+            self.session.profile_of(pk).ok().flatten(),
+            self.states.iter().filter_map(|s| s.members.get(pk)).map(|m| &m.profile),
+        );
+        self.cache.borrow_mut().insert(*pk, p.clone());
+        p
+    }
+}
+
 /// How a member shows up: nickname, display name, profile name, or a pubkey
 /// prefix; colored by their highest colored role.
-fn display(state: &ServerState, pk: &PublicKey) -> Display {
+fn display(state: &ServerState, pk: &PublicKey, people: &People) -> Display {
     let m = state.members.get(pk);
+    let profile = people.get(pk);
     let name = m
         .and_then(|m| m.nickname.clone())
-        .or_else(|| m.map(|m| m.profile.display_name.clone()).filter(|s| !s.is_empty()))
-        .or_else(|| m.map(|m| m.profile.name.clone()).filter(|s| !s.is_empty()))
+        .or_else(|| Some(profile.display_name.clone()).filter(|s| !s.is_empty()))
+        .or_else(|| Some(profile.name.clone()).filter(|s| !s.is_empty()))
         .unwrap_or_else(|| pk.to_hex()[..8].to_owned());
     let color = m
         .and_then(|m| {
@@ -579,7 +618,7 @@ fn display(state: &ServerState, pk: &PublicKey) -> Display {
                 .and_then(|r| hex_color(&r.color))
         })
         .unwrap_or(DEFAULT_ROLE);
-    let avatar = m.and_then(|m| m.profile.color.as_deref()).and_then(hex_color).unwrap_or(DEFAULT_AVATAR);
+    let avatar = profile.color.as_deref().and_then(hex_color).unwrap_or(DEFAULT_AVATAR);
     Display { name, color, avatar }
 }
 
@@ -885,7 +924,7 @@ impl Backend {
                 let me = self.session.keys().public_key();
                 let state = if self.home { None } else { self.server.as_ref().and_then(|g| self.session.server(g).ok().flatten()) };
                 let mut c = match state.as_ref().filter(|s| s.is_member(&pk)) {
-                    Some(state) => card(state, &pk, &me),
+                    Some(state) => card(state, &pk, &me, &People::new(&self.session)),
                     None => self.outside_card(&pk),
                 };
                 c.friend = self.session.friendship(&pk).map(Friend::from).unwrap_or_default();
@@ -895,6 +934,7 @@ impl Backend {
                 self.session.set_synced_setting("theme", serde_json::json!(name)).map_err(|e| e.to_string())?;
             }
             Command::Search(text) => {
+                let people = People::new(&self.session);
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 let mut query = inferno_core::search::Query::parse(&text);
                 // before:/after:/on: name days on this device's calendar.
@@ -910,7 +950,7 @@ impl Backend {
                     .map_err(|e| e.to_string())?
                     .into_iter()
                     .map(|h| {
-                        let d = display(&state, &h.message.author);
+                        let d = display(&state, &h.message.author, &people);
                         SearchRow {
                             channel_id: h.channel_id,
                             channel_name: h.channel_name,
@@ -973,20 +1013,9 @@ impl Backend {
         Ok(())
     }
 
-    /// Their kind 0, else the profile they carry in a server we share
-    /// (Rails members publish profiles there; not everyone has a kind 0).
-    fn profile(&self, pk: &PublicKey) -> inferno_core::server::wire::MemberProfile {
-        if let Ok(Some(p)) = self.session.profile_of(pk) {
-            return p;
-        }
-        for gid in self.session.servers().unwrap_or_default() {
-            if let Ok(Some(state)) = self.session.server(&gid) {
-                if let Some(m) = state.members.get(pk) {
-                    return m.profile.clone();
-                }
-            }
-        }
-        Default::default()
+    /// The person's unified profile (see `People`).
+    fn profile(&self, pk: &PublicKey) -> MemberProfile {
+        self.session.profile(pk).unwrap_or_default()
     }
 
     fn person(&self, pk: &PublicKey) -> Person {
@@ -1212,13 +1241,24 @@ impl Backend {
                     self.publish_timeline();
                 }
             }
-            SessionUpdate::Dm(_) | SessionUpdate::Social | SessionUpdate::Profile(_) => {
+            SessionUpdate::Profile(_) => self.refresh_people(),
+            SessionUpdate::Dm(_) | SessionUpdate::Social => {
                 // The badge and request bar show everywhere, not only in Home.
                 self.publish_home();
                 if self.dm.is_some() {
                     self.publish_dm();
                 }
             }
+        }
+    }
+
+    /// Someone's profile changed: everything that shows people.
+    fn refresh_people(&mut self) {
+        self.publish_me();
+        self.refresh_all();
+        self.publish_home();
+        if self.dm.is_some() {
+            self.publish_dm();
         }
     }
 
@@ -1270,6 +1310,7 @@ impl Backend {
     }
 
     fn publish_server_keep_channel(&mut self) {
+        let people = People::new(&self.session);
         let Some(gid) = self.server.clone() else { return };
         let Ok(Some(state)) = self.session.server(&gid) else { return };
 
@@ -1321,12 +1362,12 @@ impl Backend {
         hoisted.sort_by_key(|r| std::cmp::Reverse(r.position));
         let push_group = |members: &mut Vec<MemberRow>, title: String, color: u32, list: &[&inferno_core::server::Member]| {
             members.push(MemberRow::Header { text: format!("{title} — {}", list.len()), color });
-            members.extend(list.iter().map(|m| member_row(&state, &m.pubkey, &me)));
+            members.extend(list.iter().map(|m| member_row(&state, &m.pubkey, &me, &people)));
         };
         if let Some(owner) = state.owner.filter(|o| !state.members.contains_key(o)) {
             // The owner has no member event of their own when they made the server here.
             members.push(MemberRow::Header { text: "OWNER — 1".into(), color: 0x878583 });
-            members.push(member_row(&state, &owner, &me));
+            members.push(member_row(&state, &owner, &me, &people));
         }
         for r in hoisted {
             if let Some(list) = by_role.get(&Some(r.id.clone())) {
@@ -1392,7 +1433,7 @@ impl Backend {
         let bans = state
             .bans
             .iter()
-            .map(|(pk, b)| BanItem { pubkey: pk.to_hex(), name: display(&state, pk).name, reason: b.reason.clone() })
+            .map(|(pk, b)| BanItem { pubkey: pk.to_hex(), name: display(&state, pk, &people).name, reason: b.reason.clone() })
             .collect();
         let m = &state.metadata;
         Cx::post_action(Update::ServerSettings(ServerSettings {
@@ -1433,19 +1474,20 @@ impl Backend {
     }
 
     fn publish_timeline(&mut self) {
+        let people = People::new(&self.session);
         let (Some(gid), Some(ch)) = (self.server.clone(), self.channel.clone()) else { return };
         let Ok(Some(state)) = self.session.server(&gid) else { return };
         let Ok(timeline) = self.session.timeline(&gid, &ch) else { return };
         let by_id: HashMap<EventId, usize> = timeline.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
         let mut rows = Vec::with_capacity(timeline.len());
         for (i, m) in timeline.iter().enumerate() {
-            let d = display(&state, &m.author);
+            let d = display(&state, &m.author, &people);
             let prev = i.checked_sub(1).map(|p| &timeline[p]);
             let grouped = prev.is_some_and(|p| p.author == m.author && m.reply_to.is_none() && m.created_at - p.created_at < 300);
             let reply = m.reply_to.and_then(|id| by_id.get(&id)).map(|&pi| {
                 let p = &timeline[pi];
                 let cut: String = p.content.as_deref().unwrap_or("…").chars().take(60).collect();
-                format!("↳ {}  {}", display(&state, &p.author).name, cut)
+                format!("↳ {}  {}", display(&state, &p.author, &people).name, cut)
             });
             rows.push(MessageRow {
                 id: m.id.to_hex(),
@@ -1466,7 +1508,7 @@ impl Backend {
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);
-        let mentions = server_mentions(&state);
+        let mentions = server_mentions(&state, &people);
         Cx::post_action(Update::Timeline { gid, channel_id: ch, rows, can_pin, mentions });
     }
 }

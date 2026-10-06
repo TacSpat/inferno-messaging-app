@@ -24,6 +24,10 @@ use crate::{dtag, kinds};
 use crate::social::{self, DmMessage, Friendship, Payload, Response, Rumor};
 
 
+/// Authors per profile filter: relays cap filter sizes, and a server can
+/// have thousands of members.
+const PEOPLE_PER_FILTER: usize = 500;
+
 /// A row of the DM sidebar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conversation {
@@ -233,6 +237,7 @@ impl Session {
         session.open_stored_dms()?;
         session.resubscribe().await?;
         session.spawn_listener();
+        session.catch_up_people();
         session.spawn_batchers();
         Ok(session)
     }
@@ -862,6 +867,71 @@ impl Session {
         Ok(self.store.get_addressable(Kind::Metadata, pk, "")?.map(|e| profile::member_profile(&profile::content(&e))))
     }
 
+    /// One profile per person, the same in every server, DM and list: their
+    /// kind 0, with any field it lacks taken from the profile they carry in a
+    /// server we share (Rails puts colours there, not in kind 0). Rails and
+    /// Flutter kept a copy per server and per contact, which drifted apart
+    /// and grew with every server. Nicknames and roles stay per server.
+    pub fn profile(&self, pk: &PublicKey) -> Result<crate::server::wire::MemberProfile> {
+        let states: Vec<ServerState> = self.servers()?.iter().filter_map(|g| self.server(g).ok().flatten()).collect();
+        Ok(profile::merge(self.profile_of(pk)?, states.iter().filter_map(|s| s.members.get(pk)).map(|m| &m.profile)))
+    }
+
+    /// Everyone whose profile we show: members of our servers, DM peers,
+    /// friends and requests, and ourselves. Each once.
+    pub fn known_people(&self) -> Result<Vec<PublicKey>> {
+        let mut set: HashSet<PublicKey> = HashSet::new();
+        set.insert(self.keys.public_key());
+        for gid in self.servers()? {
+            if let Some(state) = self.server(&gid)? {
+                set.extend(state.members.keys().copied());
+            }
+        }
+        for r in self.store.rumors()? {
+            set.insert(r.counterparty);
+        }
+        let mut v: Vec<PublicKey> = set.into_iter().collect();
+        v.sort();
+        Ok(v)
+    }
+
+    /// At startup: profiles that changed while we were away (since the newest
+    /// we hold), and those we never had. In the background, a few REQs.
+    fn catch_up_people(&self) {
+        let Ok(people) = self.known_people() else { return };
+        let hexes: Vec<String> = people.iter().map(|p| p.to_hex()).collect();
+        let Ok((have, newest)) = self.store.authors_with(Kind::Metadata.as_u16(), &hexes) else { return };
+        let (known, unknown): (Vec<PublicKey>, Vec<PublicKey>) = people.into_iter().partition(|p| have.contains(&p.to_hex()));
+        let since = self.resume_from(newest);
+        let mut filters: Vec<Filter> = Vec::new();
+        for c in known.chunks(PEOPLE_PER_FILTER) {
+            let f = Filter::new().kind(Kind::Metadata).authors(c.iter().copied());
+            filters.push(match since {
+                Some(t) => f.since(t),
+                None => f,
+            });
+        }
+        for c in unknown.chunks(PEOPLE_PER_FILTER) {
+            filters.push(Filter::new().kind(Kind::Metadata).authors(c.iter().copied()));
+        }
+        if filters.is_empty() {
+            return;
+        }
+        let (pool, store, updates) = (self.pool.clone(), self.store.clone(), self.updates.clone());
+        tokio::spawn(async move {
+            match pool.fetch(filters).await {
+                Ok(events) => {
+                    for e in &events {
+                        if matches!(store.put_event(e), Ok(crate::store::PutOutcome::Inserted)) {
+                            let _ = updates.send(Update::Profile(e.pubkey));
+                        }
+                    }
+                }
+                Err(e) => tracing::warn!("profile catch-up failed: {e}"),
+            }
+        });
+    }
+
     /// Fetches profiles we don't have yet, in the background. A full fetch
     /// per person would hammer relays, so missing ones go in one filter.
     pub async fn want_profiles(&self, pks: &[PublicKey]) {
@@ -898,8 +968,10 @@ impl Session {
             v.push(npub);
             if let Some(m) = state.members.get(pk) {
                 v.extend(m.nickname.clone());
-                v.push(m.profile.display_name.clone());
-                v.push(m.profile.name.clone());
+            }
+            if let Ok(p) = self.profile(pk) {
+                v.push(p.display_name);
+                v.push(p.name);
             }
             v.retain(|n| !n.is_empty());
             v
@@ -1196,6 +1268,15 @@ impl Session {
         self.pool.subscribe_keyed("dms", dm::filters(me, self.resume_from(dm_newest))).await?;
         // Our block list (NIP-51 mute list, kept private).
         self.pool.subscribe_keyed("mutes", vec![Filter::new().kind(Kind::MuteList).author(me)]).await?;
+        // Everyone we know, once: profile changes from here on.
+        let people = self.known_people()?;
+        if !people.is_empty() {
+            let filters = people
+                .chunks(PEOPLE_PER_FILTER)
+                .map(|c| Filter::new().kind(Kind::Metadata).authors(c.iter().copied()).since(self.started_at))
+                .collect();
+            self.pool.subscribe_keyed("people", filters).await?;
+        }
 
         let gids = self.servers()?;
         let mut groups = HashMap::new();
@@ -1280,6 +1361,10 @@ impl Session {
                     let new = self.keep_dm(&event.id, &msg)?;
                     if new && !self.blocked()?.contains(&msg.sender) {
                         let counterparty = self.counterparty(&msg);
+                        if self.store.rumors_with(&counterparty)?.len() == 1 {
+                            // Someone new: follow their profile from now on.
+                            self.refresh.notify_one();
+                        }
                         self.want_profiles(&[counterparty]).await;
                         let _ = self.updates.send(Update::Dm(msg));
                         let _ = self.updates.send(Update::Social);
@@ -1295,8 +1380,9 @@ impl Session {
                 }
             }
             _ if event.kind == Kind::Metadata => {
-                self.store.put_event(event)?;
-                let _ = self.updates.send(Update::Profile(event.pubkey));
+                if matches!(self.store.put_event(event)?, crate::store::PutOutcome::Inserted) {
+                    let _ = self.updates.send(Update::Profile(event.pubkey));
+                }
             }
             kinds::SERVER_METADATA..=kinds::SERVER_INVITE => {
                 let Some(gid) = wire::server_gid(event) else { return Ok(()) };
