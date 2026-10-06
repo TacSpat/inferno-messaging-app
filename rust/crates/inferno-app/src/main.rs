@@ -19,11 +19,14 @@ mod rich_input;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
 mod time_fmt;
+mod uploads;
 mod window_state;
 
 use makepad_widgets::*;
 
 use rich_input::RichInputWidgetRefExt;
+use crop::{Crop, Target};
+use uploads::Uploads;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
@@ -565,6 +568,11 @@ script_mod! {
         draw_text.text_style: theme.font_bold{font_size: 8.0}
     }
     let Field = TextInput{width: Fill height: 36}
+    // Text edited in place on a card: no well, just the text.
+    let CardInput = TextInput{width: Fill height: Fit padding: Inset{left: 2 right: 2 top: 2 bottom: 2}
+        draw_bg +: {pixel: fn() { return vec4(0.0, 0.0, 0.0, 0.0) }}
+        draw_text +: {color: #xffffff color_empty: #xffffff59}
+    }
     let PageTitle = Txt{
         margin: Inset{bottom: 8}
         draw_text.color: #xffffff
@@ -1420,32 +1428,82 @@ script_mod! {
                                 }
                             }
 
+                            // One card: what others see, edited in place (Rails had an
+                            // editable banner card, a separate preview card and a
+                            // colour preview strip; this is all three).
                             page_profile := View{
                                 visible: false
                                 width: 768 height: Fit flow: Down
                                 PageTitle{text: "Profile"}
-                                FieldLabel{text: "DISPLAY NAME"}
-                                p_display := Field{empty_text: "How you appear to others"}
-                                FieldLabel{text: "USERNAME"}
-                                p_username := Field{empty_text: "username"}
-                                FieldLabel{text: "ABOUT ME"}
-                                p_about := Field{empty_text: "Tell others about yourself"}
-                                FieldLabel{text: "CUSTOM STATUS"}
-                                View{width: Fill height: Fit flow: Right spacing: 8
-                                    p_status_emoji := TextInput{width: 60 height: 36 empty_text: "🙂"}
-                                    p_status := Field{empty_text: "What are you up to?"}
+                                Hint{text: "This is how others see you. Click the banner or your picture to change them."
+                                    margin: Inset{bottom: 12}}
+                                profile_editor := RoundedView{
+                                    width: 480 height: Fit flow: Down
+                                    new_batch: true
+                                    draw_bg +: {
+                                        c0: uniform(vec4(0.118 0.11 0.106 1.))
+                                        c1: uniform(vec4(0.118 0.11 0.106 1.))
+                                        banner: uniform(vec4(0.17 0.16 0.16 1.))
+                                        pixel: fn() {
+                                            let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                                            sdf.box(0. 0. self.rect_size.x self.rect_size.y 8.0)
+                                            let t = clamp((self.pos.x + self.pos.y) * 0.5, 0.0, 1.0)
+                                            let body = mix(self.c0, self.c1, t)
+                                            let px = self.pos.y * self.rect_size.y
+                                            sdf.fill(mix(self.banner, body, step(128.0, px)))
+                                            return sdf.result
+                                        }
+                                    }
+                                    // Rails: h-32 banner.
+                                    ed_banner := View{width: Fill height: 128 flow: Overlay cursor: MouseCursor.Hand
+                                        align: Align{x: 1.0 y: 1.0}
+                                        ed_banner_img := Image{visible: false width: Fill height: 128 fit: ImageFit.CropToFill
+                                            draw_bg.border_radius: 8.0}
+                                        RoundedView{width: Fit height: Fit margin: 8 padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+                                            new_batch: true draw_bg.color: #x00000080 draw_bg.border_radius: 4.0
+                                            Txt{text: "Change banner" draw_text.color: #xffffffcc draw_text.text_style.font_size: 8.5}}
+                                    }
+                                    View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 16}
+                                        margin: Inset{top: -44}
+                                        // Rails: 80px avatar with a 4px ring.
+                                        ed_avatar := RoundedView{width: 88 height: 88 padding: 4 cursor: MouseCursor.Hand
+                                            new_batch: true draw_bg.color: #x1e1c1b draw_bg.border_radius: 44.0
+                                            ed_face := RoundedView{flow: Overlay width: 80 height: 80 align: Center new_batch: true
+                                                draw_bg.color: #x1e1c1b draw_bg.border_radius: 40.0
+                                                initial := Txt{text: "?" draw_text.color: #xffffff
+                                                    draw_text.text_style: theme.font_bold{font_size: 20.0}}
+                                                pic := Image{visible: false width: 80 height: 80 fit: ImageFit.CropToFill
+                                                    draw_bg.border_radius: 40.0}
+                                            }
+                                        }
+                                        RoundedView{width: Fill height: Fit flow: Down spacing: 6 padding: 12 margin: Inset{top: 8}
+                                            new_batch: true draw_bg.color: #x0000004d draw_bg.border_radius: 8.0
+                                            p_display := CardInput{empty_text: "Display name"
+                                                draw_text +: {text_style: theme.font_bold{font_size: 13.0}}}
+                                            p_username := CardInput{empty_text: "username"
+                                                draw_text +: {color: #xffffff99 text_style +: {font_size: 9.0}}}
+                                            View{width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                                                p_status_emoji := RoundedView{width: 32 height: 32 align: Center cursor: MouseCursor.Hand
+                                                    new_batch: true draw_bg.color: #x00000040 draw_bg.border_radius: 6.0
+                                                    label := Txt{text: "🙂" draw_text.text_style.font_size: 12.0}}
+                                                p_status := CardInput{empty_text: "What are you up to?"
+                                                    draw_text +: {color: #xffffffb3 text_style +: {font_size: 9.5}}}
+                                            }
+                                            SolidView{width: Fill height: 1 draw_bg.color: #xffffff1a}
+                                            CardHead{text: "ABOUT ME"}
+                                            p_about := CardInput{empty_text: "Tell others about yourself" is_multiline: true
+                                                height: Fit{min: 48}
+                                                draw_text +: {color: #xffffffcc text_style +: {font_size: 9.5}}}
+                                        }
+                                    }
                                 }
                                 FieldLabel{text: "PROFILE THEME"}
-                                View{width: Fill height: Fit flow: Right spacing: 8
-                                    p_color := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
-                                    p_color_2 := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
+                                View{width: 480 height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                    p_color := TextInput{width: 120 height: 36 empty_text: "#1e1c1b"}
+                                    p_color_2 := TextInput{width: 120 height: 36 empty_text: "#1e1c1b"}
+                                    Hint{width: Fit text: "Two colours make a gradient."}
                                 }
-                                // Rails uploads these; until uploads land, a link.
-                                FieldLabel{text: "AVATAR"}
-                                p_picture := Field{empty_text: "https://… image link"}
-                                FieldLabel{text: "BANNER"}
-                                p_banner := Field{empty_text: "https://… image link"}
-                                View{width: Fill height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
+                                View{width: 480 height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
                                     save_profile := Button{text: "Save Changes"}
                                     profile_note := Hint{text: ""}
                                 }
@@ -1726,6 +1784,57 @@ script_mod! {
                     // Styled confirmation (Flutter's improvement over Rails'
                     // native confirm): black/60 backdrop, gray-800 radius 12,
                     // max 448 (spec: modals).
+                    // Rails' picture editor: drag to reposition, slider to zoom.
+                    crop_dialog := Modal{
+                        content +: {
+                            RoundedView{
+                                width: 512 height: Fit
+                                flow: Down spacing: 8
+                                padding: 16
+                                new_batch: true
+                                draw_bg.color: gray_800
+                                draw_bg.border_radius: 12.0
+                                crop_title := Txt{text: "Edit Avatar" draw_text.color: #xffffff
+                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                Hint{text: "Drag to reposition, use the slider to zoom."}
+                                crop_view := View{
+                                    width: 480 height: 300
+                                    flow: Overlay
+                                    clip_x: true clip_y: true
+                                    cursor: MouseCursor.Move
+                                    show_bg: true
+                                    draw_bg.color: gray_950
+                                    crop_img := Image{width: 100 height: 100 fit: ImageFit.Stretch}
+                                    // Avatar: darkened outside the circle (Rails' r=110 of 300).
+                                    crop_mask := View{
+                                        width: Fill height: Fill
+                                        show_bg: true
+                                        draw_bg +: {
+                                            circle: uniform(1.0)
+                                            pixel: fn() {
+                                                let p = self.pos * self.rect_size
+                                                let c = self.rect_size * 0.5
+                                                let r = min(self.rect_size.x, self.rect_size.y) * 0.4
+                                                let d = length(p - c) - r
+                                                let a = clamp(d + 0.5, 0.0, 1.0) * 0.55 * self.circle
+                                                return vec4(0.0, 0.0, 0.0, a)
+                                            }
+                                        }
+                                    }
+                                }
+                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                    crop_zoom := Slider{width: Fill text: "Zoom" min: 1.0 max: 3.0 default: 1.0}
+                                }
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5} margin: Inset{top: 4}
+                                    crop_note := Hint{text: ""}
+                                    crop_cancel := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                        Txt{text: "Cancel" draw_text.color: gray_400}}
+                                    crop_apply := Button{text: "Apply"}
+                                }
+                            }
+                        }
+                    }
+
                     confirm_dialog := Modal{
                         content +: {
                             RoundedView{
@@ -1884,6 +1993,21 @@ pub struct App {
     last_press: DVec2,
     #[rust]
     my_picture: Option<String>,
+    /// The profile being edited: picture and banner URLs to save.
+    #[rust]
+    draft_picture: String,
+    #[rust]
+    draft_banner: String,
+    /// The status emoji being edited (picked from the emoji dropdown).
+    #[rust]
+    status_emoji: String,
+    /// The picture editor's state and the picked image's pixels.
+    #[rust]
+    crop: Option<(Crop, Vec<u32>)>,
+    #[rust]
+    crop_drag: Option<DVec2>,
+    #[rust]
+    uploads: Uploads,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -2966,6 +3090,151 @@ impl App {
         }
     }
 
+    /// The profile card editor's colours, from the hex fields.
+    fn paint_profile_editor(&mut self, cx: &mut Cx) {
+        let hex = |s: String| {
+            let h = s.trim().trim_start_matches('#').to_owned();
+            u32::from_str_radix(&h, 16).ok().filter(|_| h.len() == 6)
+        };
+        let c1 = hex(self.ui.text_input(cx, ids!(p_color)).text());
+        let c2 = hex(self.ui.text_input(cx, ids!(p_color_2)).text());
+        let (a, b) = (c1.unwrap_or(0x1e1c1b), c2.or(c1).unwrap_or(0x1e1c1b));
+        let (v0, v1, banner) = (lists::rgba(a, 1.0), lists::rgba(b, 1.0), theme::tok("gray_700", 1.0));
+        let mut card = self.ui.widget(cx, ids!(profile_editor));
+        script_apply_eval!(cx, card, {draw_bg +: {c0: #(v0) c1: #(v1) banner: #(banner)}});
+        let mut ring = self.ui.widget(cx, ids!(ed_avatar));
+        script_apply_eval!(cx, ring, {draw_bg +: {color: #(v1)}});
+        let mut face = self.ui.widget(cx, ids!(ed_face));
+        script_apply_eval!(cx, face, {draw_bg +: {color: #(v0)}});
+        let name = self.ui.text_input(cx, ids!(p_display)).text();
+        let name = if name.trim().is_empty() { self.ui.text_input(cx, ids!(p_username)).text() } else { name };
+        let initial = name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
+        self.ui.label(cx, ids!(ed_face.initial)).set_text(cx, &initial);
+        self.ui.redraw(cx);
+    }
+
+    /// Shows the saved (or just uploaded) pictures on the editor card.
+    fn show_profile_pictures(&mut self, cx: &mut Cx) {
+        let pic = Some(self.draft_picture.clone()).filter(|u| !u.is_empty());
+        let banner = Some(self.draft_banner.clone()).filter(|u| !u.is_empty());
+        let img = self.ui.image(cx, ids!(ed_face.pic));
+        images::show(cx, &img, pic.as_deref());
+        let img = self.ui.image(cx, ids!(ed_banner_img));
+        images::show(cx, &img, banner.as_deref());
+    }
+
+    /// Opens the system picker for a picture.
+    fn pick_picture(&mut self, cx: &mut Cx, target: Target) {
+        let id = match target {
+            Target::Avatar => live_id!(pick_avatar),
+            Target::Banner => live_id!(pick_banner),
+        };
+        // UI tests can't drive the system dialog: INFERNO_TEST_PICK=<file>
+        // stands in for the user's choice.
+        if let Ok(path) = std::env::var("INFERNO_TEST_PICK") {
+            match std::fs::read(&path) {
+                Ok(bytes) => self.open_crop(cx, target, &bytes),
+                Err(e) => self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ {path}: {e}")),
+            }
+            return;
+        }
+        let title = if target == Target::Avatar { "Choose a picture" } else { "Choose a banner" };
+        let dialog = FileDialog::new()
+            .set_id(id)
+            .set_title(title.into())
+            .add_filter("Images".into(), ["png", "jpg", "jpeg", "gif", "webp", "bmp"].map(String::from).to_vec())
+            .want_bytes(true);
+        cx.open_select_file_dialog(dialog);
+    }
+
+    /// A picked file: decode it into the editor (Rails' crop modal).
+    fn open_crop(&mut self, cx: &mut Cx, target: Target, bytes: &[u8]) {
+        const MAX_BYTES: usize = 20 * 1024 * 1024;
+        if bytes.len() > MAX_BYTES {
+            self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ That file is over 20 MB.");
+            return;
+        }
+        let image = match decode_image_from_data(bytes) {
+            Ok(i) if i.width > 0 && i.height > 0 => i,
+            _ => {
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ That doesn't look like an image this app can read.");
+                return;
+            }
+        };
+        let view_h = if target == Target::Avatar { 300.0 } else { 200.0 };
+        let crop = Crop::new(target, (image.width as f64, image.height as f64), (480.0, view_h));
+        let pixels = image.data.clone();
+        let texture = image.into_new_texture(cx);
+        self.ui.image(cx, ids!(crop_img)).set_texture(cx, Some(texture));
+        let mut view = self.ui.widget(cx, ids!(crop_view));
+        script_apply_eval!(cx, view, {height: #(view_h)});
+        let circle = if target == Target::Avatar { 1.0 } else { 0.0 };
+        let mut mask = self.ui.widget(cx, ids!(crop_mask));
+        script_apply_eval!(cx, mask, {draw_bg +: {circle: #(circle)}});
+        self.ui.label(cx, ids!(crop_title)).set_text(cx, if target == Target::Avatar { "Edit Avatar" } else { "Edit Banner" });
+        self.ui.slider(cx, ids!(crop_zoom)).set_value(cx, 1.0);
+        self.crop = Some((crop, pixels));
+        self.layout_crop(cx);
+        self.ui.modal(cx, ids!(crop_dialog)).open(cx);
+    }
+
+    /// Places the picture in the editor viewport from the crop state.
+    fn layout_crop(&mut self, cx: &mut Cx) {
+        let Some((crop, _)) = &self.crop else { return };
+        let s = crop.scale();
+        let (w, h, x, y) = (crop.src.0 * s, crop.src.1 * s, crop.offset.0, crop.offset.1);
+        let mut img = self.ui.widget(cx, ids!(crop_img));
+        script_apply_eval!(cx, img, {width: #(w) height: #(h) margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ui.redraw(cx);
+    }
+
+    /// Apply: bake the crop, show it on the card at once, and upload it.
+    fn apply_crop(&mut self, cx: &mut Cx) {
+        let Some((crop, pixels)) = self.crop.take() else { return };
+        let png = match crop.encode(&pixels) {
+            Ok(p) => p,
+            Err(e) => {
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ Couldn't prepare the picture: {e}"));
+                return;
+            }
+        };
+        let (w, h) = crop.output_size();
+        if let Ok(buffer) = ImageBuffer::new(&crop.render(&pixels), w, h) {
+            let texture = buffer.into_new_texture(cx);
+            let path: &[LiveId] = match crop.target {
+                Target::Avatar => ids!(ed_face.pic),
+                Target::Banner => ids!(ed_banner_img),
+            };
+            let img = self.ui.image(cx, path);
+            img.set_texture(cx, Some(texture));
+            img.set_visible(cx, true);
+        }
+        let purpose = match crop.target {
+            Target::Avatar => uploads::Purpose::Avatar,
+            Target::Banner => uploads::Purpose::Banner,
+        };
+        let (id, sha256) = self.uploads.start(purpose, png, "image/png");
+        self.send(backend::Command::UploadAuth { id, sha256 });
+        self.ui.label(cx, ids!(profile_note)).set_text(cx, "Uploading…");
+        self.ui.modal(cx, ids!(crop_dialog)).close(cx);
+        self.ui.redraw(cx);
+    }
+
+    fn upload_done(&mut self, cx: &mut Cx, done: uploads::Done) {
+        match done {
+            uploads::Done::Uploaded { purpose, url } => {
+                match purpose {
+                    uploads::Purpose::Avatar => self.draft_picture = url,
+                    uploads::Purpose::Banner => self.draft_banner = url,
+                }
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, "Uploaded. Save Changes to keep it.");
+            }
+            uploads::Done::Failed { error, .. } => {
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ Upload failed: {error}"));
+            }
+        }
+    }
+
     fn show_search_panel(&mut self, cx: &mut Cx, open: bool) {
         self.ui.view(cx, ids!(search_panel)).set_visible(cx, open);
         self.ui.view(cx, ids!(member_col)).set_visible(cx, !open);
@@ -3075,17 +3344,22 @@ impl App {
                     (ids!(p_username), &p.username),
                     (ids!(p_about), &p.about),
                     (ids!(p_status), &p.status),
-                    (ids!(p_status_emoji), &p.status_emoji),
                     (ids!(p_color), &p.color),
                     (ids!(p_color_2), &p.color_2),
-                    (ids!(p_picture), &p.picture),
-                    (ids!(p_banner), &p.banner),
                 ] {
                     self.ui.text_input(cx, path).set_text(cx, value);
                 }
-                let pic = Some(p.picture.as_str()).filter(|u| !u.is_empty());
+                self.draft_picture = p.picture.clone();
+                self.draft_banner = p.banner.clone();
+                self.status_emoji = p.status_emoji.clone();
+                let emoji = if p.status_emoji.is_empty() { "🙂" } else { p.status_emoji.as_str() };
+                self.ui.label(cx, ids!(p_status_emoji.label)).set_text(cx, emoji);
+                self.paint_profile_editor(cx);
+                self.show_profile_pictures(cx);
+                self.my_picture = Some(p.picture.clone()).filter(|u| !u.is_empty());
+                let pic = self.my_picture.clone();
                 let img = self.ui.image(cx, ids!(me_avatar.pic));
-                images::show(cx, &img, pic);
+                images::show(cx, &img, pic.as_deref());
             }
             Update::Relays(relays) => {
                 if let Some(mut list) = self.ui.widget(cx, ids!(relay_list)).borrow_mut::<lists::RelayList>() {
@@ -3103,6 +3377,11 @@ impl App {
                 self.ui.redraw(cx);
             }
             Update::Card(card) => self.show_card(cx, card),
+            Update::UploadAuth { id, header, servers } => {
+                if let Some(done) = self.uploads.authorized(cx, *id, header.clone(), servers.clone()) {
+                    self.upload_done(cx, done);
+                }
+            }
             Update::Home(h) => {
                 self.home_data = h.clone();
                 self.ui.view(cx, ids!(home_badge)).set_visible(cx, h.badge > 0);
@@ -3238,6 +3517,50 @@ impl MatchEvent for App {
 
         // Home
         let tap = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId]| ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+        // Profile editor: pictures, live colours and initial.
+        if tap(&self.ui, cx, ids!(ed_avatar)) {
+            self.pick_picture(cx, Target::Avatar);
+        }
+        if tap(&self.ui, cx, ids!(ed_banner)) {
+            self.pick_picture(cx, Target::Banner);
+        }
+        for path in [ids!(p_color), ids!(p_color_2), ids!(p_display), ids!(p_username)] {
+            if self.ui.text_input(cx, path).changed(actions).is_some() {
+                self.paint_profile_editor(cx);
+            }
+        }
+        for action in actions {
+            let Some(fa) = action.downcast_ref::<FileDialogAction>() else { continue };
+            let (id, bytes) = match fa {
+                FileDialogAction::FileLoaded { id, files } => (*id, files.first().map(|f| f.bytes.to_vec())),
+                FileDialogAction::FileSelected { id, paths } => (*id, paths.first().and_then(|p| std::fs::read(p).ok())),
+                _ => continue,
+            };
+            let target = if id == live_id!(pick_avatar) {
+                Target::Avatar
+            } else if id == live_id!(pick_banner) {
+                Target::Banner
+            } else {
+                continue;
+            };
+            match bytes {
+                Some(b) => self.open_crop(cx, target, &b),
+                None => self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ Couldn't read that file."),
+            }
+        }
+        if let Some(z) = self.ui.slider(cx, ids!(crop_zoom)).slided(actions) {
+            if let Some((crop, _)) = self.crop.as_mut() {
+                crop.set_zoom(z);
+            }
+            self.layout_crop(cx);
+        }
+        if tap(&self.ui, cx, ids!(crop_cancel)) {
+            self.crop = None;
+            self.ui.modal(cx, ids!(crop_dialog)).close(cx);
+        }
+        if self.ui.button(cx, ids!(crop_apply)).clicked(actions) {
+            self.apply_crop(cx);
+        }
         if tap(&self.ui, cx, ids!(home_btn)) || tap(&self.ui, cx, ids!(friends_link)) {
             self.set_home(cx, true);
             self.show_friends(cx, self.friends_tab);
@@ -3689,11 +4012,11 @@ impl MatchEvent for App {
                 username: get(&self.ui, cx, ids!(p_username)),
                 about: get(&self.ui, cx, ids!(p_about)),
                 status: get(&self.ui, cx, ids!(p_status)),
-                status_emoji: get(&self.ui, cx, ids!(p_status_emoji)),
+                status_emoji: self.status_emoji.clone(),
                 color: get(&self.ui, cx, ids!(p_color)),
                 color_2: get(&self.ui, cx, ids!(p_color_2)),
-                picture: get(&self.ui, cx, ids!(p_picture)),
-                banner: get(&self.ui, cx, ids!(p_banner)),
+                picture: self.draft_picture.clone(),
+                banner: self.draft_banner.clone(),
             };
             let is_color = |c: &str| c.len() == 7 && c.starts_with('#') && u32::from_str_radix(&c[1..], 16).is_ok();
             let bad = [&form.color, &form.color_2].into_iter().find(|c| !c.is_empty() && !is_color(c));
@@ -3799,6 +4122,25 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        for done in self.uploads.handle_event(cx, event) {
+            self.upload_done(cx, done);
+        }
+        // Dragging the picture in the editor.
+        if self.crop.is_some() {
+            let area = self.ui.view(cx, ids!(crop_view)).area();
+            match event.hits(cx, area) {
+                Hit::FingerDown(fe) => self.crop_drag = Some(fe.abs),
+                Hit::FingerMove(fe) => {
+                    if let (Some(last), Some((crop, _))) = (self.crop_drag, self.crop.as_mut()) {
+                        crop.drag(fe.abs.x - last.x, fe.abs.y - last.y);
+                        self.crop_drag = Some(fe.abs);
+                        self.layout_crop(cx);
+                    }
+                }
+                Hit::FingerUp(_) => self.crop_drag = None,
+                _ => {}
+            }
+        }
         if images::handle_event(cx, event) {
             // A picture arrived: rows recorded before it need redrawing.
             for list in [ids!(members.list), ids!(messages.list), ids!(dms.list), ids!(friend_list.list)] {
@@ -3813,6 +4155,9 @@ impl AppMain for App {
             let pic = self.my_picture.clone();
             let img = self.ui.image(cx, ids!(me_avatar.pic));
             images::show(cx, &img, pic.as_deref());
+            if self.ui.view(cx, ids!(page_profile)).visible() {
+                self.show_profile_pictures(cx);
+            }
             self.ui.redraw(cx);
         }
         // A theme switch reapplies the DSL, which resets styling set at

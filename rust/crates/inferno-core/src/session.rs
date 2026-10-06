@@ -210,6 +210,7 @@ impl Session {
             .fetch(vec![
                 Filter::new().kind(Kind::Metadata).author(keys.public_key()),
                 Filter::new().kind(Kind::MuteList).author(keys.public_key()),
+                Filter::new().kind(Kind::BlossomServerList).author(keys.public_key()),
             ])
             .await
         {
@@ -859,6 +860,22 @@ impl Session {
         for h in &pks {
             self.store.block(h)?;
         }
+        Ok(())
+    }
+
+    /// Where our uploads go: our NIP-B7 list, else Rails' defaults.
+    pub fn blossom_servers(&self) -> Result<Vec<String>> {
+        let listed = self
+            .store
+            .get_addressable(Kind::BlossomServerList, &self.keys.public_key(), "")?
+            .map(|e| crate::blossom::servers_from_list(&e))
+            .unwrap_or_default();
+        Ok(if listed.is_empty() { crate::blossom::DEFAULT_SERVERS.iter().map(|s| s.to_string()).collect() } else { listed })
+    }
+
+    pub async fn set_blossom_servers(&self, servers: &[String]) -> Result<()> {
+        let event = crate::blossom::server_list(&self.keys, servers).map_err(SessionError::Other)?;
+        self.publish(&event).await?;
         Ok(())
     }
 

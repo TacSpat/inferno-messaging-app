@@ -266,6 +266,8 @@ pub enum Update {
     /// (with how many messages). Rows come as a `Timeline` keyed "@dm".
     DmHeader { person: Person, request: Option<usize> },
     People(Vec<Person>),
+    /// The `Authorization` header for upload `id`, and the servers to try.
+    UploadAuth { id: u64, header: String, servers: Vec<String> },
     /// The theme this account uses (synced across devices).
     Theme(String),
     SearchResults { query: String, rows: Vec<SearchRow> },
@@ -340,6 +342,9 @@ pub enum Command {
     CloseDm(String),
     MarkDmRead(String),
     FindPeople(String),
+    /// Sign an upload of a blob with this sha256 (hex); `id` is echoed.
+    UploadAuth { id: u64, sha256: String },
+    SaveBlossomServers(Vec<String>),
     SaveOverview(ServerSettings),
     SaveRoles(Vec<RoleForm>),
     Unban(String),
@@ -734,6 +739,13 @@ impl Backend {
                 let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
                 self.session.mark_dm_read(&pk).map_err(|e| e.to_string())?;
             }
+            Command::UploadAuth { id, sha256 } => {
+                let header = inferno_core::blossom::upload_auth(self.session.keys(), &sha256, Timestamp::now())?;
+                Cx::post_action(Update::UploadAuth { id, header, servers: self.upload_servers() });
+            }
+            Command::SaveBlossomServers(servers) => {
+                self.session.set_blossom_servers(&servers).await.map_err(|e| e.to_string())?;
+            }
             Command::FindPeople(q) => {
                 let people = self.find_people(&q).await;
                 Cx::post_action(Update::People(people));
@@ -1030,6 +1042,20 @@ impl Backend {
     /// The person's unified profile (see `People`).
     fn profile(&self, pk: &PublicKey) -> MemberProfile {
         self.session.profile(pk).unwrap_or_default()
+    }
+
+    /// Where uploads go. `INFERNO_BLOSSOM=url,url` overrides; a local test
+    /// run (`INFERNO_RELAYS` set) defaults to inferno-devrelay's Blossom so
+    /// test files never reach public hosts.
+    fn upload_servers(&self) -> Vec<String> {
+        let split = |v: String| v.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect::<Vec<_>>();
+        if let Ok(v) = std::env::var("INFERNO_BLOSSOM") {
+            return split(v);
+        }
+        if std::env::var("INFERNO_RELAYS").is_ok() {
+            return vec!["http://127.0.0.1:7778".into()];
+        }
+        self.session.blossom_servers().unwrap_or_default()
     }
 
     fn person(&self, pk: &PublicKey) -> Person {
