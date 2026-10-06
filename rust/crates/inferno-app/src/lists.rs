@@ -77,8 +77,10 @@ impl Widget for RailList {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChannelListAction {
     Select(String),
-    EditChannel(String),
-    EditCategory(String),
+    /// The category's hover "+": create a channel in it.
+    CreateIn(String),
+    /// Right-click on a row (`None` = empty sidebar space) at window `at`.
+    Context { row: Option<SidebarRow>, at: (f64, f64) },
     Move { id: String, category: Option<String>, index: usize },
 }
 
@@ -134,6 +136,17 @@ impl ChannelList {
         Some((last.0 + 1, last.1.pos.y + last.1.size.y)).filter(|_| first.0 <= last.0)
     }
 
+    pub fn contains(&self, cx: &Cx, abs: DVec2) -> bool {
+        self.view.area().rect(cx).contains(abs)
+    }
+
+    /// Whether `abs` is over a drawn row.
+    pub fn row_at(&self, cx: &Cx, abs: DVec2) -> bool {
+        let list = self.view.portal_list(cx, ids!(list));
+        let Some(list) = list.borrow() else { return false };
+        list.items().values().any(|item| item.widget.area().rect(cx).contains(abs))
+    }
+
     /// Turns "insert before row `slot`" into a container and index.
     fn target(&self, dragged: usize, slot: usize) -> Option<(Option<String>, usize)> {
         let rows: Vec<(usize, &SidebarRow)> = self.rows.iter().enumerate().filter(|(i, _)| *i != dragged).collect();
@@ -187,16 +200,19 @@ impl ChannelList {
                 redraw_items(cx, &list);
             }
             let row = self.rows.get(i).cloned();
-            if item.view(cx, ids!(gear)).finger_up(actions).is_some_and(|e| !e.cancelled) {
-                out = match row {
-                    Some(SidebarRow::Channel { id, .. }) => Some(ChannelListAction::EditChannel(id)),
-                    Some(SidebarRow::Category { id, .. }) => Some(ChannelListAction::EditCategory(id)),
-                    None => None,
-                };
+            if item.view(cx, ids!(add)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                if let Some(SidebarRow::Category { id, .. }) = row {
+                    out = Some(ChannelListAction::CreateIn(id));
+                }
                 self.drag = None;
                 continue;
             }
             if let Some(e) = view.finger_down(actions) {
+                if !e.device.is_primary_hit() {
+                    out = Some(ChannelListAction::Context { row: row.clone(), at: (e.abs.x, e.abs.y) });
+                    self.drag = None;
+                    continue;
+                }
                 if matches!(row, Some(SidebarRow::Channel { .. })) {
                     self.drag = Some(Drag { row: i, start_y: e.abs.y, moving: false, slot: None });
                 }
@@ -231,10 +247,18 @@ impl ChannelList {
                             out = Some(ChannelListAction::Move { id, category, index });
                         }
                     }
-                    (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled => {
+                    (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled && e.device.is_primary_hit() => {
                         out = Some(ChannelListAction::Select(id));
                     }
                     _ => {}
+                }
+            }
+        }
+        // Right-click on the list's own empty space (rows handle their own).
+        if out.is_none() {
+            if let Some(ViewAction::FingerDown(e)) = actions.find_widget_action(self.view.widget_uid()).map(|a| a.cast()) {
+                if !e.device.is_primary_hit() {
+                    out = Some(ChannelListAction::Context { row: None, at: (e.abs.x, e.abs.y) });
                 }
             }
         }
@@ -254,7 +278,7 @@ impl Widget for ChannelList {
                     SidebarRow::Category { name, .. } => {
                         let row = list.item(cx, i, id!(Category));
                         row.label(cx, ids!(label)).set_text(cx, name);
-                        row.view(cx, ids!(gear)).set_visible(cx, hovered && self.can_manage);
+                        row.view(cx, ids!(add)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
                     SidebarRow::Channel { id, name, voice, encrypted, .. } => {
@@ -263,7 +287,6 @@ impl Widget for ChannelList {
                         let glyph = if *voice { "🔊" } else if *encrypted { "🔒" } else { "#" };
                         row.label(cx, ids!(item.hash)).set_text(cx, glyph);
                         row.label(cx, ids!(item.name)).set_text(cx, name);
-                        row.view(cx, ids!(item.gear)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
                 }

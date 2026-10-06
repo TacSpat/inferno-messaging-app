@@ -6,6 +6,7 @@
 pub use makepad_widgets;
 
 mod backend;
+mod ctxmenu;
 mod demo;
 mod lists;
 mod message_list;
@@ -77,8 +78,6 @@ script_mod! {
         draw_bg.border_radius: 4.0
         hash := Txt{text: "#" draw_text.color: #x87858399 draw_text.text_style.font_size: 12.5}
         name := Txt{width: Fill text: "channel" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5}
-        gear := View{visible: false width: Fit height: Fit cursor: MouseCursor.Hand
-            Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}}
     }
 
     let CategoryHeader = View{
@@ -88,8 +87,9 @@ script_mod! {
         align: Align{y: 0.5}
         Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}
         label := Txt{width: Fill text: "CATEGORY" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
-        gear := View{visible: false width: Fit height: Fit cursor: MouseCursor.Hand
-            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}}
+        // Rails: a hover "+" titled "Create Channel" (manage_channels).
+        add := View{visible: false width: Fit height: Fit cursor: MouseCursor.Hand
+            Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/plus.svg")}}
     }
 
     // ─── Member list ─────────────────────────────────────────────────
@@ -308,6 +308,7 @@ script_mod! {
     mod.widgets.ChannelList = set_type_default() do mod.widgets.ChannelListBase{
         width: Fill height: Fill
         flow: Overlay
+        cursor: MouseCursor.Default
         // Spec: drag-and-drop shows a 2px accent drop line.
         drop_line := SolidView{visible: false width: Fill height: 2 draw_bg.color: accent}
         list := PortalList{
@@ -423,6 +424,28 @@ script_mod! {
         }
         icon := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_300}
         label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 10.5}
+    }
+
+    // One context-menu slot: an optional separator, then the item.
+    let CtxSlot = View{
+        visible: false
+        width: Fill height: Fit
+        flow: Down
+        sep := SolidView{visible: false width: Fill height: 1 margin: Inset{top: 4 bottom: 4} draw_bg.color: gray_700}
+        item := MenuItem{icon.icon_walk: Walk{width: 0 height: 16}}
+    }
+
+    // Rails form card: gray-800, rounded-xl, border gray-700/50, p-5.
+    let Card = RoundedView{
+        width: Fill height: Fit
+        flow: Down spacing: 4
+        padding: 20
+        margin: Inset{bottom: 16}
+        new_batch: true
+        draw_bg.color: gray_800
+        draw_bg.border_radius: 12.0
+        draw_bg.border_size: 1.0
+        draw_bg.border_color: #x2c2a2980
     }
 
     let FieldLabel = Txt{
@@ -793,61 +816,120 @@ script_mod! {
                             Txt{text: "ESC" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
                         }
                     }
-                    }
 
-                    channel_dialog := Modal{
-                        content +: {
-                            RoundedView{
-                                width: 448 height: Fit
-                                flow: Down spacing: 4
-                                padding: 24
-                                new_batch: true
-                                draw_bg.color: gray_800
-                                draw_bg.border_radius: 12.0
-                                ch_title := Txt{text: "Create Channel" draw_text.color: #xffffff
-                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                    // Create / edit channel: a page, as in Rails (channels/new,
+                    // channels/edit): centered max-w-lg on gray-950.
+                    channel_page := SolidView{
+                        visible: false
+                        width: Fill height: Fill
+                        align: Align{x: 0.5}
+                        draw_bg.color: gray_950
+                        ScrollYView{width: 512 height: Fill flow: Down padding: Inset{top: 48 bottom: 48}
+                            ch_title := Txt{text: "Create Channel" draw_text.color: #xffffff
+                                draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                            ch_subtitle := Txt{text: "" margin: Inset{top: 2 bottom: 20} draw_text.color: gray_500 draw_text.text_style.font_size: 10.0}
+                            Card{
+                                create_only := View{width: Fill height: Fit flow: Right spacing: 12
+                                    View{width: Fill height: Fit flow: Down
+                                        FieldLabel{text: "TYPE" margin: Inset{bottom: 6}}
+                                        ch_type := DropDown{width: Fill labels: ["Text", "Voice"]}
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        FieldLabel{text: "CATEGORY" margin: Inset{bottom: 6}}
+                                        ch_category := DropDown{width: Fill labels: ["None"]}
+                                    }
+                                }
                                 FieldLabel{text: "CHANNEL NAME"}
                                 ch_name := Field{empty_text: "new-channel"}
                                 FieldLabel{text: "TOPIC"}
                                 ch_topic := Field{empty_text: "What's this channel about?"}
-                                create_only := View{width: Fill height: Fit flow: Down spacing: 4 margin: Inset{top: 10}
-                                    ch_voice := CheckBox{text: "Voice channel"}
-                                    ch_encrypted := CheckBox{text: "Encrypted (end-to-end)"}
-                                }
+                            }
+                            Card{
+                                ch_nsfw := CheckBox{text: "Age-Restricted Channel (NSFW)"}
+                                ch_post_only := CheckBox{text: "Post-only (only moderators can post)"}
+                                ch_encrypted := CheckBox{text: "End-to-End Encryption"}
                                 ch_roles_box := View{width: Fill height: Fit flow: Down
-                                    FieldLabel{text: "WHO CAN SEE IT (BESIDES ADMINS)"}
+                                    FieldLabel{text: "ALLOWED ROLES"}
+                                    Hint{text: "Besides the owner and admins. Choose Everyone for all members."}
                                     ch_roles := mod.widgets.RolePicker{}
                                 }
-                                View{width: Fill height: Fit flow: Down spacing: 4 margin: Inset{top: 6}
-                                    ch_post_only := CheckBox{text: "Post-only (only moderators can post)"}
-                                    ch_nsfw := CheckBox{text: "Age-restricted (NSFW)"}
-                                }
-                                View{width: Fill height: Fit margin: Inset{top: 16} flow: Right spacing: 8 align: Align{y: 0.5}
-                                    ch_save := Button{text: "Create Channel"}
-                                    View{width: Fill height: 1}
-                                    ch_delete := Button{text: "Delete Channel" draw_text.color: #xf87171}
-                                }
+                            }
+                            View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                ch_cancel := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                    Txt{text: "Cancel" draw_text.color: gray_400}}
+                                View{width: Fill height: 1}
+                                ch_save := Button{text: "Create Channel"}
+                            }
+                            ch_danger := Card{margin: Inset{top: 24}
+                                Txt{text: "Danger Zone" draw_text.color: #xf87171 draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                Hint{text: "Deleting a channel removes it for everyone. Its messages can't be shown again."}
+                                ch_delete := Button{text: "Delete Channel" margin: Inset{top: 8}}
                             }
                         }
                     }
 
-                    category_dialog := Modal{
+                    // Create / edit category: Rails' max-w-md card, name only.
+                    category_page := SolidView{
+                        visible: false
+                        width: Fill height: Fill
+                        align: Align{x: 0.5 y: 0.3}
+                        draw_bg.color: gray_950
+                        RoundedView{width: 448 height: Fit flow: Down spacing: 4 padding: 32 new_batch: true
+                            draw_bg.color: gray_800 draw_bg.border_radius: 8.0
+                            cat_title := Txt{text: "Create Category" draw_text.color: #xffffff
+                                draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                            FieldLabel{text: "NAME"}
+                            cat_name := Field{empty_text: "New category"}
+                            View{width: Fill height: Fit margin: Inset{top: 16} flow: Right spacing: 12 align: Align{y: 0.5}
+                                cat_cancel := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                    Txt{text: "Cancel" draw_text.color: gray_400}}
+                                View{width: Fill height: 1}
+                                cat_save := Button{text: "Create Category"}
+                            }
+                        }
+                    }
+
+                    // Context menus, opened at the pointer (ctxmenu.rs).
+                    ctx_layer := View{
+                        visible: false
+                        width: Fill height: Fill
+                        ctx_menu := RoundedView{
+                            width: 200 height: Fit
+                            flow: Down
+                            padding: 6
+                            new_batch: true
+                            draw_bg.color: gray_900
+                            draw_bg.border_radius: 8.0
+                            draw_bg.border_size: 1.0
+                            draw_bg.border_color: gray_700
+                            s0 := CtxSlot{} s1 := CtxSlot{} s2 := CtxSlot{} s3 := CtxSlot{} s4 := CtxSlot{}
+                            s5 := CtxSlot{} s6 := CtxSlot{} s7 := CtxSlot{} s8 := CtxSlot{} s9 := CtxSlot{}
+                            s10 := CtxSlot{} s11 := CtxSlot{} s12 := CtxSlot{} s13 := CtxSlot{}
+                        }
+                    }
+                    }
+
+                    // Styled confirmation (Flutter's improvement over Rails'
+                    // native confirm): black/60 backdrop, gray-800 radius 12,
+                    // max 448 (spec: modals).
+                    confirm_dialog := Modal{
                         content +: {
                             RoundedView{
-                                width: 400 height: Fit
-                                flow: Down spacing: 4
+                                width: 448 height: Fit
+                                flow: Down spacing: 8
                                 padding: 24
                                 new_batch: true
                                 draw_bg.color: gray_800
                                 draw_bg.border_radius: 12.0
-                                cat_title := Txt{text: "Create Category" draw_text.color: #xffffff
+                                confirm_title := Txt{text: "" draw_text.color: #xffffff
                                     draw_text.text_style: theme.font_bold{font_size: 13.0}}
-                                FieldLabel{text: "CATEGORY NAME"}
-                                cat_name := Field{empty_text: "New category"}
-                                View{width: Fill height: Fit margin: Inset{top: 16} flow: Right spacing: 8 align: Align{y: 0.5}
-                                    cat_save := Button{text: "Create Category"}
+                                confirm_body := Hint{text: ""}
+                                confirm_reason := View{visible: false width: Fill height: Fit
+                                    confirm_input := Field{empty_text: "Reason (optional)"}}
+                                View{width: Fill height: Fit margin: Inset{top: 12} flow: Right spacing: 8 align: Align{y: 0.5}
                                     View{width: Fill height: 1}
-                                    cat_delete := Button{text: "Delete Category" draw_text.color: #xf87171}
+                                    confirm_cancel := Button{text: "Cancel"}
+                                    confirm_ok := Button{text: "Confirm" draw_text.color: #xf87171}
                                 }
                             }
                         }
@@ -919,10 +1001,50 @@ pub struct App {
     /// Category dialog target: None = creating.
     #[rust]
     dialog_category: Option<String>,
-    /// Destructive actions take a second click.
+    /// The action waiting on the confirm dialog.
     #[rust]
-    confirm: Option<String>,
+    pending: Option<Pending>,
+    #[rust]
+    categories: Vec<backend::RoleItem>,
+    #[rust]
+    server_name: String,
+    /// Slots of the open context menu, and the menus it came from.
+    #[rust]
+    ctx: Vec<CtxSlotData>,
+    #[rust]
+    ctx_back: Vec<CtxMenuData>,
+    #[rust]
+    ctx_at: DVec2,
+    /// Category picked when the channel page opened (create mode).
+    #[rust]
+    page_category: Option<String>,
 }
+
+/// An action that needs a yes first.
+#[derive(Debug, Clone)]
+pub enum Pending {
+    Menu(ctxmenu::Action),
+    Leave,
+}
+
+/// One filled context-menu slot (separator above, action, label, danger).
+#[derive(Debug, Clone)]
+pub struct CtxSlotData {
+    sep: bool,
+    action: ctxmenu::Action,
+    label: String,
+    danger: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct CtxMenuData {
+    items: Vec<ctxmenu::Item>,
+}
+
+const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
+    id!(s0), id!(s1), id!(s2), id!(s3), id!(s4), id!(s5), id!(s6),
+    id!(s7), id!(s8), id!(s9), id!(s10), id!(s11), id!(s12), id!(s13),
+];
 
 const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 3] = [
     (ids!(nav_account), ids!(page_account)),
@@ -1012,31 +1134,34 @@ impl App {
         self.ui.redraw(cx);
     }
 
-    fn open_channel_dialog(&mut self, cx: &mut Cx, id: Option<String>) {
+    fn open_channel_page(&mut self, cx: &mut Cx, id: Option<String>, category: Option<String>) {
         let form = id
             .as_ref()
             .and_then(|id| self.channel_forms.iter().find(|f| f.id.as_ref() == Some(id)).cloned())
             .unwrap_or_default();
         self.dialog_channel = id.clone();
-        self.confirm = None;
+        self.page_category = category.clone();
         let creating = id.is_none();
         self.ui.label(cx, ids!(ch_title)).set_text(cx, if creating { "Create Channel" } else { "Edit Channel" });
+        self.ui.label(cx, ids!(ch_subtitle)).set_text(cx, &format!("in {}", self.server_name));
         self.ui.button(cx, ids!(ch_save)).set_text(cx, if creating { "Create Channel" } else { "Save Changes" });
-        self.ui.button(cx, ids!(ch_delete)).set_text(cx, "Delete Channel");
-        self.ui.button(cx, ids!(ch_delete)).set_visible(cx, !creating);
+        self.ui.view(cx, ids!(ch_danger)).set_visible(cx, !creating);
         self.ui.view(cx, ids!(create_only)).set_visible(cx, creating);
+        // Encryption can't be changed after creation (the key is fixed).
+        self.ui.check_box(cx, ids!(ch_encrypted)).set_visible(cx, creating);
         self.ui.text_input(cx, ids!(ch_name)).set_text(cx, &form.name);
         self.ui.text_input(cx, ids!(ch_topic)).set_text(cx, &form.topic);
-        for (path, v) in [
-            (ids!(ch_voice), form.voice),
-            (ids!(ch_encrypted), form.encrypted),
-            (ids!(ch_post_only), form.post_only),
-            (ids!(ch_nsfw), form.nsfw),
-        ] {
+        self.ui.drop_down(cx, ids!(ch_type)).set_selected_item(cx, 0);
+        let mut labels = vec!["None".to_owned()];
+        labels.extend(self.categories.iter().map(|c| c.name.clone()));
+        let dd = self.ui.drop_down(cx, ids!(ch_category));
+        dd.set_labels(cx, labels);
+        let pick = category.and_then(|c| self.categories.iter().position(|x| x.id == c)).map_or(0, |i| i + 1);
+        dd.set_selected_item(cx, pick);
+        for (path, v) in [(ids!(ch_encrypted), form.encrypted), (ids!(ch_post_only), form.post_only), (ids!(ch_nsfw), form.nsfw)] {
             self.ui.check_box(cx, path).set_active(cx, v, Animate::No);
         }
-        // Everyone except @everyone itself is offered; @everyone is offered
-        // as "Everyone" since it means all members.
+        // @everyone is offered as "Everyone", since it means all members.
         let roles: Vec<(String, String, bool)> = self
             .roles
             .iter()
@@ -1050,24 +1175,27 @@ impl App {
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(ch_roles.list)));
         self.ui.view(cx, ids!(ch_roles_box)).set_visible(cx, form.encrypted);
-        self.ui.modal(cx, ids!(channel_dialog)).open(cx);
+        self.ui.view(cx, ids!(channel_page)).set_visible(cx, true);
+        self.ui.redraw(cx);
     }
 
-    fn open_category_dialog(&mut self, cx: &mut Cx, id: Option<String>, name: &str) {
+    fn open_category_page(&mut self, cx: &mut Cx, id: Option<String>) {
+        let name = id
+            .as_ref()
+            .and_then(|id| self.categories.iter().find(|c| &c.id == id))
+            .map(|c| c.name.clone())
+            .unwrap_or_default();
         self.dialog_category = id.clone();
-        self.confirm = None;
         let creating = id.is_none();
         self.ui.label(cx, ids!(cat_title)).set_text(cx, if creating { "Create Category" } else { "Edit Category" });
-        self.ui.button(cx, ids!(cat_save)).set_text(cx, if creating { "Create Category" } else { "Save" });
-        self.ui.button(cx, ids!(cat_delete)).set_text(cx, "Delete Category");
-        self.ui.button(cx, ids!(cat_delete)).set_visible(cx, !creating);
-        self.ui.text_input(cx, ids!(cat_name)).set_text(cx, name);
-        self.ui.modal(cx, ids!(category_dialog)).open(cx);
+        self.ui.button(cx, ids!(cat_save)).set_text(cx, if creating { "Create Category" } else { "Edit Category" });
+        self.ui.text_input(cx, ids!(cat_name)).set_text(cx, &name);
+        self.ui.view(cx, ids!(category_page)).set_visible(cx, true);
+        self.ui.redraw(cx);
     }
 
     /// Opens or closes the server dropdown, showing only what we may do.
     fn set_server_menu(&mut self, cx: &mut Cx, open: bool) {
-        self.confirm = None;
         if open {
             let p = self.perms.clone();
             self.ui.view(cx, ids!(menu_create_channel)).set_visible(cx, p.manage_channels);
@@ -1076,23 +1204,152 @@ impl App {
             self.ui.view(cx, ids!(menu_leave)).set_visible(cx, !p.owner);
             self.ui.view(cx, ids!(menu_invite)).set_visible(cx, p.create_invite);
             self.ui.view(cx, ids!(menu_divider)).set_visible(cx, !p.owner || p.create_invite);
-            self.ui.label(cx, ids!(menu_leave.label)).set_text(cx, "Leave Server");
         }
         self.ui.view(cx, ids!(server_menu)).set_visible(cx, open);
         self.ui.redraw(cx);
     }
 
-    fn sidebar_category_name(&self, cx: &mut Cx, id: &str) -> String {
-        self.ui
-            .widget(cx, ids!(channels))
-            .borrow::<lists::ChannelList>()
-            .and_then(|l| {
-                l.rows.iter().find_map(|r| match r {
-                    backend::SidebarRow::Category { id: cid, name } if cid == id => Some(name.clone()),
-                    _ => None,
-                })
-            })
-            .unwrap_or_default()
+    fn close_pages(&mut self, cx: &mut Cx) {
+        self.ui.view(cx, ids!(channel_page)).set_visible(cx, false);
+        self.ui.view(cx, ids!(category_page)).set_visible(cx, false);
+        self.ui.redraw(cx);
+    }
+
+    // ─── Context menus ───────────────────────────────────────────────────
+
+    fn open_menu(&mut self, cx: &mut Cx, items: Vec<ctxmenu::Item>, at: DVec2) {
+        let slots = ctxmenu::layout(&items);
+        if slots.is_empty() {
+            return;
+        }
+        self.ctx = slots
+            .iter()
+            .map(|(sep, action, label, danger)| CtxSlotData { sep: *sep, action: action.clone(), label: label.clone(), danger: *danger })
+            .collect();
+        for (i, slot_id) in CTX_SLOTS.iter().enumerate() {
+            let slot = self.ui.view(cx, &[id!(ctx_menu), *slot_id]);
+            match self.ctx.get(i) {
+                Some(d) => {
+                    slot.set_visible(cx, true);
+                    self.ui.view(cx, &[id!(ctx_menu), *slot_id, id!(sep)]).set_visible(cx, d.sep);
+                    let mut label = self.ui.widget(cx, &[id!(ctx_menu), *slot_id, id!(item), id!(label)]);
+                    let color = if d.danger { lists::rgba(0xf87171, 1.0) } else { lists::rgba(0xa8a7a5, 1.0) };
+                    script_apply_eval!(cx, label, {draw_text +: {color: #(color)}});
+                    label.set_text(cx, &d.label);
+                }
+                None => slot.set_visible(cx, false),
+            }
+        }
+        let win = self.ui.view(cx, ids!(ctx_layer)).area().rect(cx).size;
+        let win = if win.x > 0.0 { win } else { dvec2(1400.0, 860.0) };
+        let (x, y) = ctxmenu::place((at.x, at.y), (ctxmenu::WIDTH, ctxmenu::height(&slots)), (win.x, win.y));
+        let mut menu = self.ui.widget(cx, ids!(ctx_menu));
+        script_apply_eval!(cx, menu, {margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ctx_at = at;
+        self.ui.view(cx, ids!(ctx_layer)).set_visible(cx, true);
+        self.ui.redraw(cx);
+    }
+
+    fn close_menu(&mut self, cx: &mut Cx) {
+        self.ctx.clear();
+        self.ctx_back.clear();
+        self.ui.view(cx, ids!(ctx_layer)).set_visible(cx, false);
+        self.ui.redraw(cx);
+    }
+
+    fn sidebar_menu(&self, row: Option<&backend::SidebarRow>) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let manage = self.perms.manage_channels;
+        match row {
+            // Rails: empty sidebar space, manage_channels only.
+            None => {
+                if !manage {
+                    return vec![];
+                }
+                vec![Item::new("Create Channel", A::CreateChannel { category: None }), Item::new("Create Category", A::CreateCategory)]
+            }
+            Some(backend::SidebarRow::Channel { id, .. }) => {
+                let mut v = vec![Item::new("Mark as Read", A::MarkRead(id.clone()))];
+                if manage {
+                    v.push(Item::Separator);
+                    v.push(Item::new("Edit Channel", A::EditChannel(id.clone())));
+                    v.push(Item::danger("Delete Channel", A::DeleteChannel(id.clone())));
+                }
+                v.push(Item::Separator);
+                v.push(Item::new("Copy Channel ID", A::Copy(id.clone())));
+                v
+            }
+            Some(backend::SidebarRow::Category { id, .. }) => {
+                let mut v = vec![];
+                if manage {
+                    v.push(Item::new("Create Channel", A::CreateChannel { category: Some(id.clone()) }));
+                    v.push(Item::Separator);
+                    v.push(Item::new("Edit Category", A::EditCategory(id.clone())));
+                    v.push(Item::danger("Delete Category", A::DeleteCategory(id.clone())));
+                    v.push(Item::Separator);
+                }
+                v.push(Item::new("Copy Category ID", A::Copy(id.clone())));
+                v
+            }
+        }
+    }
+
+    fn confirm(&mut self, cx: &mut Cx, pending: Pending, title: &str, body: &str, ok: &str, reason: bool) {
+        self.pending = Some(pending);
+        self.ui.label(cx, ids!(confirm_title)).set_text(cx, title);
+        self.ui.label(cx, ids!(confirm_body)).set_text(cx, body);
+        self.ui.button(cx, ids!(confirm_ok)).set_text(cx, ok);
+        self.ui.text_input(cx, ids!(confirm_input)).set_text(cx, "");
+        self.ui.view(cx, ids!(confirm_reason)).set_visible(cx, reason);
+        self.ui.modal(cx, ids!(confirm_dialog)).open(cx);
+    }
+
+    /// Runs a picked menu action (destructive ones ask first).
+    fn run_menu_action(&mut self, cx: &mut Cx, action: ctxmenu::Action) {
+        use ctxmenu::Action as A;
+        match action {
+            A::CreateChannel { category } => self.open_channel_page(cx, None, category),
+            A::CreateCategory => self.open_category_page(cx, None),
+            A::MarkRead(id) => self.send(backend::Command::MarkRead(id)),
+            A::EditChannel(id) => self.open_channel_page(cx, Some(id), None),
+            A::EditCategory(id) => self.open_category_page(cx, Some(id)),
+            A::Copy(text) => cx.copy_to_clipboard(&text),
+            A::DeleteChannel(_) => self.confirm(
+                cx,
+                Pending::Menu(action),
+                "Delete Channel",
+                "Are you sure? All messages in this channel will be permanently deleted.",
+                "Delete Channel",
+                false,
+            ),
+            A::DeleteCategory(_) => self.confirm(
+                cx,
+                Pending::Menu(action),
+                "Delete Category",
+                "Are you sure? Channels in this category will become uncategorized.",
+                "Delete Category",
+                false,
+            ),
+            other => self.run_message_or_member_action(cx, other),
+        }
+    }
+
+    /// Message and member menu actions (filled in with those menus).
+    fn run_message_or_member_action(&mut self, _cx: &mut Cx, _action: ctxmenu::Action) {}
+
+    /// The confirmed side of a pending action.
+    fn run_confirmed(&mut self, cx: &mut Cx, pending: Pending) {
+        use ctxmenu::Action as A;
+        let _reason = self.ui.text_input(cx, ids!(confirm_input)).text();
+        match pending {
+            Pending::Leave => self.send(backend::Command::LeaveServer),
+            Pending::Menu(A::DeleteChannel(id)) => {
+                self.send(backend::Command::DeleteChannel(id));
+                self.close_pages(cx);
+            }
+            Pending::Menu(A::DeleteCategory(id)) => self.send(backend::Command::DeleteCategory(id)),
+            Pending::Menu(_) => {}
+        }
     }
 
     fn notice(&self, cx: &mut Cx, text: &str) {
@@ -1121,8 +1378,10 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
             }
-            Update::Server { gid, name, sidebar, members, perms, roles, channels } => {
+            Update::Server { gid, name, sidebar, members, perms, roles, categories, channels } => {
                 self.perms = perms.clone();
+                self.categories = categories.clone();
+                self.server_name = name.clone();
                 self.roles = roles.clone();
                 self.channel_forms = channels.clone();
                 if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
@@ -1258,11 +1517,10 @@ impl MatchEvent for App {
             .and_then(|mut c| c.handle_list_actions(cx, actions));
         match sidebar_action {
             Some(lists::ChannelListAction::Select(id)) => self.send(backend::Command::SelectChannel(id)),
-            Some(lists::ChannelListAction::EditChannel(id)) => self.open_channel_dialog(cx, Some(id)),
-            Some(lists::ChannelListAction::EditCategory(id)) => {
-                let name = self.sidebar_category_name(cx, &id);
-                // Rails shows category names uppercase; edit the stored case.
-                self.open_category_dialog(cx, Some(id), &name);
+            Some(lists::ChannelListAction::CreateIn(cat)) => self.open_channel_page(cx, None, Some(cat)),
+            Some(lists::ChannelListAction::Context { row, at }) => {
+                let items = self.sidebar_menu(row.as_ref());
+                self.open_menu(cx, items, dvec2(at.0, at.1));
             }
             Some(lists::ChannelListAction::Move { id, category, index }) => {
                 self.send(backend::Command::MoveChannel { id, category, index })
@@ -1303,25 +1561,42 @@ impl MatchEvent for App {
         }
         if tapped(&self.ui, cx, ids!(menu_create_channel)) {
             self.set_server_menu(cx, false);
-            self.open_channel_dialog(cx, None);
+            self.open_channel_page(cx, None, None);
         }
         if tapped(&self.ui, cx, ids!(menu_create_category)) {
             self.set_server_menu(cx, false);
-            self.open_category_dialog(cx, None, "");
+            self.open_category_page(cx, None);
         }
         if tapped(&self.ui, cx, ids!(menu_invite)) {
             self.set_server_menu(cx, false);
             self.send(backend::Command::CreateInvite);
         }
         if tapped(&self.ui, cx, ids!(menu_leave)) {
-            if self.confirm.as_deref() == Some("leave") {
-                self.set_server_menu(cx, false);
-                self.send(backend::Command::LeaveServer);
-                self.confirm = None;
-            } else {
-                self.confirm = Some("leave".into());
-                self.ui.label(cx, ids!(menu_leave.label)).set_text(cx, "Click again to leave");
+            self.set_server_menu(cx, false);
+            let body = format!("Leave {}?", self.server_name);
+            self.confirm(cx, Pending::Leave, "Leave Server", &body, "Leave Server", false);
+        }
+        // Context menu picks, and the confirm dialog
+        for (i, slot) in CTX_SLOTS.iter().enumerate() {
+            if tapped(&self.ui, cx, &[id!(ctx_menu), *slot, id!(item)]) {
+                if let Some(d) = self.ctx.get(i).cloned() {
+                    self.close_menu(cx);
+                    self.run_menu_action(cx, d.action);
+                }
             }
+        }
+        if self.ui.button(cx, ids!(confirm_cancel)).clicked(actions) {
+            self.pending = None;
+            self.ui.modal(cx, ids!(confirm_dialog)).close(cx);
+        }
+        if self.ui.button(cx, ids!(confirm_ok)).clicked(actions) {
+            self.ui.modal(cx, ids!(confirm_dialog)).close(cx);
+            if let Some(p) = self.pending.take() {
+                self.run_confirmed(cx, p);
+            }
+        }
+        if tapped(&self.ui, cx, ids!(ch_cancel)) || tapped(&self.ui, cx, ids!(cat_cancel)) {
+            self.close_pages(cx);
         }
         if self.ui.check_box(cx, ids!(ch_encrypted)).changed(actions).is_some() {
             let on = self.ui.check_box(cx, ids!(ch_encrypted)).active(cx);
@@ -1338,26 +1613,25 @@ impl MatchEvent for App {
                 id: self.dialog_channel.clone(),
                 name: self.ui.text_input(cx, ids!(ch_name)).text(),
                 topic: self.ui.text_input(cx, ids!(ch_topic)).text(),
-                voice: existing.as_ref().map_or_else(|| self.ui.check_box(cx, ids!(ch_voice)).active(cx), |e| e.voice),
-                category: existing.as_ref().and_then(|e| e.category.clone()),
+                voice: existing.as_ref().map_or_else(|| self.ui.drop_down(cx, ids!(ch_type)).selected_item() == 1, |e| e.voice),
+                category: match &existing {
+                    Some(e) => e.category.clone(),
+                    None => {
+                        let i = self.ui.drop_down(cx, ids!(ch_category)).selected_item();
+                        i.checked_sub(1).and_then(|i| self.categories.get(i)).map(|c| c.id.clone())
+                    }
+                },
                 encrypted: existing.as_ref().map_or_else(|| self.ui.check_box(cx, ids!(ch_encrypted)).active(cx), |e| e.encrypted),
                 allowed_roles: allowed,
                 post_only: self.ui.check_box(cx, ids!(ch_post_only)).active(cx),
                 nsfw: self.ui.check_box(cx, ids!(ch_nsfw)).active(cx),
             };
             self.send(backend::Command::SaveChannel(form));
-            self.ui.modal(cx, ids!(channel_dialog)).close(cx);
+            self.close_pages(cx);
         }
         if self.ui.button(cx, ids!(ch_delete)).clicked(actions) {
-            if self.confirm.as_deref() == Some("delete-channel") {
-                if let Some(id) = self.dialog_channel.take() {
-                    self.send(backend::Command::DeleteChannel(id));
-                }
-                self.confirm = None;
-                self.ui.modal(cx, ids!(channel_dialog)).close(cx);
-            } else {
-                self.confirm = Some("delete-channel".into());
-                self.ui.button(cx, ids!(ch_delete)).set_text(cx, "Click again to delete");
+            if let Some(id) = self.dialog_channel.clone() {
+                self.run_menu_action(cx, ctxmenu::Action::DeleteChannel(id));
             }
         }
         if self.ui.button(cx, ids!(cat_save)).clicked(actions) {
@@ -1366,21 +1640,8 @@ impl MatchEvent for App {
                 Some(id) => self.send(backend::Command::RenameCategory { id, name }),
                 None => self.send(backend::Command::CreateCategory(name)),
             }
-            self.ui.modal(cx, ids!(category_dialog)).close(cx);
+            self.close_pages(cx);
         }
-        if self.ui.button(cx, ids!(cat_delete)).clicked(actions) {
-            if self.confirm.as_deref() == Some("delete-category") {
-                if let Some(id) = self.dialog_category.take() {
-                    self.send(backend::Command::DeleteCategory(id));
-                }
-                self.confirm = None;
-                self.ui.modal(cx, ids!(category_dialog)).close(cx);
-            } else {
-                self.confirm = Some("delete-category".into());
-                self.ui.button(cx, ids!(cat_delete)).set_text(cx, "Click again to delete");
-            }
-        }
-
         // Settings overlay
         if tapped(&self.ui, cx, ids!(open_settings)) {
             self.set_settings_open(cx, true);
@@ -1508,15 +1769,37 @@ impl AppMain for App {
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {
-                if self.ui.view(cx, ids!(server_menu)).visible() {
+                if self.ui.view(cx, ids!(ctx_layer)).visible() {
+                    self.close_menu(cx);
+                } else if self.ui.view(cx, ids!(channel_page)).visible() || self.ui.view(cx, ids!(category_page)).visible() {
+                    self.close_pages(cx);
+                } else if self.ui.view(cx, ids!(server_menu)).visible() {
                     self.set_server_menu(cx, false);
                 } else if self.ui.view(cx, ids!(settings)).visible() {
                     self.set_settings_open(cx, false);
                 }
             }
         }
-        // A press outside an open dropdown closes it (the header toggles it).
+        // Right-click on empty sidebar space (rows open their own menus).
         if let Event::MouseDown(m) = event {
+            if !m.button.is_primary() {
+                let over_row = self
+                    .ui
+                    .widget(cx, ids!(channels))
+                    .borrow::<lists::ChannelList>()
+                    .map(|l| (l.contains(cx, m.abs), l.row_at(cx, m.abs)));
+                if let Some((true, false)) = over_row {
+                    let items = self.sidebar_menu(None);
+                    self.open_menu(cx, items, m.abs);
+                    return;
+                }
+            }
+        }
+        // A press outside an open dropdown or menu closes it.
+        if let Event::MouseDown(m) = event {
+            if self.ui.view(cx, ids!(ctx_layer)).visible() && !self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).contains(m.abs) {
+                self.close_menu(cx);
+            }
             let menu = self.ui.view(cx, ids!(server_menu));
             if menu.visible() {
                 let inside = |r: Rect| r.contains(m.abs);

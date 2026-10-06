@@ -125,6 +125,8 @@ pub enum Update {
         perms: ServerPerms,
         /// Roles, for encrypted-channel access.
         roles: Vec<RoleItem>,
+        /// Categories by position (id, real-case name), for pickers.
+        categories: Vec<RoleItem>,
         /// Every channel's editable fields, by id.
         channels: Vec<ChannelForm>,
     },
@@ -158,6 +160,7 @@ pub enum Command {
     /// Move a channel to `index` within `category` (None = top level).
     MoveChannel { id: String, category: Option<String>, index: usize },
     LeaveServer,
+    MarkRead(String),
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────
@@ -482,6 +485,9 @@ impl Backend {
                 self.session.move_channel(&gid, &id, category.as_deref(), index).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
+            Command::MarkRead(id) => {
+                self.session.store().mark_read(&id, inferno_core::store::now_secs()).map_err(|e| e.to_string())?;
+            }
             Command::LeaveServer => {
                 let gid = self.server.take().ok_or("Pick a server first.")?;
                 self.session.leave(&gid).await.map_err(|e| e.to_string())?;
@@ -668,6 +674,9 @@ impl Backend {
             owner: state.is_owner(&me),
         };
         let roles = state.roles.iter().map(|r| RoleItem { id: r.id.clone(), name: r.name.clone() }).collect();
+        let mut cats = state.structure.categories.clone();
+        cats.sort_by_key(|c| c.position);
+        let categories = cats.into_iter().map(|c| RoleItem { id: c.id, name: c.name }).collect();
         let channels = state
             .structure
             .channels
@@ -691,6 +700,7 @@ impl Backend {
             members,
             perms,
             roles,
+            categories,
             channels,
         });
         self.publish_channel();
