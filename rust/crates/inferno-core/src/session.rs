@@ -407,6 +407,28 @@ impl Session {
         Ok(event)
     }
 
+    /// Edits one of our messages. Only the author's edits count, so this
+    /// refuses anyone else's.
+    pub async fn edit(&self, gid: &str, channel_id: &str, original: EventId, text: &str) -> Result<Event> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let channel = state.channel(channel_id).ok_or(SessionError::Unknown)?;
+        let original = self.store.get_event(&original)?.ok_or(SessionError::Unknown)?;
+        let event = send::edit(&self.keys, &state, channel, &original, text, now_secs())?;
+        self.publish(&event).await?;
+        let _ = self.updates.send(Update::Channel { gid: gid.into(), channel_id: channel_id.into() });
+        Ok(event)
+    }
+
+    /// Pins or unpins a message (needs manage_messages).
+    pub async fn pin(&self, gid: &str, channel_id: &str, target: EventId, pinned: bool) -> Result<Event> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let channel = state.channel(channel_id).ok_or(SessionError::Unknown)?;
+        let event = send::pin(&self.keys, &state, channel, target, pinned)?;
+        self.publish(&event).await?;
+        let _ = self.updates.send(Update::Channel { gid: gid.into(), channel_id: channel_id.into() });
+        Ok(event)
+    }
+
     pub async fn send_dm(&self, to: PublicKey, body: &str) -> Result<()> {
         let events = dm::build(&self.keys, to, body, vec![]).map_err(|e| SessionError::Other(e.to_string()))?;
         for e in &events {

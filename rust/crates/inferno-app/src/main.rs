@@ -134,10 +134,13 @@ script_mod! {
         new_batch: true
         draw_bg +: {
             hover: instance(0.0)
+            // 0..1: jump-to flash, accent/.3 at full strength.
+            flash: instance(0.0)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
-                sdf.fill(mix(#xdc262600, #xdc26260f, self.hover))
+                let fill = mix(#xdc262600, #xdc26260f, self.hover)
+                sdf.fill(mix(fill, #xdc26264d, self.flash))
                 sdf.rect(0. 0. 2. self.rect_size.y)
                 sdf.fill(mix(#xdc262600, #xdc262666, self.hover))
                 return sdf.result
@@ -165,6 +168,32 @@ script_mod! {
         draw_text.text_style.line_spacing: 1.4
     }
 
+    // Hover toolbar: gray-800, radius 4, 1px accent/.25 border (spec).
+    let ToolBtn = View{
+        width: Fit height: Fit
+        padding: 6
+        cursor: MouseCursor.Hand
+    }
+    let Toolbar = RoundedView{
+        width: Fit height: Fit
+        flow: Right
+        new_batch: true
+        draw_bg.color: gray_800
+        draw_bg.border_radius: 4.0
+        draw_bg.border_size: 1.0
+        draw_bg.border_color: #xdc262640
+        reply_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/reply.svg")}}
+        pin_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
+        edit_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/edit.svg")}}
+    }
+    // Floats at the row's top right (Rails: top-0 right-2).
+    let ToolbarSlot = View{
+        width: Fill height: Fit
+        align: Align{x: 1.0 y: 0.0}
+        padding: Inset{right: 8}
+        toolbar := Toolbar{}
+    }
+
     mod.widgets.MessageListBase = #(message_list::MessageList::register_widget(vm))
     mod.widgets.MessageList = set_type_default() do mod.widgets.MessageListBase{
         width: Fill height: Fill
@@ -178,36 +207,53 @@ script_mod! {
             // padding throws off its tail-follow math, so the rows carry it
             // as margin instead.
 
-            // A full row: 40px avatar column (16px right margin) + content.
+            // A full row: 40px avatar column (16px right margin) + content,
+            // with the hover toolbar laid over it inside the same row, so
+            // moving onto the toolbar doesn't leave the row's hover.
             MsgFull := MsgRow{
-                avatar := RoundedView{
-                    width: 40 height: 40
-                    margin: Inset{right: 16 top: 2}
-                    align: Center
-                    new_batch: true
-                    draw_bg.color: #x1e1c1b
-                    draw_bg.border_radius: 20.0
-                    initial := Txt{text: "?" draw_text.text_style.font_size: 10.5}
-                }
-                content := View{
+                flow: Overlay
+                line := View{
                     width: Fill height: Fit
-                    flow: Down spacing: 2
-                    reply := Txt{text: "" width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
-                    head := View{
-                        width: Fill height: Fit
-                        flow: Right spacing: 8
-                        align: Align{y: 0.5}
-                        name := Txt{text: "name" draw_text.text_style.font_size: 10.5}
-                        time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                    flow: Right
+                    avatar := RoundedView{
+                        width: 40 height: 40
+                        margin: Inset{right: 16 top: 2}
+                        align: Center
+                        new_batch: true
+                        draw_bg.color: #x1e1c1b
+                        draw_bg.border_radius: 20.0
+                        initial := Txt{text: "?" draw_text.text_style.font_size: 10.5}
                     }
-                    body := Body{text: ""}
+                    content := View{
+                        width: Fill height: Fit
+                        flow: Down spacing: 2
+                        // Reply preview: click to jump to the parent.
+                        reply := View{width: Fill height: Fit cursor: MouseCursor.Hand
+                            text := Txt{text: "" width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                        }
+                        head := View{
+                            width: Fill height: Fit
+                            flow: Right spacing: 8
+                            align: Align{y: 0.5}
+                            name := Txt{text: "name" draw_text.text_style.font_size: 10.5}
+                            time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                        }
+                        body := Body{text: ""}
+                    }
                 }
+                slot := ToolbarSlot{}
             }
 
             // Grouped: a 40px spacer replaces the avatar.
             MsgGrouped := MsgRow{
-                View{width: 40 height: 1 margin: Inset{right: 16}}
-                body := Body{text: ""}
+                flow: Overlay
+                line := View{
+                    width: Fill height: Fit
+                    flow: Right
+                    View{width: 40 height: 1 margin: Inset{right: 16}}
+                    body := Body{text: ""}
+                }
+                slot := ToolbarSlot{}
             }
 
             // System lines: green arrow, gray-300 text, timestamp.
@@ -289,6 +335,42 @@ script_mod! {
             Header := RoleHeader{text: ""}
             Member := MemberItem{}
         }
+    }
+
+    mod.widgets.PinsListBase = #(lists::PinsList::register_widget(vm))
+    mod.widgets.PinsList = set_type_default() do mod.widgets.PinsListBase{
+        width: Fill height: 320
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Pin := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{bottom: 6}
+                padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
+                flow: Down spacing: 2
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: gray_800
+                draw_bg.border_radius: 6.0
+                author := Txt{text: "" draw_text.color: #xffffff draw_text.text_style.font_size: 9.5}
+                body := Txt{width: Fill text: "" draw_text.color: gray_200}
+            }
+            Empty := Txt{text: "No pinned messages yet." draw_text.color: gray_500 margin: 8}
+        }
+    }
+
+    // Reply / edit bars above the composer: gray-700, rounded top.
+    let ComposerBar = RoundedView{
+        visible: false
+        width: Fill height: Fit
+        padding: Inset{left: 16 right: 8 top: 6 bottom: 6}
+        flow: Right spacing: 6
+        align: Align{y: 0.5}
+        new_batch: true
+        draw_bg.color: gray_700
+        draw_bg.border_radius: 8.0
+        label := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+        close := ToolBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
     }
 
     startup() do #(App::script_component(vm)){
@@ -396,7 +478,8 @@ script_mod! {
                                 // Topics are one line: truncate, don't wrap (Rails: truncate).
                                 channel_topic := Txt{width: Fill text: "" draw_text.color: gray_400
                                     flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
-                                Ico{draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}
+                                pins_btn := View{width: Fit height: Fit cursor: MouseCursor.Hand
+                                    Ico{draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
                                 invite_btn := View{width: Fit height: Fit cursor: MouseCursor.Hand
                                     Ico{draw_icon.svg: crate_resource("self:resources/icons/users.svg")}}
                                 RoundedView{width: 160 height: 28 padding: Inset{left: 8 right: 8}
@@ -409,7 +492,31 @@ script_mod! {
                             }
                             SolidView{width: Fill height: 1 draw_bg.color: #xdc26261f}
 
-                            messages := mod.widgets.MessageList{}
+                            msg_area := View{
+                                width: Fill height: Fill
+                                flow: Overlay
+                                messages := mod.widgets.MessageList{}
+                                // Pinned messages float over the list, under the header.
+                                pins_slot := View{
+                                    width: Fill height: Fit
+                                    align: Align{x: 1.0}
+                                    padding: Inset{right: 16 top: 4}
+                                    pins_panel := RoundedView{
+                                        visible: false
+                                        width: 420 height: Fit
+                                        flow: Down spacing: 8
+                                        padding: 12
+                                        new_batch: true
+                                        draw_bg.color: gray_900
+                                        draw_bg.border_radius: 8.0
+                                        draw_bg.border_size: 1.0
+                                        draw_bg.border_color: gray_700
+                                        Txt{text: "Pinned Messages" draw_text.color: #xffffff
+                                            draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                        pins := mod.widgets.PinsList{}
+                                    }
+                                }
+                            }
 
                             // Typing row (24px) then the composer.
                             View{width: Fill height: 24 padding: Inset{left: 16} align: Align{y: 0.5}
@@ -417,7 +524,10 @@ script_mod! {
                             }
                             View{
                                 width: Fill height: Fit
+                                flow: Down
                                 padding: Inset{left: 16 right: 16 bottom: 16}
+                                reply_bar := ComposerBar{}
+                                edit_bar := ComposerBar{label.text: "Editing message — Enter to save, Esc to cancel" label.draw_text.color: #xf87171}
                                 // Bar: gray-600, radius 8, 1px accent/.2 border.
                                 RoundedView{
                                     width: Fill height: Fit
@@ -506,6 +616,12 @@ pub struct App {
     showing: Option<(String, String)>,
     #[rust]
     npub: String,
+    /// Event id we're replying to.
+    #[rust]
+    reply_to: Option<String>,
+    /// Event id we're editing.
+    #[rust]
+    editing: Option<String>,
 }
 
 impl App {
@@ -513,6 +629,56 @@ impl App {
         if let Some(tx) = &self.backend {
             let _ = tx.send(cmd);
         }
+    }
+
+    fn focus_composer(&self, cx: &mut Cx) {
+        if let Some(mut input) = self.ui.text_input(cx, ids!(composer)).borrow_mut() {
+            input.take_key_focus(cx);
+        }
+    }
+
+    fn clear_bars(&mut self, cx: &mut Cx) {
+        self.reply_to = None;
+        if self.editing.take().is_some() {
+            self.ui.text_input(cx, ids!(composer)).set_text(cx, "");
+        }
+        self.ui.view(cx, ids!(reply_bar)).set_visible(cx, false);
+        self.ui.view(cx, ids!(edit_bar)).set_visible(cx, false);
+        self.ui.redraw(cx);
+    }
+
+    fn message_action(&mut self, cx: &mut Cx, action: message_list::MessageAction) {
+        use message_list::MessageAction;
+        let row = self
+            .ui
+            .widget(cx, ids!(messages))
+            .borrow::<message_list::MessageList>()
+            .and_then(|l| {
+                let i = match action {
+                    MessageAction::Reply(i) | MessageAction::Edit(i) | MessageAction::Pin(i) => i,
+                };
+                l.row(i).cloned()
+            });
+        let Some(row) = row else { return };
+        match action {
+            MessageAction::Reply(_) => {
+                self.clear_bars(cx);
+                self.reply_to = Some(row.id.clone());
+                let preview: String = row.body.as_deref().unwrap_or("…").chars().take(80).collect();
+                self.ui.label(cx, ids!(reply_bar.label)).set_text(cx, &format!("Replying to {}  —  {}", row.author, preview));
+                self.ui.view(cx, ids!(reply_bar)).set_visible(cx, true);
+                self.focus_composer(cx);
+            }
+            MessageAction::Edit(_) => {
+                self.clear_bars(cx);
+                self.editing = Some(row.id.clone());
+                self.ui.text_input(cx, ids!(composer)).set_text(cx, row.body.as_deref().unwrap_or(""));
+                self.ui.view(cx, ids!(edit_bar)).set_visible(cx, true);
+                self.focus_composer(cx);
+            }
+            MessageAction::Pin(_) => self.send(backend::Command::Pin { id: row.id.clone(), pinned: !row.pinned }),
+        }
+        self.ui.redraw(cx);
     }
 
     fn notice(&self, cx: &mut Cx, text: &str) {
@@ -533,13 +699,13 @@ impl App {
                 if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
                     rail.servers = servers.clone();
                 }
-                self.ui.widget(cx, ids!(rail)).redraw(cx);
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
             }
             Update::Server { gid, name, sidebar, members } => {
                 if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
                     rail.selected = Some(gid.clone());
                 }
-                self.ui.widget(cx, ids!(rail)).redraw(cx);
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
                 self.ui.label(cx, ids!(server_name)).set_text(cx, name);
                 if self.ui.label(cx, ids!(notice)).text().starts_with("Joining") {
                     self.notice(cx, "");
@@ -547,29 +713,43 @@ impl App {
                 if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
                     list.rows = sidebar.clone();
                 }
-                self.ui.widget(cx, ids!(channels)).redraw(cx);
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
                 if let Some(mut list) = self.ui.widget(cx, ids!(members)).borrow_mut::<lists::MemberList>() {
                     list.rows = members.clone();
                 }
-                self.ui.widget(cx, ids!(members)).redraw(cx);
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(members.list)));
             }
             Update::Channel { gid, channel_id, name, topic, encrypted } => {
                 if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
                     list.selected = Some(channel_id.clone());
                 }
-                self.ui.widget(cx, ids!(channels)).redraw(cx);
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
                 self.ui.label(cx, ids!(channel_hash)).set_text(cx, if *encrypted { "🔒" } else { "#" });
                 self.ui.label(cx, ids!(channel_name)).set_text(cx, name);
                 self.ui.label(cx, ids!(channel_topic)).set_text(cx, topic);
                 let _ = gid;
             }
-            Update::Timeline { gid, channel_id, rows } => {
+            Update::Timeline { gid, channel_id, rows, can_pin } => {
                 let key = (gid.clone(), channel_id.clone());
                 let new_channel = self.showing.as_ref() != Some(&key);
                 self.showing = Some(key);
+                if new_channel {
+                    self.clear_bars(cx);
+                    self.ui.view(cx, ids!(pins_panel)).set_visible(cx, false);
+                }
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
+                    list.can_pin = *can_pin;
                     list.set_rows(cx, rows.clone(), new_channel);
                 }
+                let pins: Vec<lists::PinRow> = rows
+                    .iter()
+                    .filter(|r| r.pinned)
+                    .map(|r| lists::PinRow { id: r.id.clone(), author: r.author.clone(), body: r.body.clone().unwrap_or_default() })
+                    .collect();
+                if let Some(mut list) = self.ui.widget(cx, ids!(pins)).borrow_mut::<lists::PinsList>() {
+                    list.rows = pins;
+                }
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(pins.list)));
             }
             Update::Invite(link) => {
                 cx.copy_to_clipboard(link);
@@ -622,6 +802,32 @@ impl MatchEvent for App {
             self.send(backend::Command::SelectChannel(id));
         }
 
+        let list_action = self
+            .ui
+            .widget(cx, ids!(messages))
+            .borrow_mut::<message_list::MessageList>()
+            .and_then(|mut l| l.handle_list_actions(cx, actions));
+        if let Some(a) = list_action {
+            self.message_action(cx, a);
+        }
+        let tapped = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId]| ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+        if tapped(&self.ui, cx, ids!(reply_bar.close)) || tapped(&self.ui, cx, ids!(edit_bar.close)) {
+            self.clear_bars(cx);
+        }
+        if tapped(&self.ui, cx, ids!(pins_btn)) {
+            let panel = self.ui.view(cx, ids!(pins_panel));
+            panel.set_visible(cx, !panel.visible());
+            self.ui.redraw(cx);
+        }
+        let pin_click = self.ui.widget(cx, ids!(pins)).borrow::<lists::PinsList>().and_then(|p| p.clicked(cx, actions));
+        if let Some(id) = pin_click {
+            self.ui.view(cx, ids!(pins_panel)).set_visible(cx, false);
+            if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
+                list.jump_to(cx, &id);
+            }
+            self.ui.redraw(cx);
+        }
+
         if self.ui.view(cx, ids!(add_server)).finger_up(actions).is_some_and(|e| !e.cancelled) {
             self.ui.modal(cx, ids!(dialog)).open(cx);
         }
@@ -651,10 +857,21 @@ impl MatchEvent for App {
         }
 
         let composer = self.ui.text_input(cx, ids!(composer));
+        if composer.escaped(actions) {
+            self.clear_bars(cx);
+        }
         if let Some((text, _)) = composer.returned(actions) {
             let text = text.trim();
             if !text.is_empty() {
-                self.send(backend::Command::Send(text.to_owned()));
+                match self.editing.take() {
+                    Some(id) => self.send(backend::Command::Edit { id, text: text.to_owned() }),
+                    None => {
+                        let reply_to = self.reply_to.take();
+                        self.send(backend::Command::Send { text: text.to_owned(), reply_to });
+                    }
+                }
+                self.ui.view(cx, ids!(reply_bar)).set_visible(cx, false);
+                self.ui.view(cx, ids!(edit_bar)).set_visible(cx, false);
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
                     list.follow_end(cx);
                 }

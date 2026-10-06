@@ -41,6 +41,12 @@ pub enum MemberRow {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MessageRow {
+    /// Event id (hex); empty for demo rows.
+    pub id: String,
+    /// Sent by us: offers Edit.
+    pub own: bool,
+    /// The parent's event id, for jump-to-reply.
+    pub reply_to: Option<String>,
     pub author: String,
     pub initial: String,
     pub color: u32,
@@ -62,7 +68,7 @@ pub enum Update {
     Servers(Vec<ServerItem>),
     Server { gid: String, name: String, sidebar: Vec<SidebarRow>, members: Vec<MemberRow> },
     Channel { gid: String, channel_id: String, name: String, topic: String, encrypted: bool },
-    Timeline { gid: String, channel_id: String, rows: Vec<MessageRow> },
+    Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool },
     Invite(String),
     Error(String),
     /// Nothing selected: no servers yet.
@@ -73,7 +79,9 @@ pub enum Update {
 pub enum Command {
     SelectServer(String),
     SelectChannel(String),
-    Send(String),
+    Send { text: String, reply_to: Option<String> },
+    Edit { id: String, text: String },
+    Pin { id: String, pinned: bool },
     CreateServer(String),
     Join(String),
     CreateInvite,
@@ -233,6 +241,13 @@ fn display(state: &ServerState, pk: &PublicKey) -> Display {
 }
 
 impl Backend {
+    fn selected(&self) -> Result<(String, String), String> {
+        match (self.server.clone(), self.channel.clone()) {
+            (Some(g), Some(c)) => Ok((g, c)),
+            _ => Err("Pick a channel first.".into()),
+        }
+    }
+
     async fn command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::SelectServer(gid) => {
@@ -244,14 +259,25 @@ impl Backend {
                 self.channel = Some(id);
                 self.publish_channel();
             }
-            Command::Send(text) => {
-                let (Some(gid), Some(ch)) = (self.server.clone(), self.channel.clone()) else {
-                    return Err("Pick a channel first.".into());
-                };
+            Command::Send { text, reply_to } => {
+                let (gid, ch) = self.selected()?;
+                let reply_to = reply_to.and_then(|id| EventId::from_hex(&id).ok());
                 self.session
-                    .send(&gid, &ch, &Outgoing { content: &text, ..Default::default() })
+                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, ..Default::default() })
                     .await
                     .map_err(|e| e.to_string())?;
+                self.publish_timeline();
+            }
+            Command::Edit { id, text } => {
+                let (gid, ch) = self.selected()?;
+                let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
+                self.session.edit(&gid, &ch, id, &text).await.map_err(|e| e.to_string())?;
+                self.publish_timeline();
+            }
+            Command::Pin { id, pinned } => {
+                let (gid, ch) = self.selected()?;
+                let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
+                self.session.pin(&gid, &ch, id, pinned).await.map_err(|e| e.to_string())?;
                 self.publish_timeline();
             }
             Command::CreateServer(name) => {
@@ -431,6 +457,9 @@ impl Backend {
                 format!("↳ {}  {}", display(&state, &p.author).name, cut)
             });
             rows.push(MessageRow {
+                id: m.id.to_hex(),
+                own: m.author == self.session.keys().public_key(),
+                reply_to: m.reply_to.map(|r| r.to_hex()),
                 initial: first_initial(&d.name),
                 author: d.name,
                 color: d.color,
@@ -444,6 +473,7 @@ impl Backend {
                 system: false,
             });
         }
-        Cx::post_action(Update::Timeline { gid, channel_id: ch, rows });
+        let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);
+        Cx::post_action(Update::Timeline { gid, channel_id: ch, rows, can_pin });
     }
 }

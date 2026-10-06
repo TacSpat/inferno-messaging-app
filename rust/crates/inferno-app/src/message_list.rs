@@ -23,7 +23,27 @@ pub struct MessageList {
     opened_frames: u32,
     #[rust]
     perf: Perf,
+    /// Row under the pointer: the only one showing the hover toolbar.
+    #[rust]
+    hovered: Option<usize>,
+    /// We may pin (manage_messages): shows the toolbar's pin button.
+    #[rust]
+    pub can_pin: bool,
+    /// Row flashing after a jump, and when the flash started.
+    #[rust]
+    flash: Option<(usize, std::time::Instant)>,
 }
+
+/// What a click in the list asks the app to do.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MessageAction {
+    Reply(usize),
+    Edit(usize),
+    Pin(usize),
+}
+
+/// Spec: a jumped-to message flashes accent/.3, fading over 4s.
+const FLASH_SECS: f32 = 4.0;
 
 /// Draw timings, printed once a second when INFERNO_PERF is set. Measures
 /// the list's own CPU time per frame (row layout and text), which is what
@@ -84,6 +104,9 @@ pub fn demo_rows() -> Vec<MessageRow> {
         .map(|(i, m)| {
             let a = &AUTHORS[m.author];
             MessageRow {
+                id: String::new(),
+                own: false,
+                reply_to: None,
                 author: a.name.into(),
                 initial: a.name[..1].to_uppercase(),
                 color: a.role_color,
@@ -111,7 +134,54 @@ impl MessageList {
         if new_channel {
             self.opened_frames = 0;
         }
+        crate::lists::redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
         self.view.redraw(cx);
+    }
+
+    pub fn row(&self, index: usize) -> Option<&MessageRow> {
+        self.rows.get(index)
+    }
+
+
+    /// Scrolls to the message with event id `id` and flashes it.
+    pub fn jump_to(&mut self, cx: &mut Cx, id: &str) -> bool {
+        let Some(index) = self.rows.iter().position(|r| r.id == id) else { return false };
+        let list = self.view.portal_list(cx, ids!(list));
+        // Leave some room above so the message isn't flush with the header.
+        list.smooth_scroll_to(cx, index, 80.0, Some(40), 120.0);
+        self.flash = Some((index, std::time::Instant::now()));
+        crate::lists::redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
+        self.view.redraw(cx);
+        true
+    }
+
+    /// Handles hover and clicks inside the rows.
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> Option<MessageAction> {
+        let list = self.view.portal_list(cx, ids!(list));
+        let mut out = None;
+        for (index, item) in list.items_with_actions(actions) {
+            if item.as_view().finger_hover_in(actions).is_some() {
+                self.hovered = Some(index);
+                crate::lists::redraw_items(cx, &list);
+            }
+            if item.as_view().finger_hover_out(actions).is_some() && self.hovered == Some(index) {
+                self.hovered = None;
+                crate::lists::redraw_items(cx, &list);
+            }
+            let clicked = |path: &[LiveId]| item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+            if clicked(ids!(toolbar.reply_btn)) {
+                out = Some(MessageAction::Reply(index));
+            } else if clicked(ids!(toolbar.edit_btn)) {
+                out = Some(MessageAction::Edit(index));
+            } else if clicked(ids!(toolbar.pin_btn)) {
+                out = Some(MessageAction::Pin(index));
+            } else if clicked(ids!(line.content.reply)) {
+                if let Some(parent) = self.rows.get(index).and_then(|r| r.reply_to.clone()) {
+                    self.jump_to(cx, &parent);
+                }
+            }
+        }
+        out
     }
 
     /// After sending, follow the newest message again.
@@ -140,9 +210,17 @@ impl Widget for MessageList {
                 _ => {}
             }
             self.opened_frames = self.opened_frames.saturating_add(1);
+            let flash_alpha = |index: usize| -> f32 {
+                match self.flash {
+                    Some((i, at)) if i == index => (1.0 - at.elapsed().as_secs_f32() / FLASH_SECS).max(0.0),
+                    _ => 0.0,
+                }
+            };
             while let Some(index) = list.next_visible_item(cx) {
                 let Some(msg) = self.rows.get(index) else { continue };
                 drawn += 1;
+                let hovered = self.hovered == Some(index);
+                let flash = flash_alpha(index);
                 let body = msg.body.as_deref().unwrap_or("🔒 Encrypted — you don't have this channel's key yet");
 
                 if msg.system {
@@ -152,14 +230,21 @@ impl Widget for MessageList {
                     row.draw_all(cx, &mut Scope::empty());
                     continue;
                 }
+                let item = list.item(cx, index, if msg.grouped { id!(MsgGrouped) } else { id!(MsgFull) });
+                let toolbar = item.view(cx, ids!(toolbar));
+                toolbar.set_visible(cx, hovered && !msg.id.is_empty());
+                item.view(cx, ids!(toolbar.edit_btn)).set_visible(cx, msg.own);
+                item.view(cx, ids!(toolbar.pin_btn)).set_visible(cx, self.can_pin);
+                let mut row_bg = item.clone();
+                script_apply_eval!(cx, row_bg, {draw_bg +: {flash: #(flash)}});
+
                 if msg.grouped {
-                    let row = list.item(cx, index, id!(MsgGrouped));
-                    row.label(cx, ids!(body)).set_text(cx, body);
-                    row.draw_all(cx, &mut Scope::empty());
+                    item.label(cx, ids!(line.body)).set_text(cx, body);
+                    item.draw_all(cx, &mut Scope::empty());
                     continue;
                 }
 
-                let row = list.item(cx, index, id!(MsgFull));
+                let row = item.view(cx, ids!(line));
                 let mut avatar = row.widget(cx, ids!(avatar));
                 let fill = rgba(msg.avatar, 1.0);
                 script_apply_eval!(cx, avatar, {draw_bg +: {color: #(fill)}});
@@ -171,15 +256,18 @@ impl Widget for MessageList {
                 let edited = if msg.edited { "  (edited)" } else { "" };
                 let pinned = if msg.pinned { "  📌" } else { "" };
                 row.label(cx, ids!(content.head.time)).set_text(cx, &format!("{}{edited}{pinned}", clock(msg.at)));
-                let reply = row.label(cx, ids!(content.reply));
-                reply.set_visible(cx, msg.reply.is_some());
-                reply.set_text(cx, msg.reply.as_deref().unwrap_or(""));
+                row.view(cx, ids!(content.reply)).set_visible(cx, msg.reply.is_some());
+                row.label(cx, ids!(content.reply.text)).set_text(cx, msg.reply.as_deref().unwrap_or(""));
                 row.label(cx, ids!(content.body)).set_text(cx, body);
-                row.draw_all(cx, &mut Scope::empty());
+                item.draw_all(cx, &mut Scope::empty());
             }
         }
         self.perf.record(started.elapsed(), drawn);
-        if self.opened_frames <= 2 {
+        let flashing = self.flash.is_some_and(|(_, at)| at.elapsed().as_secs_f32() < FLASH_SECS);
+        if !flashing && self.flash.is_some() {
+            self.flash = None;
+        }
+        if self.opened_frames <= 2 || flashing {
             // Not inside the loop: the list is borrowed there.
             self.view.redraw(cx);
         }

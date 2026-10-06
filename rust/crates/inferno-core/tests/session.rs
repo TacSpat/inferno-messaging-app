@@ -130,3 +130,32 @@ async fn encrypted_channel_keys_reach_members_who_join_later() {
     let tl = alice.timeline(&gid, &vault).unwrap();
     assert!(tl.iter().any(|m| m.content.as_deref() == Some("welcome in")), "{tl:?}");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reply_edit_and_pin_reach_the_other_client() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let mut alice_rx = alice.updates();
+
+    let gid = owner.create_server("x").await.unwrap();
+    let general = owner.server(&gid).unwrap().unwrap().structure.channels[0].id.clone();
+    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+
+    let first = owner.send(&gid, &general, &Outgoing { content: "typo hre", ..Default::default() }).await.unwrap();
+    owner.send(&gid, &general, &Outgoing { content: "a reply", reply_to: Some(first.id), ..Default::default() }).await.unwrap();
+    owner.edit(&gid, &general, first.id, "typo here").await.unwrap();
+    owner.pin(&gid, &general, first.id, true).await.unwrap();
+
+    // Wait until Alice has all four events.
+    for _ in 0..4 {
+        wait_for(&mut alice_rx, "channel traffic", |u| matches!(u, Update::Channel { .. })).await;
+    }
+    let tl = alice.timeline(&gid, &general).unwrap();
+    let edited = tl.iter().find(|m| m.id == first.id).unwrap();
+    assert_eq!(edited.content.as_deref(), Some("typo here"));
+    assert!(edited.edited_at.is_some() && edited.pinned);
+    assert_eq!(tl.iter().find(|m| m.content.as_deref() == Some("a reply")).unwrap().reply_to, Some(first.id));
+}

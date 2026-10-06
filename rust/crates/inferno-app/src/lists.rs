@@ -11,6 +11,18 @@ pub(crate) fn rgba(hex: u32, alpha: f32) -> Vec4 {
     vec4(r, g, b, alpha)
 }
 
+/// Re-records every live row of `list`. Rows with `new_batch` keep a cached
+/// draw that doesn't notice text changes, so after the data changes (an
+/// edit, a renamed member) they'd keep showing the old text.
+pub(crate) fn redraw_items(cx: &mut Cx, list: &PortalListRef) {
+    if let Some(list) = list.borrow() {
+        for item in list.items().values() {
+            item.widget.redraw(cx);
+        }
+    }
+    list.redraw(cx);
+}
+
 /// A clicked row, if `item` was clicked in `actions`.
 fn clicked(item: &WidgetRef, actions: &Actions) -> bool {
     item.as_view().finger_up(actions).is_some_and(|e| !e.cancelled)
@@ -154,6 +166,64 @@ impl Widget for MemberList {
                         n.set_text(cx, name);
                         row.draw_all(cx, &mut Scope::empty());
                     }
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+// ─── Pinned messages panel ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PinRow {
+    pub id: String,
+    pub author: String,
+    pub body: String,
+}
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct PinsList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<PinRow>,
+}
+
+impl PinsList {
+    /// The event id of the pin clicked in `actions`, if any.
+    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<String> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions)
+            .into_iter()
+            .find(|(_, item)| clicked(item, actions))
+            .and_then(|(i, _)| self.rows.get(i).map(|r| r.id.clone()))
+    }
+}
+
+impl Widget for PinsList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            let count = self.rows.len().max(1);
+            list.set_item_range(cx, 0, count);
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(r) => {
+                        let row = list.item(cx, i, id!(Pin));
+                        row.label(cx, ids!(author)).set_text(cx, &r.author);
+                        row.label(cx, ids!(body)).set_text(cx, &r.body);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None if i == 0 => {
+                        let row = list.item(cx, i, id!(Empty));
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None => {}
                 }
             }
         }
