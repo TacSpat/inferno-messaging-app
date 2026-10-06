@@ -116,6 +116,11 @@ script_mod! {
 
         link_color: #x60a5fa
         mention_color: #x60a5fa
+        mention_bg: #x60a5fa26
+        mention_bg_hover: #x60a5fa4d
+        everyone_color: #xfacc15
+        everyone_bg: #xeab30826
+        everyone_bg_hover: #xeab3084d
     }
 }
 
@@ -140,6 +145,27 @@ pub struct MessageText {
     link_color: Vec4f,
     #[live]
     mention_color: Vec4f,
+    #[live]
+    mention_bg: Vec4f,
+    #[live]
+    mention_bg_hover: Vec4f,
+    #[live]
+    everyone_color: Vec4f,
+    #[live]
+    everyone_bg: Vec4f,
+    #[live]
+    everyone_bg_hover: Vec4f,
+    /// The link or mention under the pointer (index into `targets`).
+    #[rust]
+    hovered: Option<usize>,
+    /// The link being read: its target and the text inside it, drawn as one
+    /// inline widget when it closes.
+    #[rust]
+    open_link: Option<(String, String)>,
+    /// Links and mentions drawn this pass: the range of TextFlow's tracked
+    /// areas each one covers (one per row it wraps over), and its target.
+    #[rust]
+    targets: Vec<(std::ops::Range<usize>, String)>,
     #[live]
     paragraph_spacing: f64,
     #[live]
@@ -169,10 +195,38 @@ impl Widget for MessageText {
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         self.text_flow.handle_event(cx, event, scope);
+        for (i, (range, target)) in self.targets.clone().into_iter().enumerate() {
+            for k in range {
+                let Some(area) = self.text_flow.areas_tracker.areas.get(k).copied() else { continue };
+                match event.hits(cx, area) {
+                    Hit::FingerHoverIn(_) | Hit::FingerHoverOver(_) => {
+                        cx.set_cursor(MouseCursor::Hand);
+                        if self.hovered != Some(i) {
+                            self.hovered = Some(i);
+                            self.redraw(cx);
+                        }
+                    }
+                    Hit::FingerHoverOut(_) if self.hovered == Some(i) => {
+                        self.hovered = None;
+                        self.redraw(cx);
+                    }
+                    Hit::FingerUp(e) if e.is_over && e.was_tap() => {
+                        let action = match target.strip_prefix(crate::message_format::MENTION_SCHEME) {
+                            Some(who) => MessageTextAction::Mention(who.to_owned()),
+                            None => MessageTextAction::Link(target.clone()),
+                        };
+                        cx.widget_action(self.widget_uid(), action);
+                    }
+                    _ => {}
+                }
+            }
+        }
     }
 
     fn draw_walk(&mut self, cx: &mut Cx2d, _scope: &mut Scope, walk: Walk) -> DrawStep {
         self.auto_id = 0;
+        self.targets.clear();
+        self.open_link = None;
 
         self.begin(cx, walk);
         self.process_markdown_doc(cx);
@@ -303,15 +357,62 @@ impl MessageText {
                     tf.strikethrough.pop();
                 }
                 MdEvent::Start(Tag::Link { dest_url, .. }) => {
-                    let color = if dest_url.starts_with(crate::message_format::MENTION_SCHEME) {
-                        self.mention_color
-                    } else {
-                        self.link_color
-                    };
-                    tf.font_colors.push(color);
+                    self.open_link = Some((dest_url.to_string(), String::new()));
                 }
                 MdEvent::End(TagEnd::Link) => {
+                    // Rails: links accent-light, underlined on hover; mentions
+                    // an accent/.15 pill in accent (warning colours for
+                    // @everyone and @here, the role's colour for roles),
+                    // accent/.3 and underlined on hover. Drawn as text runs so
+                    // they sit on the baseline; their rects are tracked for
+                    // hover and clicks.
+                    let Some((target, text)) = self.open_link.take() else { continue };
+                    let index = self.targets.len();
+                    let hovered = self.hovered == Some(index);
+                    let who = target.strip_prefix(crate::message_format::MENTION_SCHEME);
+                    let saved_bg = tf.draw_block.code_color;
+                    let color = match who {
+                        Some("everyone") => {
+                            tf.draw_block.code_color = if hovered { self.everyone_bg_hover } else { self.everyone_bg };
+                            self.everyone_color
+                        }
+                        Some(w) => {
+                            tf.draw_block.code_color = if hovered { self.mention_bg_hover } else { self.mention_bg };
+                            w.strip_prefix("role:")
+                                .and_then(|hex| u32::from_str_radix(hex, 16).ok())
+                                .map(|c| {
+                                    vec4(
+                                        ((c >> 16) & 0xff) as f32 / 255.0,
+                                        ((c >> 8) & 0xff) as f32 / 255.0,
+                                        (c & 0xff) as f32 / 255.0,
+                                        1.0,
+                                    )
+                                })
+                                .unwrap_or(self.mention_color)
+                        }
+                        None => self.link_color,
+                    };
+                    tf.areas_tracker.push_tracker();
+                    tf.font_colors.push(color);
+                    if who.is_some() {
+                        tf.inline_code.push();
+                        tf.bold.push();
+                    }
+                    if hovered {
+                        tf.underline.push();
+                    }
+                    tf.draw_text(cx, &text);
+                    if hovered {
+                        tf.underline.pop();
+                    }
+                    if who.is_some() {
+                        tf.bold.pop();
+                        tf.inline_code.pop();
+                    }
                     tf.font_colors.pop();
+                    let (a, b) = tf.areas_tracker.pop_tracker();
+                    tf.draw_block.code_color = saved_bg;
+                    self.targets.push((a..b, target));
                 }
                 MdEvent::Start(Tag::Image {
                     dest_url, title, ..
@@ -427,6 +528,11 @@ impl MessageText {
                         tf.draw_text(cx, &text);
                         tf.fixed.pop();
                         tf.end_code(cx);
+                    }
+                }
+                MdEvent::Text(text) if self.open_link.is_some() => {
+                    if let Some((_, t)) = self.open_link.as_mut() {
+                        t.push_str(&text);
                     }
                 }
                 MdEvent::Text(text) => {
@@ -599,3 +705,14 @@ impl MessageTextRef {
     }
 }
 
+
+/// What a click in a message body asks for.
+#[derive(Clone, Debug, Default)]
+pub enum MessageTextAction {
+    #[default]
+    None,
+    /// An http(s) link to open.
+    Link(String),
+    /// A mention: a member's hex pubkey, `everyone`, or `role:<rrggbb>`.
+    Mention(String),
+}

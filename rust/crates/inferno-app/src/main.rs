@@ -201,6 +201,8 @@ script_mod! {
         draw_text.text_style.line_spacing: 1.4
     }
 
+
+
     // A message body, rendered as Rails does (message_format.rs).
     let MsgBody = mod.widgets.MessageText{
         width: Fill height: Fit
@@ -209,6 +211,9 @@ script_mod! {
         font_color: gray_200
         paragraph_spacing: 4
         pre_code_spacing: 4
+        // Rails pills: 0 4px padding, no margin (the typed space separates).
+        inline_code_padding: Inset{left: 4 right: 4 top: 0 bottom: 0}
+        inline_code_margin: Inset{left: 0 right: 0 top: 0 bottom: 0}
         heading_base_scale: 1.4
         draw_text +: {color: gray_200}
         text_style_normal: theme.font_regular{font_size: 10.5 line_spacing: 1.4}
@@ -219,15 +224,18 @@ script_mod! {
         draw_block +: {
             line_color: gray_400
             sep_color: gray_600
-            quote_bg_color: gray_800
-            quote_fg_color: gray_500
+            // Rails: 4px gray-600 left border, no fill.
+            quote_bg_color: #0000
+            quote_fg_color: gray_600
             code_color: gray_900
             selection_color: accent_30
             table_header_bg_color: gray_800
             table_border_color: gray_600
         }
         link_color: accent_light
-        mention_color: accent_light
+        mention_color: accent
+        mention_bg: accent_15
+        mention_bg_hover: accent_30
     }
 
     // Hover toolbar: gray-800, radius 4, 1px accent/.25 border (spec).
@@ -1854,6 +1862,9 @@ pub struct App {
     /// Rails' spoiler toggle for the next message.
     #[rust]
     spoiler: bool,
+    /// Where the pointer last went down, for menus opened from actions.
+    #[rust]
+    last_press: DVec2,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -3003,7 +3014,7 @@ impl App {
                 self.ui.label(cx, ids!(channel_topic)).set_text(cx, topic);
                 let _ = gid;
             }
-            Update::Timeline { gid, channel_id, rows, can_pin } => {
+            Update::Timeline { gid, channel_id, rows, can_pin, mentions } => {
                 let key = (gid.clone(), channel_id.clone());
                 let new_channel = self.showing.as_ref() != Some(&key);
                 self.showing = Some(key);
@@ -3015,6 +3026,7 @@ impl App {
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
                     list.can_pin = *can_pin;
                     list.no_reply = gid == "@dm";
+                    list.mentions = mentions.iter().cloned().collect();
                     list.set_rows(cx, rows.clone(), new_channel && jump.is_none());
                     if let Some(id) = jump {
                         list.jump_to(cx, &id);
@@ -3179,6 +3191,21 @@ impl MatchEvent for App {
                 self.set_home(cx, false);
             }
             self.send(backend::Command::SelectServer(gid));
+        }
+
+        // Links and mentions in message bodies.
+        for action in actions {
+            let Some(wa) = action.as_widget_action() else { continue };
+            match wa.cast::<message_text::MessageTextAction>() {
+                message_text::MessageTextAction::Link(url) if url.starts_with("https://") || url.starts_with("http://") => {
+                    cx.open_url(&url, OpenUrlInPlace::No);
+                }
+                message_text::MessageTextAction::Mention(who) if who.len() == 64 => {
+                    self.card_at = Some(self.last_press + dvec2(0.0, 12.0));
+                    self.send(backend::Command::Card(who));
+                }
+                _ => {}
+            }
         }
 
         // Home
@@ -3788,6 +3815,7 @@ impl AppMain for App {
         }
         // A press outside an open dropdown or menu closes it.
         if let Event::MouseDown(m) = event {
+            self.last_press = m.abs;
             let suggest = self.ui.view(cx, ids!(search_suggest));
             self.press_in_suggest = suggest.visible() && suggest.area().rect(cx).contains(m.abs);
             if self.ui.view(cx, ids!(card_layer)).visible() && !self.ui.view(cx, ids!(card)).area().rect(cx).contains(m.abs) {

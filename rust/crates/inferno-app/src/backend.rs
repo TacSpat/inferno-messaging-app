@@ -281,7 +281,9 @@ pub enum Update {
         channels: Vec<ChannelForm>,
     },
     Channel { gid: String, channel_id: String, name: String, topic: String, encrypted: bool },
-    Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool },
+    /// `mentions`: lowercase `@word` → its `mention:` target (see
+    /// message_format), for the names that resolve here.
+    Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
     Invite(String),
     Error(String),
     /// Nothing selected: no servers yet.
@@ -484,6 +486,34 @@ fn hex_color(s: &str) -> Option<u32> {
 
 const DEFAULT_ROLE: u32 = 0xcccbca; // gray-200, Rails' color for no role
 const DEFAULT_AVATAR: u32 = 0x1e1c1b;
+
+/// A name `@word` can match (Rails: `@(\w+)`).
+fn is_word(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
+/// Rails styles `@username` for members and `@role` for roles (in the role's
+/// colour). Display names and nicknames that are one word count too, since
+/// that's what our Mention inserts.
+fn server_mentions(state: &ServerState) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for role in state.roles.iter().filter(|r| !r.is_everyone()) {
+        let name = role.name.trim_start_matches('@');
+        if is_word(name) {
+            let color = role.color.trim_start_matches('#');
+            let color = if color.len() == 6 { color } else { "dc2626" };
+            out.push((name.to_lowercase(), format!("role:{color}")));
+        }
+    }
+    for (pk, m) in &state.members {
+        for name in [Some(&m.profile.name), Some(&m.profile.display_name), m.nickname.as_ref()].into_iter().flatten() {
+            if is_word(name) {
+                out.push((name.to_lowercase(), pk.to_hex()));
+            }
+        }
+    }
+    out
+}
 
 fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> Card {
     let d = display(state, pk);
@@ -1089,7 +1119,16 @@ impl Backend {
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
-        Cx::post_action(Update::Timeline { gid: "@dm".into(), channel_id: with.to_hex(), rows, can_pin: false });
+        let mut mentions = Vec::new();
+        for pk in [with, me] {
+            let p = self.profile(&pk);
+            for name in [p.name, p.display_name] {
+                if is_word(&name) {
+                    mentions.push((name.to_lowercase(), pk.to_hex()));
+                }
+            }
+        }
+        Cx::post_action(Update::Timeline { gid: "@dm".into(), channel_id: with.to_hex(), rows, can_pin: false, mentions });
     }
 
     /// Rails' Find People: a public key, or a name among people we know of
@@ -1424,6 +1463,7 @@ impl Backend {
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);
-        Cx::post_action(Update::Timeline { gid, channel_id: ch, rows, can_pin });
+        let mentions = server_mentions(&state);
+        Cx::post_action(Update::Timeline { gid, channel_id: ch, rows, can_pin, mentions });
     }
 }

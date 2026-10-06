@@ -3,6 +3,8 @@
 //! already resolved; `INFERNO_DEMO=1` swaps in the 10,000-message synthetic
 //! history for performance checks.
 
+use std::collections::HashMap;
+
 use makepad_widgets::*;
 
 use crate::backend::MessageRow;
@@ -32,6 +34,9 @@ pub struct MessageList {
     /// DMs have no replies (Rails' DM payloads carry none).
     #[rust]
     pub no_reply: bool,
+    /// Lowercase `@word` → `mention:` target, for this timeline.
+    #[rust]
+    pub mentions: HashMap<String, String>,
     /// Row flashing after a jump, and when the flash started.
     #[rust]
     flash: Option<(usize, std::time::Instant)>,
@@ -262,8 +267,10 @@ impl Widget for MessageList {
                 script_apply_eval!(cx, row_bg, {draw_bg +: {flash: #(flash)}});
 
                 // Markdown re-lays-out on every set, so only set what changed.
+                let mentions = &self.mentions;
+                let resolve = |word: &str| mentions.get(&word.to_lowercase()).cloned();
                 let set_body = |cx: &mut Cx, w: WidgetRef| {
-                    let md = crate::message_format::to_markdown(body);
+                    let md = crate::message_format::to_markdown(body, &resolve);
                     if w.text() != md {
                         w.set_text(cx, &md);
                     }
