@@ -3,8 +3,8 @@
 //! and one for ourselves so our other devices see what we sent.
 //!
 //! Rails and Flutter both sign kind 14 directly with a NIP-44 encrypted body.
-//! During the migration window we still read that legacy form, and can send it
-//! alongside NIP-17 so people on the old apps keep receiving our messages.
+//! We only ever send NIP-17, but still read that legacy form during the
+//! migration window.
 //!
 //! The body is the same in both forms, so everything above this layer is
 //! unchanged: plain text, or JSON with a `type` (`message`, `reaction`,
@@ -13,13 +13,6 @@
 use nostr::nips::nip44;
 use nostr::nips::nip59::{GiftWrapBuilder, UnwrappedGift};
 use nostr_sdk::prelude::*;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SendMode {
-    Nip17,
-    /// NIP-17 plus a legacy signed kind 14, for recipients on the old apps.
-    Nip17AndLegacy,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Wire {
@@ -61,10 +54,9 @@ pub fn build(
     recipient: PublicKey,
     body: &str,
     extra_tags: Vec<Tag>,
-    mode: SendMode,
 ) -> Result<Vec<Event>, DmError> {
     let mut tags = vec![Tag::public_key(recipient)];
-    tags.extend(extra_tags.iter().cloned());
+    tags.extend(extra_tags);
 
     let mut rumor = EventBuilder::new(Kind::PrivateDirectMessage, body)
         .tags(tags)
@@ -80,28 +72,7 @@ pub fn build(
     if recipient != keys.public_key() {
         events.push(wrap(keys.public_key())?);
     }
-
-    if mode == SendMode::Nip17AndLegacy {
-        events.push(build_legacy(keys, recipient, body, extra_tags)?);
-    }
     Ok(events)
-}
-
-/// The Rails/Flutter form: kind 14 signed by the sender, NIP-44 body.
-fn build_legacy(
-    keys: &Keys,
-    recipient: PublicKey,
-    body: &str,
-    extra_tags: Vec<Tag>,
-) -> Result<Event, DmError> {
-    let content = nip44::encrypt(keys.secret_key(), &recipient, body, nip44::Version::V2)
-        .map_err(|e| DmError::Build(e.to_string()))?;
-    let mut tags = vec![Tag::public_key(recipient)];
-    tags.extend(extra_tags);
-    EventBuilder::new(Kind::PrivateDirectMessage, content)
-        .tags(tags)
-        .finalize(keys)
-        .map_err(|e| DmError::Build(e.to_string()))
 }
 
 /// Opens a kind 1059 gift wrap or a legacy kind 14 addressed to or from us.
@@ -183,7 +154,7 @@ mod tests {
     fn nip17_round_trip_for_recipient_and_our_other_devices() {
         let alice = Keys::generate();
         let bob = Keys::generate();
-        let events = build(&alice, bob.public_key(), "hi bob", vec![], SendMode::Nip17).unwrap();
+        let events = build(&alice, bob.public_key(), "hi bob", vec![]).unwrap();
         assert_eq!(events.len(), 2);
         assert!(events.iter().all(|e| e.kind == Kind::GiftWrap));
         // The wrap is signed by a throwaway key, never by Alice.
@@ -200,21 +171,24 @@ mod tests {
         assert!(open(&bob, &events[1]).is_err(), "Bob can't open Alice's copy");
     }
 
+    /// What Rails and Flutter send: kind 14 signed by the sender, NIP-44 body.
+    fn legacy_dm(from: &Keys, to: PublicKey, body: &str) -> Event {
+        let content = nip44::encrypt(from.secret_key(), &to, body, nip44::Version::V2).unwrap();
+        EventBuilder::new(Kind::PrivateDirectMessage, content)
+            .tag(Tag::public_key(to))
+            .finalize(from)
+            .unwrap()
+    }
+
     #[test]
-    fn legacy_round_trip_both_directions() {
+    fn reads_legacy_dms_both_directions() {
         let alice = Keys::generate();
         let bob = Keys::generate();
-        let events = build(
+        let legacy = &legacy_dm(
             &alice,
             bob.public_key(),
             r#"{"type":"reaction","action":"add","e":"x","emoji":"🔥"}"#,
-            vec![],
-            SendMode::Nip17AndLegacy,
-        )
-        .unwrap();
-        let legacy = events.last().unwrap();
-        assert_eq!(legacy.kind, Kind::PrivateDirectMessage);
-        assert_eq!(legacy.pubkey, alice.public_key());
+        );
 
         let at_bob = open(&bob, legacy).unwrap();
         assert_eq!(at_bob.wire, Wire::Legacy);
