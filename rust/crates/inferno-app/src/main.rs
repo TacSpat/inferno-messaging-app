@@ -397,6 +397,34 @@ script_mod! {
         draw_bg.border_radius: 4.0
         label := Txt{text: "" draw_text.color: gray_400}
     }
+    // Rails menu item: px-2.5 py-1.5 text-sm gray-300, hover gray-700 + white.
+    let MenuItem = RoundedView{
+        width: Fill height: Fit
+        padding: Inset{left: 10 right: 10 top: 6 bottom: 6}
+        flow: Right spacing: 8
+        align: Align{y: 0.5}
+        cursor: MouseCursor.Hand
+        new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
+                sdf.fill(mix(#x2c2a2900, #x2c2a29ff, self.hover))
+                return sdf.result
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+        icon := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_300}
+        label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 10.5}
+    }
+
     let FieldLabel = Txt{
         margin: Inset{top: 16 bottom: 6}
         draw_text.color: gray_500
@@ -491,6 +519,7 @@ script_mod! {
                         }
 
                         // ── Channel sidebar ──
+                        View{width: 240 height: Fill flow: Overlay
                         SolidView{
                             width: 240 height: Fill
                             flow: Down
@@ -539,6 +568,28 @@ script_mod! {
                                     Ico{icon_walk: Walk{width: 16 height: 16}
                                         draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}}
                             }
+                        }
+                        // Server dropdown (Rails: absolute left-2 right-2 top-12,
+                        // gray-900, 1px gray-700 border, radius 8, py/px 1.5).
+                        View{width: Fill height: Fit padding: Inset{left: 8 right: 8 top: 48}
+                            server_menu := RoundedView{
+                                visible: false
+                                width: Fill height: Fit
+                                flow: Down
+                                padding: 6
+                                new_batch: true
+                                draw_bg.color: gray_900
+                                draw_bg.border_radius: 8.0
+                                draw_bg.border_size: 1.0
+                                draw_bg.border_color: gray_700
+                                menu_create_channel := MenuItem{label.text: "Create Channel" icon.draw_icon.svg: crate_resource("self:resources/icons/plus.svg")}
+                                menu_create_category := MenuItem{label.text: "Create Category" icon.draw_icon.svg: crate_resource("self:resources/icons/folder.svg")}
+                                menu_server_settings := MenuItem{label.text: "Server Settings" icon.draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}
+                                menu_divider := SolidView{width: Fill height: 1 margin: Inset{top: 4 bottom: 4} draw_bg.color: gray_700}
+                                menu_leave := MenuItem{label.text: "Leave Server" label.draw_text.color: #xf87171 icon.icon_walk: Walk{width: 0 height: 16}}
+                                menu_invite := MenuItem{label.text: "Invite People" icon.draw_icon.svg: crate_resource("self:resources/icons/link.svg")}
+                            }
+                        }
                         }
 
                         // ── Chat column ──
@@ -742,26 +793,6 @@ script_mod! {
                             Txt{text: "ESC" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
                         }
                     }
-                    }
-
-                    // Server menu (Rails: the header dropdown), gated by permission.
-                    server_menu := Modal{
-                        content +: {
-                            RoundedView{
-                                width: 220 height: Fit
-                                flow: Down spacing: 2
-                                padding: 6
-                                new_batch: true
-                                draw_bg.color: gray_900
-                                draw_bg.border_radius: 8.0
-                                draw_bg.border_size: 1.0
-                                draw_bg.border_color: gray_700
-                                menu_create_channel := NavItem{label.text: "Create Channel" label.draw_text.color: gray_300}
-                                menu_create_category := NavItem{label.text: "Create Category" label.draw_text.color: gray_300}
-                                menu_invite := NavItem{label.text: "Invite People" label.draw_text.color: gray_300}
-                                menu_leave := NavItem{label.text: "Leave Server" label.draw_text.color: #xf87171}
-                            }
-                        }
                     }
 
                     channel_dialog := Modal{
@@ -1034,6 +1065,23 @@ impl App {
         self.ui.modal(cx, ids!(category_dialog)).open(cx);
     }
 
+    /// Opens or closes the server dropdown, showing only what we may do.
+    fn set_server_menu(&mut self, cx: &mut Cx, open: bool) {
+        self.confirm = None;
+        if open {
+            let p = self.perms.clone();
+            self.ui.view(cx, ids!(menu_create_channel)).set_visible(cx, p.manage_channels);
+            self.ui.view(cx, ids!(menu_create_category)).set_visible(cx, p.manage_channels);
+            self.ui.view(cx, ids!(menu_server_settings)).set_visible(cx, p.manage_server);
+            self.ui.view(cx, ids!(menu_leave)).set_visible(cx, !p.owner);
+            self.ui.view(cx, ids!(menu_invite)).set_visible(cx, p.create_invite);
+            self.ui.view(cx, ids!(menu_divider)).set_visible(cx, !p.owner || p.create_invite);
+            self.ui.label(cx, ids!(menu_leave.label)).set_text(cx, "Leave Server");
+        }
+        self.ui.view(cx, ids!(server_menu)).set_visible(cx, open);
+        self.ui.redraw(cx);
+    }
+
     fn sidebar_category_name(&self, cx: &mut Cx, id: &str) -> String {
         self.ui
             .widget(cx, ids!(channels))
@@ -1250,29 +1298,24 @@ impl MatchEvent for App {
 
         // Server menu and channel/category dialogs
         if tapped(&self.ui, cx, ids!(server_header)) && !self.channel_forms.is_empty() {
-            self.confirm = None;
-            self.ui.view(cx, ids!(menu_create_channel)).set_visible(cx, self.perms.manage_channels);
-            self.ui.view(cx, ids!(menu_create_category)).set_visible(cx, self.perms.manage_channels);
-            self.ui.view(cx, ids!(menu_invite)).set_visible(cx, self.perms.create_invite);
-            self.ui.view(cx, ids!(menu_leave)).set_visible(cx, !self.perms.owner);
-            self.ui.label(cx, ids!(menu_leave.label)).set_text(cx, "Leave Server");
-            self.ui.modal(cx, ids!(server_menu)).open(cx);
+            let open = !self.ui.view(cx, ids!(server_menu)).visible();
+            self.set_server_menu(cx, open);
         }
         if tapped(&self.ui, cx, ids!(menu_create_channel)) {
-            self.ui.modal(cx, ids!(server_menu)).close(cx);
+            self.set_server_menu(cx, false);
             self.open_channel_dialog(cx, None);
         }
         if tapped(&self.ui, cx, ids!(menu_create_category)) {
-            self.ui.modal(cx, ids!(server_menu)).close(cx);
+            self.set_server_menu(cx, false);
             self.open_category_dialog(cx, None, "");
         }
         if tapped(&self.ui, cx, ids!(menu_invite)) {
-            self.ui.modal(cx, ids!(server_menu)).close(cx);
+            self.set_server_menu(cx, false);
             self.send(backend::Command::CreateInvite);
         }
         if tapped(&self.ui, cx, ids!(menu_leave)) {
             if self.confirm.as_deref() == Some("leave") {
-                self.ui.modal(cx, ids!(server_menu)).close(cx);
+                self.set_server_menu(cx, false);
                 self.send(backend::Command::LeaveServer);
                 self.confirm = None;
             } else {
@@ -1462,10 +1505,25 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
-        // Esc closes the settings overlay (spec).
+        // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
-            if k.key_code == KeyCode::Escape && self.ui.view(cx, ids!(settings)).visible() {
-                self.set_settings_open(cx, false);
+            if k.key_code == KeyCode::Escape {
+                if self.ui.view(cx, ids!(server_menu)).visible() {
+                    self.set_server_menu(cx, false);
+                } else if self.ui.view(cx, ids!(settings)).visible() {
+                    self.set_settings_open(cx, false);
+                }
+            }
+        }
+        // A press outside an open dropdown closes it (the header toggles it).
+        if let Event::MouseDown(m) = event {
+            let menu = self.ui.view(cx, ids!(server_menu));
+            if menu.visible() {
+                let inside = |r: Rect| r.contains(m.abs);
+                let header = self.ui.view(cx, ids!(server_header)).area().rect(cx);
+                if !inside(menu.area().rect(cx)) && !inside(header) {
+                    self.set_server_menu(cx, false);
+                }
             }
         }
         if let Event::WindowGeomChange(e) = event {

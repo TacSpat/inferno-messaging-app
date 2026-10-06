@@ -241,3 +241,44 @@ async fn role_limited_encrypted_channel_and_ordering() {
     assert!(s.channel_is_root(&general));
     let _ = publish::new_public_id();
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn roles_moderation_and_metadata_round_trip() {
+    use inferno_core::server::{wire, Permission};
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let alice_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    let a = alice_keys.public_key();
+
+    // A moderator role, assigned to Alice.
+    let mut roles = owner.server(&gid).unwrap().unwrap().roles.clone();
+    roles.push(wire::Role {
+        id: "r-mod".into(),
+        name: "Mod".into(),
+        color: "#22c55e".into(),
+        position: 5,
+        hoist: true,
+        mentionable: false,
+        permissions: serde_json::json!({"kick_members": true}).as_object().cloned().unwrap(),
+        role_type: String::new(),
+    });
+    owner.save_roles(&gid, roles).await.unwrap();
+    owner.set_member_roles(&gid, &a, &["r-mod".into()]).await.unwrap();
+    let state = owner.server(&gid).unwrap().unwrap();
+    assert!(state.has(&a, Permission::KickMembers));
+
+    owner.update_metadata(&gid, |m| m.name = "Renamed".into()).await.unwrap();
+    assert_eq!(owner.server(&gid).unwrap().unwrap().metadata.name, "Renamed");
+
+    owner.timeout(&gid, &a, inferno_core::store::now_secs() + 600).await.unwrap();
+    assert!(owner.server(&gid).unwrap().unwrap().timed_out_until(&a, inferno_core::store::now_secs()).is_some());
+    owner.ban(&gid, &a, "test").await.unwrap();
+    assert!(owner.server(&gid).unwrap().unwrap().is_banned(&a));
+    owner.unban(&gid, &a).await.unwrap();
+    assert!(!owner.server(&gid).unwrap().unwrap().is_banned(&a));
+}

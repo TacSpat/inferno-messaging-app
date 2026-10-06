@@ -529,6 +529,65 @@ impl Session {
         self.after_structure_change(gid).await
     }
 
+    // ─── Server settings ────────────────────────────────────────────────
+
+    /// Edits the server's metadata (needs manage_server).
+    pub async fn update_metadata(&self, gid: &str, edit: impl FnOnce(&mut wire::Metadata)) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut meta = state.metadata.clone();
+        edit(&mut meta);
+        self.publish(&publish::metadata(&self.keys, &state, &meta)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    /// Replaces the role list (needs manage_roles). Keeps `@everyone`.
+    pub async fn save_roles(&self, gid: &str, roles: Vec<wire::Role>) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        if !roles.iter().any(|r| r.is_everyone()) {
+            return Err(SessionError::Other("the @everyone role can't be removed".into()));
+        }
+        self.publish(&publish::roles(&self.keys, &state, &roles)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    pub async fn set_member_roles(&self, gid: &str, member: &PublicKey, role_ids: &[String]) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::set_roles(&self.keys, &state, member, role_ids)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    pub async fn kick(&self, gid: &str, member: &PublicKey) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::kick(&self.keys, &state, member)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    /// `until` = 0 lifts the timeout.
+    pub async fn timeout(&self, gid: &str, member: &PublicKey, until: i64) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::timeout(&self.keys, &state, member, until)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    pub async fn ban(&self, gid: &str, member: &PublicKey, reason: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::ban(&self.keys, &state, member, reason)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    pub async fn unban(&self, gid: &str, member: &PublicKey) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::unban(&self.keys, &state, member)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
     /// Shares the current keys of `gid`'s encrypted channels that `member`
     /// may read. Managers' sessions do this when someone joins.
     async fn share_keys_with(&self, gid: &str, member: PublicKey) -> Result<()> {

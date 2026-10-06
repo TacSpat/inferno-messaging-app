@@ -37,6 +37,7 @@ pub enum SidebarRow {
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ServerPerms {
     pub manage_channels: bool,
+    pub manage_server: bool,
     pub create_invite: bool,
     pub owner: bool,
 }
@@ -662,6 +663,7 @@ impl Backend {
         }
         let perms = ServerPerms {
             manage_channels: state.has(&me, inferno_core::server::Permission::ManageChannels),
+            manage_server: state.has(&me, inferno_core::server::Permission::ManageServer),
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
             owner: state.is_owner(&me),
         };
