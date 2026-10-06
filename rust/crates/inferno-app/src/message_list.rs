@@ -29,6 +29,9 @@ pub struct MessageList {
     /// We may pin (manage_messages): shows the toolbar's pin button.
     #[rust]
     pub can_pin: bool,
+    /// DMs have no replies (Rails' DM payloads carry none).
+    #[rust]
+    pub no_reply: bool,
     /// Row flashing after a jump, and when the flash started.
     #[rust]
     flash: Option<(usize, std::time::Instant)>,
@@ -254,6 +257,7 @@ impl Widget for MessageList {
                 toolbar.set_visible(cx, hovered && !msg.id.is_empty());
                 item.view(cx, ids!(toolbar.edit_btn)).set_visible(cx, msg.own);
                 item.view(cx, ids!(toolbar.pin_btn)).set_visible(cx, self.can_pin);
+                item.view(cx, ids!(toolbar.reply_btn)).set_visible(cx, !self.no_reply);
                 let mut row_bg = item.clone();
                 script_apply_eval!(cx, row_bg, {draw_bg +: {flash: #(flash)}});
 

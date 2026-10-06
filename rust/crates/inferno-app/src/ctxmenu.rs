@@ -29,6 +29,16 @@ pub enum Action {
     Timeout { member: String, secs: i64 },
     Kick(String),
     Ban(String),
+    /// Opens (or starts) a DM with this pubkey.
+    Message(String),
+    AddFriend(String),
+    AcceptFriend(String),
+    DeclineFriend(String),
+    /// Remove Friend, or cancel an outgoing request.
+    RemoveFriend(String),
+    Block(String),
+    MarkDmRead(String),
+    CloseDm(String),
     /// Returns to the menu this submenu came from.
     Back,
 }

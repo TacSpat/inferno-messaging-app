@@ -867,3 +867,190 @@ mod date_tests {
         assert_eq!(super::date_long(1_791_217_800), "Oct 05, 2026");
     }
 }
+
+// ─── DM sidebar ──────────────────────────────────────────────────────────
+
+/// Rails' `_dm_sidebar`: 32px avatar, name, unread badge (99+ cap).
+#[derive(Script, ScriptHook, Widget)]
+pub struct DmList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<crate::backend::DmRow>,
+    /// The open conversation's pubkey.
+    #[rust]
+    pub selected: Option<String>,
+}
+
+impl DmList {
+    /// Left click: the row index.
+    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<usize> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions).into_iter().find_map(|(i, item)| {
+            item.as_view()
+                .finger_up(actions)
+                .filter(|e| !e.cancelled && e.device.is_primary_hit())
+                .map(|_| i)
+                .filter(|i| *i < self.rows.len())
+        })
+    }
+
+    /// Right click: (row index, window position).
+    pub fn context(&self, cx: &mut Cx, actions: &Actions) -> Option<(usize, DVec2)> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions).into_iter().find_map(|(i, item)| {
+            item.as_view()
+                .finger_down(actions)
+                .filter(|e| !e.device.is_primary_hit())
+                .map(|e| (i, e.abs))
+                .filter(|(i, _)| *i < self.rows.len())
+        })
+    }
+}
+
+impl Widget for DmList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some(r) = self.rows.get(i) else { continue };
+                let mut row = list.item(cx, i, id!(Conv));
+                let active = self.selected.as_deref() == Some(r.person.pubkey.as_str());
+                let bg = if active { crate::theme::tok("gray_700", 1.0) } else { rgba(0, 0.0) };
+                script_apply_eval!(cx, row, {draw_bg +: {color: #(bg)}});
+                let mut face = row.widget(cx, ids!(avatar));
+                let a = rgba(r.person.avatar, 1.0);
+                script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
+                row.label(cx, ids!(avatar.initial)).set_text(cx, &r.person.initial);
+                let mut name = row.widget(cx, ids!(name));
+                let c = if active || r.unread > 0 { rgba(0xffffff, 1.0) } else { crate::theme::tok("gray_400", 1.0) };
+                script_apply_eval!(cx, name, {draw_text +: {color: #(c)}});
+                name.set_text(cx, &r.person.name);
+                row.view(cx, ids!(badge)).set_visible(cx, r.unread > 0);
+                let n = if r.unread > 99 { "99+".to_owned() } else { r.unread.to_string() };
+                row.label(cx, ids!(badge.count)).set_text(cx, &n);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+// ─── Friends page ────────────────────────────────────────────────────────
+
+/// What a person row on the friends page offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendKind {
+    Friend,
+    Incoming,
+    Outgoing,
+    Blocked,
+    /// A Find People result.
+    Found,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum FriendRow {
+    /// Rails' "INCOMING — 2" section heads.
+    Header(String),
+    Person { person: crate::backend::Person, sub: String, kind: FriendKind },
+    Empty(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FriendButton {
+    Message,
+    Add,
+    Accept,
+    Decline,
+    Remove,
+    Unblock,
+}
+
+const FRIEND_BUTTONS: [(&[LiveId], FriendButton); 6] = [
+    (ids!(msg_btn), FriendButton::Message),
+    (ids!(add_btn), FriendButton::Add),
+    (ids!(accept_btn), FriendButton::Accept),
+    (ids!(decline_btn), FriendButton::Decline),
+    (ids!(remove_btn), FriendButton::Remove),
+    (ids!(unblock_btn), FriendButton::Unblock),
+];
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct FriendList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<FriendRow>,
+}
+
+impl FriendList {
+    /// A button pressed on a person row: (their pubkey, which).
+    pub fn pressed(&self, cx: &mut Cx, actions: &Actions) -> Option<(String, FriendButton)> {
+        let list = self.view.portal_list(cx, ids!(list));
+        for (i, item) in list.items_with_actions(actions) {
+            let Some(FriendRow::Person { person, .. }) = self.rows.get(i) else { continue };
+            for (path, b) in FRIEND_BUTTONS {
+                if item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                    return Some((person.pubkey.clone(), b));
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Widget for FriendList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(FriendRow::Header(t)) => {
+                        let row = list.item(cx, i, id!(Head));
+                        row.set_text(cx, t);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(FriendRow::Empty(t)) => {
+                        let row = list.item(cx, i, id!(Empty));
+                        row.label(cx, ids!(text)).set_text(cx, t);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(FriendRow::Person { person, sub, kind }) => {
+                        let row = list.item(cx, i, id!(Person));
+                        let mut face = row.widget(cx, ids!(avatar));
+                        let a = rgba(person.avatar, 1.0);
+                        script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
+                        row.label(cx, ids!(avatar.initial)).set_text(cx, &person.initial);
+                        row.label(cx, ids!(name)).set_text(cx, &person.name);
+                        row.label(cx, ids!(sub)).set_text(cx, sub);
+                        use FriendButton::*;
+                        let shown: &[FriendButton] = match kind {
+                            FriendKind::Friend => &[Message, Remove],
+                            FriendKind::Incoming => &[Accept, Decline],
+                            FriendKind::Outgoing => &[Remove],
+                            FriendKind::Blocked => &[Unblock],
+                            FriendKind::Found => &[Message, Add],
+                        };
+                        for (path, b) in FRIEND_BUTTONS {
+                            row.view(cx, path).set_visible(cx, shown.contains(&b));
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None => {}
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}

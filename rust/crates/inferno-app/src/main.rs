@@ -16,7 +16,7 @@ mod window_state;
 
 use makepad_widgets::*;
 
-use backend::{Card, ServerPerms, ServerSettings};
+use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
 
@@ -715,6 +715,14 @@ script_mod! {
                 }
                 // Flutter's shortcuts on the card.
                 View{width: Fill height: Fit flow: Right spacing: 8 margin: Inset{top: 4}
+                    card_message := RoundedView{width: Fill height: 30 align: Center cursor: MouseCursor.Hand new_batch: true
+                        draw_bg.color: accent draw_bg.border_radius: 4.0
+                        Txt{text: "Message" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}
+                    card_friend := RoundedView{width: Fill height: 30 align: Center cursor: MouseCursor.Hand new_batch: true
+                        draw_bg.color: #x00000066 draw_bg.border_radius: 4.0
+                        label := Txt{text: "Add Friend" draw_text.color: #xffffffcc draw_text.text_style.font_size: 9.0}}
+                }
+                View{width: Fill height: Fit flow: Right spacing: 8
                     card_copy := RoundedView{width: Fill height: 30 align: Center cursor: MouseCursor.Hand new_batch: true
                         draw_bg.color: #x00000066 draw_bg.border_radius: 4.0
                         Txt{text: "Copy User ID" draw_text.color: #xffffffcc draw_text.text_style.font_size: 9.0}}
@@ -722,6 +730,81 @@ script_mod! {
             }
         }
     }
+
+    // DM sidebar row (Rails: px-2.5 py-1.5 rounded, 32px avatar, ml-2.5 name,
+    // 18px accent unread badge).
+    mod.widgets.DmListBase = #(lists::DmList::register_widget(vm))
+    mod.widgets.DmList = set_type_default() do mod.widgets.DmListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Conv := RoundedView{
+                width: Fill height: Fit
+                padding: Inset{left: 10 right: 10 top: 6 bottom: 6}
+                margin: Inset{bottom: 2}
+                flow: Right spacing: 10 align: Align{y: 0.5}
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: #0000 draw_bg.border_radius: 4.0
+                avatar := RoundedView{width: 32 height: 32 align: Center new_batch: true
+                    draw_bg.color: #x1e1c1b draw_bg.border_radius: 16.0
+                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}
+                name := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5
+                    flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+                badge := RoundedView{visible: false width: Fit height: 18 padding: Inset{left: 5 right: 5} align: Center new_batch: true
+                    draw_bg.color: accent draw_bg.border_radius: 9.0
+                    count := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.0}}}
+            }
+        }
+    }
+
+    // Friends page rows (Rails conversations#index: 36px avatar, name,
+    // status line, round 36px action buttons).
+    let FriendBtn = RoundedView{width: 36 height: 36 align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_700 draw_bg.border_radius: 18.0}
+    mod.widgets.FriendListBase = #(lists::FriendList::register_widget(vm))
+    mod.widgets.FriendList = set_type_default() do mod.widgets.FriendListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Head := Txt{width: Fill padding: Inset{left: 8 top: 12 bottom: 8} text: ""
+                draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+            Empty := View{width: Fill height: Fit padding: Inset{top: 64} align: Align{x: 0.5}
+                text := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 10.0}}
+            Person := View{
+                width: Fill height: Fit
+                padding: Inset{left: 8 right: 8 top: 10 bottom: 10}
+                flow: Right spacing: 12 align: Align{y: 0.5}
+                avatar := RoundedView{width: 36 height: 36 align: Center new_batch: true
+                    draw_bg.color: gray_600 draw_bg.border_radius: 18.0
+                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}
+                View{width: Fill height: Fit flow: Down spacing: 2
+                    name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                    sub := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+                }
+                msg_btn := FriendBtn{Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: gray_300
+                    draw_icon.svg: crate_resource("self:resources/icons/message.svg")}}
+                add_btn := FriendBtn{Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: #x4ade80
+                    draw_icon.svg: crate_resource("self:resources/icons/user_plus.svg")}}
+                accept_btn := FriendBtn{Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: #x4ade80
+                    draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
+                decline_btn := FriendBtn{Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: #xf87171
+                    draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                remove_btn := FriendBtn{Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: #xf87171
+                    draw_icon.svg: crate_resource("self:resources/icons/user_x.svg")}}
+                unblock_btn := RoundedView{width: Fit height: 30 padding: Inset{left: 12 right: 12} align: Center
+                    cursor: MouseCursor.Hand new_batch: true draw_bg.color: gray_700 draw_bg.border_radius: 4.0
+                    Txt{text: "Unblock" draw_text.color: gray_300 draw_text.text_style.font_size: 9.5}}
+            }
+        }
+    }
+
+    // Rails' friends page tab pill: px-3 py-1.5 rounded, bg-gray-600 when on.
+    let TabPill = RoundedView{width: Fit height: 30 padding: Inset{left: 12 right: 12} align: Center flow: Right spacing: 6
+        cursor: MouseCursor.Hand new_batch: true draw_bg.color: #0000 draw_bg.border_radius: 4.0
+        label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.5}}}
 
     mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
     mod.widgets.ResultList = set_type_default() do mod.widgets.ResultListBase{
@@ -768,12 +851,23 @@ script_mod! {
                             padding: Inset{top: 12 bottom: 12}
                             align: Align{x: 0.5}
                             draw_bg.color: gray_950
+                            // Home: DMs and friends. Badge = friend requests + unread DMs.
                             RailSlot{
-                                RoundedView{width: 48 height: 48 align: Center
-                                    draw_bg.color: gray_700
-                                    draw_bg.border_radius: 16.0
-                                    Ico{icon_walk: Walk{width: 24 height: 24} draw_icon.color: gray_300
-                                        draw_icon.svg: crate_resource("self:resources/icons/home.svg")}
+                                View{width: 48 height: 48 flow: Overlay
+                                    home_btn := RoundedView{width: 48 height: 48 align: Center
+                                        cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: gray_700
+                                        draw_bg.border_radius: 16.0
+                                        Ico{icon_walk: Walk{width: 24 height: 24} draw_icon.color: gray_300
+                                            draw_icon.svg: crate_resource("self:resources/icons/home.svg")}
+                                    }
+                                    View{width: 48 height: 48 align: Align{x: 1.0 y: 1.0}
+                                        home_badge := RoundedView{visible: false width: Fit height: 18 padding: Inset{left: 5 right: 5}
+                                            align: Center new_batch: true
+                                            draw_bg.color: accent draw_bg.border_radius: 9.0
+                                            draw_bg.border_size: 2.0 draw_bg.border_color: gray_950
+                                            count := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 7.5}}}
+                                    }
                                 }
                             }
                             SolidView{width: 32 height: 2 draw_bg.color: gray_800}
@@ -796,6 +890,7 @@ script_mod! {
                             flow: Down
                             draw_bg.color: gray_800
 
+                            server_side := View{width: Fill height: Fill flow: Down
                             // Header: 48px, server name 16px semibold white, chevron.
                             server_header := View{
                                 cursor: MouseCursor.Hand
@@ -817,6 +912,38 @@ script_mod! {
                             }
 
                             channels := mod.widgets.ChannelList{margin: Inset{top: 8}}
+                            }
+
+                            // Home: Rails' _dm_sidebar.
+                            dm_side := View{visible: false width: Fill height: Fill flow: Down
+                                View{width: Fill height: 48 padding: Inset{left: 12 right: 8} flow: Right align: Align{y: 0.5}
+                                    Txt{width: Fill text: "Direct Messages" draw_text.color: #xffffff
+                                        draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                    dm_add_friend := View{width: 32 height: 32 align: Center cursor: MouseCursor.Hand
+                                        Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: gray_400
+                                            draw_icon.svg: crate_resource("self:resources/icons/user_plus.svg")}}
+                                }
+                                SolidView{width: Fill height: 1 draw_bg.color: gray_900}
+                                View{width: Fill height: Fill flow: Down padding: Inset{left: 8 right: 8 top: 8}
+                                    friends_link := RoundedView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
+                                        margin: Inset{bottom: 2}
+                                        flow: Right spacing: 12 align: Align{y: 0.5} cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: #0000 draw_bg.border_radius: 4.0
+                                        Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_400
+                                            draw_icon.svg: crate_resource("self:resources/icons/users.svg")}
+                                        label := Txt{text: "Friends" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                    }
+                                    saved_link := RoundedView{width: Fill height: Fit padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
+                                        margin: Inset{bottom: 8}
+                                        flow: Right spacing: 12 align: Align{y: 0.5} cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: #0000 draw_bg.border_radius: 4.0
+                                        Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_400
+                                            draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}
+                                        label := Txt{text: "Saved Messages" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                    }
+                                    dms := mod.widgets.DmList{}
+                                }
+                            }
 
                             // User panel: gray-950, 8px padding, 32px avatar,
                             // name 14 medium, status 12 gray-400, version 10 gray-600.
@@ -863,8 +990,77 @@ script_mod! {
                         }
                         }
 
+                        View{width: Fill height: Fill flow: Down
+                        // Rails' friend request bar: who wants to be friends,
+                        // i/n with arrows, then accept, decline and ignore.
+                        friend_bar := SolidView{
+                            visible: false
+                            width: Fill height: 44
+                            padding: Inset{left: 12 right: 12}
+                            flow: Right spacing: 10 align: Align{y: 0.5}
+                            draw_bg.color: accent_15
+                            fb_prev := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                                Txt{text: "‹" draw_text.color: gray_300 draw_text.text_style.font_size: 14.0}}
+                            fb_avatar := RoundedView{width: 28 height: 28 align: Center new_batch: true
+                                draw_bg.color: #x1e1c1b draw_bg.border_radius: 14.0
+                                initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}
+                            fb_text := Txt{width: Fill text: "" draw_text.color: gray_100 draw_text.text_style.font_size: 10.0}
+                            fb_count := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                            fb_next := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                                Txt{text: "›" draw_text.color: gray_300 draw_text.text_style.font_size: 14.0}}
+                            SolidView{width: 1 height: 24 draw_bg.color: gray_600}
+                            fb_accept := FriendBtn{width: 30 height: 30 draw_bg.color: #x16a34a
+                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
+                            fb_decline := FriendBtn{width: 30 height: 30 draw_bg.color: #xdc2626
+                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                            fb_ignore := RoundedView{width: Fit height: 30 padding: Inset{left: 10 right: 10} align: Center
+                                cursor: MouseCursor.Hand new_batch: true draw_bg.color: gray_700 draw_bg.border_radius: 4.0
+                                Txt{text: "Ignore" draw_text.color: gray_300 draw_text.text_style.font_size: 9.0}}
+                        }
+                        View{width: Fill height: Fill flow: Overlay
+                        // ── Friends page (Rails conversations#index) ──
+                        friends_page := SolidView{
+                            visible: false
+                            width: Fill height: Fill
+                            flow: Down
+                            draw_bg.color: gray_700
+                            View{width: Fill height: 48 padding: Inset{left: 16 right: 16} flow: Right spacing: 8 align: Align{y: 0.5}
+                                Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_400
+                                    draw_icon.svg: crate_resource("self:resources/icons/users.svg")}
+                                Txt{text: "Contacts" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 12.0}}
+                            }
+                            View{width: Fill height: Fit padding: Inset{left: 16 right: 16 bottom: 8} flow: Right spacing: 4
+                                tab_online := TabPill{label.text: "Online"}
+                                tab_all := TabPill{label.text: "All"}
+                                tab_pending := TabPill{label.text: "Pending"
+                                    pending_badge := RoundedView{visible: false width: Fit height: 16 padding: Inset{left: 5 right: 5}
+                                        align: Center new_batch: true draw_bg.color: accent draw_bg.border_radius: 8.0
+                                        count := Txt{text: "" draw_text.color: #xffffff draw_text.text_style.font_size: 7.5}}}
+                                tab_blocked := TabPill{label.text: "Blocked"}
+                                tab_search := TabPill{draw_bg.color: #x16a34acc label.text: "Search" label.draw_text.color: #xffffff}
+                            }
+                            SolidView{width: Fill height: 1 draw_bg.color: gray_900}
+                            find_box := View{visible: false width: Fill height: Fit flow: Down spacing: 4 padding: 16
+                                Txt{text: "Find People" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                Hint{text: "Search by name or public key (npub or hex)."}
+                                RoundedView{width: Fill height: 40 margin: Inset{top: 8} padding: Inset{left: 12 right: 12}
+                                    flow: Right spacing: 8 align: Align{y: 0.5} new_batch: true
+                                    draw_bg.color: gray_900 draw_bg.border_radius: 8.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_700
+                                    Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: gray_500
+                                        draw_icon.svg: crate_resource("self:resources/icons/search.svg")}
+                                    find_input := TextInput{width: Fill height: 36 empty_text: "Search by name or public key..."
+                                        draw_bg +: {color: #0000 color_hover: #0000 color_focus: #0000 color_empty: #0000
+                                            border_color: #0000 border_color_hover: #0000 border_color_focus: #0000 border_color_empty: #0000}
+                                        draw_text +: {color: gray_100 color_empty: gray_500}}
+                                }
+                            }
+                            View{width: Fill height: Fill padding: Inset{left: 16 right: 16}
+                                friend_list := mod.widgets.FriendList{}
+                            }
+                        }
+
                         // ── Chat column ──
-                        View{
+                        chat_col := View{
                             width: Fill height: Fill
                             flow: Down
                             // Header: 48px, 16px side padding, icon, name, divider, topic.
@@ -876,7 +1072,7 @@ script_mod! {
                                 channel_hash := Txt{text: "#" draw_text.color: gray_400 draw_text.text_style.font_size: 15.0}
                                 channel_name := Txt{text: "" draw_text.color: #xffffff
                                     draw_text.text_style: theme.font_bold{font_size: 12.0}}
-                                SolidView{width: 1 height: 24 margin: Inset{left: 8 right: 8} draw_bg.color: gray_600}
+                                topic_divider := SolidView{width: 1 height: 24 margin: Inset{left: 8 right: 8} draw_bg.color: gray_600}
                                 // Topics are one line: truncate, don't wrap (Rails: truncate).
                                 channel_topic := Txt{width: Fill text: "" draw_text.color: gray_400
                                     flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
@@ -947,13 +1143,43 @@ script_mod! {
                                         pins := mod.widgets.PinsList{}
                                     }
                                 }
+                                // Rails' message request: the messages stay hidden
+                                // behind a card until accepted.
+                                dm_request := SolidView{
+                                    visible: false
+                                    width: Fill height: Fill
+                                    align: Center
+                                    draw_bg.color: gray_700
+                                    RoundedView{width: 384 height: Fit flow: Down spacing: 6 padding: 24 align: Align{x: 0.5}
+                                        new_batch: true
+                                        draw_bg.color: gray_800 draw_bg.border_radius: 12.0
+                                        draw_bg.border_size: 1.0 draw_bg.border_color: gray_700
+                                        req_avatar := RoundedView{width: 64 height: 64 align: Center new_batch: true
+                                            draw_bg.color: gray_600 draw_bg.border_radius: 32.0
+                                            initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 18.0}}}
+                                        req_name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                        RoundedView{width: Fill height: Fit padding: 12 margin: Inset{top: 6 bottom: 6} new_batch: true
+                                            draw_bg.color: #xeab3081a draw_bg.border_radius: 8.0
+                                            Txt{width: Fill text: "This person is not in your contacts. Messages are hidden until you accept. Images and links are blocked for your safety."
+                                                draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}}
+                                        req_waiting := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
+                                        View{width: Fit height: Fit flow: Right spacing: 8 margin: Inset{top: 8}
+                                            req_accept := RoundedView{width: Fit height: 34 padding: Inset{left: 16 right: 16} align: Center
+                                                cursor: MouseCursor.Hand new_batch: true draw_bg.color: #x16a34a draw_bg.border_radius: 4.0
+                                                Txt{text: "Accept" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}}
+                                            req_decline := RoundedView{width: Fit height: 34 padding: Inset{left: 16 right: 16} align: Center
+                                                cursor: MouseCursor.Hand new_batch: true draw_bg.color: gray_600 draw_bg.border_radius: 4.0
+                                                Txt{text: "Decline" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 9.5}}}
+                                        }
+                                    }
+                                }
                             }
 
                             // Typing row (24px) then the composer.
                             View{width: Fill height: 24 padding: Inset{left: 16} align: Align{y: 0.5}
                                 notice := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
                             }
-                            View{
+                            composer_box := View{
                                 width: Fill height: Fit
                                 flow: Down
                                 padding: Inset{left: 16 right: 16 bottom: 16}
@@ -987,6 +1213,9 @@ script_mod! {
                                         Ico{draw_icon.svg: crate_resource("self:resources/icons/send.svg")}}
                                 }
                             }
+                        }
+
+                        }
                         }
 
                         // ── Search results: 420px, gray-800 (spec), in place of members ──
@@ -1490,6 +1719,24 @@ pub struct App {
     card_at: Option<DVec2>,
     #[rust]
     card: Card,
+    /// In Home (DMs and friends).
+    #[rust]
+    home: bool,
+    #[rust]
+    home_data: Home,
+    /// Friends page tab: Online, All, Pending, Blocked, Search.
+    #[rust]
+    friends_tab: usize,
+    #[rust]
+    found: Vec<backend::Person>,
+    /// Which incoming request the bar shows.
+    #[rust]
+    bar_index: usize,
+    /// The open DM's pubkey.
+    #[rust]
+    dm_with: Option<String>,
+    #[rust]
+    dm_name: String,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1889,6 +2136,29 @@ impl App {
                 "Delete Category",
                 false,
             ),
+            A::Message(pk) => self.open_dm(cx, pk),
+            A::AddFriend(pk) => self.send(backend::Command::AddFriend(pk)),
+            A::AcceptFriend(pk) => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: true }),
+            A::DeclineFriend(pk) => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: false }),
+            A::MarkDmRead(pk) => self.send(backend::Command::MarkDmRead(pk)),
+            A::CloseDm(pk) => {
+                if self.dm_with.as_deref() == Some(pk.as_str()) {
+                    self.show_friends(cx, self.friends_tab);
+                }
+                self.send(backend::Command::CloseDm(pk));
+            }
+            A::RemoveFriend(_) => self.confirm(cx, Pending::Menu(action), "Remove Friend", "Remove friend?", "Remove", false),
+            A::Block(ref pk) => {
+                let name = self
+                    .home_data
+                    .conversations
+                    .iter()
+                    .find(|c| c.person.pubkey == *pk)
+                    .map(|c| c.person.name.clone())
+                    .unwrap_or_else(|| "this person".into());
+                let body = format!("Block {name}? They won't be able to message you, and will be removed from your friends.");
+                self.confirm(cx, Pending::Menu(action.clone()), "Block User", &body, "Block", false)
+            }
             other => self.run_message_or_member_action(cx, other),
         }
     }
@@ -1939,11 +2209,52 @@ impl App {
     }
 
     /// Rails' member menu, with Flutter's timeout presets and ban reason.
+    /// Rails' DM sidebar menu.
+    fn dm_menu(&self, r: &backend::DmRow) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let pk = r.person.pubkey.clone();
+        let mut v = Vec::new();
+        v.extend(self.friend_items(&pk, r.friend));
+        v.push(Item::danger("Block User", A::Block(pk.clone())));
+        v.push(Item::Separator);
+        v.push(Item::new("Mark as Read", A::MarkDmRead(pk.clone())));
+        v.push(Item::new("Close Conversation", A::CloseDm(pk)));
+        v
+    }
+
+    fn friend_items(&self, pk: &str, friend: Friend) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        match friend {
+            Friend::Accepted => vec![Item::danger("Remove Friend", A::RemoveFriend(pk.into()))],
+            Friend::Incoming => vec![
+                Item::new("Accept Friend Request", A::AcceptFriend(pk.into())),
+                Item::new("Decline Friend Request", A::DeclineFriend(pk.into())),
+            ],
+            Friend::Outgoing => vec![Item::new("Cancel Friend Request", A::RemoveFriend(pk.into()))],
+            Friend::None => vec![Item::new("Add Friend", A::AddFriend(pk.into()))],
+        }
+    }
+
     fn member_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
         use ctxmenu::{Action as A, Item};
         let Some((name, _, owner, me)) = self.member(pubkey) else { return vec![] };
         let p = &self.perms;
         let mut v = vec![Item::new("Mention", A::Mention(name.clone()))];
+        if !me {
+            // Rails: Message, then the friend action for where we stand.
+            let friend = self
+                .home_data
+                .friends
+                .iter()
+                .any(|f| f.pubkey == pubkey)
+                .then_some(Friend::Accepted)
+                .or_else(|| self.home_data.incoming.iter().any(|f| f.pubkey == pubkey).then_some(Friend::Incoming))
+                .or_else(|| self.home_data.outgoing.iter().any(|f| f.pubkey == pubkey).then_some(Friend::Outgoing))
+                .unwrap_or_default();
+            v.push(Item::Separator);
+            v.push(Item::new("Message", A::Message(pubkey.into())));
+            v.extend(self.friend_items(pubkey, friend));
+        }
         if p.manage_roles && !owner {
             v.push(Item::Separator);
             v.push(Item::new("Roles  ›", A::RolesFor(pubkey.into())));
@@ -2082,6 +2393,13 @@ impl App {
                 }
             }
             Pending::Menu(A::Kick(pk)) => self.send(backend::Command::Kick(pk)),
+            Pending::Menu(A::RemoveFriend(pk)) => self.send(backend::Command::RemoveFriend(pk)),
+            Pending::Menu(A::Block(pk)) => {
+                if self.dm_with.as_deref() == Some(pk.as_str()) {
+                    self.show_friends(cx, self.friends_tab);
+                }
+                self.send(backend::Command::Block(pk));
+            }
             Pending::Menu(A::Ban(pk)) => self.send(backend::Command::Ban { pubkey: pk, reason: reason.trim().to_owned() }),
             Pending::DeleteRole(id) => {
                 self.role_drafts.retain(|r| r.id != id);
@@ -2299,6 +2617,9 @@ impl App {
                 None => view.set_visible(cx, false),
             }
         }
+        self.ui.view(cx, ids!(card_message)).set_visible(cx, !card.me);
+        self.ui.view(cx, ids!(card_friend)).set_visible(cx, !card.me);
+        self.ui.label(cx, ids!(card_friend.label)).set_text(cx, Self::card_friend_label(card.friend));
         let since = card.joined_at.map(lists::date_long).unwrap_or_else(|| "Unknown".into());
         self.ui.label(cx, ids!(card.since)).set_text(cx, &since);
         // Keep it on screen; Rails clamps against 400px of height.
@@ -2315,6 +2636,174 @@ impl App {
         if self.ui.view(cx, ids!(card_layer)).visible() {
             self.ui.view(cx, ids!(card_layer)).set_visible(cx, false);
             self.ui.redraw(cx);
+        }
+    }
+
+    /// Switches between a server and Home (DM sidebar, friends, DMs).
+    fn set_home(&mut self, cx: &mut Cx, home: bool) {
+        self.home = home;
+        self.ui.view(cx, ids!(server_side)).set_visible(cx, !home);
+        self.ui.view(cx, ids!(dm_side)).set_visible(cx, home);
+        self.ui.view(cx, ids!(server_menu)).set_visible(cx, false);
+        self.ui.view(cx, ids!(member_col)).set_visible(cx, !home);
+        self.ui.view(cx, ids!(member_edge)).set_visible(cx, !home);
+        self.ui.view(cx, ids!(search_panel)).set_visible(cx, false);
+        for path in [ids!(pins_btn), ids!(invite_btn), ids!(search_bar), ids!(topic_divider)] {
+            self.ui.view(cx, path).set_visible(cx, !home);
+        }
+        self.ui.widget(cx, ids!(channel_topic)).set_visible(cx, !home);
+        if !home {
+            self.dm_with = None;
+            self.ui.view(cx, ids!(friends_page)).set_visible(cx, false);
+            self.ui.view(cx, ids!(chat_col)).set_visible(cx, true);
+            self.ui.view(cx, ids!(dm_request)).set_visible(cx, false);
+            self.ui.view(cx, ids!(composer_box)).set_visible(cx, true);
+        }
+        let mut btn = self.ui.widget(cx, ids!(home_btn));
+        let bg = if home { theme::tok("accent", 1.0) } else { theme::tok("gray_700", 1.0) };
+        script_apply_eval!(cx, btn, {draw_bg +: {color: #(bg)}});
+        if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
+            if home {
+                rail.selected = None;
+            }
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
+        self.ui.redraw(cx);
+    }
+
+    /// The friends page, on `tab`.
+    fn show_friends(&mut self, cx: &mut Cx, tab: usize) {
+        self.friends_tab = tab;
+        self.dm_with = None;
+        self.ui.view(cx, ids!(friends_page)).set_visible(cx, true);
+        self.ui.view(cx, ids!(chat_col)).set_visible(cx, false);
+        self.ui.view(cx, ids!(find_box)).set_visible(cx, tab == 4);
+        for (i, path) in [ids!(tab_online), ids!(tab_all), ids!(tab_pending), ids!(tab_blocked)].into_iter().enumerate() {
+            let mut pill = self.ui.widget(cx, path);
+            let bg = if i == tab { theme::tok("gray_600", 1.0) } else { lists::rgba(0, 0.0) };
+            script_apply_eval!(cx, pill, {draw_bg +: {color: #(bg)}});
+        }
+        self.fill_friends(cx);
+        self.fill_dm_sidebar(cx);
+    }
+
+    fn fill_friends(&mut self, cx: &mut Cx) {
+        use lists::{FriendKind as K, FriendRow as R};
+        let h = &self.home_data;
+        let people = |list: &[backend::Person], sub: &str, kind: K| -> Vec<R> {
+            list.iter().map(|p| R::Person { person: p.clone(), sub: sub.into(), kind }).collect()
+        };
+        let mut rows = Vec::new();
+        match self.friends_tab {
+            // Presence isn't published yet, so Online lists everyone, as All.
+            0 | 1 => {
+                let title = if self.friends_tab == 0 { "ONLINE" } else { "ALL CONTACTS" };
+                if h.friends.is_empty() {
+                    rows.push(R::Empty("You don't have any contacts yet. Add some!".into()));
+                } else {
+                    rows.push(R::Header(format!("{title} — {}", h.friends.len())));
+                    rows.extend(people(&h.friends, "Friend", K::Friend));
+                }
+            }
+            2 => {
+                if !h.incoming.is_empty() {
+                    rows.push(R::Header(format!("INCOMING — {}", h.incoming.len())));
+                    rows.extend(people(&h.incoming, "Incoming Friend Request", K::Incoming));
+                }
+                if !h.outgoing.is_empty() {
+                    rows.push(R::Header(format!("OUTGOING — {}", h.outgoing.len())));
+                    rows.extend(people(&h.outgoing, "Outgoing Friend Request", K::Outgoing));
+                }
+                if rows.is_empty() {
+                    rows.push(R::Empty("There are no pending friend requests.".into()));
+                }
+            }
+            3 => {
+                if h.blocked.is_empty() {
+                    rows.push(R::Empty("You haven't blocked anyone.".into()));
+                } else {
+                    rows.push(R::Header(format!("BLOCKED — {}", h.blocked.len())));
+                    rows.extend(people(&h.blocked, "Blocked", K::Blocked));
+                }
+            }
+            _ => {
+                let friends: Vec<&str> = h.friends.iter().map(|p| p.pubkey.as_str()).collect();
+                for p in &self.found {
+                    let kind = if friends.contains(&p.pubkey.as_str()) { K::Friend } else { K::Found };
+                    rows.push(R::Person { person: p.clone(), sub: String::new(), kind });
+                }
+            }
+        }
+        if let Some(mut l) = self.ui.widget(cx, ids!(friend_list)).borrow_mut::<lists::FriendList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(friend_list.list)));
+        let n = h.incoming.len();
+        self.ui.view(cx, ids!(pending_badge)).set_visible(cx, n > 0);
+        self.ui.label(cx, ids!(pending_badge.count)).set_text(cx, &n.to_string());
+        self.ui.redraw(cx);
+    }
+
+    fn fill_dm_sidebar(&mut self, cx: &mut Cx) {
+        let friends_active = self.dm_with.is_none();
+        let me_hex = self.my_hex();
+        for (path, active) in [(ids!(friends_link), friends_active), (ids!(saved_link), self.dm_with.as_deref() == Some(me_hex.as_str()))] {
+            let mut link = self.ui.widget(cx, path);
+            let bg = if active { theme::tok("gray_700", 1.0) } else { lists::rgba(0, 0.0) };
+            script_apply_eval!(cx, link, {draw_bg +: {color: #(bg)}});
+            let mut label = self.ui.widget(cx, &[path[0], id!(label)]);
+            let fg = if active { lists::rgba(0xffffff, 1.0) } else { theme::tok("gray_400", 1.0) };
+            script_apply_eval!(cx, label, {draw_text +: {color: #(fg)}});
+        }
+        if let Some(mut l) = self.ui.widget(cx, ids!(dms)).borrow_mut::<lists::DmList>() {
+            // Saved Messages has its own link above the list.
+            l.rows = self.home_data.conversations.iter().filter(|c| c.person.pubkey != me_hex).cloned().collect();
+            l.selected = self.dm_with.clone();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(dms.list)));
+    }
+
+    fn my_hex(&self) -> String {
+        inferno_core::nostr::prelude::PublicKey::parse(&self.npub).map(|p| p.to_hex()).unwrap_or_default()
+    }
+
+    /// Rails' friend request bar: one incoming request at a time.
+    fn fill_request_bar(&mut self, cx: &mut Cx) {
+        let n = self.home_data.incoming.len();
+        self.ui.view(cx, ids!(friend_bar)).set_visible(cx, n > 0);
+        if n == 0 {
+            return;
+        }
+        self.bar_index = self.bar_index.min(n - 1);
+        let p = self.home_data.incoming[self.bar_index].clone();
+        self.ui.label(cx, ids!(fb_text)).set_text(cx, &format!("{} wants to be friends", p.name));
+        self.ui.label(cx, ids!(fb_count)).set_text(cx, &format!("{}/{}", self.bar_index + 1, n));
+        self.ui.label(cx, ids!(fb_avatar.initial)).set_text(cx, &p.initial);
+        let mut a = self.ui.widget(cx, ids!(fb_avatar));
+        let c = lists::rgba(p.avatar, 1.0);
+        script_apply_eval!(cx, a, {draw_bg +: {color: #(c)}});
+        self.ui.redraw(cx);
+    }
+
+    fn open_dm(&mut self, cx: &mut Cx, pubkey: String) {
+        self.close_card(cx);
+        if !self.home {
+            self.set_home(cx, true);
+        }
+        self.dm_with = Some(pubkey.clone());
+        self.ui.view(cx, ids!(friends_page)).set_visible(cx, false);
+        self.ui.view(cx, ids!(chat_col)).set_visible(cx, true);
+        self.send(backend::Command::OpenDm(pubkey));
+        self.fill_dm_sidebar(cx);
+    }
+
+    /// What the card's friend button says and does (Rails' four states).
+    fn card_friend_label(friend: Friend) -> &'static str {
+        match friend {
+            Friend::None => "Add Friend",
+            Friend::Outgoing => "Request Sent",
+            Friend::Incoming => "Accept Request",
+            Friend::Accepted => "Remove Friend",
         }
     }
 
@@ -2400,6 +2889,7 @@ impl App {
                 let jump = self.pending_jump.take_if(|(ch, _)| ch == channel_id).map(|(_, id)| id);
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
                     list.can_pin = *can_pin;
+                    list.no_reply = gid == "@dm";
                     list.set_rows(cx, rows.clone(), new_channel && jump.is_none());
                     if let Some(id) = jump {
                         list.jump_to(cx, &id);
@@ -2448,6 +2938,46 @@ impl App {
                 self.ui.redraw(cx);
             }
             Update::Card(card) => self.show_card(cx, card),
+            Update::Home(h) => {
+                self.home_data = h.clone();
+                self.ui.view(cx, ids!(home_badge)).set_visible(cx, h.badge > 0);
+                let n = if h.badge > 99 { "99+".to_owned() } else { h.badge.to_string() };
+                self.ui.label(cx, ids!(home_badge.count)).set_text(cx, &n);
+                self.fill_request_bar(cx);
+                if self.home {
+                    self.fill_dm_sidebar(cx);
+                    self.fill_friends(cx);
+                }
+            }
+            Update::DmHeader { person, request } => {
+                if self.dm_with.as_deref() != Some(person.pubkey.as_str()) {
+                    return;
+                }
+                self.dm_name = person.name.clone();
+                self.ui.label(cx, ids!(channel_hash)).set_text(cx, "@");
+                self.ui.label(cx, ids!(channel_name)).set_text(cx, &person.name);
+                self.ui.text_input(cx, ids!(composer)).set_empty_text(cx, format!("Message @{}", person.name));
+                self.ui.view(cx, ids!(dm_request)).set_visible(cx, request.is_some());
+                self.ui.view(cx, ids!(composer_box)).set_visible(cx, request.is_none());
+                if let Some(n) = request {
+                    self.ui.label(cx, ids!(req_name)).set_text(cx, &person.name);
+                    self.ui.label(cx, ids!(req_avatar.initial)).set_text(cx, &person.initial);
+                    let mut a = self.ui.widget(cx, ids!(req_avatar));
+                    let c = lists::rgba(person.avatar, 1.0);
+                    script_apply_eval!(cx, a, {draw_bg +: {color: #(c)}});
+                    self.ui.label(cx, ids!(req_waiting))
+                        .set_text(cx, &format!("{n} message{} waiting", if *n == 1 { "" } else { "s" }));
+                } else {
+                    self.send(backend::Command::MarkDmRead(person.pubkey.clone()));
+                }
+                self.ui.redraw(cx);
+            }
+            Update::People(people) => {
+                self.found = people.clone();
+                if self.friends_tab == 4 {
+                    self.fill_friends(cx);
+                }
+            }
             Update::Theme(name) => {
                 self.saved_theme = name.clone();
                 self.apply_theme(cx, name);
@@ -2520,7 +3050,116 @@ impl MatchEvent for App {
 
         let rail_click = self.ui.widget(cx, ids!(rail)).borrow::<lists::RailList>().and_then(|r| r.clicked(cx, actions));
         if let Some(gid) = rail_click {
+            if self.home {
+                self.set_home(cx, false);
+            }
             self.send(backend::Command::SelectServer(gid));
+        }
+
+        // Home
+        let tap = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId]| ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+        if tap(&self.ui, cx, ids!(home_btn)) || tap(&self.ui, cx, ids!(friends_link)) {
+            self.set_home(cx, true);
+            self.show_friends(cx, self.friends_tab);
+            self.send(backend::Command::Home);
+        }
+        if tap(&self.ui, cx, ids!(dm_add_friend)) {
+            self.set_home(cx, true);
+            self.show_friends(cx, 4);
+            if let Some(mut input) = self.ui.text_input(cx, ids!(find_input)).borrow_mut() {
+                input.take_key_focus(cx);
+            }
+        }
+        if tap(&self.ui, cx, ids!(saved_link)) {
+            let me = self.my_hex();
+            self.open_dm(cx, me);
+        }
+        for (i, path) in [ids!(tab_online), ids!(tab_all), ids!(tab_pending), ids!(tab_blocked), ids!(tab_search)].into_iter().enumerate() {
+            if tap(&self.ui, cx, path) {
+                self.show_friends(cx, i);
+            }
+        }
+        let find = self.ui.text_input(cx, ids!(find_input));
+        if let Some((q, _)) = find.returned(actions) {
+            self.send(backend::Command::FindPeople(q));
+        }
+        if let Some(q) = find.changed(actions) {
+            if q.trim().len() >= 2 {
+                self.send(backend::Command::FindPeople(q));
+            }
+        }
+        let pressed = self.ui.widget(cx, ids!(friend_list)).borrow::<lists::FriendList>().and_then(|l| l.pressed(cx, actions));
+        if let Some((pk, b)) = pressed {
+            use lists::FriendButton as B;
+            match b {
+                B::Message => self.open_dm(cx, pk),
+                B::Add => self.send(backend::Command::AddFriend(pk)),
+                B::Accept => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: true }),
+                B::Decline => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: false }),
+                B::Remove => self.run_menu_action(cx, ctxmenu::Action::RemoveFriend(pk)),
+                B::Unblock => self.send(backend::Command::Unblock(pk)),
+            }
+        }
+        let dm_click = self.ui.widget(cx, ids!(dms)).borrow::<lists::DmList>().and_then(|l| l.clicked(cx, actions));
+        if let Some(i) = dm_click {
+            if let Some(r) = self.home_data.conversations.iter().filter(|c| c.person.pubkey != self.my_hex()).nth(i).cloned() {
+                self.open_dm(cx, r.person.pubkey);
+            }
+        }
+        let dm_ctx = self.ui.widget(cx, ids!(dms)).borrow::<lists::DmList>().and_then(|l| l.context(cx, actions));
+        if let Some((i, at)) = dm_ctx {
+            if let Some(r) = self.home_data.conversations.iter().filter(|c| c.person.pubkey != self.my_hex()).nth(i).cloned() {
+                let items = self.dm_menu(&r);
+                self.open_menu(cx, items, at);
+            }
+        }
+        if tap(&self.ui, cx, ids!(req_accept)) {
+            if let Some(pk) = self.dm_with.clone() {
+                self.send(backend::Command::AcceptDm(pk));
+            }
+        }
+        if tap(&self.ui, cx, ids!(req_decline)) {
+            if let Some(pk) = self.dm_with.clone() {
+                self.send(backend::Command::CloseDm(pk));
+                self.show_friends(cx, self.friends_tab);
+            }
+        }
+        // Friend request bar.
+        let n = self.home_data.incoming.len();
+        if n > 0 {
+            let current = self.home_data.incoming[self.bar_index.min(n - 1)].pubkey.clone();
+            if tap(&self.ui, cx, ids!(fb_prev)) {
+                self.bar_index = (self.bar_index + n - 1) % n;
+                self.fill_request_bar(cx);
+            }
+            if tap(&self.ui, cx, ids!(fb_next)) {
+                self.bar_index = (self.bar_index + 1) % n;
+                self.fill_request_bar(cx);
+            }
+            if tap(&self.ui, cx, ids!(fb_accept)) {
+                self.send(backend::Command::AnswerFriend { pubkey: current.clone(), accept: true });
+            }
+            if tap(&self.ui, cx, ids!(fb_decline)) {
+                self.send(backend::Command::AnswerFriend { pubkey: current.clone(), accept: false });
+            }
+            if tap(&self.ui, cx, ids!(fb_ignore)) {
+                self.send(backend::Command::IgnoreFriend(current));
+            }
+        }
+        // Card buttons.
+        if tap(&self.ui, cx, ids!(card_message)) {
+            let pk = self.card.pubkey.clone();
+            self.open_dm(cx, pk);
+        }
+        if tap(&self.ui, cx, ids!(card_friend)) {
+            let pk = self.card.pubkey.clone();
+            self.close_card(cx);
+            match self.card.friend {
+                Friend::None => self.send(backend::Command::AddFriend(pk)),
+                Friend::Incoming => self.send(backend::Command::AnswerFriend { pubkey: pk, accept: true }),
+                Friend::Accepted => self.run_menu_action(cx, ctxmenu::Action::RemoveFriend(pk)),
+                Friend::Outgoing => {}
+            }
         }
         let member_click = self.ui.widget(cx, ids!(members)).borrow::<lists::MemberList>().and_then(|l| l.clicked_member(cx, actions));
         if let Some((i, at)) = member_click {

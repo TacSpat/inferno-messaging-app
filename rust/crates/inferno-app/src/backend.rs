@@ -13,6 +13,7 @@ use inferno_core::keys::Identity;
 use inferno_core::nostr_sdk::prelude::*;
 use inferno_core::server::ServerState;
 use inferno_core::session::{Session, StartOptions, Update as SessionUpdate};
+use inferno_core::social::{Friendship, Payload};
 use inferno_core::store::{RelaySource, Store};
 use inferno_core::vault::{OsKeyring, Vault};
 use makepad_widgets::Cx;
@@ -170,6 +171,58 @@ pub struct SearchRow {
     pub body: String,
 }
 
+/// Rails' Contact status, as the UI needs it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Friend {
+    #[default]
+    None,
+    Outgoing,
+    Incoming,
+    Accepted,
+}
+
+impl From<Friendship> for Friend {
+    fn from(f: Friendship) -> Self {
+        match f {
+            Friendship::None => Friend::None,
+            Friendship::Outgoing => Friend::Outgoing,
+            Friendship::Incoming => Friend::Incoming,
+            Friendship::Accepted => Friend::Accepted,
+        }
+    }
+}
+
+/// Someone outside a server: a DM peer, friend, request or block.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Person {
+    pub pubkey: String,
+    pub name: String,
+    pub initial: String,
+    pub avatar: u32,
+}
+
+/// A row of the DM sidebar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct DmRow {
+    pub person: Person,
+    pub unread: usize,
+    pub request: bool,
+    pub friend: Friend,
+}
+
+/// Everything the Home view shows (Rails' conversations#index and the DM
+/// sidebar).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Home {
+    pub conversations: Vec<DmRow>,
+    pub friends: Vec<Person>,
+    pub incoming: Vec<Person>,
+    pub outgoing: Vec<Person>,
+    pub blocked: Vec<Person>,
+    /// The Home button's badge: friend requests plus unread DMs.
+    pub badge: usize,
+}
+
 /// Rails' profile card (`users/_card`), for one member of the open server.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Card {
@@ -191,11 +244,19 @@ pub struct Card {
     pub roles: Vec<(String, u32)>,
     pub joined_at: Option<i64>,
     pub me: bool,
+    pub friend: Friend,
+    /// Opened outside a server (Rails shows Friends Since instead).
+    pub in_server: bool,
 }
 
 #[derive(Debug, Clone)]
 pub enum Update {
     Card(Card),
+    Home(Home),
+    /// The open DM: who, and whether it's a request waiting for an answer
+    /// (with how many messages). Rows come as a `Timeline` keyed "@dm".
+    DmHeader { person: Person, request: Option<usize> },
+    People(Vec<Person>),
     /// The theme this account uses (synced across devices).
     Theme(String),
     SearchResults { query: String, rows: Vec<SearchRow> },
@@ -255,6 +316,19 @@ pub enum Command {
     SetTheme(String),
     /// Opens the profile card of a member (hex pubkey).
     Card(String),
+    /// Home: the DM sidebar and friends page.
+    Home,
+    OpenDm(String),
+    AddFriend(String),
+    AnswerFriend { pubkey: String, accept: bool },
+    RemoveFriend(String),
+    IgnoreFriend(String),
+    Block(String),
+    Unblock(String),
+    AcceptDm(String),
+    CloseDm(String),
+    MarkDmRead(String),
+    FindPeople(String),
     SaveOverview(ServerSettings),
     SaveRoles(Vec<RoleForm>),
     Unban(String),
@@ -336,11 +410,12 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     let options = StartOptions { seed_default_relays: custom_relays.is_empty() };
     let session = Session::start_with(keys, store, options).await.map_err(|e| e.to_string())?;
 
-    let mut ui = Backend { session: session.clone(), server: None, channel: None, vault, npub: identity.npub(), backed_up };
+    let mut ui = Backend { session: session.clone(), server: None, channel: None, home: false, dm: None, vault, npub: identity.npub(), backed_up };
     if let Ok(Some(serde_json::Value::String(theme))) = session.synced_setting("theme") {
         Cx::post_action(Update::Theme(theme));
     }
     ui.publish_me();
+    ui.publish_home();
     ui.publish_relays();
     ui.publish_servers();
 
@@ -370,6 +445,9 @@ struct Backend {
     session: Arc<Session>,
     server: Option<String>,
     channel: Option<String>,
+    /// In Home (DMs and friends) rather than a server.
+    home: bool,
+    dm: Option<PublicKey>,
     vault: Vault<OsKeyring>,
     npub: String,
     backed_up: bool,
@@ -441,6 +519,8 @@ fn card(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> Card {
         roles: roles.iter().map(|r| (r.name.clone(), hex_color(&r.color).unwrap_or(0x99aab5))).collect(),
         joined_at: m.and_then(|m| m.joined_at),
         me: pk == me,
+        friend: Friend::None,
+        in_server: true,
     }
 }
 
@@ -484,6 +564,8 @@ impl Backend {
     async fn command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::SelectServer(gid) => {
+                self.home = false;
+                self.dm = None;
                 self.server = Some(gid);
                 self.channel = None;
                 self.publish_server();
@@ -491,6 +573,89 @@ impl Backend {
             Command::SelectChannel(id) => {
                 self.channel = Some(id);
                 self.publish_channel();
+            }
+            Command::Send { text, .. } if self.dm.is_some() => {
+                let to = self.dm.expect("checked");
+                self.session
+                    .send_dm(&to, &Payload::Message { content: text, files: vec![], spoiler: false })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_dm();
+            }
+            Command::Edit { id, text } if self.dm.is_some() => {
+                let to = self.dm.expect("checked");
+                let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
+                self.session.send_dm(&to, &Payload::Edit { id, content: text }).await.map_err(|e| e.to_string())?;
+                self.publish_dm();
+            }
+            Command::DeleteMessage(id) if self.dm.is_some() => {
+                let to = self.dm.expect("checked");
+                let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
+                self.session.send_dm(&to, &Payload::Delete { id }).await.map_err(|e| e.to_string())?;
+                self.publish_dm();
+            }
+            Command::Home => {
+                self.home = true;
+                self.dm = None;
+                self.publish_home();
+            }
+            Command::OpenDm(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.home = true;
+                self.dm = Some(pk);
+                self.session.want_profiles(&[pk]).await;
+                self.publish_dm();
+                self.publish_home();
+            }
+            Command::AddFriend(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.add_friend(&pk).await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Error("Friend request sent.".into()));
+            }
+            Command::AnswerFriend { pubkey, accept } => {
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                self.session.answer_friend(&pk, accept).await.map_err(|e| e.to_string())?;
+            }
+            Command::RemoveFriend(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.remove_friend(&pk).await.map_err(|e| e.to_string())?;
+            }
+            Command::IgnoreFriend(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.ignore_friend(&pk).map_err(|e| e.to_string())?;
+            }
+            Command::Block(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.block(&pk).await.map_err(|e| e.to_string())?;
+                if self.dm == Some(pk) {
+                    self.dm = None;
+                }
+                self.publish_home();
+            }
+            Command::Unblock(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.unblock(&pk).await.map_err(|e| e.to_string())?;
+            }
+            Command::AcceptDm(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.accept_dm(&pk).map_err(|e| e.to_string())?;
+                self.publish_dm();
+            }
+            Command::CloseDm(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.close_dm(&pk).map_err(|e| e.to_string())?;
+                if self.dm == Some(pk) {
+                    self.dm = None;
+                    self.publish_home();
+                }
+            }
+            Command::MarkDmRead(pk) => {
+                let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
+                self.session.mark_dm_read(&pk).map_err(|e| e.to_string())?;
+            }
+            Command::FindPeople(q) => {
+                let people = self.find_people(&q).await;
+                Cx::post_action(Update::People(people));
             }
             Command::Send { text, reply_to } => {
                 let (gid, ch) = self.selected()?;
@@ -686,10 +851,15 @@ impl Backend {
                 self.publish_servers();
             }
             Command::Card(pk) => {
-                let gid = self.server.clone().ok_or("Pick a server first.")?;
-                let state = self.session.server(&gid).map_err(|e| e.to_string())?.ok_or("Unknown server")?;
                 let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
-                Cx::post_action(Update::Card(card(&state, &pk, &self.session.keys().public_key())));
+                let me = self.session.keys().public_key();
+                let state = if self.home { None } else { self.server.as_ref().and_then(|g| self.session.server(g).ok().flatten()) };
+                let mut c = match state.as_ref().filter(|s| s.is_member(&pk)) {
+                    Some(state) => card(state, &pk, &me),
+                    None => self.outside_card(&pk),
+                };
+                c.friend = self.session.friendship(&pk).map(Friend::from).unwrap_or_default();
+                Cx::post_action(Update::Card(c));
             }
             Command::SetTheme(name) => {
                 self.session.set_synced_setting("theme", serde_json::json!(name)).map_err(|e| e.to_string())?;
@@ -770,6 +940,192 @@ impl Backend {
         Ok(())
     }
 
+    /// Their kind 0, else the profile they carry in a server we share
+    /// (Rails members publish profiles there; not everyone has a kind 0).
+    fn profile(&self, pk: &PublicKey) -> inferno_core::server::wire::MemberProfile {
+        if let Ok(Some(p)) = self.session.profile_of(pk) {
+            return p;
+        }
+        for gid in self.session.servers().unwrap_or_default() {
+            if let Ok(Some(state)) = self.session.server(&gid) {
+                if let Some(m) = state.members.get(pk) {
+                    return m.profile.clone();
+                }
+            }
+        }
+        Default::default()
+    }
+
+    fn person(&self, pk: &PublicKey) -> Person {
+        let profile = self.profile(pk);
+        let npub = inferno_core::nostr::nips::nip19::ToBech32::to_bech32(pk).unwrap_or_default();
+        let name = [profile.display_name.clone(), profile.name.clone()]
+            .into_iter()
+            .find(|n| !n.is_empty())
+            .unwrap_or_else(|| format!("{}…", &npub[..12.min(npub.len())]));
+        let name = if *pk == self.session.keys().public_key() { "Saved Messages".to_owned() } else { name };
+        Person {
+            pubkey: pk.to_hex(),
+            initial: first_initial(&name),
+            name,
+            avatar: profile.color.as_deref().and_then(hex_color).unwrap_or(DEFAULT_AVATAR),
+        }
+    }
+
+    fn outside_card(&self, pk: &PublicKey) -> Card {
+        let profile = self.profile(pk);
+        let p = self.person(pk);
+        let npub = inferno_core::nostr::nips::nip19::ToBech32::to_bech32(pk).unwrap_or_default();
+        let c1 = profile.color.as_deref().and_then(hex_color);
+        let c2 = profile.color_2.as_deref().and_then(hex_color);
+        let status = [profile.status_emoji.as_str(), profile.status.as_str()]
+            .iter()
+            .filter(|s| !s.is_empty())
+            .copied()
+            .collect::<Vec<_>>()
+            .join(" ");
+        Card {
+            pubkey: pk.to_hex(),
+            tag: if profile.name.is_empty() { format!("{}…", &npub[..16.min(npub.len())]) } else { profile.name.clone() },
+            npub,
+            initial: p.initial,
+            name: p.name,
+            status,
+            about: profile.about.clone(),
+            color: c1.unwrap_or(DEFAULT_AVATAR),
+            color_2: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
+            ring: c2.or(c1).unwrap_or(DEFAULT_AVATAR),
+            avatar: p.avatar,
+            roles: vec![],
+            joined_at: None,
+            me: *pk == self.session.keys().public_key(),
+            friend: Friend::None,
+            in_server: false,
+        }
+    }
+
+    fn publish_home(&mut self) {
+        let friends = self.session.friendships().unwrap_or_default();
+        let conversations = self.session.conversations().unwrap_or_default();
+        let pick = |want: Friendship| -> Vec<Person> {
+            let mut v: Vec<Person> = friends.iter().filter(|(_, f)| **f == want).map(|(pk, _)| self.person(pk)).collect();
+            v.sort_by_key(|p| p.name.to_lowercase());
+            v
+        };
+        let mut blocked: Vec<Person> = self.session.blocked_list().unwrap_or_default().iter().map(|pk| self.person(pk)).collect();
+        blocked.sort_by_key(|p| p.name.to_lowercase());
+        let incoming = pick(Friendship::Incoming);
+        let unread: usize = conversations.iter().map(|c| c.unread).sum();
+        let home = Home {
+            conversations: conversations
+                .iter()
+                .map(|c| DmRow {
+                    person: self.person(&c.with),
+                    unread: c.unread,
+                    request: c.request,
+                    friend: friends.get(&c.with).copied().map(Friend::from).unwrap_or_default(),
+                })
+                .collect(),
+            friends: pick(Friendship::Accepted),
+            badge: incoming.len() + unread,
+            incoming,
+            outgoing: pick(Friendship::Outgoing),
+            blocked,
+        };
+        Cx::post_action(Update::Home(home));
+    }
+
+    /// The open DM, as a timeline keyed ("@dm", pubkey).
+    fn publish_dm(&mut self) {
+        let Some(with) = self.dm else { return };
+        let me = self.session.keys().public_key();
+        let messages = self.session.dm_messages(&with).unwrap_or_default();
+        let person = self.person(&with);
+        let me_person = self.person(&me);
+        let my_name = if with == me {
+            me_person.name.clone()
+        } else {
+            let p = self.session.my_profile().unwrap_or_default();
+            let s = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+            [s("display_name"), s("name")].into_iter().find(|n| !n.is_empty()).unwrap_or_else(|| self.npub[..12].to_owned())
+        };
+        let request = self
+            .session
+            .conversations()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|c| c.with == with && c.request)
+            .map(|_| messages.len());
+        let mut rows = Vec::with_capacity(messages.len());
+        for (i, m) in messages.iter().enumerate() {
+            let prev = i.checked_sub(1).map(|p| &messages[p]);
+            let grouped = prev.is_some_and(|p| p.author == m.author && m.created_at - p.created_at < 300);
+            let (name, avatar) = if m.author == me { (my_name.clone(), me_person.avatar) } else { (person.name.clone(), person.avatar) };
+            let mut body = m.content.clone();
+            for f in &m.files {
+                body.push('\n');
+                body.push_str(f);
+            }
+            if !m.reactions.is_empty() {
+                let r: Vec<String> = m.reactions.iter().map(|(e, who)| format!("{e} {}", who.len())).collect();
+                body.push_str(&format!("\n{}", r.join("  ")));
+            }
+            rows.push(MessageRow {
+                id: m.id.to_hex(),
+                own: m.author == me,
+                author_pk: m.author.to_hex(),
+                reply_to: None,
+                initial: first_initial(&name),
+                author: name,
+                color: DEFAULT_ROLE,
+                avatar,
+                at: m.created_at,
+                body: Some(body),
+                reply: None,
+                edited: m.edited,
+                pinned: false,
+                grouped,
+                system: false,
+            });
+        }
+        Cx::post_action(Update::DmHeader { person, request });
+        Cx::post_action(Update::Timeline { gid: "@dm".into(), channel_id: with.to_hex(), rows, can_pin: false });
+    }
+
+    /// Rails' Find People: a public key, or a name among people we know of
+    /// (server members and DM peers). user@domain lookups need HTTP and
+    /// aren't wired yet.
+    async fn find_people(&self, q: &str) -> Vec<Person> {
+        let q = q.trim();
+        if q.is_empty() {
+            return vec![];
+        }
+        if let Ok(pk) = PublicKey::parse(q) {
+            self.session.want_profiles(&[pk]).await;
+            return vec![self.person(&pk)];
+        }
+        let lower = q.to_lowercase();
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let mut known: Vec<PublicKey> = self.session.conversations().unwrap_or_default().iter().map(|c| c.with).collect();
+        for gid in self.session.servers().unwrap_or_default() {
+            if let Ok(Some(state)) = self.session.server(&gid) {
+                known.extend(state.members.keys().copied());
+            }
+        }
+        for pk in known {
+            if pk == self.session.keys().public_key() || !seen.insert(pk) {
+                continue;
+            }
+            let p = self.person(&pk);
+            if p.name.to_lowercase().contains(&lower) {
+                out.push(p);
+            }
+        }
+        out.truncate(25);
+        out
+    }
+
     fn publish_me(&mut self) {
         let p = self.session.my_profile().unwrap_or_default();
         let s = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
@@ -814,7 +1170,13 @@ impl Backend {
                     self.publish_timeline();
                 }
             }
-            SessionUpdate::Dm(_) | SessionUpdate::Social | SessionUpdate::Profile(_) => {}
+            SessionUpdate::Dm(_) | SessionUpdate::Social | SessionUpdate::Profile(_) => {
+                // The badge and request bar show everywhere, not only in Home.
+                self.publish_home();
+                if self.dm.is_some() {
+                    self.publish_dm();
+                }
+            }
         }
     }
 
