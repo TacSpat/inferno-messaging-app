@@ -516,3 +516,245 @@ impl Widget for RolePicker {
         self.view.handle_event(cx, event, scope);
     }
 }
+
+// ─── Server settings lists ───────────────────────────────────────────────
+
+/// Rails' role editor groups (`role_editor_controller.js` PERMISSION_GROUPS).
+pub const PERMISSION_GROUPS: &[(&str, &[(&str, &str)])] = &[
+    ("General", &[
+        ("read_messages", "View channels and read messages"),
+        ("read_message_history", "Read message history"),
+        ("create_invite", "Create invite links"),
+        ("change_nickname", "Change their own nickname in this server"),
+    ]),
+    ("Text", &[
+        ("send_messages", "Send messages in text channels"),
+        ("attach_files", "Upload images and files"),
+        ("send_gifs", "Send GIFs in messages"),
+        ("add_reactions", "Add emoji reactions to messages"),
+        ("mention_everyone", "Use @everyone and @here mentions"),
+    ]),
+    ("Expression", &[
+        ("send_custom_emojis", "Use custom server emojis in messages"),
+        ("send_custom_stickers", "Use custom server stickers in messages"),
+        ("create_emojis", "Upload custom emojis to the server"),
+        ("create_stickers", "Upload custom stickers to the server"),
+        ("manage_emojis", "Delete emojis and stickers uploaded by others"),
+    ]),
+    ("Management", &[
+        ("manage_messages", "Delete or pin other members' messages"),
+        ("manage_channels", "Create, edit, and delete channels"),
+        ("manage_roles", "Create, edit, and reorder roles"),
+        ("manage_invites", "View and revoke invite links"),
+        ("manage_server", "Edit server name, icon, and settings"),
+    ]),
+    ("Moderation", &[
+        ("kick_members", "Remove members from the server"),
+        ("ban_members", "Permanently ban members"),
+    ]),
+    ("Voice", &[
+        ("connect_voice", "Join voice channels"),
+        ("speak", "Speak in voice channels"),
+        ("video", "Send video in voice channels"),
+        ("screen_share", "Share their screen in voice channels"),
+        ("mute_members", "Server-mute other members in voice"),
+        ("deafen_members", "Server-deafen other members in voice"),
+        ("move_members", "Move members between voice channels"),
+    ]),
+    ("Dangerous", &[("administrator", "Full admin access — bypasses all permission checks")]),
+];
+
+#[derive(Debug, Clone, PartialEq)]
+enum PermRow {
+    Header(&'static str),
+    Perm { key: &'static str, label: &'static str },
+}
+
+fn perm_rows() -> Vec<PermRow> {
+    let mut v = Vec::new();
+    for (group, perms) in PERMISSION_GROUPS {
+        v.push(PermRow::Header(group));
+        v.extend(perms.iter().map(|(key, label)| PermRow::Perm { key, label }));
+    }
+    v
+}
+
+/// Permission toggles for the role being edited.
+#[derive(Script, ScriptHook, Widget)]
+pub struct PermList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub granted: Vec<String>,
+    #[rust]
+    rows: Vec<PermRow>,
+    #[rust]
+    pub enabled: bool,
+}
+
+impl PermList {
+    /// Toggles a clicked permission; true if anything changed.
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let list = self.view.portal_list(cx, ids!(list));
+        let hit = list.items_with_actions(actions).into_iter().find(|(_, item)| clicked(item, actions));
+        if let Some((i, _)) = hit {
+            if let Some(PermRow::Perm { key, .. }) = self.rows.get(i) {
+                match self.granted.iter().position(|k| k == key) {
+                    Some(p) => {
+                        self.granted.remove(p);
+                    }
+                    None => self.granted.push(key.to_string()),
+                }
+                redraw_items(cx, &list);
+                return true;
+            }
+        }
+        false
+    }
+}
+
+impl Widget for PermList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        if self.rows.is_empty() {
+            self.rows = perm_rows();
+        }
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(PermRow::Header(g)) => {
+                        let row = list.item(cx, i, id!(Group));
+                        row.set_text(cx, &g.to_uppercase());
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(PermRow::Perm { key, label }) => {
+                        let row = list.item(cx, i, id!(Perm));
+                        let on = self.granted.iter().any(|k| k == key);
+                        row.label(cx, ids!(mark)).set_text(cx, if on { "✓" } else { "·" });
+                        row.label(cx, ids!(label)).set_text(cx, label);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None => {}
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+/// Roles, highest first; one is selected for editing.
+#[derive(Script, ScriptHook, Widget)]
+pub struct RoleList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub roles: Vec<crate::backend::RoleForm>,
+    #[rust]
+    pub selected: usize,
+}
+
+impl RoleList {
+    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<usize> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions).into_iter().find(|(_, item)| clicked(item, actions)).map(|(i, _)| i)
+    }
+}
+
+impl Widget for RoleList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.roles.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some(r) = self.roles.get(i) else { continue };
+                let row = list.item(cx, i, if i == self.selected { id!(Selected) } else { id!(Role) });
+                let mut dot = row.widget(cx, ids!(dot));
+                let c = rgba(u32::from_str_radix(r.color.trim_start_matches('#'), 16).unwrap_or(0x99aab5), 1.0);
+                script_apply_eval!(cx, dot, {draw_bg +: {color: #(c)}});
+                row.label(cx, ids!(name)).set_text(cx, &r.name);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+/// Rows with a name, a detail line and up to two buttons (members, bans).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PersonRow {
+    pub id: String,
+    pub name: String,
+    pub detail: String,
+    pub a: Option<String>,
+    pub b: Option<String>,
+}
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct PeopleList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<PersonRow>,
+}
+
+impl PeopleList {
+    /// (row id, which button: 0 = a, 1 = b)
+    pub fn pressed(&self, cx: &mut Cx, actions: &Actions) -> Option<(String, u8)> {
+        let list = self.view.portal_list(cx, ids!(list));
+        for (i, item) in list.items_with_actions(actions) {
+            for (path, n) in [(ids!(btn_a), 0u8), (ids!(btn_b), 1u8)] {
+                if item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                    return self.rows.get(i).map(|r| (r.id.clone(), n));
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Widget for PeopleList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            let count = self.rows.len().max(1);
+            list.set_item_range(cx, 0, count);
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(r) => {
+                        let row = list.item(cx, i, id!(Person));
+                        row.label(cx, ids!(name)).set_text(cx, &r.name);
+                        row.label(cx, ids!(detail)).set_text(cx, &r.detail);
+                        for (path, label_path, text) in
+                            [(ids!(btn_a), ids!(btn_a.t), &r.a), (ids!(btn_b), ids!(btn_b.t), &r.b)]
+                        {
+                            row.view(cx, path).set_visible(cx, text.is_some());
+                            row.label(cx, label_path).set_text(cx, text.as_deref().unwrap_or(""));
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None if i == 0 => {
+                        list.item(cx, i, id!(Empty)).draw_all(cx, &mut Scope::empty());
+                    }
+                    None => {}
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}

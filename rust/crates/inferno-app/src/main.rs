@@ -16,7 +16,7 @@ mod window_state;
 
 use makepad_widgets::*;
 
-use backend::ServerPerms;
+use backend::{ServerPerms, ServerSettings};
 
 app_main!(App);
 
@@ -501,6 +501,95 @@ script_mod! {
         }
     }
 
+    // ─── Server settings widgets (lists.rs) ──────────────────────────
+    mod.widgets.PermListBase = #(lists::PermList::register_widget(vm))
+    mod.widgets.PermList = set_type_default() do mod.widgets.PermListBase{
+        width: Fill height: 420
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Group := Txt{margin: Inset{top: 14 bottom: 6} draw_text.color: gray_400
+                draw_text.text_style: theme.font_bold{font_size: 8.5}}
+            Perm := View{
+                width: Fill height: Fit
+                padding: Inset{top: 5 bottom: 5}
+                flow: Right spacing: 10
+                cursor: MouseCursor.Hand
+                mark := Txt{width: 14 text: "·" draw_text.color: accent_light}
+                label := Txt{width: Fill text: "" draw_text.color: gray_200}
+            }
+        }
+    }
+
+    mod.widgets.RoleListBase = #(lists::RoleList::register_widget(vm))
+    mod.widgets.RoleList = set_type_default() do mod.widgets.RoleListBase{
+        width: 200 height: 480
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Role := RoundedView{
+                width: Fill height: Fit
+                padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
+                flow: Right spacing: 8
+                align: Align{y: 0.5}
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: #0000
+                draw_bg.border_radius: 4.0
+                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
+                name := Txt{text: "" draw_text.color: gray_300}
+            }
+            Selected := RoundedView{
+                width: Fill height: Fit
+                padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
+                flow: Right spacing: 8
+                align: Align{y: 0.5}
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: gray_600
+                draw_bg.border_radius: 4.0
+                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
+                name := Txt{text: "" draw_text.color: #xffffff}
+            }
+        }
+    }
+
+    let SmallBtn = RoundedView{
+        width: Fit height: Fit
+        padding: Inset{left: 10 right: 10 top: 5 bottom: 5}
+        cursor: MouseCursor.Hand
+        new_batch: true
+        draw_bg.color: gray_700
+        draw_bg.border_radius: 4.0
+        t := Txt{text: "" draw_text.color: gray_200 draw_text.text_style.font_size: 9.0}
+    }
+
+    mod.widgets.PeopleListBase = #(lists::PeopleList::register_widget(vm))
+    mod.widgets.PeopleList = set_type_default() do mod.widgets.PeopleListBase{
+        width: Fill height: 520
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Person := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{bottom: 6}
+                padding: Inset{left: 12 right: 8 top: 8 bottom: 8}
+                flow: Right spacing: 8
+                align: Align{y: 0.5}
+                new_batch: true
+                draw_bg.color: gray_800
+                draw_bg.border_radius: 6.0
+                View{width: Fill height: Fit flow: Down spacing: 2
+                    name := Txt{text: "" draw_text.color: gray_100}
+                    detail := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                }
+                btn_a := SmallBtn{}
+                btn_b := SmallBtn{t.draw_text.color: #xf87171}
+            }
+            Empty := Hint{text: "Nobody here." margin: 8}
+        }
+    }
+
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
@@ -889,6 +978,113 @@ script_mod! {
                         }
                     }
 
+                    // Server settings: Rails' full-page layout (w-56 nav,
+                    // max-w-3xl content, round close), gated per page.
+                    srv_settings := SolidView{
+                        visible: false
+                        width: Fill height: Fill
+                        flow: Right
+                        draw_bg.color: gray_900
+                        SolidView{
+                            width: 224 height: Fill
+                            flow: Down spacing: 2
+                            padding: Inset{left: 16 right: 16 top: 24}
+                            draw_bg.color: gray_800
+                            srv_nav_title := NavHeader{text: "SERVER"}
+                            snav_overview := NavItem{label.text: "Overview"}
+                            NavHeader{text: "PEOPLE"}
+                            snav_members := NavItem{label.text: "Members"}
+                            snav_roles := NavItem{label.text: "Roles"}
+                            NavHeader{text: "MODERATION"}
+                            snav_bans := NavItem{label.text: "Bans"}
+                            snav_delete := NavItem{margin: Inset{top: 16} label.text: "Delete Server" label.draw_text.color: #xf87171}
+                        }
+                        ScrollYView{
+                            width: Fill height: Fill
+                            flow: Down
+                            padding: Inset{left: 40 right: 40 top: 32 bottom: 32}
+
+                            spage_overview := View{
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Server Overview"}
+                                FieldLabel{text: "SERVER NAME"}
+                                so_name := Field{}
+                                FieldLabel{text: "DESCRIPTION"}
+                                so_about := Field{empty_text: "What's this server about?"}
+                                FieldLabel{text: "SERVER CONFIGURATION"}
+                                so_discoverable := CheckBox{text: "Discoverable (listed in server discovery)"}
+                                so_age := CheckBox{text: "Age-restricted (18+)"}
+                                FieldLabel{text: "WELCOME MESSAGE"}
+                                so_welcome_on := CheckBox{text: "Post a welcome message when someone joins"}
+                                so_welcome := Field{empty_text: "Welcome {user} to {server}!"}
+                                View{width: Fill height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
+                                    so_save := Button{text: "Save Changes"}
+                                    so_note := Hint{text: ""}
+                                }
+                            }
+
+                            spage_roles := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Roles"}
+                                View{width: Fill height: Fit flow: Right spacing: 24
+                                    View{width: 200 height: Fit flow: Down spacing: 8
+                                        role_create := Button{text: "Create Role"}
+                                        role_list := mod.widgets.RoleList{}
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                            role_title := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                            role_note := Hint{width: Fit text: ""}
+                                            role_save := Button{text: "Save Changes"}
+                                            role_delete := Button{text: "Delete Role" draw_text.color: #xf87171}
+                                        }
+                                        role_fields := View{width: Fill height: Fit flow: Down
+                                            FieldLabel{text: "ROLE NAME"}
+                                            role_name := Field{}
+                                            FieldLabel{text: "ROLE COLOR"}
+                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                                role_swatch := RoundedView{width: 36 height: 36 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
+                                                role_color := TextInput{width: 140 height: 36 empty_text: "#99aab5"}
+                                            }
+                                            role_hoist := CheckBox{margin: Inset{top: 10} text: "Display role members separately"}
+                                            role_mention := CheckBox{text: "Allow anyone to @mention this role"}
+                                        }
+                                        FieldLabel{text: "PERMISSIONS"}
+                                        role_perms := mod.widgets.PermList{}
+                                    }
+                                }
+                            }
+
+                            spage_members := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                srv_members_title := PageTitle{text: "Members"}
+                                srv_members := mod.widgets.PeopleList{}
+                            }
+
+                            spage_bans := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Bans"}
+                                srv_bans := mod.widgets.PeopleList{}
+                            }
+                        }
+                        View{width: Fit height: Fit padding: 24 flow: Down align: Align{x: 0.5} spacing: 4
+                            close_srv_settings := RoundedView{
+                                width: 36 height: 36
+                                align: Center
+                                cursor: MouseCursor.Hand
+                                draw_bg.color: #0000
+                                draw_bg.border_radius: 18.0
+                                draw_bg.border_size: 2.0
+                                draw_bg.border_color: gray_600
+                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}
+                            }
+                            Txt{text: "ESC" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+                        }
+                    }
+
                     // Context menus, opened at the pointer (ctxmenu.rs).
                     ctx_layer := View{
                         visible: false
@@ -1019,6 +1215,13 @@ pub struct App {
     #[rust]
     members: Vec<backend::MemberRow>,
     #[rust]
+    srv: ServerSettings,
+    /// Roles as edited on the roles page (saved with Save Changes).
+    #[rust]
+    role_drafts: Vec<backend::RoleForm>,
+    #[rust]
+    role_sel: usize,
+    #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
     #[rust]
@@ -1030,6 +1233,8 @@ pub struct App {
 pub enum Pending {
     Menu(ctxmenu::Action),
     Leave,
+    DeleteRole(String),
+    DeleteServer,
 }
 
 /// One filled context-menu slot (separator above, action, label, danger).
@@ -1049,6 +1254,14 @@ pub struct CtxMenuData {
 const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
     id!(s0), id!(s1), id!(s2), id!(s3), id!(s4), id!(s5), id!(s6),
     id!(s7), id!(s8), id!(s9), id!(s10), id!(s11), id!(s12), id!(s13),
+];
+
+/// Server settings pages: (nav, page, required permission check index).
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 4] = [
+    (ids!(snav_overview), ids!(spage_overview)),
+    (ids!(snav_members), ids!(spage_members)),
+    (ids!(snav_roles), ids!(spage_roles)),
+    (ids!(snav_bans), ids!(spage_bans)),
 ];
 
 const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 3] = [
@@ -1543,7 +1756,177 @@ impl App {
             }
             Pending::Menu(A::Kick(pk)) => self.send(backend::Command::Kick(pk)),
             Pending::Menu(A::Ban(pk)) => self.send(backend::Command::Ban { pubkey: pk, reason: reason.trim().to_owned() }),
+            Pending::DeleteRole(id) => {
+                self.role_drafts.retain(|r| r.id != id);
+                self.role_sel = 0;
+                self.send(backend::Command::SaveRoles(self.role_drafts.clone()));
+                self.show_role(cx);
+            }
+            Pending::DeleteServer => {
+                self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+                self.send(backend::Command::DeleteServer);
+                self.ui.redraw(cx);
+            }
             Pending::Menu(_) => {}
+        }
+    }
+
+    // ─── Server settings ─────────────────────────────────────────────────
+
+    /// Which server settings pages we may open (Rails' gates).
+    fn srv_page_allowed(&self) -> [bool; 4] {
+        let p = &self.perms;
+        [
+            p.manage_server,
+            p.manage_server || p.manage_roles,
+            p.manage_server || p.manage_roles,
+            p.manage_server || p.ban_members,
+        ]
+    }
+
+    fn open_srv_settings(&mut self, cx: &mut Cx) {
+        let allowed = self.srv_page_allowed();
+        for (i, (nav, _)) in SRV_PAGES.iter().enumerate() {
+            self.ui.view(cx, nav).set_visible(cx, allowed[i]);
+        }
+        self.ui.view(cx, ids!(snav_delete)).set_visible(cx, self.perms.owner);
+        self.ui.label(cx, ids!(srv_nav_title)).set_text(cx, &self.server_name.to_uppercase());
+        self.fill_srv_pages(cx);
+        if let Some(first) = allowed.iter().position(|a| *a) {
+            self.show_srv_page(cx, first);
+        }
+        self.ui.view(cx, ids!(srv_settings)).set_visible(cx, true);
+        self.ui.redraw(cx);
+    }
+
+    fn show_srv_page(&mut self, cx: &mut Cx, page: usize) {
+        for (i, (nav, view)) in SRV_PAGES.iter().enumerate() {
+            let active = i == page;
+            self.ui.view(cx, view).set_visible(cx, active);
+            let mut item = self.ui.widget(cx, nav);
+            let (bg, fg) = if active {
+                (lists::rgba(0x403e3c, 1.0), lists::rgba(0xffffff, 1.0))
+            } else {
+                (lists::rgba(0x000000, 0.0), lists::rgba(0x878583, 1.0))
+            };
+            script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
+            let mut label = self.ui.widget(cx, &[nav[0], id!(label)]);
+            script_apply_eval!(cx, label, {draw_text +: {color: #(fg)}});
+        }
+        self.ui.redraw(cx);
+    }
+
+    /// Copies the latest settings snapshot into the pages.
+    fn fill_srv_pages(&mut self, cx: &mut Cx) {
+        let o = self.srv.clone();
+        self.ui.text_input(cx, ids!(so_name)).set_text(cx, &o.name);
+        self.ui.text_input(cx, ids!(so_about)).set_text(cx, &o.about);
+        self.ui.text_input(cx, ids!(so_welcome)).set_text(cx, &o.welcome_message);
+        for (path, v) in [(ids!(so_discoverable), o.discoverable), (ids!(so_age), o.age_restricted), (ids!(so_welcome_on), o.welcome_enabled)] {
+            self.ui.check_box(cx, path).set_active(cx, v, Animate::No);
+        }
+        self.role_drafts = o.roles.clone();
+        self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
+        self.show_role(cx);
+        self.fill_people(cx);
+    }
+
+    fn fill_people(&mut self, cx: &mut Cx) {
+        let p = self.perms.clone();
+        let names: std::collections::HashMap<String, String> =
+            self.roles.iter().map(|r| (r.id.clone(), r.name.clone())).collect();
+        let people: Vec<lists::PersonRow> = self
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                backend::MemberRow::Member { name, pubkey, roles, owner, me, .. } => {
+                    let role_names: Vec<String> = roles.iter().filter_map(|r| names.get(r).cloned()).collect();
+                    let detail = if *owner { "Owner".to_owned() } else if role_names.is_empty() { "No roles".to_owned() } else { role_names.join(", ") };
+                    let actionable = !*owner && !*me;
+                    Some(lists::PersonRow {
+                        id: pubkey.clone(),
+                        name: name.clone(),
+                        detail,
+                        a: (actionable && p.kick_members).then(|| "Kick".to_owned()),
+                        b: (actionable && p.ban_members).then(|| "Ban".to_owned()),
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        self.ui.label(cx, ids!(srv_members_title)).set_text(cx, &format!("Members ({})", people.len()));
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::PeopleList>() {
+            l.rows = people;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_members.list)));
+        let bans: Vec<lists::PersonRow> = self
+            .srv
+            .bans
+            .iter()
+            .map(|b| lists::PersonRow {
+                id: b.pubkey.clone(),
+                name: b.name.clone(),
+                detail: if b.reason.is_empty() { "No reason given".into() } else { b.reason.clone() },
+                a: p.ban_members.then(|| "Unban".to_owned()),
+                b: None,
+            })
+            .collect();
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_bans)).borrow_mut::<lists::PeopleList>() {
+            l.rows = bans;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    /// Shows the selected role draft in the editor.
+    fn show_role(&mut self, cx: &mut Cx) {
+        let Some(r) = self.role_drafts.get(self.role_sel).cloned() else { return };
+        let can = self.perms.manage_roles;
+        self.ui.label(cx, ids!(role_title)).set_text(cx, &format!("Edit Role — {}", r.name));
+        // @everyone: permissions only, like Rails.
+        self.ui.view(cx, ids!(role_fields)).set_visible(cx, !r.everyone);
+        self.ui.button(cx, ids!(role_delete)).set_visible(cx, can && !r.everyone);
+        self.ui.button(cx, ids!(role_save)).set_visible(cx, can);
+        self.ui.text_input(cx, ids!(role_name)).set_text(cx, &r.name);
+        self.ui.text_input(cx, ids!(role_color)).set_text(cx, &r.color);
+        self.set_swatch(cx, &r.color);
+        self.ui.check_box(cx, ids!(role_hoist)).set_active(cx, r.hoist, Animate::No);
+        self.ui.check_box(cx, ids!(role_mention)).set_active(cx, r.mentionable, Animate::No);
+        if let Some(mut l) = self.ui.widget(cx, ids!(role_perms)).borrow_mut::<lists::PermList>() {
+            l.granted = r.perms.clone();
+            l.enabled = can;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(role_perms.list)));
+        if let Some(mut l) = self.ui.widget(cx, ids!(role_list)).borrow_mut::<lists::RoleList>() {
+            l.roles = self.role_drafts.clone();
+            l.selected = self.role_sel;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(role_list.list)));
+        self.ui.redraw(cx);
+    }
+
+    fn set_swatch(&self, cx: &mut Cx, color: &str) {
+        if let Ok(c) = u32::from_str_radix(color.trim_start_matches('#'), 16) {
+            let mut sw = self.ui.widget(cx, ids!(role_swatch));
+            let v = lists::rgba(c, 1.0);
+            script_apply_eval!(cx, sw, {draw_bg +: {color: #(v)}});
+        }
+    }
+
+    /// Pulls the editor's fields into the selected draft.
+    fn read_role_editor(&mut self, cx: &mut Cx) {
+        let name = self.ui.text_input(cx, ids!(role_name)).text();
+        let color = self.ui.text_input(cx, ids!(role_color)).text();
+        let hoist = self.ui.check_box(cx, ids!(role_hoist)).active(cx);
+        let mention = self.ui.check_box(cx, ids!(role_mention)).active(cx);
+        let perms = self.ui.widget(cx, ids!(role_perms)).borrow::<lists::PermList>().map(|l| l.granted.clone()).unwrap_or_default();
+        if let Some(r) = self.role_drafts.get_mut(self.role_sel) {
+            if !r.everyone {
+                r.name = name;
+                r.color = color;
+                r.hoist = hoist;
+                r.mentionable = mention;
+            }
+            r.perms = perms;
         }
     }
 
@@ -1593,6 +1976,9 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
                 self.members = members.clone();
+                if self.ui.view(cx, ids!(srv_settings)).visible() {
+                    self.fill_people(cx);
+                }
                 if let Some(mut list) = self.ui.widget(cx, ids!(members)).borrow_mut::<lists::MemberList>() {
                     list.rows = members.clone();
                 }
@@ -1661,6 +2047,20 @@ impl App {
                 );
                 self.ui.view(cx, ids!(backup_form)).set_visible(cx, false);
                 self.ui.redraw(cx);
+            }
+            Update::ServerSettings(settings) => {
+                self.srv = settings.clone();
+                if self.ui.view(cx, ids!(srv_settings)).visible() {
+                    // Keep unsaved role edits; refresh the rest.
+                    let drafts = std::mem::take(&mut self.role_drafts);
+                    let sel = self.role_sel;
+                    self.fill_srv_pages(cx);
+                    if !drafts.is_empty() && drafts.iter().any(|d| !self.srv.roles.contains(d)) {
+                        self.role_drafts = drafts;
+                        self.role_sel = sel.min(self.role_drafts.len().saturating_sub(1));
+                        self.show_role(cx);
+                    }
+                }
             }
             Update::Error(e) => {
                 self.notice(cx, &format!("⚠ {e}"));
@@ -1849,6 +2249,98 @@ impl MatchEvent for App {
             }
             self.close_pages(cx);
         }
+        // Server settings
+        if tapped(&self.ui, cx, ids!(menu_server_settings)) {
+            self.set_server_menu(cx, false);
+            self.open_srv_settings(cx);
+        }
+        if tapped(&self.ui, cx, ids!(close_srv_settings)) {
+            self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+            self.ui.redraw(cx);
+        }
+        for (i, (nav, _)) in SRV_PAGES.iter().enumerate() {
+            if tapped(&self.ui, cx, nav) {
+                self.show_srv_page(cx, i);
+            }
+        }
+        if tapped(&self.ui, cx, ids!(snav_delete)) {
+            let body = format!("Delete {}? This removes it for every member and cannot be undone.", self.server_name);
+            self.confirm(cx, Pending::DeleteServer, "Delete Server", &body, "Delete Server", false);
+        }
+        if self.ui.button(cx, ids!(so_save)).clicked(actions) {
+            let o = backend::ServerSettings {
+                name: self.ui.text_input(cx, ids!(so_name)).text(),
+                about: self.ui.text_input(cx, ids!(so_about)).text(),
+                discoverable: self.ui.check_box(cx, ids!(so_discoverable)).active(cx),
+                age_restricted: self.ui.check_box(cx, ids!(so_age)).active(cx),
+                welcome_enabled: self.ui.check_box(cx, ids!(so_welcome_on)).active(cx),
+                welcome_message: self.ui.text_input(cx, ids!(so_welcome)).text(),
+                ..Default::default()
+            };
+            self.send(backend::Command::SaveOverview(o));
+            self.ui.label(cx, ids!(so_note)).set_text(cx, "Saved ✓");
+        }
+        let role_click = self.ui.widget(cx, ids!(role_list)).borrow::<lists::RoleList>().and_then(|l| l.clicked(cx, actions));
+        if let Some(i) = role_click {
+            self.read_role_editor(cx);
+            self.role_sel = i;
+            self.show_role(cx);
+        }
+        if let Some(mut l) = self.ui.widget(cx, ids!(role_perms)).borrow_mut::<lists::PermList>() {
+            l.handle_list_actions(cx, actions);
+        }
+        if let Some(c) = self.ui.text_input(cx, ids!(role_color)).changed(actions) {
+            self.set_swatch(cx, &c);
+            self.ui.redraw(cx);
+        }
+        if self.ui.button(cx, ids!(role_create)).clicked(actions) && self.perms.manage_roles {
+            self.read_role_editor(cx);
+            let top = self.role_drafts.iter().filter(|r| !r.everyone).map(|r| r.position).max().unwrap_or(0);
+            let id = inferno_core::server::publish::new_public_id();
+            self.role_drafts.insert(0, backend::RoleForm {
+                id,
+                name: "new role".into(),
+                color: "#99aab5".into(),
+                position: top + 1,
+                ..Default::default()
+            });
+            self.role_sel = 0;
+            self.show_role(cx);
+            self.ui.label(cx, ids!(role_note)).set_text(cx, "Not saved yet");
+        }
+        if self.ui.button(cx, ids!(role_save)).clicked(actions) {
+            self.read_role_editor(cx);
+            let bad = self.role_drafts.iter().find(|r| {
+                !r.everyone && !(r.color.len() == 7 && r.color.starts_with('#') && u32::from_str_radix(&r.color[1..], 16).is_ok())
+            });
+            match bad {
+                Some(r) => {
+                    let msg = format!("⚠ \"{}\" isn't a #rrggbb color.", r.color);
+                    self.ui.label(cx, ids!(role_note)).set_text(cx, &msg);
+                }
+                None => {
+                    self.send(backend::Command::SaveRoles(self.role_drafts.clone()));
+                    self.ui.label(cx, ids!(role_note)).set_text(cx, "Saved ✓");
+                }
+            }
+        }
+        if self.ui.button(cx, ids!(role_delete)).clicked(actions) {
+            if let Some(r) = self.role_drafts.get(self.role_sel).cloned() {
+                let body = format!("Delete the {} role? Members who have it lose it.", r.name);
+                self.confirm(cx, Pending::DeleteRole(r.id), "Delete Role", &body, "Delete Role", false);
+            }
+        }
+        let member_btn = self.ui.widget(cx, ids!(srv_members)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        match member_btn {
+            Some((pk, 0)) => self.run_menu_action(cx, ctxmenu::Action::Kick(pk)),
+            Some((pk, _)) => self.run_menu_action(cx, ctxmenu::Action::Ban(pk)),
+            None => {}
+        }
+        let ban_btn = self.ui.widget(cx, ids!(srv_bans)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        if let Some((pk, _)) = ban_btn {
+            self.send(backend::Command::Unban(pk));
+        }
+
         // Settings overlay
         if tapped(&self.ui, cx, ids!(open_settings)) {
             self.set_settings_open(cx, true);
@@ -1982,6 +2474,9 @@ impl AppMain for App {
                     self.close_pages(cx);
                 } else if self.ui.view(cx, ids!(server_menu)).visible() {
                     self.set_server_menu(cx, false);
+                } else if self.ui.view(cx, ids!(srv_settings)).visible() {
+                    self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+                    self.ui.redraw(cx);
                 } else if self.ui.view(cx, ids!(settings)).visible() {
                     self.set_settings_open(cx, false);
                 }

@@ -52,6 +52,41 @@ pub struct RoleItem {
     pub name: String,
 }
 
+/// A role as the roles page edits it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct RoleForm {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    pub position: i64,
+    pub hoist: bool,
+    pub mentionable: bool,
+    /// Granted permission keys (Rails' names).
+    pub perms: Vec<String>,
+    pub everyone: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BanItem {
+    pub pubkey: String,
+    pub name: String,
+    pub reason: String,
+}
+
+/// Everything the server settings pages show.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ServerSettings {
+    pub name: String,
+    pub about: String,
+    pub discoverable: bool,
+    pub age_restricted: bool,
+    pub welcome_enabled: bool,
+    pub welcome_message: String,
+    /// Highest position first, as Rails lists them.
+    pub roles: Vec<RoleForm>,
+    pub bans: Vec<BanItem>,
+}
+
 /// A channel as the edit dialog needs it.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ChannelForm {
@@ -124,6 +159,7 @@ pub struct RelayItem {
 
 #[derive(Debug, Clone)]
 pub enum Update {
+    ServerSettings(ServerSettings),
     Profile(ProfileForm),
     Relays(Vec<RelayItem>),
     /// The ncryptsec of a new backup (also copied to the clipboard).
@@ -175,6 +211,10 @@ pub enum Command {
     LeaveServer,
     MarkRead(String),
     DeleteMessage(String),
+    SaveOverview(ServerSettings),
+    SaveRoles(Vec<RoleForm>),
+    Unban(String),
+    DeleteServer,
     SetMemberRoles { pubkey: String, roles: Vec<String> },
     Kick(String),
     Timeout { pubkey: String, secs: i64 },
@@ -512,6 +552,55 @@ impl Backend {
                 self.session.move_channel(&gid, &id, category.as_deref(), index).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
+            Command::SaveOverview(o) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                if o.name.trim().is_empty() {
+                    return Err("The server needs a name.".into());
+                }
+                self.session
+                    .update_metadata(&gid, move |m| {
+                        m.name = o.name.trim().to_owned();
+                        m.about = o.about;
+                        m.discoverable = o.discoverable;
+                        m.age_restricted = o.age_restricted;
+                        m.welcome_enabled = o.welcome_enabled;
+                        m.welcome_message = o.welcome_message;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_servers();
+                self.publish_server_keep_channel();
+            }
+            Command::SaveRoles(forms) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let roles = forms
+                    .into_iter()
+                    .map(|f| inferno_core::server::wire::Role {
+                        id: f.id,
+                        name: f.name.trim().to_owned(),
+                        color: f.color,
+                        position: f.position,
+                        hoist: f.hoist,
+                        mentionable: f.mentionable,
+                        permissions: f.perms.into_iter().map(|k| (k, serde_json::Value::Bool(true))).collect(),
+                        role_type: String::new(),
+                    })
+                    .collect();
+                self.session.save_roles(&gid, roles).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::Unban(pubkey) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                self.session.unban(&gid, &pk).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::DeleteServer => {
+                let gid = self.server.take().ok_or("Pick a server first.")?;
+                self.session.delete_server(&gid).await.map_err(|e| e.to_string())?;
+                self.channel = None;
+                self.publish_servers();
+            }
             Command::DeleteMessage(id) => {
                 let (gid, ch) = self.selected()?;
                 let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
@@ -615,7 +704,13 @@ impl Backend {
     }
 
     fn publish_servers(&mut self) {
-        let gids = self.session.servers().unwrap_or_default();
+        let gids: Vec<String> = self
+            .session
+            .servers()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|g| !self.session.server(g).ok().flatten().is_some_and(|s| s.metadata.deleted))
+            .collect();
         let items: Vec<ServerItem> = gids
             .iter()
             .map(|gid| {
@@ -755,6 +850,37 @@ impl Backend {
                 nsfw: c.nsfw,
             })
             .collect();
+        let mut role_forms: Vec<RoleForm> = state
+            .roles
+            .iter()
+            .map(|r| RoleForm {
+                id: r.id.clone(),
+                name: r.name.clone(),
+                color: r.color.clone(),
+                position: r.position,
+                hoist: r.hoist,
+                mentionable: r.mentionable,
+                perms: r.permissions.iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect(),
+                everyone: r.is_everyone(),
+            })
+            .collect();
+        role_forms.sort_by_key(|r| std::cmp::Reverse(r.position));
+        let bans = state
+            .bans
+            .iter()
+            .map(|(pk, b)| BanItem { pubkey: pk.to_hex(), name: display(&state, pk).name, reason: b.reason.clone() })
+            .collect();
+        let m = &state.metadata;
+        Cx::post_action(Update::ServerSettings(ServerSettings {
+            name: m.name.clone(),
+            about: m.about.clone(),
+            discoverable: m.discoverable,
+            age_restricted: m.age_restricted,
+            welcome_enabled: m.welcome_enabled,
+            welcome_message: m.welcome_message.clone(),
+            roles: role_forms,
+            bans,
+        }));
         Cx::post_action(Update::Server {
             gid: gid.clone(),
             name: state.metadata.name.clone(),

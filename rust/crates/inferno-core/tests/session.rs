@@ -285,3 +285,25 @@ async fn roles_moderation_and_metadata_round_trip() {
     owner.unban(&gid, &a).await.unwrap();
     assert!(!owner.server(&gid).unwrap().unwrap().is_banned(&a));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn deleting_a_server_removes_it_for_members() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let mut alice_rx = alice.updates();
+    let gid = owner.create_server("doomed").await.unwrap();
+    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    assert_eq!(alice.servers().unwrap(), vec![gid.clone()]);
+
+    owner.delete_server(&gid).await.unwrap();
+    assert!(owner.servers().unwrap().is_empty());
+    for _ in 0..10 {
+        if alice.servers().unwrap().is_empty() {
+            return;
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(1), alice_rx.recv()).await;
+    }
+    panic!("alice still lists the deleted server");
+}

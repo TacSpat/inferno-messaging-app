@@ -541,6 +541,39 @@ impl Session {
         Ok(())
     }
 
+    /// Deletes the server for everyone (owner only): metadata marked
+    /// `deleted` (what Rails reads) plus a NIP-09 deletion of the server's
+    /// state addresses, so relays and every member's client drop it.
+    /// Flutter only deleted it locally.
+    pub async fn delete_server(&self, gid: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        if !state.is_owner(&self.keys.public_key()) {
+            return Err(SessionError::Other("only the owner can delete the server".into()));
+        }
+        let mut meta = state.metadata.clone();
+        meta.deleted = true;
+        self.publish(&publish::metadata(&self.keys, &state, &meta)?).await?;
+        let me = self.keys.public_key();
+        let coords = [
+            (kinds::SERVER_STRUCTURE, dtag::structure(gid)),
+            (kinds::SERVER_ROLES, dtag::roles(gid)),
+            (kinds::SERVER_EMOJI, dtag::emojis(gid)),
+            (kinds::SERVER_STICKERS, dtag::stickers(gid)),
+        ]
+        .into_iter()
+        .map(|(k, d)| Tag::coordinate(Coordinate::new(Kind::Custom(k), me).identifier(d), None));
+        let deletion = EventBuilder::new(Kind::EventDeletion, "server deleted")
+            .tags(coords)
+            .finalize(&self.keys)
+            .map_err(|e| SessionError::Other(e.to_string()))?;
+        self.publish(&deletion).await?;
+        self.store.set_server_membership(gid, false)?;
+        self.push_config();
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
     /// Replaces the role list (needs manage_roles). Keeps `@everyone`.
     pub async fn save_roles(&self, gid: &str, roles: Vec<wire::Role>) -> Result<()> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
@@ -881,6 +914,12 @@ impl Session {
                             self.share_keys_with(&gid, p).await?;
                         }
                     }
+                }
+                if kind == kinds::SERVER_METADATA && self.server(&gid)?.is_some_and(|s| s.metadata.deleted) {
+                    // The owner deleted it: drop it here too.
+                    self.store.set_server_membership(&gid, false)?;
+                    self.push_config();
+                    self.refresh.notify_one();
                 }
                 if kind == kinds::SERVER_STRUCTURE || kind == kinds::SERVER_ROLES || kind == kinds::SERVER_MEMBER {
                     // New channels or changed access: refresh routing and keys,
