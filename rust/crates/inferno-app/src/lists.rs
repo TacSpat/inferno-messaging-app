@@ -234,3 +234,51 @@ impl Widget for PinsList {
         self.view.handle_event(cx, event, scope);
     }
 }
+
+// ─── Relays (settings) ───────────────────────────────────────────────────
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct RelayList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<crate::backend::RelayItem>,
+}
+
+impl RelayList {
+    /// The relay whose Remove was clicked.
+    pub fn removed(&self, cx: &mut Cx, actions: &Actions) -> Option<String> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions)
+            .into_iter()
+            .find(|(_, item)| item.view(cx, ids!(remove)).finger_up(actions).is_some_and(|e| !e.cancelled))
+            .and_then(|(i, _)| self.rows.get(i).map(|r| r.url.clone()))
+    }
+}
+
+impl Widget for RelayList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some(r) = self.rows.get(i) else { continue };
+                let row = list.item(cx, i, id!(Relay));
+                row.label(cx, ids!(url)).set_text(cx, &r.url);
+                let mode = match (r.read, r.write) {
+                    (true, true) => "read + write",
+                    (true, false) => "read",
+                    (false, true) => "write",
+                    _ => "off",
+                };
+                row.label(cx, ids!(mode)).set_text(cx, mode);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}

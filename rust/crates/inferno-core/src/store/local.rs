@@ -50,11 +50,16 @@ impl Store {
     /// Adds any default relay that's missing. Never removes anything: relays
     /// the user added or learned via NIP-65 must survive restarts. Flutter's
     /// version deleted every non-default relay on each launch.
+    ///
+    /// Runs once per cache: a default the user removed stays removed.
     pub fn seed_default_relays(&self) -> Result<()> {
+        if self.get_setting::<bool>("relays.seeded")?.unwrap_or(false) {
+            return Ok(());
+        }
         for url in DEFAULT_RELAYS {
             self.add_relay(url, RelaySource::Default)?;
         }
-        Ok(())
+        self.set_setting("relays.seeded", &true)
     }
 
     /// Adds a relay; a relay that's already present keeps its settings.

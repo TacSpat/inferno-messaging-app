@@ -19,7 +19,7 @@ use crate::server::invite_link::{self, InviteLink};
 use crate::server::publish::{self, PublishError};
 use crate::server::{wire, Permission, ServerState};
 use crate::store::{now_secs, Store, StoreError};
-use crate::sync::{config::ConfigSync, relays};
+use crate::sync::{config::ConfigSync, profile::{self, ProfileUpdate}, relays};
 use crate::{dtag, kinds};
 
 const CHANNEL_KINDS: [u16; 4] = [kinds::CHANNEL_MESSAGE, kinds::CHANNEL_DELETE, kinds::PIN, kinds::REACTION];
@@ -128,6 +128,15 @@ impl Session {
         pool.connect().await;
         if let Err(e) = (ConfigSync { keys: &keys, pool: &pool, store: &store }).pull().await {
             tracing::warn!("config pull failed: {e}");
+        }
+        // Our own profile, so the UI shows what other devices last set.
+        match pool.fetch(vec![Filter::new().kind(Kind::Metadata).author(keys.public_key())]).await {
+            Ok(events) => {
+                for e in &events {
+                    store.put_event(e)?;
+                }
+            }
+            Err(e) => tracing::warn!("profile fetch failed: {e}"),
         }
 
         let (updates, _) = broadcast::channel(1024);
@@ -310,7 +319,8 @@ impl Session {
             return Err(SessionError::BadInvite);
         }
 
-        self.publish(&publish::join(&self.keys, &link.gid, "", "", now_secs())?).await?;
+        let me = profile::member_profile(&self.my_profile()?);
+        self.publish(&publish::join(&self.keys, &link.gid, "", &me, now_secs())?).await?;
         self.store.set_server_membership(&link.gid, true)?;
         self.push_config();
         self.backfill(&state).await?;
@@ -405,6 +415,71 @@ impl Session {
         self.publish(&event).await?;
         let _ = self.updates.send(Update::Channel { gid: gid.into(), channel_id: channel_id.into() });
         Ok(event)
+    }
+
+    /// Our current kind 0 profile (empty if we never set one).
+    pub fn my_profile(&self) -> Result<serde_json::Map<String, serde_json::Value>> {
+        Ok(self
+            .store
+            .get_addressable(Kind::Metadata, &self.keys.public_key(), "")?
+            .map(|e| profile::content(&e))
+            .unwrap_or_default())
+    }
+
+    /// Publishes a profile change: kind 0, then our member event in every
+    /// server we still belong to, since Rails reads profiles from those.
+    /// Servers we were kicked from are skipped: a newer self-signed member
+    /// event would undo the kick.
+    pub async fn update_profile(&self, update: &ProfileUpdate) -> Result<()> {
+        profile::update(&self.pool, &self.store, &self.keys, update)
+            .await
+            .map_err(|e| SessionError::Other(e.to_string()))?;
+        let me_profile = profile::member_profile(&self.my_profile()?);
+        let me = self.keys.public_key();
+        for gid in self.servers()? {
+            let Some(state) = self.server(&gid)? else { continue };
+            let Some(member) = state.members.get(&me).cloned() else {
+                // The owner of a server made here has no member event yet.
+                if state.is_owner(&me) {
+                    self.publish(&publish::join(&self.keys, &gid, "", &me_profile, now_secs())?).await?;
+                }
+                continue;
+            };
+            let nickname = member.nickname.clone().unwrap_or_default();
+            let joined = member.joined_at.unwrap_or_else(now_secs);
+            self.publish(&publish::join(&self.keys, &gid, &nickname, &me_profile, joined)?).await?;
+            let _ = self.updates.send(Update::Server(gid));
+        }
+        Ok(())
+    }
+
+    pub fn relays(&self) -> Result<Vec<crate::store::RelayRow>> {
+        Ok(self.store.relays()?)
+    }
+
+    /// Adds a relay here, connects to it, and shares the list (NIP-65).
+    pub async fn add_relay(&self, url: &str) -> Result<()> {
+        self.store.add_relay(url, crate::store::RelaySource::User)?;
+        let url = crate::relay::normalize_url(url).ok_or(SessionError::Other("not a relay URL".into()))?;
+        self.pool.add_relays([url]).await?;
+        self.pool.connect().await;
+        self.push_relays().await;
+        Ok(())
+    }
+
+    pub async fn remove_relay(&self, url: &str) -> Result<()> {
+        self.store.remove_relay(url)?;
+        if let Some(url) = crate::relay::normalize_url(url) {
+            let _ = self.pool.client().remove_relay(url.as_str()).await;
+        }
+        self.push_relays().await;
+        Ok(())
+    }
+
+    async fn push_relays(&self) {
+        if let Err(e) = relays::push(&self.pool, &self.store, &self.keys).await {
+            tracing::warn!("relay list push failed: {e}");
+        }
     }
 
     /// Edits one of our messages. Only the author's edits count, so this

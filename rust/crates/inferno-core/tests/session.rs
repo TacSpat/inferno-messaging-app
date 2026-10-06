@@ -159,3 +159,44 @@ async fn reply_edit_and_pin_reach_the_other_client() {
     assert!(edited.edited_at.is_some() && edited.pinned);
     assert_eq!(tl.iter().find(|m| m.content.as_deref() == Some("a reply")).unwrap().reply_to, Some(first.id));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_profile_update_shows_up_for_other_members() {
+    use inferno_core::sync::profile::ProfileUpdate;
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let alice_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let mut owner_rx = owner.updates();
+
+    let gid = owner.create_server("x").await.unwrap();
+    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    wait_for(&mut owner_rx, "alice's join", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+
+    alice
+        .update_profile(&ProfileUpdate {
+            name: Some(Some("alice".into())),
+            display_name: Some(Some("Alice A.".into())),
+            status: Some(Some("building".into())),
+            profile_color: Some(Some("#1e3a8a".into())),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(alice.my_profile().unwrap()["display_name"], "Alice A.");
+
+    // The owner sees it through Alice's member event, without a kind 0 fetch.
+    for _ in 0..10 {
+        let state = owner.server(&gid).unwrap().unwrap();
+        if state.members.get(&alice_keys.public_key()).is_some_and(|m| m.profile.display_name == "Alice A.") {
+            let m = &state.members[&alice_keys.public_key()];
+            assert_eq!(m.profile.status, "building");
+            assert_eq!(m.profile.color.as_deref(), Some("#1e3a8a"));
+            return;
+        }
+        let _ = tokio::time::timeout(Duration::from_secs(1), owner_rx.recv()).await;
+    }
+    panic!("owner never saw Alice's profile");
+}

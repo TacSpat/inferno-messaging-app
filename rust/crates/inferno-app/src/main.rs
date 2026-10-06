@@ -373,12 +373,64 @@ script_mod! {
         close := ToolBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
     }
 
+    // ─── Settings overlay ────────────────────────────────────────────
+    let NavHeader = Txt{
+        margin: Inset{left: 8 top: 16 bottom: 6}
+        draw_text.color: gray_400
+        draw_text.text_style: theme.font_bold{font_size: 8.5}
+    }
+    let NavItem = RoundedView{
+        width: Fill height: Fit
+        padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
+        cursor: MouseCursor.Hand
+        new_batch: true
+        draw_bg.color: #0000
+        draw_bg.border_radius: 4.0
+        label := Txt{text: "" draw_text.color: gray_400}
+    }
+    let FieldLabel = Txt{
+        margin: Inset{top: 16 bottom: 6}
+        draw_text.color: gray_500
+        draw_text.text_style: theme.font_bold{font_size: 8.0}
+    }
+    let Field = TextInput{width: Fill height: 36}
+    let PageTitle = Txt{
+        margin: Inset{bottom: 8}
+        draw_text.color: #xffffff
+        draw_text.text_style: theme.font_bold{font_size: 15.0}
+    }
+    let Hint = Txt{width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+
+    mod.widgets.RelayListBase = #(lists::RelayList::register_widget(vm))
+    mod.widgets.RelayList = set_type_default() do mod.widgets.RelayListBase{
+        width: Fill height: 300
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Relay := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{bottom: 6}
+                padding: Inset{left: 12 right: 8 top: 8 bottom: 8}
+                flow: Right spacing: 12
+                align: Align{y: 0.5}
+                new_batch: true
+                draw_bg.color: gray_800
+                draw_bg.border_radius: 6.0
+                url := Txt{width: Fill text: "" draw_text.color: gray_200}
+                mode := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                remove := View{width: Fit height: Fit padding: 6 cursor: MouseCursor.Hand
+                    Txt{text: "Remove" draw_text.color: #xf87171 draw_text.text_style.font_size: 9.0}}
+            }
+        }
+    }
+
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
                 window.title: "Inferno"
                 pass.clear_color: gray_700
                 body +: {
+                    View{width: Fill height: Fill flow: Overlay
                     SolidView{
                         width: Fill height: Fill
                         flow: Right
@@ -456,8 +508,9 @@ script_mod! {
                                     status := Txt{text: "Connecting…" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
                                 }
                                 Txt{text: "v0.1.0" draw_text.color: gray_600 draw_text.text_style.font_size: 7.5}
-                                Ico{icon_walk: Walk{width: 16 height: 16}
-                                    draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}
+                                open_settings := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                                    Ico{icon_walk: Walk{width: 16 height: 16}
+                                        draw_icon.svg: crate_resource("self:resources/icons/gear.svg")}}
                             }
                         }
 
@@ -569,6 +622,101 @@ script_mod! {
                         }
                     }
 
+                    // Full-screen settings (spec: 224px gray-800 nav, content
+                    // max 768 with 32×40 padding, 36px close circle, Esc).
+                    settings := SolidView{
+                        visible: false
+                        width: Fill height: Fill
+                        flow: Right
+                        draw_bg.color: gray_900
+                        SolidView{
+                            width: 224 height: Fill
+                            flow: Down spacing: 2
+                            padding: Inset{left: 16 right: 16 top: 24}
+                            draw_bg.color: gray_800
+                            NavHeader{text: "USER SETTINGS"}
+                            nav_account := NavItem{label.text: "My Account"}
+                            nav_profile := NavItem{label.text: "Profile"}
+                            NavHeader{text: "APP SETTINGS"}
+                            nav_relays := NavItem{label.text: "Relays"}
+                        }
+                        ScrollYView{
+                            width: Fill height: Fill
+                            flow: Down
+                            padding: Inset{left: 40 right: 40 top: 32 bottom: 32}
+
+                            page_account := View{
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "My Account"}
+                                FieldLabel{text: "PUBLIC KEY (NPUB)"}
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                    account_npub := Txt{width: Fill text: "" draw_text.color: gray_200}
+                                    copy_npub := Button{text: "Copy"}
+                                }
+                                FieldLabel{text: "KEY BACKUP"}
+                                backup_status := Hint{text: ""}
+                                backup_form := View{width: Fill height: Fit flow: Down spacing: 8 margin: Inset{top: 8}
+                                    Hint{text: "Choose a password to encrypt a backup of your key (NIP-49). You'll need it to sign in on another device or switch back to this account."}
+                                    backup_pw := Field{is_password: true empty_text: "Backup password (8+ characters)"}
+                                    backup_pw2 := Field{is_password: true empty_text: "Confirm password"}
+                                    make_backup := Button{text: "Create backup"}
+                                }
+                            }
+
+                            page_profile := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Profile"}
+                                FieldLabel{text: "DISPLAY NAME"}
+                                p_display := Field{empty_text: "How you appear to others"}
+                                FieldLabel{text: "USERNAME"}
+                                p_username := Field{empty_text: "username"}
+                                FieldLabel{text: "ABOUT ME"}
+                                p_about := Field{empty_text: "Tell others about yourself"}
+                                FieldLabel{text: "CUSTOM STATUS"}
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    p_status_emoji := TextInput{width: 60 height: 36 empty_text: "🙂"}
+                                    p_status := Field{empty_text: "What are you up to?"}
+                                }
+                                FieldLabel{text: "PROFILE THEME"}
+                                View{width: Fill height: Fit flow: Right spacing: 8
+                                    p_color := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
+                                    p_color_2 := TextInput{width: 140 height: 36 empty_text: "#1e1c1b"}
+                                }
+                                View{width: Fill height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
+                                    save_profile := Button{text: "Save Changes"}
+                                    profile_note := Hint{text: ""}
+                                }
+                            }
+
+                            page_relays := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Relays"}
+                                Hint{text: "Where your messages are published and read. The list is shared with your other devices (NIP-65)."}
+                                View{width: Fill height: Fit margin: Inset{top: 16 bottom: 12} flow: Right spacing: 8
+                                    new_relay := Field{empty_text: "wss://relay.example.com"}
+                                    add_relay := Button{text: "Add"}
+                                }
+                                relay_list := mod.widgets.RelayList{}
+                            }
+                        }
+                        View{width: Fit height: Fit padding: 24 flow: Down align: Align{x: 0.5} spacing: 4
+                            close_settings := RoundedView{
+                                width: 36 height: 36
+                                align: Center
+                                cursor: MouseCursor.Hand
+                                draw_bg.color: #0000
+                                draw_bg.border_radius: 18.0
+                                draw_bg.border_size: 2.0
+                                draw_bg.border_color: gray_600
+                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}
+                            }
+                            Txt{text: "ESC" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+                        }
+                    }
+                    }
+
                     // Create or join (opened by the rail's +).
                     dialog := Modal{
                         content +: {
@@ -623,6 +771,12 @@ pub struct App {
     #[rust]
     editing: Option<String>,
 }
+
+const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 3] = [
+    (ids!(nav_account), ids!(page_account)),
+    (ids!(nav_profile), ids!(page_profile)),
+    (ids!(nav_relays), ids!(page_relays)),
+];
 
 impl App {
     fn send(&self, cmd: backend::Command) {
@@ -681,6 +835,31 @@ impl App {
         self.ui.redraw(cx);
     }
 
+    fn show_settings_page(&mut self, cx: &mut Cx, page: usize) {
+        for (i, (nav, view)) in SETTINGS_PAGES.iter().enumerate() {
+            let active = i == page;
+            self.ui.view(cx, view).set_visible(cx, active);
+            let mut item = self.ui.widget(cx, nav);
+            let (bg, fg) = if active {
+                (lists::rgba(0x403e3c, 1.0), lists::rgba(0xffffff, 1.0))
+            } else {
+                (lists::rgba(0x000000, 0.0), lists::rgba(0x878583, 1.0))
+            };
+            script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
+            let mut label = self.ui.widget(cx, &[nav[0], id!(label)]);
+            script_apply_eval!(cx, label, {draw_text +: {color: #(fg)}});
+        }
+        self.ui.redraw(cx);
+    }
+
+    fn set_settings_open(&mut self, cx: &mut Cx, open: bool) {
+        self.ui.view(cx, ids!(settings)).set_visible(cx, open);
+        if open {
+            self.show_settings_page(cx, 0);
+        }
+        self.ui.redraw(cx);
+    }
+
     fn notice(&self, cx: &mut Cx, text: &str) {
         self.ui.label(cx, ids!(notice)).set_text(cx, text);
     }
@@ -690,6 +869,12 @@ impl App {
         match update {
             Update::Ready { name, npub, backed_up } => {
                 self.npub = npub.clone();
+                self.ui.label(cx, ids!(account_npub)).set_text(cx, npub);
+                self.ui.label(cx, ids!(backup_status)).set_text(
+                    cx,
+                    if *backed_up { "✓ Your key is backed up." } else { "⚠ Your key isn't backed up yet. If this device is lost, so is your account." },
+                );
+                self.ui.view(cx, ids!(backup_form)).set_visible(cx, !*backed_up);
                 self.ui.label(cx, ids!(profile_btn.name)).set_text(cx, name);
                 self.ui.label(cx, ids!(me_initial)).set_text(cx, &name.chars().nth(5).unwrap_or('?').to_uppercase().to_string());
                 let status = if *backed_up { "Online" } else { "Online · key not backed up" };
@@ -755,7 +940,38 @@ impl App {
                 cx.copy_to_clipboard(link);
                 self.notice(cx, &format!("Invite link copied: {link}"));
             }
-            Update::Error(e) => self.notice(cx, &format!("⚠ {e}")),
+            Update::Profile(p) => {
+                for (path, value) in [
+                    (ids!(p_display), &p.display_name),
+                    (ids!(p_username), &p.username),
+                    (ids!(p_about), &p.about),
+                    (ids!(p_status), &p.status),
+                    (ids!(p_status_emoji), &p.status_emoji),
+                    (ids!(p_color), &p.color),
+                    (ids!(p_color_2), &p.color_2),
+                ] {
+                    self.ui.text_input(cx, path).set_text(cx, value);
+                }
+            }
+            Update::Relays(relays) => {
+                if let Some(mut list) = self.ui.widget(cx, ids!(relay_list)).borrow_mut::<lists::RelayList>() {
+                    list.rows = relays.clone();
+                }
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(relay_list.list)));
+            }
+            Update::BackedUp(backup) => {
+                cx.copy_to_clipboard(backup);
+                self.ui.label(cx, ids!(backup_status)).set_text(
+                    cx,
+                    "✓ Backed up. The encrypted backup (ncryptsec) was copied to your clipboard — store it somewhere safe.",
+                );
+                self.ui.view(cx, ids!(backup_form)).set_visible(cx, false);
+                self.ui.redraw(cx);
+            }
+            Update::Error(e) => {
+                self.notice(cx, &format!("⚠ {e}"));
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ {e}"));
+            }
             Update::Empty => {
                 self.ui.label(cx, ids!(server_name)).set_text(cx, "No servers yet");
                 self.ui.label(cx, ids!(channel_name)).set_text(cx, "Welcome");
@@ -828,6 +1044,65 @@ impl MatchEvent for App {
             self.ui.redraw(cx);
         }
 
+        // Settings overlay
+        if tapped(&self.ui, cx, ids!(open_settings)) {
+            self.set_settings_open(cx, true);
+        }
+        if tapped(&self.ui, cx, ids!(close_settings)) {
+            self.set_settings_open(cx, false);
+        }
+        for (i, (nav, _)) in SETTINGS_PAGES.iter().enumerate() {
+            if tapped(&self.ui, cx, nav) {
+                self.show_settings_page(cx, i);
+            }
+        }
+        if self.ui.button(cx, ids!(copy_npub)).clicked(actions) {
+            cx.copy_to_clipboard(&self.npub);
+        }
+        if self.ui.button(cx, ids!(make_backup)).clicked(actions) {
+            let pw = self.ui.text_input(cx, ids!(backup_pw)).text();
+            let pw2 = self.ui.text_input(cx, ids!(backup_pw2)).text();
+            if pw != pw2 {
+                self.ui.label(cx, ids!(backup_status)).set_text(cx, "⚠ The passwords don't match.");
+            } else {
+                self.send(backend::Command::Backup(pw));
+                self.ui.text_input(cx, ids!(backup_pw)).set_text(cx, "");
+                self.ui.text_input(cx, ids!(backup_pw2)).set_text(cx, "");
+            }
+        }
+        if self.ui.button(cx, ids!(save_profile)).clicked(actions) {
+            let get = |ui: &WidgetRef, cx: &mut Cx, p: &[LiveId]| ui.text_input(cx, p).text();
+            let form = backend::ProfileForm {
+                display_name: get(&self.ui, cx, ids!(p_display)),
+                username: get(&self.ui, cx, ids!(p_username)),
+                about: get(&self.ui, cx, ids!(p_about)),
+                status: get(&self.ui, cx, ids!(p_status)),
+                status_emoji: get(&self.ui, cx, ids!(p_status_emoji)),
+                color: get(&self.ui, cx, ids!(p_color)),
+                color_2: get(&self.ui, cx, ids!(p_color_2)),
+            };
+            let bad = [&form.color, &form.color_2].into_iter().find(|c| {
+                !c.is_empty() && !(c.len() == 7 && c.starts_with('#') && u32::from_str_radix(&c[1..], 16).is_ok())
+            });
+            if let Some(c) = bad {
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ \"{c}\" isn't a #rrggbb color."));
+            } else {
+                self.send(backend::Command::SaveProfile(form));
+                self.ui.label(cx, ids!(profile_note)).set_text(cx, "Saved ✓");
+            }
+        }
+        if self.ui.button(cx, ids!(add_relay)).clicked(actions) {
+            let url = self.ui.text_input(cx, ids!(new_relay)).text();
+            if !url.trim().is_empty() {
+                self.send(backend::Command::AddRelay(url));
+                self.ui.text_input(cx, ids!(new_relay)).set_text(cx, "");
+            }
+        }
+        let removed = self.ui.widget(cx, ids!(relay_list)).borrow::<lists::RelayList>().and_then(|l| l.removed(cx, actions));
+        if let Some(url) = removed {
+            self.send(backend::Command::RemoveRelay(url));
+        }
+
         if self.ui.view(cx, ids!(add_server)).finger_up(actions).is_some_and(|e| !e.cancelled) {
             self.ui.modal(cx, ids!(dialog)).open(cx);
         }
@@ -894,6 +1169,12 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        // Esc closes the settings overlay (spec).
+        if let Event::KeyDown(k) = event {
+            if k.key_code == KeyCode::Escape && self.ui.view(cx, ids!(settings)).visible() {
+                self.set_settings_open(cx, false);
+            }
+        }
         if let Event::WindowGeomChange(e) = event {
             let g = &e.new_geom;
             let offset = *self.frame_offset.get_or_insert_with(|| {

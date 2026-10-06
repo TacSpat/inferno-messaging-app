@@ -142,13 +142,33 @@ fn member_base(gid: &str, target: &PublicKey) -> Vec<Tag> {
     vec![Tag::identifier(dtag::member(gid, &pk)), t(&["server", gid]), t(&["p", &pk])]
 }
 
-/// Our own join (or profile refresh): no `roles` tag, since receivers ignore
-/// roles from self-signed events anyway.
-pub fn join(keys: &Keys, gid: &str, nickname: &str, profile_name: &str, now: i64) -> Result<Event, PublishError> {
+/// Our own join or profile refresh. Rails embeds the profile in member
+/// events (so members needn't fetch each other's kind 0), with these tags.
+/// No `roles` tag: receivers ignore roles from self-signed events anyway.
+pub fn join(
+    keys: &Keys,
+    gid: &str,
+    nickname: &str,
+    profile: &super::wire::MemberProfile,
+    joined_at: i64,
+) -> Result<Event, PublishError> {
     let mut tags = member_base(gid, &keys.public_key());
     tags.push(t(&["nickname", nickname]));
-    tags.push(t(&["joined_at", &now.to_string()]));
-    tags.push(t(&["profile_name", profile_name]));
+    tags.push(t(&["joined_at", &joined_at.to_string()]));
+    let opt = |v: &Option<String>| v.clone().unwrap_or_default();
+    for (k, v) in [
+        ("profile_name", profile.name.clone()),
+        ("profile_display_name", profile.display_name.clone()),
+        ("profile_about", profile.about.clone()),
+        ("profile_color", opt(&profile.color)),
+        ("profile_color_2", opt(&profile.color_2)),
+        ("profile_status", profile.status.clone()),
+        ("profile_status_emoji", profile.status_emoji.clone()),
+        ("profile_picture", opt(&profile.picture)),
+        ("profile_banner", opt(&profile.banner)),
+    ] {
+        tags.push(t(&[k, &v]));
+    }
     sign(keys, kinds::SERVER_MEMBER, tags)
 }
 
@@ -309,7 +329,8 @@ mod tests {
         let owner = Keys::generate();
         let alice = Keys::generate();
         let (gid, mut events) = create_server(&owner, "x").unwrap();
-        events.push(join(&alice, &gid, "", "alice", 0).unwrap());
+        let profile = crate::server::wire::MemberProfile { name: "alice".into(), ..Default::default() };
+        events.push(join(&alice, &gid, "", &profile, 0).unwrap());
         let state = ServerState::resolve(&gid, owner.public_key(), &events);
         assert!(state.is_member(&alice.public_key()));
         assert_eq!(ban(&alice, &state, &owner.public_key(), "").unwrap_err(), PublishError::NotAllowed);

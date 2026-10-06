@@ -37,6 +37,10 @@ pub struct ProfileUpdate {
     pub nip05: Option<Option<String>>,
     pub status: Option<Option<String>>,
     pub status_emoji: Option<Option<String>>,
+    /// Rails' two profile colors (`#rrggbb`); not standard kind 0 fields,
+    /// so other clients ignore them, but Inferno members see them.
+    pub profile_color: Option<Option<String>>,
+    pub profile_color_2: Option<Option<String>>,
 }
 
 impl ProfileUpdate {
@@ -50,6 +54,8 @@ impl ProfileUpdate {
             ("nip05", &self.nip05),
             ("status", &self.status),
             ("status_emoji", &self.status_emoji),
+            ("profile_color", &self.profile_color),
+            ("profile_color_2", &self.profile_color_2),
         ];
         for (key, change) in fields {
             match change {
@@ -173,5 +179,22 @@ mod tests {
         assert_eq!(body["nip05"], "tac@x.example");
         assert_eq!(body["about"], "new bio");
         assert!(published.created_at.as_secs() > 200);
+    }
+}
+
+/// A kind 0 body as the member-event profile Rails embeds in 31753.
+pub fn member_profile(profile: &Map<String, Value>) -> crate::server::wire::MemberProfile {
+    let s = |k: &str| profile.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let o = |k: &str| Some(s(k)).filter(|v| !v.is_empty());
+    crate::server::wire::MemberProfile {
+        name: s("name"),
+        display_name: s("display_name"),
+        about: s("about"),
+        picture: o("picture"),
+        banner: o("banner"),
+        color: o("profile_color"),
+        color_2: o("profile_color_2"),
+        status: s("status"),
+        status_emoji: s("status_emoji"),
     }
 }

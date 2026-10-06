@@ -144,6 +144,15 @@ fn deleted_server_stays_deleted_until_republished() {
 }
 
 #[test]
+fn a_removed_default_relay_stays_removed() {
+    let store = Store::open_in_memory().unwrap();
+    store.seed_default_relays().unwrap();
+    store.remove_relay("wss://relay.damus.io").unwrap();
+    store.seed_default_relays().unwrap();
+    assert!(!store.relays().unwrap().iter().any(|r| r.url == "wss://relay.damus.io"));
+}
+
+#[test]
 fn relay_seeding_only_adds() {
     let store = Store::open_in_memory().unwrap();
     store.seed_default_relays().unwrap();

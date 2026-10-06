@@ -62,8 +62,30 @@ pub struct MessageRow {
     pub system: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ProfileForm {
+    pub username: String,
+    pub display_name: String,
+    pub about: String,
+    pub status: String,
+    pub status_emoji: String,
+    pub color: String,
+    pub color_2: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelayItem {
+    pub url: String,
+    pub read: bool,
+    pub write: bool,
+}
+
 #[derive(Debug, Clone)]
 pub enum Update {
+    Profile(ProfileForm),
+    Relays(Vec<RelayItem>),
+    /// The ncryptsec of a new backup (also copied to the clipboard).
+    BackedUp(String),
     Ready { name: String, npub: String, backed_up: bool },
     Servers(Vec<ServerItem>),
     Server { gid: String, name: String, sidebar: Vec<SidebarRow>, members: Vec<MemberRow> },
@@ -85,6 +107,10 @@ pub enum Command {
     CreateServer(String),
     Join(String),
     CreateInvite,
+    SaveProfile(ProfileForm),
+    Backup(String),
+    AddRelay(String),
+    RemoveRelay(String),
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────
@@ -104,18 +130,21 @@ fn profile() -> String {
     std::env::var("INFERNO_PROFILE").unwrap_or_else(|_| "default".into())
 }
 
-fn load_identity() -> Result<(Identity, bool), String> {
+fn open_vault() -> Result<Vault<OsKeyring>, String> {
     let service = match profile().as_str() {
         "default" => "inferno".to_owned(),
         p => format!("inferno-{p}"),
     };
-    let vault = Vault::new(OsKeyring::with_service(&service).map_err(|e| e.to_string())?);
+    Ok(Vault::new(OsKeyring::with_service(&service).map_err(|e| e.to_string())?))
+}
+
+fn load_identity(vault: &Vault<OsKeyring>) -> Result<(Identity, bool), String> {
     if let Some(id) = vault.active().map_err(|e| e.to_string())? {
         let backed_up = vault.has_backup(&id.pubkey_hex()).map_err(|e| e.to_string())?;
         return Ok((id, backed_up));
     }
     // First run: no onboarding screen yet, so create a key now and keep it;
-    // the backup step comes with onboarding.
+    // the backup step (Settings › My Account) finishes the sign-up.
     let id = Identity::generate();
     vault.sign_up_pending_backup(&id, "").map_err(|e| e.to_string())?;
     Ok((id, false))
@@ -138,7 +167,8 @@ pub fn spawn() -> mpsc::UnboundedSender<Command> {
 }
 
 async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), String> {
-    let (identity, backed_up) = load_identity()?;
+    let vault = open_vault()?;
+    let (identity, backed_up) = load_identity(&vault)?;
     let keys = identity.keys().clone();
     let dir = data_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -154,10 +184,9 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     let options = StartOptions { seed_default_relays: custom_relays.is_empty() };
     let session = Session::start_with(keys, store, options).await.map_err(|e| e.to_string())?;
 
-    let short = identity.npub()[..12].to_owned();
-    Cx::post_action(Update::Ready { name: short, npub: identity.npub(), backed_up });
-
-    let mut ui = Backend { session: session.clone(), server: None, channel: None };
+    let mut ui = Backend { session: session.clone(), server: None, channel: None, vault, npub: identity.npub(), backed_up };
+    ui.publish_me();
+    ui.publish_relays();
     ui.publish_servers();
 
     let mut updates = session.updates();
@@ -186,6 +215,9 @@ struct Backend {
     session: Arc<Session>,
     server: Option<String>,
     channel: Option<String>,
+    vault: Vault<OsKeyring>,
+    npub: String,
+    backed_up: bool,
 }
 
 fn initials(name: &str) -> String {
@@ -294,6 +326,43 @@ impl Backend {
                 self.publish_servers();
                 self.publish_server();
             }
+            Command::SaveProfile(form) => {
+                use inferno_core::sync::profile::ProfileUpdate;
+                // Empty fields clear; every field is sent, it's a whole form.
+                let set = |v: &str| Some(Some(v.trim().to_owned()));
+                self.session
+                    .update_profile(&ProfileUpdate {
+                        name: set(&form.username),
+                        display_name: set(&form.display_name),
+                        about: set(&form.about),
+                        status: set(&form.status),
+                        status_emoji: set(&form.status_emoji),
+                        profile_color: set(&form.color),
+                        profile_color_2: set(&form.color_2),
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_me();
+                self.publish_server_keep_channel();
+            }
+            Command::Backup(password) => {
+                if password.chars().count() < 8 {
+                    return Err("Use at least 8 characters for the backup password.".into());
+                }
+                let backup = self.vault.add_backup(&password).map_err(|e| e.to_string())?;
+                self.backed_up = true;
+                self.publish_me();
+                Cx::post_action(Update::BackedUp(backup));
+            }
+            Command::AddRelay(url) => {
+                self.session.add_relay(url.trim()).await.map_err(|e| e.to_string())?;
+                self.publish_relays();
+            }
+            Command::RemoveRelay(url) => {
+                self.session.remove_relay(&url).await.map_err(|e| e.to_string())?;
+                self.publish_relays();
+            }
             Command::CreateInvite => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 let link = self.session.create_invite(&gid).await.map_err(|e| e.to_string())?;
@@ -301,6 +370,37 @@ impl Backend {
             }
         }
         Ok(())
+    }
+
+    fn publish_me(&mut self) {
+        let p = self.session.my_profile().unwrap_or_default();
+        let s = |k: &str| p.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+        let form = ProfileForm {
+            username: s("name"),
+            display_name: s("display_name"),
+            about: s("about"),
+            status: s("status"),
+            status_emoji: s("status_emoji"),
+            color: s("profile_color"),
+            color_2: s("profile_color_2"),
+        };
+        let name = [form.display_name.clone(), form.username.clone()]
+            .into_iter()
+            .find(|n| !n.is_empty())
+            .unwrap_or_else(|| self.npub[..12].to_owned());
+        Cx::post_action(Update::Ready { name, npub: self.npub.clone(), backed_up: self.backed_up });
+        Cx::post_action(Update::Profile(form));
+    }
+
+    fn publish_relays(&mut self) {
+        let relays = self
+            .session
+            .relays()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|r| RelayItem { url: r.url, read: r.read, write: r.write })
+            .collect();
+        Cx::post_action(Update::Relays(relays));
     }
 
     fn session_update(&mut self, update: SessionUpdate) {
