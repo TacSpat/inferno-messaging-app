@@ -103,3 +103,6 @@ graphify-out/
 
 # Editor settings
 /doc/.obsidian/
+
+# Rust rebuild build output
+/rust/target/

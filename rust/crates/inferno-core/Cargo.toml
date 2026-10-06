@@ -1,0 +1,7 @@
+[package]
+name = "inferno-core"
+version.workspace = true
+edition.workspace = true
+description = "Inferno client core: Nostr protocol, local cache, keys and sync. No UI."
+
+[dependencies]

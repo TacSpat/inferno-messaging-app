@@ -1,0 +1,13 @@
+[workspace]
+resolver = "2"
+members = ["crates/inferno-core", "crates/inferno-app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+inferno-core = { path = "crates/inferno-core" }
+# Makepad 2.0 is unreleased and moves fast: pinned to one dev commit, updated on purpose.
+# dev @ 44a01c5 (2026-10-05)
+makepad-widgets = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599", default-features = false }

@@ -1,0 +1,13 @@
+[package]
+name = "inferno-app"
+version.workspace = true
+edition.workspace = true
+description = "Inferno desktop and mobile client (Makepad)."
+
+[[bin]]
+name = "inferno"
+path = "src/main.rs"
+
+[dependencies]
+inferno-core.workspace = true
+makepad-widgets.workspace = true
