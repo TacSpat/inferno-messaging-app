@@ -65,3 +65,41 @@ flutter_01.png
 
 # graphify knowledge graph output (regenerable)
 graphify-out/
+
+# Rails secrets — never commit
+/config/master.key
+/.env
+/.env~
+
+# Rails runtime data (keep the tracked .keep files)
+/storage/*
+!/storage/.keep
+/tmp/*
+!/tmp/.keep
+!/tmp/pids/
+/tmp/pids/*
+!/tmp/pids/.keep
+!/tmp/storage/
+/tmp/storage/*
+!/tmp/storage/.keep
+/log/*
+!/log/.keep
+/public/cached_assets/
+
+# Rails/JS build output and dependencies
+/app/assets/builds/*
+!/app/assets/builds/.keep
+/.bundle/
+/node_modules/
+/dist/
+/binaries/
+
+# Rails ML models (too large for git)
+/lib/models/*.onnx
+/lib/models/*.onnx.data
+
+# Stale duplicate Flutter tree — live code is root lib/
+/flutter/
+
+# Editor settings
+/doc/.obsidian/
