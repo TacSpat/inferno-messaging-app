@@ -106,3 +106,15 @@ fn os_keyring_round_trip() {
     store.delete("probe").unwrap();
     assert_eq!(store.get("probe").unwrap(), None);
 }
+
+#[test]
+fn pending_backup_signs_in_now_and_backs_up_later() {
+    let v = vault();
+    let me = Identity::generate();
+    v.sign_up_pending_backup(&me, "Me").unwrap();
+    assert_eq!(v.active().unwrap().unwrap().pubkey_hex(), me.pubkey_hex());
+    assert!(!v.has_backup(&me.pubkey_hex()).unwrap());
+    v.add_backup("pw").unwrap();
+    assert!(v.has_backup(&me.pubkey_hex()).unwrap());
+    assert!(v.verify_backup_password("pw").unwrap());
+}

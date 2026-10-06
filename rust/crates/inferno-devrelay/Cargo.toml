@@ -1,0 +1,10 @@
+[package]
+name = "inferno-devrelay"
+version.workspace = true
+edition.workspace = true
+description = "A throwaway in-memory Nostr relay for local development and UI tests."
+publish = false
+
+[dependencies]
+nostr-sdk = { version = "0.45", features = ["local-relay"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }

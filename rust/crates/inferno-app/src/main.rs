@@ -5,7 +5,9 @@
 
 pub use makepad_widgets;
 
+mod backend;
 mod demo;
+mod lists;
 mod message_list;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
@@ -222,6 +224,73 @@ script_mod! {
         }
     }
 
+    // ─── Live lists (lists.rs) ───────────────────────────────────────
+    mod.widgets.RailListBase = #(lists::RailList::register_widget(vm))
+    mod.widgets.RailList = set_type_default() do mod.widgets.RailListBase{
+        width: 72 height: Fill
+        list := PortalList{
+            width: 72 height: Fill
+            flow: Down
+            Idle := RailSlot{
+                margin: Inset{bottom: 8}
+                cursor: MouseCursor.Hand
+                icon := RailIcon{}
+            }
+            Active := RailSlot{
+                margin: Inset{bottom: 8}
+                cursor: MouseCursor.Hand
+                View{width: 72 height: 48 align: Align{x: 0.0 y: 0.5}
+                    // Active pill: 3×40 accent-light at the left edge.
+                    RoundedView{width: 3 height: 40 draw_bg.color: accent_light draw_bg.border_radius: 1.5}
+                }
+                icon := RailIcon{
+                    draw_bg.color: accent
+                    draw_bg.color_2: accent_dark
+                    draw_bg.border_radius: 12.0
+                }
+            }
+        }
+    }
+
+    mod.widgets.ChannelListBase = #(lists::ChannelList::register_widget(vm))
+    mod.widgets.ChannelList = set_type_default() do mod.widgets.ChannelListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Category := CategoryHeader{margin: Inset{left: 8 right: 8}}
+            Channel := View{
+                width: Fill height: Fit
+                margin: Inset{left: 8 right: 8 top: 1 bottom: 1}
+                cursor: MouseCursor.Hand
+                item := ChannelItem{}
+            }
+            // Active: gray-600 fill with a 2px accent left border.
+            ActiveChannel := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{left: 8 right: 8 top: 1 bottom: 1}
+                flow: Overlay
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: gray_600
+                draw_bg.border_radius: 4.0
+                item := ChannelItem{hash.draw_text.color: #xe1e0df99 name.draw_text.color: #xffffff}
+                RoundedView{width: 2 height: 33 draw_bg.color: accent draw_bg.border_radius: 1.0}
+            }
+        }
+    }
+
+    mod.widgets.MemberListBase = #(lists::MemberList::register_widget(vm))
+    mod.widgets.MemberList = set_type_default() do mod.widgets.MemberListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Header := RoleHeader{text: ""}
+            Member := MemberItem{}
+        }
+    }
+
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
@@ -249,23 +318,10 @@ script_mod! {
                                 }
                             }
                             SolidView{width: 32 height: 2 draw_bg.color: gray_800}
+                            rail := mod.widgets.RailList{}
                             RailSlot{
-                                View{width: 72 height: 48 align: Align{x: 0.0 y: 0.5}
-                                    // Active pill: 3×40 accent-light at the left edge.
-                                    RoundedView{width: 3 height: 40 draw_bg.color: accent_light draw_bg.border_radius: 1.5}
-                                }
-                                RailIcon{
-                                    draw_bg.color: accent
-                                    draw_bg.color_2: accent_dark
-                                    draw_bg.border_radius: 12.0
-                                    initials.text: "TI"
-                                }
-                            }
-                            RailSlot{RailIcon{initials.text: "NS"}}
-                            RailSlot{RailIcon{initials.text: "RD"}}
-                            RailSlot{RailIcon{initials.text: "GA"}}
-                            RailSlot{
-                                RoundedView{width: 48 height: 48 align: Center
+                                add_server := RoundedView{width: 48 height: 48 align: Center
+                                    cursor: MouseCursor.Hand
                                     draw_bg.color: gray_700
                                     draw_bg.border_radius: 16.0
                                     Ico{icon_walk: Walk{width: 24 height: 24} draw_icon.color: #x22c55e
@@ -286,7 +342,7 @@ script_mod! {
                                 padding: Inset{left: 16 right: 16}
                                 flow: Right
                                 align: Align{y: 0.5}
-                                Txt{width: Fill text: "Tac's Inferno" draw_text.color: #xffffff
+                                server_name := Txt{width: Fill text: "" draw_text.color: #xffffff
                                     draw_text.text_style: theme.font_bold{font_size: 12.0}}
                                 Ico{icon_walk: Walk{width: 16 height: 16}
                                     draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}
@@ -299,32 +355,7 @@ script_mod! {
                                 draw_bg.border_radius: 0.0
                             }
 
-                            ScrollYView{
-                                width: Fill height: Fill
-                                flow: Down spacing: 2
-                                padding: Inset{left: 8 right: 8 top: 8 bottom: 8}
-                                CategoryHeader{label.text: "TEXT CHANNELS"}
-                                // Active: gray-600 fill with a 2px accent left border.
-                                RoundedView{
-                                    width: Fill height: Fit
-                                    flow: Overlay
-                                    draw_bg.color: gray_600
-                                    draw_bg.border_radius: 4.0
-                                    new_batch: true
-                                    ChannelItem{hash.draw_text.color: #xe1e0df99 name.text: "general" name.draw_text.color: #xffffff}
-                                    RoundedView{width: 2 height: 33 draw_bg.color: accent draw_bg.border_radius: 1.0}
-                                }
-                                ChannelItem{name.text: "announcements"}
-                                ChannelItem{name.text: "dev-chat" name.draw_text.color: #xffffff
-                                    name.draw_text.text_style: theme.font_bold{font_size: 10.5}}
-                                ChannelItem{name.text: "screenshots"}
-                                ChannelItem{name.text: "off-topic"}
-                                CategoryHeader{label.text: "VOICE CHANNELS"}
-                                ChannelItem{hash.text: "🔊" name.text: "Lounge"}
-                                ChannelItem{hash.text: "🔊" name.text: "Gaming"}
-                                CategoryHeader{label.text: "PRIVATE"}
-                                ChannelItem{hash.text: "🔒" name.text: "mods"}
-                            }
+                            channels := mod.widgets.ChannelList{margin: Inset{top: 8}}
 
                             // User panel: gray-950, 8px padding, 32px avatar,
                             // name 14 medium, status 12 gray-400, version 10 gray-600.
@@ -337,10 +368,10 @@ script_mod! {
                                 draw_bg.color: gray_950
                                 RoundedView{width: 32 height: 32 align: Center new_batch: true
                                     draw_bg.color: #x7f1d1d draw_bg.border_radius: 16.0
-                                    Txt{text: "T" draw_text.text_style.font_size: 10.0}}
-                                View{width: Fill height: Fit flow: Down
-                                    Txt{text: "Tac" draw_text.color: #xffffff}
-                                    Txt{text: "🔥 Online" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                    me_initial := Txt{text: "" draw_text.text_style.font_size: 10.0}}
+                                profile_btn := View{width: Fill height: Fit flow: Down cursor: MouseCursor.Hand
+                                    name := Txt{text: "" draw_text.color: #xffffff}
+                                    status := Txt{text: "Connecting…" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
                                 }
                                 Txt{text: "v0.1.0" draw_text.color: gray_600 draw_text.text_style.font_size: 7.5}
                                 Ico{icon_walk: Walk{width: 16 height: 16}
@@ -358,13 +389,16 @@ script_mod! {
                                 padding: Inset{left: 16 right: 16}
                                 flow: Right spacing: 8
                                 align: Align{y: 0.5}
-                                Txt{text: "#" draw_text.color: gray_400 draw_text.text_style.font_size: 15.0}
-                                Txt{text: "general" draw_text.color: #xffffff
+                                channel_hash := Txt{text: "#" draw_text.color: gray_400 draw_text.text_style.font_size: 15.0}
+                                channel_name := Txt{text: "" draw_text.color: #xffffff
                                     draw_text.text_style: theme.font_bold{font_size: 12.0}}
                                 SolidView{width: 1 height: 24 margin: Inset{left: 8 right: 8} draw_bg.color: gray_600}
-                                Txt{width: Fill text: "Hang out, share builds, report bugs" draw_text.color: gray_400}
+                                // Topics are one line: truncate, don't wrap (Rails: truncate).
+                                channel_topic := Txt{width: Fill text: "" draw_text.color: gray_400
+                                    flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
                                 Ico{draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}
-                                Ico{draw_icon.svg: crate_resource("self:resources/icons/users.svg")}
+                                invite_btn := View{width: Fit height: Fit cursor: MouseCursor.Hand
+                                    Ico{draw_icon.svg: crate_resource("self:resources/icons/users.svg")}}
                                 RoundedView{width: 160 height: 28 padding: Inset{left: 8 right: 8}
                                     align: Align{y: 0.5} new_batch: true
                                     draw_bg.color: gray_900 draw_bg.border_radius: 4.0
@@ -378,7 +412,9 @@ script_mod! {
                             messages := mod.widgets.MessageList{}
 
                             // Typing row (24px) then the composer.
-                            View{width: Fill height: 24 padding: Inset{left: 16}}
+                            View{width: Fill height: 24 padding: Inset{left: 16} align: Align{y: 0.5}
+                                notice := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                            }
                             View{
                                 width: Fill height: Fit
                                 padding: Inset{left: 16 right: 16 bottom: 16}
@@ -419,19 +455,30 @@ script_mod! {
                             flow: Down
                             padding: Inset{left: 8 right: 8 top: 0 bottom: 16}
                             draw_bg.color: gray_800
-                            RoleHeader{text: "ADMIN — 1" draw_text.color: #xdc2626}
-                            MemberItem{face.avatar.draw_bg.color: #x7f1d1d face.avatar.initial.text: "T"
-                                name.text: "Tac" name.draw_text.color: #xdc2626}
-                            RoleHeader{text: "ONLINE — 3"}
-                            MemberItem{face.avatar.draw_bg.color: #x78350f face.avatar.initial.text: "E" name.text: "ember"}
-                            MemberItem{face.avatar.draw_bg.color: #x1e3a8a face.avatar.initial.text: "F" name.text: "frostbyte"}
-                            MemberItem{face.avatar.draw_bg.color: #x064e3b face.avatar.initial.text: "M" name.text: "moss"}
-                            RoleHeader{text: "OFFLINE — 2"}
-                            // Offline members at 40% opacity.
-                            MemberItem{face.avatar.draw_bg.color: #x1e1c1b66 face.avatar.initial.text: "N"
-                                name.text: "nightjar" name.draw_text.color: #xa8a7a566 face.badge.dot.draw_bg.color: #x656361}
-                            MemberItem{face.avatar.draw_bg.color: #x581c8766 face.avatar.initial.text: "Q"
-                                name.text: "quill" name.draw_text.color: #xa8a7a566 face.badge.dot.draw_bg.color: #x656361}
+                            members := mod.widgets.MemberList{}
+                        }
+                    }
+
+                    // Create or join (opened by the rail's +).
+                    dialog := Modal{
+                        content +: {
+                            RoundedView{
+                                width: 448 height: Fit
+                                flow: Down spacing: 10
+                                padding: 24
+                                new_batch: true
+                                draw_bg.color: gray_800
+                                draw_bg.border_radius: 12.0
+                                Txt{text: "Create a server" draw_text.color: #xffffff
+                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                new_server_name := TextInput{width: Fill height: 36 empty_text: "Server name"}
+                                create_server := Button{text: "Create"}
+                                SolidView{width: Fill height: 1 margin: Inset{top: 6 bottom: 6} draw_bg.color: gray_700}
+                                Txt{text: "Join with an invite" draw_text.color: #xffffff
+                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                invite_link := TextInput{width: Fill height: 36 empty_text: "nostr:naddr1…"}
+                                join_server := Button{text: "Join"}
+                            }
                         }
                     }
                 }
@@ -451,6 +498,91 @@ pub struct App {
     /// the difference when saving or the window creeps down every launch.
     #[rust]
     frame_offset: Option<DVec2>,
+    #[rust]
+    backend: Option<tokio::sync::mpsc::UnboundedSender<backend::Command>>,
+    /// (gid, channel) the message list is showing, to tell a new channel
+    /// (jump to newest) from new messages in the same one (keep scroll).
+    #[rust]
+    showing: Option<(String, String)>,
+    #[rust]
+    npub: String,
+}
+
+impl App {
+    fn send(&self, cmd: backend::Command) {
+        if let Some(tx) = &self.backend {
+            let _ = tx.send(cmd);
+        }
+    }
+
+    fn notice(&self, cx: &mut Cx, text: &str) {
+        self.ui.label(cx, ids!(notice)).set_text(cx, text);
+    }
+
+    fn apply(&mut self, cx: &mut Cx, update: &backend::Update) {
+        use backend::Update;
+        match update {
+            Update::Ready { name, npub, backed_up } => {
+                self.npub = npub.clone();
+                self.ui.label(cx, ids!(profile_btn.name)).set_text(cx, name);
+                self.ui.label(cx, ids!(me_initial)).set_text(cx, &name.chars().nth(5).unwrap_or('?').to_uppercase().to_string());
+                let status = if *backed_up { "Online" } else { "Online · key not backed up" };
+                self.ui.label(cx, ids!(profile_btn.status)).set_text(cx, status);
+            }
+            Update::Servers(servers) => {
+                if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
+                    rail.servers = servers.clone();
+                }
+                self.ui.widget(cx, ids!(rail)).redraw(cx);
+            }
+            Update::Server { gid, name, sidebar, members } => {
+                if let Some(mut rail) = self.ui.widget(cx, ids!(rail)).borrow_mut::<lists::RailList>() {
+                    rail.selected = Some(gid.clone());
+                }
+                self.ui.widget(cx, ids!(rail)).redraw(cx);
+                self.ui.label(cx, ids!(server_name)).set_text(cx, name);
+                if self.ui.label(cx, ids!(notice)).text().starts_with("Joining") {
+                    self.notice(cx, "");
+                }
+                if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+                    list.rows = sidebar.clone();
+                }
+                self.ui.widget(cx, ids!(channels)).redraw(cx);
+                if let Some(mut list) = self.ui.widget(cx, ids!(members)).borrow_mut::<lists::MemberList>() {
+                    list.rows = members.clone();
+                }
+                self.ui.widget(cx, ids!(members)).redraw(cx);
+            }
+            Update::Channel { gid, channel_id, name, topic, encrypted } => {
+                if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+                    list.selected = Some(channel_id.clone());
+                }
+                self.ui.widget(cx, ids!(channels)).redraw(cx);
+                self.ui.label(cx, ids!(channel_hash)).set_text(cx, if *encrypted { "🔒" } else { "#" });
+                self.ui.label(cx, ids!(channel_name)).set_text(cx, name);
+                self.ui.label(cx, ids!(channel_topic)).set_text(cx, topic);
+                let _ = gid;
+            }
+            Update::Timeline { gid, channel_id, rows } => {
+                let key = (gid.clone(), channel_id.clone());
+                let new_channel = self.showing.as_ref() != Some(&key);
+                self.showing = Some(key);
+                if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
+                    list.set_rows(cx, rows.clone(), new_channel);
+                }
+            }
+            Update::Invite(link) => {
+                cx.copy_to_clipboard(link);
+                self.notice(cx, &format!("Invite link copied: {link}"));
+            }
+            Update::Error(e) => self.notice(cx, &format!("⚠ {e}")),
+            Update::Empty => {
+                self.ui.label(cx, ids!(server_name)).set_text(cx, "No servers yet");
+                self.ui.label(cx, ids!(channel_name)).set_text(cx, "Welcome");
+                self.ui.label(cx, ids!(channel_topic)).set_text(cx, "Create or join a server with + in the rail");
+            }
+        }
+    }
 }
 
 impl MatchEvent for App {
@@ -464,16 +596,75 @@ impl MatchEvent for App {
             w.maximized,
             "Inferno".into(),
         );
+        if std::env::var_os("INFERNO_DEMO").is_some() {
+            if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
+                list.set_rows(cx, message_list::demo_rows(), true);
+            }
+        } else {
+            self.backend = Some(backend::spawn());
+        }
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        for action in actions {
+            if let Some(update) = action.downcast_ref::<backend::Update>() {
+                self.apply(cx, update);
+            }
+        }
+
+        let rail_click = self.ui.widget(cx, ids!(rail)).borrow::<lists::RailList>().and_then(|r| r.clicked(cx, actions));
+        if let Some(gid) = rail_click {
+            self.send(backend::Command::SelectServer(gid));
+        }
+        let channel_click =
+            self.ui.widget(cx, ids!(channels)).borrow::<lists::ChannelList>().and_then(|c| c.clicked(cx, actions));
+        if let Some(id) = channel_click {
+            self.send(backend::Command::SelectChannel(id));
+        }
+
+        if self.ui.view(cx, ids!(add_server)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+            self.ui.modal(cx, ids!(dialog)).open(cx);
+        }
+        if self.ui.view(cx, ids!(profile_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) && !self.npub.is_empty() {
+            cx.copy_to_clipboard(&self.npub);
+            self.notice(cx, &format!("Your npub was copied: {}", self.npub));
+        }
+        if self.ui.view(cx, ids!(invite_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+            self.send(backend::Command::CreateInvite);
+        }
+        if self.ui.button(cx, ids!(create_server)).clicked(actions) {
+            let name = self.ui.text_input(cx, ids!(new_server_name)).text();
+            if !name.trim().is_empty() {
+                self.send(backend::Command::CreateServer(name));
+                self.ui.text_input(cx, ids!(new_server_name)).set_text(cx, "");
+                self.ui.modal(cx, ids!(dialog)).close(cx);
+            }
+        }
+        if self.ui.button(cx, ids!(join_server)).clicked(actions) {
+            let link = self.ui.text_input(cx, ids!(invite_link)).text();
+            if !link.trim().is_empty() {
+                self.send(backend::Command::Join(link));
+                self.ui.text_input(cx, ids!(invite_link)).set_text(cx, "");
+                self.ui.modal(cx, ids!(dialog)).close(cx);
+                self.notice(cx, "Joining…");
+            }
+        }
+
         let composer = self.ui.text_input(cx, ids!(composer));
         if let Some((text, _)) = composer.returned(actions) {
-            if !text.trim().is_empty() {
+            let text = text.trim();
+            if !text.is_empty() {
+                self.send(backend::Command::Send(text.to_owned()));
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
-                    list.push_own(cx, text.trim());
+                    list.follow_end(cx);
                 }
                 composer.set_text(cx, "");
+                // A single-line input drops focus on Return; keep typing in
+                // the chat like Rails and Discord do.
+                if let Some(mut input) = composer.borrow_mut() {
+                    input.take_key_focus(cx);
+                }
+                self.notice(cx, "");
             }
         }
     }

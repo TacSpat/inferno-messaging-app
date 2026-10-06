@@ -95,6 +95,34 @@ impl<S: SecretStore> Vault<S> {
         self.activate(identity)
     }
 
+    /// Saves and signs in an identity that has no backup yet: the first-run
+    /// path before onboarding asks for a backup password. The account can't
+    /// be switched back to after signing out until [`Self::add_backup`] runs,
+    /// so the UI should nag until it does (see [`Self::has_backup`]).
+    pub fn sign_up_pending_backup(&self, identity: &Identity, display_name: &str) -> Result<(), VaultError> {
+        let pubkey = identity.pubkey_hex();
+        let entry = Account { pubkey: pubkey.clone(), npub: identity.npub(), display_name: display_name.to_owned() };
+        let mut accounts = self.accounts()?;
+        match accounts.iter_mut().find(|a| a.pubkey == pubkey) {
+            Some(existing) => *existing = entry,
+            None => accounts.push(entry),
+        }
+        self.write_accounts(&accounts)?;
+        self.activate(identity)
+    }
+
+    /// Adds the NIP-49 backup for the active account (finishing a pending sign-up).
+    pub fn add_backup(&self, backup_password: &str) -> Result<String, VaultError> {
+        let identity = self.active()?.ok_or(VaultError::NotSignedIn)?;
+        let backup = identity.export_backup(backup_password)?;
+        self.secrets.set(&backup_name(&identity.pubkey_hex()), &backup)?;
+        Ok(backup)
+    }
+
+    pub fn has_backup(&self, pubkey: &str) -> Result<bool, VaultError> {
+        Ok(self.secrets.get(&backup_name(pubkey))?.is_some())
+    }
+
     /// Adds an account from an `ncryptsec` backup without signing it in.
     /// Decrypting first proves the password before anything is stored.
     pub fn add_account(
