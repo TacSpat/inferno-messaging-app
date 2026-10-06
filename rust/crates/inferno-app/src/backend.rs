@@ -157,8 +157,20 @@ pub struct RelayItem {
     pub write: bool,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchRow {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub id: String,
+    pub author: String,
+    pub color: u32,
+    pub at: i64,
+    pub body: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum Update {
+    SearchResults { query: String, rows: Vec<SearchRow> },
     ServerSettings(ServerSettings),
     Profile(ProfileForm),
     Relays(Vec<RelayItem>),
@@ -211,6 +223,7 @@ pub enum Command {
     LeaveServer,
     MarkRead(String),
     DeleteMessage(String),
+    Search(String),
     SaveOverview(ServerSettings),
     SaveRoles(Vec<RoleForm>),
     Unban(String),
@@ -600,6 +613,33 @@ impl Backend {
                 self.session.delete_server(&gid).await.map_err(|e| e.to_string())?;
                 self.channel = None;
                 self.publish_servers();
+            }
+            Command::Search(text) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let query = inferno_core::search::Query::parse(&text);
+                if query.is_empty() {
+                    return Ok(());
+                }
+                let state = self.session.server(&gid).map_err(|e| e.to_string())?.ok_or("Unknown server")?;
+                let rows = self
+                    .session
+                    .search(&gid, &query, 100)
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .map(|h| {
+                        let d = display(&state, &h.message.author);
+                        SearchRow {
+                            channel_id: h.channel_id,
+                            channel_name: h.channel_name,
+                            id: h.message.id.to_hex(),
+                            author: d.name,
+                            color: d.color,
+                            at: h.message.created_at,
+                            body: h.message.content.unwrap_or_default(),
+                        }
+                    })
+                    .collect();
+                Cx::post_action(Update::SearchResults { query: text, rows });
             }
             Command::DeleteMessage(id) => {
                 let (gid, ch) = self.selected()?;

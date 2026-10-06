@@ -7,6 +7,13 @@
 
 use std::collections::{HashMap, HashSet};
 
+#[derive(Debug, Clone)]
+pub struct SearchHit {
+    pub channel_id: String,
+    pub channel_name: String,
+    pub message: ChannelMessage,
+}
+
 /// What `Session::create_channel` makes.
 #[derive(Debug, Clone, Default)]
 pub struct ChannelSpec {
@@ -527,6 +534,42 @@ impl Session {
         }
         self.publish_structure(gid, &structure).await?;
         self.after_structure_change(gid).await
+    }
+
+    // ─── Search ─────────────────────────────────────────────────────────
+
+    /// Searches the cached messages of every channel in `gid` we can read.
+    /// Newest first, at most `limit`.
+    pub fn search(&self, gid: &str, query: &crate::search::Query, limit: usize) -> Result<Vec<SearchHit>> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let me = self.keys.public_key();
+        let names = |pk: &PublicKey| -> Vec<String> {
+            let mut v = vec![pk.to_hex()];
+            let Ok(npub) = nostr::nips::nip19::ToBech32::to_bech32(pk);
+            v.push(npub);
+            if let Some(m) = state.members.get(pk) {
+                v.extend(m.nickname.clone());
+                v.push(m.profile.display_name.clone());
+                v.push(m.profile.name.clone());
+            }
+            v.retain(|n| !n.is_empty());
+            v
+        };
+        let mut hits = Vec::new();
+        for channel in state.structure.channels.iter().filter(|c| c.kind != "voice" && state.can_read(&me, c)) {
+            if !query.in_channels.is_empty() && !query.in_channels.contains(&channel.name.to_lowercase()) {
+                continue;
+            }
+            for m in self.timeline(gid, &channel.id)? {
+                let Some(body) = m.content.as_deref() else { continue };
+                if query.matches(body, m.created_at, m.pinned, &names(&m.author), &channel.name) {
+                    hits.push(SearchHit { channel_id: channel.id.clone(), channel_name: channel.name.clone(), message: m });
+                }
+            }
+        }
+        hits.sort_by_key(|h| std::cmp::Reverse((h.message.created_at, h.message.id)));
+        hits.truncate(limit);
+        Ok(hits)
     }
 
     // ─── Server settings ────────────────────────────────────────────────

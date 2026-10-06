@@ -307,3 +307,26 @@ async fn deleting_a_server_removes_it_for_members() {
     }
     panic!("alice still lists the deleted server");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn search_finds_messages_by_text_author_and_channel() {
+    use inferno_core::search::Query;
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    let general = owner.server(&gid).unwrap().unwrap().structure.channels[0].id.clone();
+    let dev = owner.create_channel(&gid, &ChannelSpec { name: "dev".into(), ..Default::default() }).await.unwrap();
+    owner.send(&gid, &general, &Outgoing { content: "relay is down again", ..Default::default() }).await.unwrap();
+    owner.send(&gid, &dev, &Outgoing { content: "fixed the relay https://example.com/notes.pdf", ..Default::default() }).await.unwrap();
+    owner.send(&gid, &dev, &Outgoing { content: "lunch?", ..Default::default() }).await.unwrap();
+
+    let hits = owner.search(&gid, &Query::parse("relay"), 50).unwrap();
+    assert_eq!(hits.len(), 2);
+    let in_dev = owner.search(&gid, &Query::parse("relay in: dev"), 50).unwrap();
+    assert_eq!(in_dev.len(), 1);
+    assert_eq!(in_dev[0].channel_name, "dev");
+    assert_eq!(owner.search(&gid, &Query::parse("has: file"), 50).unwrap().len(), 1);
+    let npub = inferno_core::nostr::nips::nip19::ToBech32::to_bech32(&owner.keys().public_key()).unwrap();
+    assert_eq!(owner.search(&gid, &Query::parse(&format!("from: {}", &npub[..12])), 50).unwrap().len(), 3);
+}

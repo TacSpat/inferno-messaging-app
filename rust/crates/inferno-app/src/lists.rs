@@ -758,3 +758,88 @@ impl Widget for PeopleList {
         self.view.handle_event(cx, event, scope);
     }
 }
+
+// ─── Search results ──────────────────────────────────────────────────────
+
+/// `MM/DD/YYYY h:MM AM`, as Rails shows message times (UTC for now).
+pub fn date_time(at: i64) -> String {
+    let days = at.div_euclid(86_400);
+    let secs = at.rem_euclid(86_400);
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    let (h, min) = (secs / 3600, (secs / 60) % 60);
+    let (h12, ampm) = match h {
+        0 => (12, "AM"),
+        1..=11 => (h, "AM"),
+        12 => (12, "PM"),
+        _ => (h - 12, "PM"),
+    };
+    format!("{m:02}/{d:02}/{y} {h12}:{min:02} {ampm}")
+}
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct ResultList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<crate::backend::SearchRow>,
+}
+
+impl ResultList {
+    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<crate::backend::SearchRow> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions)
+            .into_iter()
+            .find(|(_, item)| clicked(item, actions))
+            .and_then(|(i, _)| self.rows.get(i).cloned())
+    }
+}
+
+impl Widget for ResultList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            let count = self.rows.len().max(1);
+            list.set_item_range(cx, 0, count);
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(r) => {
+                        let row = list.item(cx, i, id!(Hit));
+                        row.label(cx, ids!(channel)).set_text(cx, &format!("# {}", r.channel_name));
+                        let mut name = row.widget(cx, ids!(head.author));
+                        let c = rgba(r.color, 1.0);
+                        script_apply_eval!(cx, name, {draw_text +: {color: #(c)}});
+                        name.set_text(cx, &r.author);
+                        row.label(cx, ids!(head.time)).set_text(cx, &date_time(r.at));
+                        row.label(cx, ids!(body)).set_text(cx, &r.body);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None if i == 0 => list.item(cx, i, id!(Empty)).draw_all(cx, &mut Scope::empty()),
+                    None => {}
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
+#[cfg(test)]
+mod date_tests {
+    #[test]
+    fn rails_date_format() {
+        assert_eq!(super::date_time(0), "01/01/1970 12:00 AM");
+        assert_eq!(super::date_time(1_791_217_800), "10/05/2026 4:30 PM");
+    }
+}

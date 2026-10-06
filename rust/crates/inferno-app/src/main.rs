@@ -590,6 +590,32 @@ script_mod! {
         }
     }
 
+    mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
+    mod.widgets.ResultList = set_type_default() do mod.widgets.ResultListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Hit := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{bottom: 8}
+                padding: 10
+                flow: Down spacing: 4
+                cursor: MouseCursor.Hand
+                new_batch: true
+                draw_bg.color: gray_700
+                draw_bg.border_radius: 6.0
+                channel := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+                head := View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                    author := Txt{text: "" draw_text.text_style.font_size: 10.0}
+                    time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
+                }
+                body := Body{text: ""}
+            }
+            Empty := Hint{text: "No results." margin: 8}
+        }
+    }
+
     startup() do #(App::script_component(vm)){
         ui: Root{
             main_window := Window{
@@ -725,11 +751,16 @@ script_mod! {
                                     Ico{draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
                                 invite_btn := View{width: Fit height: Fit cursor: MouseCursor.Hand
                                     Ico{draw_icon.svg: crate_resource("self:resources/icons/users.svg")}}
-                                RoundedView{width: 160 height: 28 padding: Inset{left: 8 right: 8}
+                                // Rails: bg-gray-900 rounded h-7, 200px.
+                                search_bar := RoundedView{width: 200 height: 28 padding: Inset{left: 4 right: 8}
                                     align: Align{y: 0.5} new_batch: true
                                     draw_bg.color: gray_900 draw_bg.border_radius: 4.0
-                                    Txt{width: Fill text: "Search" draw_text.color: gray_500 draw_text.text_style.font_size: 9.5}
-                                    Ico{icon_walk: Walk{width: 14 height: 14}
+                                    search_input := TextInput{width: Fill height: 28 empty_text: "Search"
+                                        draw_bg +: {color: #0000 color_hover: #0000 color_focus: #0000 color_empty: #0000
+                                            border_color: #0000 border_color_hover: #0000 border_color_focus: #0000 border_color_empty: #0000}
+                                        draw_text +: {color: gray_200 color_empty: gray_500}
+                                    }
+                                    Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_500
                                         draw_icon.svg: crate_resource("self:resources/icons/search.svg")}
                                 }
                             }
@@ -739,6 +770,30 @@ script_mod! {
                                 width: Fill height: Fill
                                 flow: Overlay
                                 messages := mod.widgets.MessageList{}
+                                // Search filter hints (Rails: right-aligned, w-72, gray-900).
+                                suggest_slot := View{
+                                    width: Fill height: Fit
+                                    align: Align{x: 1.0}
+                                    padding: Inset{right: 16 top: 4}
+                                    search_suggest := RoundedView{
+                                        visible: false
+                                        width: 288 height: Fit
+                                        flow: Down
+                                        padding: Inset{top: 6 bottom: 6 left: 6 right: 6}
+                                        new_batch: true
+                                        draw_bg.color: gray_900
+                                        draw_bg.border_radius: 8.0
+                                        draw_bg.border_size: 1.0
+                                        draw_bg.border_color: gray_700
+                                        Txt{text: "SEARCH FILTERS" margin: Inset{left: 6 top: 2 bottom: 4} draw_text.color: gray_500
+                                            draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                        f_from := MenuItem{label.text: "From a specific user   from: user" icon.icon_walk: Walk{width: 0 height: 16}}
+                                        f_in := MenuItem{label.text: "In a specific channel   in: channel" icon.icon_walk: Walk{width: 0 height: 16}}
+                                        f_has := MenuItem{label.text: "Has a specific type   has: file, image, or link" icon.icon_walk: Walk{width: 0 height: 16}}
+                                        f_date := MenuItem{label.text: "Date filters   before:, after:, or on: date" icon.icon_walk: Walk{width: 0 height: 16}}
+                                        f_pinned := MenuItem{label.text: "Pinned messages   pinned: true" icon.icon_walk: Walk{width: 0 height: 16}}
+                                    }
+                                }
                                 // Pinned messages float over the list, under the header.
                                 pins_slot := View{
                                     width: Fill height: Fit
@@ -801,9 +856,24 @@ script_mod! {
                             }
                         }
 
+                        // ── Search results: 420px, gray-800 (spec), in place of members ──
+                        search_panel := SolidView{
+                            visible: false
+                            width: 420 height: Fill
+                            flow: Down
+                            padding: Inset{left: 12 right: 12 top: 0 bottom: 12}
+                            draw_bg.color: gray_800
+                            View{width: Fill height: 48 flow: Right spacing: 8 align: Align{y: 0.5}
+                                Txt{text: "Results" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                search_count := Txt{width: Fill text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                                close_search := View{width: Fit height: Fit padding: 6 cursor: MouseCursor.Hand
+                                    Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                            }
+                            search_results := mod.widgets.ResultList{}
+                        }
                         // ── Member list: 240px, gray-800, 1px accent/.15 left border ──
-                        SolidView{width: 1 height: Fill draw_bg.color: #xdc262626}
-                        SolidView{
+                        member_edge := SolidView{width: 1 height: Fill draw_bg.color: #xdc262626}
+                        member_col := SolidView{
                             width: 240 height: Fill
                             flow: Down
                             padding: Inset{left: 8 right: 8 top: 0 bottom: 16}
@@ -1221,6 +1291,12 @@ pub struct App {
     role_drafts: Vec<backend::RoleForm>,
     #[rust]
     role_sel: usize,
+    /// A message to jump to once its channel's timeline arrives.
+    #[rust]
+    pending_jump: Option<(String, String)>,
+    /// A press landed in the search hints: the input's blur must not hide them.
+    #[rust]
+    press_in_suggest: bool,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1270,6 +1346,12 @@ const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 3] = [
     (ids!(nav_relays), ids!(page_relays)),
 ];
 
+/// Sets an input's text with the caret at the end, where typing continues.
+fn set_text_end(cx: &mut Cx, input: &TextInputRef, text: &str) {
+    input.set_text(cx, text);
+    input.set_cursor(cx, makepad_widgets::makepad_draw::text::selection::Cursor { index: text.len(), prefer_next_row: false }, false);
+}
+
 impl App {
     fn send(&self, cmd: backend::Command) {
         if let Some(tx) = &self.backend {
@@ -1318,7 +1400,8 @@ impl App {
             MessageAction::Edit(_) => {
                 self.clear_bars(cx);
                 self.editing = Some(row.id.clone());
-                self.ui.text_input(cx, ids!(composer)).set_text(cx, row.body.as_deref().unwrap_or(""));
+                let composer = self.ui.text_input(cx, ids!(composer));
+                set_text_end(cx, &composer, row.body.as_deref().unwrap_or(""));
                 self.ui.view(cx, ids!(edit_bar)).set_visible(cx, true);
                 self.focus_composer(cx);
             }
@@ -1695,7 +1778,7 @@ impl App {
                     text.push(' ');
                 }
                 text.push_str(&format!("@{name} "));
-                composer.set_text(cx, &text);
+                set_text_end(cx, &composer, &text);
                 self.focus_composer(cx);
             }
             A::RolesFor(pk) => {
@@ -1930,6 +2013,13 @@ impl App {
         }
     }
 
+    fn show_search_panel(&mut self, cx: &mut Cx, open: bool) {
+        self.ui.view(cx, ids!(search_panel)).set_visible(cx, open);
+        self.ui.view(cx, ids!(member_col)).set_visible(cx, !open);
+        self.ui.view(cx, ids!(member_edge)).set_visible(cx, !open);
+        self.ui.redraw(cx);
+    }
+
     fn notice(&self, cx: &mut Cx, text: &str) {
         self.ui.label(cx, ids!(notice)).set_text(cx, text);
     }
@@ -2002,9 +2092,13 @@ impl App {
                     self.clear_bars(cx);
                     self.ui.view(cx, ids!(pins_panel)).set_visible(cx, false);
                 }
+                let jump = self.pending_jump.take_if(|(ch, _)| ch == channel_id).map(|(_, id)| id);
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
                     list.can_pin = *can_pin;
-                    list.set_rows(cx, rows.clone(), new_channel);
+                    list.set_rows(cx, rows.clone(), new_channel && jump.is_none());
+                    if let Some(id) = jump {
+                        list.jump_to(cx, &id);
+                    }
                 }
                 let pins: Vec<lists::PinRow> = rows
                     .iter()
@@ -2047,6 +2141,18 @@ impl App {
                 );
                 self.ui.view(cx, ids!(backup_form)).set_visible(cx, false);
                 self.ui.redraw(cx);
+            }
+            Update::SearchResults { query, rows } => {
+                let n = rows.len();
+                self.ui.label(cx, ids!(search_count)).set_text(
+                    cx,
+                    &format!("{} result{} for \"{}\"", n, if n == 1 { "" } else { "s" }, query),
+                );
+                if let Some(mut l) = self.ui.widget(cx, ids!(search_results)).borrow_mut::<lists::ResultList>() {
+                    l.rows = rows.clone();
+                }
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(search_results.list)));
+                self.show_search_panel(cx, true);
             }
             Update::ServerSettings(settings) => {
                 self.srv = settings.clone();
@@ -2249,6 +2355,61 @@ impl MatchEvent for App {
             }
             self.close_pages(cx);
         }
+        // Search
+        let search = self.ui.text_input(cx, ids!(search_input));
+        let focused = actions
+            .find_widget_action(search.widget_uid())
+            .is_some_and(|a| matches!(a.cast(), TextInputAction::KeyFocus));
+        if focused {
+            self.ui.view(cx, ids!(search_suggest)).set_visible(cx, true);
+            self.ui.redraw(cx);
+        }
+        if (search.key_focus_lost(actions) && !self.press_in_suggest) || search.escaped(actions) {
+            self.ui.view(cx, ids!(search_suggest)).set_visible(cx, false);
+            self.ui.redraw(cx);
+        }
+        if let Some((text, _)) = search.returned(actions) {
+            self.ui.view(cx, ids!(search_suggest)).set_visible(cx, false);
+            if !text.trim().is_empty() {
+                self.send(backend::Command::Search(text));
+            }
+        }
+        for (path, insert) in [
+            (ids!(f_from), "from: "),
+            (ids!(f_in), "in: "),
+            (ids!(f_has), "has: "),
+            (ids!(f_date), "after: "),
+            (ids!(f_pinned), "pinned: true "),
+        ] {
+            if self.ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                self.press_in_suggest = false;
+                let mut text = search.text();
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
+                }
+                text.push_str(insert);
+                set_text_end(cx, &search, &text);
+                if let Some(mut input) = search.borrow_mut() {
+                    input.take_key_focus(cx);
+                }
+            }
+        }
+        if tapped(&self.ui, cx, ids!(close_search)) {
+            self.show_search_panel(cx, false);
+        }
+        let hit = self.ui.widget(cx, ids!(search_results)).borrow::<lists::ResultList>().and_then(|l| l.clicked(cx, actions));
+        if let Some(r) = hit {
+            let same = self.showing.as_ref().is_some_and(|(_, ch)| *ch == r.channel_id);
+            if same {
+                if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
+                    list.jump_to(cx, &r.id);
+                }
+            } else {
+                self.pending_jump = Some((r.channel_id.clone(), r.id.clone()));
+                self.send(backend::Command::SelectChannel(r.channel_id));
+            }
+        }
+
         // Server settings
         if tapped(&self.ui, cx, ids!(menu_server_settings)) {
             self.set_server_menu(cx, false);
@@ -2498,6 +2659,8 @@ impl AppMain for App {
         }
         // A press outside an open dropdown or menu closes it.
         if let Event::MouseDown(m) = event {
+            let suggest = self.ui.view(cx, ids!(search_suggest));
+            self.press_in_suggest = suggest.visible() && suggest.area().rect(cx).contains(m.abs);
             if self.ui.view(cx, ids!(ctx_layer)).visible() && !self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).contains(m.abs) {
                 self.close_menu(cx);
             }

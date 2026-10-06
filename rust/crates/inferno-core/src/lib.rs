@@ -7,6 +7,7 @@ pub mod dtag;
 pub mod keys;
 pub mod kinds;
 pub mod relay;
+pub mod search;
 pub mod server;
 pub mod session;
 pub mod store;
