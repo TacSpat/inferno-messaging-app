@@ -11,6 +11,8 @@ path = "src/main.rs"
 [dependencies]
 inferno-core.workspace = true
 makepad-widgets.workspace = true
+# Makepad's PNG encoder, for cropped avatars and banners.
+makepad-zune-png = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599" }
 # The same copy Makepad uses (for the vendored RichInput).
 # Makepad's copy, for the forked MessageText.
 pulldown-cmark = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599", default-features = false }

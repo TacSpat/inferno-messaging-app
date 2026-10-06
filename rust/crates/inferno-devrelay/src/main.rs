@@ -1,6 +1,9 @@
 //! `cargo run -p inferno-devrelay [PORT]` — an in-memory relay on
-//! 127.0.0.1 (default port 7777) so local runs and UI tests never touch the
-//! public relays. Everything is lost when it stops.
+//! 127.0.0.1 (default port 7777), plus a Blossom server on PORT+1 (7778), so
+//! local runs and UI tests never touch public relays or media hosts.
+//! Everything is lost when it stops.
+
+mod blossom;
 
 use std::net::{IpAddr, Ipv4Addr};
 
@@ -18,5 +21,8 @@ async fn main() {
         .build();
     relay.run().await.expect("start relay");
     println!("inferno-devrelay listening on {}", relay.url().await);
+    let blossom_port = port + 1;
+    tokio::spawn(blossom::serve(blossom_port));
+    println!("blossom listening on http://127.0.0.1:{blossom_port}");
     tokio::signal::ctrl_c().await.ok();
 }

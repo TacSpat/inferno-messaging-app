@@ -7,6 +7,7 @@ pub use makepad_widgets;
 
 mod backend;
 mod composer_lint;
+mod crop;
 mod ctxmenu;
 mod demo;
 mod images;

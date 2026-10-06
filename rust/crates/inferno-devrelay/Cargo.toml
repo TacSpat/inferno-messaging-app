@@ -7,4 +7,6 @@ publish = false
 
 [dependencies]
 nostr-sdk = { version = "0.45", features = ["local-relay"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "io-util"] }
+base64 = "0.22"
+sha2 = "0.11"
