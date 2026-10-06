@@ -80,23 +80,6 @@ pub fn by_name(name: &str) -> Option<&'static Theme> {
     THEMES.iter().find(|t| t.name == name)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn spot_check_against_the_spec_table() {
-        let inferno = by_name("inferno").unwrap();
-        assert_eq!(inferno.gray_700, Rgb(0x2c2a29));
-        assert_eq!(inferno.accent, Rgb(0xdc2626));
-        assert_eq!(by_name("frostfire").unwrap().gray_600, Rgb(0x3d5a80));
-        assert_eq!(by_name("pulsar").unwrap().accent, Rgb(0xf9a8d4));
-        assert_eq!(by_name("obsidian").unwrap().confirm, Rgb(0x3b82f6));
-        assert!(!by_name("obsidian").unwrap().animated_glow);
-        assert_eq!(Rgb(0xff0080).vec4(1.0), [1.0, 0.0, 128.0 / 255.0, 1.0]);
-    }
-}
-
 // ─── The theme in use ────────────────────────────────────────────────────
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -167,4 +150,21 @@ impl Theme {
 pub fn tok(name: &str, alpha: f32) -> makepad_widgets::Vec4 {
     let [r, g, b, a] = current().token(name).vec4(alpha);
     makepad_widgets::vec4(r, g, b, a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn spot_check_against_the_spec_table() {
+        let inferno = by_name("inferno").unwrap();
+        assert_eq!(inferno.gray_700, Rgb(0x2c2a29));
+        assert_eq!(inferno.accent, Rgb(0xdc2626));
+        assert_eq!(by_name("frostfire").unwrap().gray_600, Rgb(0x3d5a80));
+        assert_eq!(by_name("pulsar").unwrap().accent, Rgb(0xf9a8d4));
+        assert_eq!(by_name("obsidian").unwrap().confirm, Rgb(0x3b82f6));
+        assert!(!by_name("obsidian").unwrap().animated_glow);
+        assert_eq!(Rgb(0xff0080).vec4(1.0), [1.0, 0.0, 128.0 / 255.0, 1.0]);
+    }
 }
