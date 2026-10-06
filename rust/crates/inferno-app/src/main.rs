@@ -6,16 +6,21 @@
 pub use makepad_widgets;
 
 mod backend;
+mod composer_lint;
 mod ctxmenu;
 mod demo;
 mod lists;
+mod message_format;
+mod message_text;
 mod message_list;
+mod rich_input;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
 mod window_state;
 
 use makepad_widgets::*;
 
+use rich_input::RichInputWidgetRefExt;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
@@ -49,6 +54,7 @@ script_mod! {
     let accent_25 = #(theme::tok("accent", 0.25))
     let accent_30 = #(theme::tok("accent", 0.3))
     let accent_40 = #(theme::tok("accent", 0.4))
+    let accent_50 = #(theme::tok("accent", 0.5))
     let gray_700_00 = #(theme::tok("gray_700", 0.0))
     let gray_700_50 = #(theme::tok("gray_700", 0.5))
     let gray_100_60 = #(theme::tok("gray_100", 0.6))
@@ -195,6 +201,35 @@ script_mod! {
         draw_text.text_style.line_spacing: 1.4
     }
 
+    // A message body, rendered as Rails does (message_format.rs).
+    let MsgBody = mod.widgets.MessageText{
+        width: Fill height: Fit
+        padding: 0
+        font_size: 10.5
+        font_color: gray_200
+        paragraph_spacing: 4
+        pre_code_spacing: 4
+        heading_base_scale: 1.4
+        draw_text +: {color: gray_200}
+        text_style_normal: theme.font_regular{font_size: 10.5 line_spacing: 1.4}
+        text_style_italic: theme.font_italic{font_size: 10.5 line_spacing: 1.4}
+        text_style_bold: theme.font_bold{font_size: 10.5 line_spacing: 1.4}
+        text_style_bold_italic: theme.font_bold_italic{font_size: 10.5 line_spacing: 1.4}
+        text_style_fixed: theme.font_code{font_size: 9.5 line_spacing: 1.4}
+        draw_block +: {
+            line_color: gray_400
+            sep_color: gray_600
+            quote_bg_color: gray_800
+            quote_fg_color: gray_500
+            code_color: gray_900
+            selection_color: accent_30
+            table_header_bg_color: gray_800
+            table_border_color: gray_600
+        }
+        link_color: accent_light
+        mention_color: accent_light
+    }
+
     // Hover toolbar: gray-800, radius 4, 1px accent/.25 border (spec).
     let ToolBtn = View{
         width: Fit height: Fit
@@ -266,7 +301,7 @@ script_mod! {
                                 name := Txt{text: "name" draw_text.text_style.font_size: 10.5}}
                             time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
                         }
-                        body := Body{text: ""}
+                        body := MsgBody{}
                     }
                 }
                 slot := ToolbarSlot{}
@@ -279,7 +314,7 @@ script_mod! {
                     width: Fill height: Fit
                     flow: Right
                     View{width: 40 height: 1 margin: Inset{right: 16}}
-                    body := Body{text: ""}
+                    body := MsgBody{}
                 }
                 slot := ToolbarSlot{}
             }
@@ -392,17 +427,56 @@ script_mod! {
     }
 
     // Reply / edit bars above the composer: gray-700, rounded top.
-    let ComposerBar = RoundedView{
+    // Rails' reply/edit/spoiler bars: gray-700, rounded top, px-4 py-2,
+    // 1px gray-600 rule under; the reply bar adds a 2px accent/.5 left edge
+    // over an accent/.06 → clear gradient.
+    let ComposerBar = View{
         visible: false
         width: Fill height: Fit
-        padding: Inset{left: 16 right: 8 top: 6 bottom: 6}
+        padding: Inset{left: 16 right: 10 top: 8 bottom: 8}
         flow: Right spacing: 6
         align: Align{y: 0.5}
+        show_bg: true
         new_batch: true
-        draw_bg.color: gray_700
-        draw_bg.border_radius: 8.0
-        label := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
-        close := ToolBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+        draw_bg +: {
+            edge: uniform(0.0)
+            fill: uniform(gray_700)
+            tint: uniform(accent_06)
+            seam: uniform(accent_40)
+            rule: uniform(gray_600)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                // Taller than the rect, so only the top corners round.
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y + 8.0 8.0)
+                let c = mix(self.fill, vec4(self.tint.rgb, 1.0), self.tint.a * (1.0 - self.pos.x) * self.edge)
+                sdf.fill(c)
+                sdf.rect(0. self.rect_size.y - 1.0 self.rect_size.x 1.0)
+                sdf.fill(self.rule)
+                sdf.rect(0. 0. 2.0 * self.edge self.rect_size.y)
+                sdf.fill(self.seam)
+                return sdf.result
+            }
+        }
+        lead := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+        who := Txt{text: "" draw_text.color: accent_light draw_text.text_style: theme.font_bold{font_size: 9.5}}
+        label := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.5
+            flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+        close := ToolBtn{padding: 2 Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_400
+            draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+    }
+
+    // Composer icon: gray-400, accent on hover (Rails' ember buttons).
+    let ComposerBtn = View{
+        width: Fit height: Fit padding: 8
+        cursor: MouseCursor.Hand
+        ico := Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_400}
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.15}} apply: {ico: {draw_icon: {color: gray_400}}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.15}} apply: {ico: {draw_icon: {color: accent}}}}
+            }
+        }
     }
 
     // ─── Settings overlay ────────────────────────────────────────────
@@ -1179,38 +1253,78 @@ script_mod! {
                             View{width: Fill height: 24 padding: Inset{left: 16} align: Align{y: 0.5}
                                 notice := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
                             }
+                            // Rails: px-4 pb-4. The shell below takes 8 of that for
+                            // the focus glow, which spills outside the bar.
                             composer_box := View{
                                 width: Fill height: Fit
                                 flow: Down
-                                padding: Inset{left: 16 right: 16 bottom: 16}
-                                reply_bar := ComposerBar{}
-                                edit_bar := ComposerBar{label.text: "Editing message — Enter to save, Esc to cancel" label.draw_text.color: #xf87171}
-                                // Bar: gray-600, radius 8, 1px accent/.2 border.
-                                RoundedView{
+                                padding: Inset{left: 8 right: 8 bottom: 8}
+                                View{width: Fill height: Fit flow: Down padding: Inset{left: 8 right: 8}
+                                    reply_bar := ComposerBar{draw_bg.edge: 1.0 lead.text: "Replying to"}
+                                    edit_bar := ComposerBar{lead.text: "✎" lead.draw_text.color: accent_light
+                                        who.text: "Editing message"}
+                                    spoiler_bar := ComposerBar{lead.text: "This message will be sent as a spoiler"
+                                        lead.draw_text.color: gray_300}
+                                }
+                                // Rails' input bar: gray-600, radius 8, 1px accent/.2
+                                // border; focused, the border goes to accent/.5 with a
+                                // 2px accent/.12 ring and a 20px accent/.1 glow, 0.25s.
+                                composer_shell := View{
                                     width: Fill height: Fit
-                                    padding: Inset{left: 4 right: 4}
-                                    flow: Right
-                                    align: Align{y: 0.5}
+                                    padding: 8
+                                    show_bg: true
                                     new_batch: true
-                                    draw_bg.color: gray_600
-                                    draw_bg.border_radius: 8.0
-                                    draw_bg.border_size: 1.0
-                                    draw_bg.border_color: accent_20
-                                    View{width: Fit height: Fit padding: 8
-                                        Ico{draw_icon.svg: crate_resource("self:resources/icons/plus.svg")}}
-                                    composer := TextInput{
-                                        width: Fill height: 40
-                                        empty_text: "Message #general"
-                                        draw_bg +: {color: #0000 color_hover: #0000 color_focus: #0000 color_empty: #0000
-                                            border_color: #0000 border_color_hover: #0000 border_color_focus: #0000 border_color_empty: #0000}
-                                        draw_text +: {color: gray_100 color_empty: gray_400}
+                                    draw_bg +: {
+                                        focus: instance(0.0)
+                                        fill: uniform(gray_600)
+                                        edge: uniform(accent_20)
+                                        edge_focus: uniform(accent_50)
+                                        glow: uniform(accent)
+                                        pixel: fn() {
+                                            let p = self.pos * self.rect_size
+                                            let c = self.rect_size * 0.5
+                                            // Distance to the bar: a rect inset 8px, radius 8.
+                                            let q = abs(p - c) - (c - vec2(8.0, 8.0)) + vec2(8.0, 8.0)
+                                            let d = length(max(q, vec2(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - 8.0
+                                            let border = mix(self.edge, self.edge_focus, self.focus)
+                                            let inside = 1.0 - clamp(d + 0.5, 0.0, 1.0)
+                                            let on_edge = clamp(d + 1.5, 0.0, 1.0) * inside
+                                            let body = mix(self.fill.rgb, border.rgb, on_edge * border.a)
+                                            let ring = (1.0 - smoothstep(0.5, 2.5, d)) * 0.12
+                                            let halo = exp(-max(d, 0.0) / 7.0) * 0.1
+                                            let out_a = (ring + halo) * self.focus * (1.0 - inside)
+                                            return vec4(body * inside + self.glow.rgb * out_a, inside + out_a)
+                                        }
                                     }
-                                    View{width: Fit height: Fit padding: 8
-                                        Ico{draw_icon.svg: crate_resource("self:resources/icons/eye_off.svg")}}
-                                    View{width: Fit height: Fit padding: 8
-                                        Ico{draw_icon.svg: crate_resource("self:resources/icons/smile.svg")}}
-                                    View{width: Fit height: Fit padding: 8
-                                        Ico{draw_icon.svg: crate_resource("self:resources/icons/send.svg")}}
+                                    animator: Animator{
+                                        focus: {
+                                            default: @off
+                                            off: AnimatorState{from: {all: Forward {duration: 0.25}} apply: {draw_bg: {focus: 0.0}}}
+                                            on: AnimatorState{from: {all: Forward {duration: 0.25}} apply: {draw_bg: {focus: 1.0}}}
+                                        }
+                                    }
+                                    View{
+                                        width: Fill height: Fit
+                                        padding: Inset{left: 8 right: 8}
+                                        flow: Right
+                                        align: Align{y: 0.5}
+                                        attach_btn := ComposerBtn{ico.draw_icon.svg: crate_resource("self:resources/icons/plus.svg")}
+                                        // Rails: text-sm leading-6, py-2 px-1, up to max-h-48.
+                                        composer := mod.widgets.RichInput{
+                                            width: Fill height: Fit{max: FitBound.Abs(192)}
+                                            padding: Inset{left: 4 right: 4 top: 8 bottom: 8}
+                                            is_multiline: true
+                                            submit_on_enter: true
+                                            highlight: true
+                                            empty_text: "Message #general"
+                                            draw_bg +: {pixel: fn() { return vec4(0.0, 0.0, 0.0, 0.0) }}
+                                            draw_text +: {color: gray_100 color_empty: gray_400
+                                                text_style +: {font_size: 10.5 line_spacing: 1.5}}
+                                        }
+                                        spoiler_btn := ComposerBtn{ico.draw_icon.svg: crate_resource("self:resources/icons/eye_off.svg")}
+                                        emoji_btn := ComposerBtn{ico.draw_icon.svg: crate_resource("self:resources/icons/smile.svg")}
+                                        send_btn := ComposerBtn{ico.draw_icon.svg: crate_resource("self:resources/icons/send.svg")}
+                                    }
                                 }
                             }
                         }
@@ -1737,6 +1851,9 @@ pub struct App {
     dm_with: Option<String>,
     #[rust]
     dm_name: String,
+    /// Rails' spoiler toggle for the next message.
+    #[rust]
+    spoiler: bool,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1805,6 +1922,11 @@ fn set_text_end(cx: &mut Cx, input: &TextInputRef, text: &str) {
     input.set_cursor(cx, makepad_widgets::makepad_draw::text::selection::Cursor { index: text.len(), prefer_next_row: false }, false);
 }
 
+fn set_rich_end(cx: &mut Cx, input: &rich_input::RichInputRef, text: &str) {
+    input.set_text(cx, text);
+    input.set_cursor(cx, makepad_widgets::makepad_draw::text::selection::Cursor { index: text.len(), prefer_next_row: false }, false);
+}
+
 impl App {
     fn send(&self, cmd: backend::Command) {
         if let Some(tx) = &self.backend {
@@ -1813,7 +1935,7 @@ impl App {
     }
 
     fn focus_composer(&self, cx: &mut Cx) {
-        if let Some(mut input) = self.ui.text_input(cx, ids!(composer)).borrow_mut() {
+        if let Some(mut input) = self.ui.rich_input(cx, ids!(composer)).borrow_mut() {
             input.take_key_focus(cx);
         }
     }
@@ -1821,7 +1943,7 @@ impl App {
     fn clear_bars(&mut self, cx: &mut Cx) {
         self.reply_to = None;
         if self.editing.take().is_some() {
-            self.ui.text_input(cx, ids!(composer)).set_text(cx, "");
+            self.ui.rich_input(cx, ids!(composer)).set_text(cx, "");
         }
         self.ui.view(cx, ids!(reply_bar)).set_visible(cx, false);
         self.ui.view(cx, ids!(edit_bar)).set_visible(cx, false);
@@ -1855,15 +1977,18 @@ impl App {
                 self.clear_bars(cx);
                 self.reply_to = Some(row.id.clone());
                 let preview: String = row.body.as_deref().unwrap_or("…").chars().take(80).collect();
-                self.ui.label(cx, ids!(reply_bar.label)).set_text(cx, &format!("Replying to {}  —  {}", row.author, preview));
+                self.ui.label(cx, ids!(reply_bar.who)).set_text(cx, &row.author);
+                self.ui.label(cx, ids!(reply_bar.label)).set_text(cx, &preview);
                 self.ui.view(cx, ids!(reply_bar)).set_visible(cx, true);
                 self.focus_composer(cx);
             }
             MessageAction::Edit(_) => {
                 self.clear_bars(cx);
                 self.editing = Some(row.id.clone());
-                let composer = self.ui.text_input(cx, ids!(composer));
-                set_text_end(cx, &composer, row.body.as_deref().unwrap_or(""));
+                let composer = self.ui.rich_input(cx, ids!(composer));
+                set_rich_end(cx, &composer, row.body.as_deref().unwrap_or(""));
+                let preview: String = row.body.as_deref().unwrap_or("").chars().take(80).collect();
+                self.ui.label(cx, ids!(edit_bar.label)).set_text(cx, &preview);
                 self.ui.view(cx, ids!(edit_bar)).set_visible(cx, true);
                 self.focus_composer(cx);
             }
@@ -2327,13 +2452,13 @@ impl App {
                 false,
             ),
             A::Mention(name) => {
-                let composer = self.ui.text_input(cx, ids!(composer));
+                let composer = self.ui.rich_input(cx, ids!(composer));
                 let mut text = composer.text();
                 if !text.is_empty() && !text.ends_with(' ') {
                     text.push(' ');
                 }
                 text.push_str(&format!("@{name} "));
-                set_text_end(cx, &composer, &text);
+                set_rich_end(cx, &composer, &text);
                 self.focus_composer(cx);
             }
             A::RolesFor(pk) => {
@@ -2956,7 +3081,7 @@ impl App {
                 self.dm_name = person.name.clone();
                 self.ui.label(cx, ids!(channel_hash)).set_text(cx, "@");
                 self.ui.label(cx, ids!(channel_name)).set_text(cx, &person.name);
-                self.ui.text_input(cx, ids!(composer)).set_empty_text(cx, format!("Message @{}", person.name));
+                self.ui.rich_input(cx, ids!(composer)).set_empty_text(cx, format!("Message @{}", person.name));
                 self.ui.view(cx, ids!(dm_request)).set_visible(cx, request.is_some());
                 self.ui.view(cx, ids!(composer_box)).set_visible(cx, request.is_none());
                 if let Some(n) = request {
@@ -3562,18 +3687,33 @@ impl MatchEvent for App {
             }
         }
 
-        let composer = self.ui.text_input(cx, ids!(composer));
+        let composer = self.ui.rich_input(cx, ids!(composer));
         if composer.escaped(actions) {
             self.clear_bars(cx);
         }
-        if let Some((text, _)) = composer.returned(actions) {
+        // The bar lights up while the composer has focus.
+        let focus = actions.find_widget_action(composer.widget_uid()).map(|a| a.cast::<TextInputAction>());
+        match focus {
+            Some(TextInputAction::KeyFocus) => self.ui.view(cx, ids!(composer_shell)).animator_play(cx, ids!(focus.on)),
+            Some(TextInputAction::KeyFocusLost) => self.ui.view(cx, ids!(composer_shell)).animator_play(cx, ids!(focus.off)),
+            _ => {}
+        }
+        if tapped(&self.ui, cx, ids!(spoiler_btn)) || tapped(&self.ui, cx, ids!(spoiler_bar.close)) {
+            self.spoiler = !self.spoiler;
+            self.ui.view(cx, ids!(spoiler_bar)).set_visible(cx, self.spoiler);
+            self.focus_composer(cx);
+        }
+        let send_now = tapped(&self.ui, cx, ids!(send_btn)).then(|| composer.text());
+        if let Some(text) = composer.returned(actions).map(|(t, _)| t).or(send_now) {
             let text = text.trim();
             if !text.is_empty() {
                 match self.editing.take() {
                     Some(id) => self.send(backend::Command::Edit { id, text: text.to_owned() }),
                     None => {
                         let reply_to = self.reply_to.take();
-                        self.send(backend::Command::Send { text: text.to_owned(), reply_to });
+                        let spoiler = std::mem::take(&mut self.spoiler);
+                        self.ui.view(cx, ids!(spoiler_bar)).set_visible(cx, false);
+                        self.send(backend::Command::Send { text: text.to_owned(), reply_to, spoiler });
                     }
                 }
                 self.ui.view(cx, ids!(reply_bar)).set_visible(cx, false);
@@ -3596,6 +3736,8 @@ impl MatchEvent for App {
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
         crate::makepad_widgets::script_mod(vm);
+        rich_input::script_mod(vm);
+        message_text::script_mod(vm);
         self::script_mod(vm)
     }
 

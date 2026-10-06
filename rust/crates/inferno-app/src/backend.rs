@@ -292,7 +292,7 @@ pub enum Update {
 pub enum Command {
     SelectServer(String),
     SelectChannel(String),
-    Send { text: String, reply_to: Option<String> },
+    Send { text: String, reply_to: Option<String>, spoiler: bool },
     Edit { id: String, text: String },
     Pin { id: String, pinned: bool },
     CreateServer(String),
@@ -574,10 +574,10 @@ impl Backend {
                 self.channel = Some(id);
                 self.publish_channel();
             }
-            Command::Send { text, .. } if self.dm.is_some() => {
+            Command::Send { text, spoiler, .. } if self.dm.is_some() => {
                 let to = self.dm.expect("checked");
                 self.session
-                    .send_dm(&to, &Payload::Message { content: text, files: vec![], spoiler: false })
+                    .send_dm(&to, &Payload::Message { content: text, files: vec![], spoiler })
                     .await
                     .map_err(|e| e.to_string())?;
                 self.publish_dm();
@@ -657,11 +657,11 @@ impl Backend {
                 let people = self.find_people(&q).await;
                 Cx::post_action(Update::People(people));
             }
-            Command::Send { text, reply_to } => {
+            Command::Send { text, reply_to, spoiler } => {
                 let (gid, ch) = self.selected()?;
                 let reply_to = reply_to.and_then(|id| EventId::from_hex(&id).ok());
                 self.session
-                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, ..Default::default() })
+                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, spoiler, ..Default::default() })
                     .await
                     .map_err(|e| e.to_string())?;
                 self.publish_timeline();

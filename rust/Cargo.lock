@@ -34,7 +34,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c982642fa9e8606056828ee9a8505737230110bb1099153c79efe865c59d12ba"
 dependencies = [
- "memchr",
+ "memchr 2.8.3",
 ]
 
 [[package]]
@@ -951,7 +951,7 @@ dependencies = [
  "futures-macro",
  "futures-sink",
  "futures-task",
- "memchr",
+ "memchr 2.8.3",
  "pin-project-lite",
  "slab",
 ]
@@ -1288,9 +1288,11 @@ version = "0.1.0"
 dependencies = [
  "inferno-core",
  "makepad-widgets",
+ "pulldown-cmark",
  "serde",
  "serde_json",
  "tokio",
+ "unicode-segmentation 1.12.0",
 ]
 
 [[package]]
@@ -1573,6 +1575,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "makepad-latex-math"
+version = "0.1.0"
+source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
+dependencies = [
+ "ttf-parser",
+]
+
+[[package]]
 name = "makepad-live-id"
 version = "1.0.0"
 source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
@@ -1795,6 +1805,7 @@ version = "2.0.0"
 source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
 dependencies = [
  "makepad-widgets-core",
+ "makepad-widgets-rich-text",
 ]
 
 [[package]]
@@ -1805,6 +1816,18 @@ dependencies = [
  "makepad-derive-widget",
  "makepad-draw",
  "ttf-parser",
+ "unicode-segmentation 1.12.0",
+]
+
+[[package]]
+name = "makepad-widgets-rich-text"
+version = "2.0.0"
+source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
+dependencies = [
+ "makepad-html",
+ "makepad-latex-math",
+ "makepad-widgets-core",
+ "pulldown-cmark",
  "unicode-segmentation 1.12.0",
 ]
 
@@ -1863,6 +1886,11 @@ source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7a
 dependencies = [
  "makepad-zune-core",
 ]
+
+[[package]]
+name = "memchr"
+version = "2.7.6"
+source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
 
 [[package]]
 name = "memchr"
@@ -2278,6 +2306,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pulldown-cmark"
+version = "0.12.2"
+source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
+dependencies = [
+ "bitflags 2.10.0",
+ "memchr 2.7.6",
+ "unicase",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2380,7 +2418,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
 dependencies = [
  "aho-corasick",
- "memchr",
+ "memchr 2.8.3",
  "regex-automata",
  "regex-syntax",
 ]
@@ -2392,7 +2430,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
 dependencies = [
  "aho-corasick",
- "memchr",
+ "memchr 2.8.3",
  "regex-syntax",
 ]
 
@@ -2646,7 +2684,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
 dependencies = [
  "itoa",
- "memchr",
+ "memchr 2.8.3",
  "serde",
  "serde_core",
  "zmij",
@@ -3083,6 +3121,11 @@ dependencies = [
  "tempfile",
  "windows-sys 0.61.2",
 ]
+
+[[package]]
+name = "unicase"
+version = "2.9.0"
+source = "git+https://github.com/makepad/makepad.git?rev=44a01c5381ab9f26526bd7ad18d30b7d35245599#44a01c5381ab9f26526bd7ad18d30b7d35245599"
 
 [[package]]
 name = "unicode-bidi"
@@ -3532,7 +3575,7 @@ version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
 dependencies = [
- "memchr",
+ "memchr 2.8.3",
 ]
 
 [[package]]

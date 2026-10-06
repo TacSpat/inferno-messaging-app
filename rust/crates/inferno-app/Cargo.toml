@@ -11,6 +11,10 @@ path = "src/main.rs"
 [dependencies]
 inferno-core.workspace = true
 makepad-widgets.workspace = true
+# The same copy Makepad uses (for the vendored RichInput).
+# Makepad's copy, for the forked MessageText.
+pulldown-cmark = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599", default-features = false }
+unicode-segmentation = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }

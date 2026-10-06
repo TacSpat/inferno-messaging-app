@@ -261,8 +261,16 @@ impl Widget for MessageList {
                 let mut row_bg = item.clone();
                 script_apply_eval!(cx, row_bg, {draw_bg +: {flash: #(flash)}});
 
+                // Markdown re-lays-out on every set, so only set what changed.
+                let set_body = |cx: &mut Cx, w: WidgetRef| {
+                    let md = crate::message_format::to_markdown(body);
+                    if w.text() != md {
+                        w.set_text(cx, &md);
+                    }
+                };
                 if msg.grouped {
-                    item.label(cx, ids!(line.body)).set_text(cx, body);
+                    let w = item.widget(cx, ids!(line.body));
+                    set_body(cx, w);
                     item.draw_all(cx, &mut Scope::empty());
                     continue;
                 }
@@ -281,7 +289,8 @@ impl Widget for MessageList {
                 row.label(cx, ids!(content.head.time)).set_text(cx, &format!("{}{edited}{pinned}", clock(msg.at)));
                 row.view(cx, ids!(content.reply)).set_visible(cx, msg.reply.is_some());
                 row.label(cx, ids!(content.reply.text)).set_text(cx, msg.reply.as_deref().unwrap_or(""));
-                row.label(cx, ids!(content.body)).set_text(cx, body);
+                let w = row.widget(cx, ids!(content.body));
+                set_body(cx, w);
                 item.draw_all(cx, &mut Scope::empty());
             }
         }
