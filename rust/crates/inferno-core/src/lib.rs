@@ -8,6 +8,7 @@ pub mod keys;
 pub mod kinds;
 pub mod relay;
 pub mod search;
+pub mod social;
 pub mod server;
 pub mod session;
 pub mod store;

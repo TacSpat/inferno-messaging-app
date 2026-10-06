@@ -77,6 +77,22 @@ const MIGRATIONS: &[&str] = &[
         value TEXT NOT NULL
     );
     "#,
+    // Decrypted DMs, so a gift wrap is opened once rather than on every
+    // read. `wrap_id` is the event we got it from (several wraps can carry
+    // one rumor: ours and the recipient's).
+    r#"
+    CREATE TABLE dm_rumors (
+        id           TEXT PRIMARY KEY,
+        sender       TEXT NOT NULL,
+        counterparty TEXT NOT NULL,
+        created_at   INTEGER NOT NULL,
+        body         TEXT NOT NULL
+    );
+    CREATE INDEX dm_rumors_counterparty ON dm_rumors (counterparty, created_at);
+    CREATE TABLE dm_opened (
+        wrap_id TEXT PRIMARY KEY
+    );
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {

@@ -6,6 +6,67 @@
 //! from the cache, so a restart shows the same thing a live session did.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex};
+
+use nostr_sdk::prelude::*;
+use tokio::sync::broadcast;
+
+use crate::channel::send::{self, Outgoing, SendError};
+use crate::channel::{keys as channel_keys, ChannelKeys, ChannelMessage, Timeline};
+use crate::dm::{self, IncomingDm};
+use crate::relay::{PublishReport, RelayPool};
+use crate::server::invite_link::{self, InviteLink};
+use crate::server::publish::{self, PublishError};
+use crate::server::{order, wire, Permission, ServerState};
+use crate::store::{now_secs, Store, StoreError};
+use crate::sync::{config::ConfigSync, profile::{self, ProfileUpdate}, relays};
+use crate::{dtag, kinds};
+use crate::social::{self, DmMessage, Friendship, Payload, Response, Rumor};
+
+
+/// A row of the DM sidebar.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Conversation {
+    pub with: PublicKey,
+    pub last_at: i64,
+    pub preview: String,
+    pub unread: usize,
+    /// From someone who isn't a friend and whom we haven't answered:
+    /// Rails' message request.
+    pub request: bool,
+}
+
+/// Per-person DM choices that follow the user across devices.
+#[derive(Debug, Default)]
+struct DmState {
+    accepted: HashMap<PublicKey, i64>,
+    ignored: HashMap<PublicKey, i64>,
+    closed: HashMap<PublicKey, i64>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct DmStateWire {
+    #[serde(default)]
+    accepted: HashMap<String, i64>,
+    #[serde(default)]
+    ignored: HashMap<String, i64>,
+    #[serde(default)]
+    closed: HashMap<String, i64>,
+}
+
+impl From<DmStateWire> for DmState {
+    fn from(w: DmStateWire) -> Self {
+        let conv = |m: HashMap<String, i64>| m.into_iter().filter_map(|(k, v)| Some((PublicKey::from_hex(&k).ok()?, v))).collect();
+        DmState { accepted: conv(w.accepted), ignored: conv(w.ignored), closed: conv(w.closed) }
+    }
+}
+
+impl From<&DmState> for DmStateWire {
+    fn from(s: &DmState) -> Self {
+        let conv = |m: &HashMap<PublicKey, i64>| m.iter().map(|(k, v)| (k.to_hex(), *v)).collect();
+        DmStateWire { accepted: conv(&s.accepted), ignored: conv(&s.ignored), closed: conv(&s.closed) }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct SearchHit {
@@ -27,21 +88,6 @@ pub struct ChannelSpec {
     pub post_only: bool,
     pub nsfw: bool,
 }
-use std::sync::{Arc, Mutex};
-
-use nostr_sdk::prelude::*;
-use tokio::sync::broadcast;
-
-use crate::channel::send::{self, Outgoing, SendError};
-use crate::channel::{keys as channel_keys, ChannelKeys, ChannelMessage, Timeline};
-use crate::dm::{self, IncomingDm};
-use crate::relay::{PublishReport, RelayPool};
-use crate::server::invite_link::{self, InviteLink};
-use crate::server::publish::{self, PublishError};
-use crate::server::{order, wire, Permission, ServerState};
-use crate::store::{now_secs, Store, StoreError};
-use crate::sync::{config::ConfigSync, profile::{self, ProfileUpdate}, relays};
-use crate::{dtag, kinds};
 
 const CHANNEL_KINDS: [u16; 4] = [kinds::CHANNEL_MESSAGE, kinds::CHANNEL_DELETE, kinds::PIN, kinds::REACTION];
 const TIMELINE_LIMIT: usize = 5_000;
@@ -53,6 +99,10 @@ pub enum Update {
     /// Something in this channel's timeline changed.
     Channel { gid: String, channel_id: String },
     Dm(IncomingDm),
+    /// Friends, conversations or blocks changed.
+    Social,
+    /// A profile we were waiting for arrived.
+    Profile(PublicKey),
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -150,8 +200,15 @@ impl Session {
         if let Err(e) = (ConfigSync { keys: &keys, pool: &pool, store: &store }).pull().await {
             tracing::warn!("config pull failed: {e}");
         }
-        // Our own profile, so the UI shows what other devices last set.
-        match pool.fetch(vec![Filter::new().kind(Kind::Metadata).author(keys.public_key())]).await {
+        // Our own profile and block list, so the UI shows what other devices
+        // last set.
+        match pool
+            .fetch(vec![
+                Filter::new().kind(Kind::Metadata).author(keys.public_key()),
+                Filter::new().kind(Kind::MuteList).author(keys.public_key()),
+            ])
+            .await
+        {
             Ok(events) => {
                 for e in &events {
                     store.put_event(e)?;
@@ -173,6 +230,7 @@ impl Session {
             config_dirty: Arc::new(tokio::sync::Notify::new()),
         });
         session.rebuild_channel_keys()?;
+        session.open_stored_dms()?;
         session.resubscribe().await?;
         session.spawn_listener();
         session.spawn_batchers();
@@ -548,6 +606,285 @@ impl Session {
         self.after_structure_change(gid).await
     }
 
+    // ─── DMs and friends ────────────────────────────────────────────────
+
+    fn counterparty(&self, msg: &IncomingDm) -> PublicKey {
+        let me = self.keys.public_key();
+        if msg.sender == me {
+            msg.recipient.unwrap_or(me)
+        } else {
+            msg.sender
+        }
+    }
+
+    /// Caches a decrypted DM; true if it's new.
+    fn keep_dm(&self, wrap: &EventId, msg: &IncomingDm) -> Result<bool> {
+        self.store.mark_dm_opened(wrap)?;
+        Ok(self.store.put_rumor(&Rumor {
+            id: msg.id,
+            sender: msg.sender,
+            counterparty: self.counterparty(msg),
+            created_at: msg.created_at.as_secs() as i64,
+            body: msg.body.clone(),
+        })?)
+    }
+
+    /// Opens any cached wraps not opened yet (e.g. from before this cache
+    /// existed). Each wrap is decrypted once.
+    fn open_stored_dms(&self) -> Result<()> {
+        let me = self.keys.public_key().to_hex();
+        let mut wraps = self.store.events_by_tag(Kind::GiftWrap, 'p', &me, usize::MAX >> 1)?;
+        wraps.extend(self.store.events_by_tag(Kind::Custom(kinds::DM_LEGACY), 'p', &me, usize::MAX >> 1)?);
+        for w in wraps {
+            if self.store.dm_opened(&w.id)? {
+                continue;
+            }
+            match dm::open(&self.keys, &w) {
+                Ok(msg) => {
+                    self.keep_dm(&w.id, &msg)?;
+                }
+                Err(_) => self.store.mark_dm_opened(&w.id)?,
+            }
+        }
+        if let Some(mutes) = self.store.get_addressable(Kind::MuteList, &self.keys.public_key(), "")? {
+            self.apply_mute_list(&mutes)?;
+        }
+        Ok(())
+    }
+
+    /// Sends one DM payload as NIP-17 and keeps it locally right away.
+    pub async fn send_dm(&self, to: &PublicKey, payload: &Payload) -> Result<EventId> {
+        // After everything already in this conversation: ties are ordered
+        // by id, which would put an edit before its message half the time.
+        let last = self.store.rumors_with(to)?.iter().map(|r| r.created_at).max();
+        let at = crate::sync::publish_time(last.map(|t| Timestamp::from(t as u64)));
+        let events = dm::build_at(&self.keys, *to, &payload.body(), vec![], at).map_err(|e| SessionError::Other(e.to_string()))?;
+        let own = events.last().expect("at least one wrap");
+        let msg = dm::open(&self.keys, own).map_err(|e| SessionError::Other(e.to_string()))?;
+        for e in &events {
+            self.store.put_event(e)?;
+        }
+        self.keep_dm(&own.id, &msg)?;
+        let _ = self.updates.send(Update::Social);
+        let mut accepted = false;
+        for e in &events {
+            accepted |= self.pool.publish(e).await?.any_accepted();
+        }
+        if !accepted {
+            return Err(SessionError::NotPublished);
+        }
+        Ok(msg.id)
+    }
+
+    pub fn friendships(&self) -> Result<HashMap<PublicKey, Friendship>> {
+        let ignored = self.dm_state()?.ignored;
+        let blocked = self.blocked()?;
+        let mut f = social::friendships(&self.keys.public_key(), &self.store.rumors()?, &ignored);
+        f.retain(|pk, _| !blocked.contains(pk));
+        Ok(f)
+    }
+
+    pub fn friendship(&self, pk: &PublicKey) -> Result<Friendship> {
+        Ok(self.friendships()?.get(pk).copied().unwrap_or_default())
+    }
+
+    /// Add Friend; accepts instead if they already asked us.
+    pub async fn add_friend(&self, pk: &PublicKey) -> Result<()> {
+        let payload = match self.friendship(pk)? {
+            Friendship::Incoming => Payload::FriendResponse(Response::Accepted),
+            Friendship::Accepted | Friendship::Outgoing => return Ok(()),
+            Friendship::None => Payload::FriendRequest,
+        };
+        self.send_dm(pk, &payload).await?;
+        self.want_profiles(&[*pk]).await;
+        Ok(())
+    }
+
+    pub async fn answer_friend(&self, pk: &PublicKey, accept: bool) -> Result<()> {
+        let r = if accept { Response::Accepted } else { Response::Declined };
+        self.send_dm(pk, &Payload::FriendResponse(r)).await?;
+        Ok(())
+    }
+
+    /// Remove Friend, or cancel an outgoing request.
+    pub async fn remove_friend(&self, pk: &PublicKey) -> Result<()> {
+        self.send_dm(pk, &Payload::FriendResponse(Response::Removed)).await?;
+        Ok(())
+    }
+
+    /// Rails' Ignore: hides the request here, tells them nothing.
+    pub fn ignore_friend(&self, pk: &PublicKey) -> Result<()> {
+        self.edit_dm_state(|s| {
+            s.ignored.insert(*pk, now_secs());
+        })
+    }
+
+    /// One conversation's messages, oldest first.
+    pub fn dm_messages(&self, with: &PublicKey) -> Result<Vec<DmMessage>> {
+        Ok(social::conversation(&self.store.rumors_with(with)?))
+    }
+
+    /// The DM sidebar: newest first. Blocked people and closed conversations
+    /// (with nothing newer) are left out.
+    pub fn conversations(&self) -> Result<Vec<Conversation>> {
+        let me = self.keys.public_key();
+        let state = self.dm_state()?;
+        let blocked = self.blocked()?;
+        let friends = self.friendships()?;
+        let mut by: HashMap<PublicKey, Vec<Rumor>> = HashMap::new();
+        for r in self.store.rumors()? {
+            by.entry(r.counterparty).or_default().push(r);
+        }
+        let mut out = Vec::new();
+        for (with, rumors) in by {
+            if blocked.contains(&with) {
+                continue;
+            }
+            let messages = social::conversation(&rumors);
+            let Some(last) = messages.last() else { continue };
+            if state.closed.get(&with).is_some_and(|at| *at >= last.created_at) {
+                continue;
+            }
+            let read = self.store.last_read(&format!("dm:{}", with.to_hex()))?.unwrap_or(0);
+            let unread = messages.iter().filter(|m| m.author != me && m.created_at > read).count();
+            let request = with != me
+                && friends.get(&with) != Some(&Friendship::Accepted)
+                && !state.accepted.contains_key(&with)
+                && !messages.iter().any(|m| m.author == me);
+            out.push(Conversation {
+                with,
+                last_at: last.created_at,
+                preview: last.content.chars().take(80).collect(),
+                unread,
+                request,
+            });
+        }
+        out.sort_by_key(|c| std::cmp::Reverse(c.last_at));
+        Ok(out)
+    }
+
+    /// Accepts a message request (Rails: shows the messages, unblurs links).
+    pub fn accept_dm(&self, with: &PublicKey) -> Result<()> {
+        self.edit_dm_state(|s| {
+            s.accepted.insert(*with, now_secs());
+        })
+    }
+
+    /// Rails' Close Conversation (and Decline on a request): hidden until a
+    /// new message arrives.
+    pub fn close_dm(&self, with: &PublicKey) -> Result<()> {
+        let at = self.store.rumors_with(with)?.iter().map(|r| r.created_at).max().unwrap_or_else(now_secs);
+        self.edit_dm_state(|s| {
+            s.closed.insert(*with, at);
+        })
+    }
+
+    pub fn mark_dm_read(&self, with: &PublicKey) -> Result<()> {
+        let at = self.store.rumors_with(with)?.iter().map(|r| r.created_at).max().unwrap_or_else(now_secs);
+        self.store.mark_read(&format!("dm:{}", with.to_hex()), at)?;
+        self.push_config();
+        let _ = self.updates.send(Update::Social);
+        Ok(())
+    }
+
+    fn dm_state(&self) -> Result<DmState> {
+        Ok(self
+            .store
+            .synced_setting("dm_state")?
+            .and_then(|v| serde_json::from_value::<DmStateWire>(v).ok())
+            .map(DmState::from)
+            .unwrap_or_default())
+    }
+
+    fn edit_dm_state(&self, f: impl FnOnce(&mut DmState)) -> Result<()> {
+        let mut state = self.dm_state()?;
+        f(&mut state);
+        let wire = DmStateWire::from(&state);
+        self.store.set_synced_setting("dm_state", serde_json::to_value(wire).map_err(|e| SessionError::Other(e.to_string()))?)?;
+        self.push_config();
+        let _ = self.updates.send(Update::Social);
+        Ok(())
+    }
+
+    pub fn blocked_list(&self) -> Result<Vec<PublicKey>> {
+        Ok(self.blocked()?.into_iter().collect())
+    }
+
+    /// Rails' Block User: they're dropped from friends and DMs, and the
+    /// list syncs as a NIP-51 mute list with the entries encrypted to
+    /// ourselves (Rails published them in the clear).
+    pub async fn block(&self, pk: &PublicKey) -> Result<()> {
+        if self.friendship(pk)? != Friendship::None {
+            let _ = self.send_dm(pk, &Payload::FriendResponse(Response::Removed)).await;
+        }
+        self.store.block(&pk.to_hex())?;
+        self.publish_mute_list().await
+    }
+
+    pub async fn unblock(&self, pk: &PublicKey) -> Result<()> {
+        self.store.unblock(&pk.to_hex())?;
+        self.publish_mute_list().await
+    }
+
+    async fn publish_mute_list(&self) -> Result<()> {
+        let tags: Vec<Vec<String>> = self.store.blocked_pubkeys()?.into_iter().map(|h| vec!["p".to_owned(), h]).collect();
+        let plain = serde_json::to_string(&tags).map_err(|e| SessionError::Other(e.to_string()))?;
+        let content = nostr::nips::nip44::encrypt(self.keys.secret_key(), &self.keys.public_key(), plain, nostr::nips::nip44::Version::V2)
+            .map_err(|e| SessionError::Other(e.to_string()))?;
+        let event = EventBuilder::new(Kind::MuteList, content).finalize(&self.keys).map_err(|e| SessionError::Other(e.to_string()))?;
+        let _ = self.updates.send(Update::Social);
+        self.publish(&event).await?;
+        Ok(())
+    }
+
+    /// Replaces our blocks with a mute list from another device. Public `p`
+    /// tags (other clients) count too.
+    fn apply_mute_list(&self, event: &Event) -> Result<()> {
+        let mut pks: Vec<String> = event.tags.public_keys().map(|p| p.to_hex()).collect();
+        if let Ok(plain) = nostr::nips::nip44::decrypt(self.keys.secret_key(), &self.keys.public_key(), &event.content) {
+            if let Ok(tags) = serde_json::from_str::<Vec<Vec<String>>>(&plain) {
+                pks.extend(tags.into_iter().filter(|t| t.first().map(String::as_str) == Some("p")).filter_map(|t| t.get(1).cloned()));
+            }
+        }
+        for h in self.store.blocked_pubkeys()? {
+            if !pks.contains(&h) {
+                self.store.unblock(&h)?;
+            }
+        }
+        for h in &pks {
+            self.store.block(h)?;
+        }
+        Ok(())
+    }
+
+    /// Someone's kind 0, if we have it.
+    pub fn profile_of(&self, pk: &PublicKey) -> Result<Option<crate::server::wire::MemberProfile>> {
+        Ok(self.store.get_addressable(Kind::Metadata, pk, "")?.map(|e| profile::member_profile(&profile::content(&e))))
+    }
+
+    /// Fetches profiles we don't have yet, in the background. A full fetch
+    /// per person would hammer relays, so missing ones go in one filter.
+    pub async fn want_profiles(&self, pks: &[PublicKey]) {
+        let missing: Vec<PublicKey> = pks
+            .iter()
+            .filter(|p| self.store.get_addressable(Kind::Metadata, p, "").ok().flatten().is_none())
+            .copied()
+            .collect();
+        if missing.is_empty() {
+            return;
+        }
+        let (pool, store, updates) = (self.pool.clone(), self.store.clone(), self.updates.clone());
+        tokio::spawn(async move {
+            if let Ok(events) = pool.fetch(vec![Filter::new().kind(Kind::Metadata).authors(missing)]).await {
+                for e in &events {
+                    if store.put_event(e).is_ok() {
+                        let _ = updates.send(Update::Profile(e.pubkey));
+                    }
+                }
+            }
+        });
+    }
+
     // ─── Search ─────────────────────────────────────────────────────────
 
     /// Searches the cached messages of every channel in `gid` we can read.
@@ -807,14 +1144,6 @@ impl Session {
         Ok(event)
     }
 
-    pub async fn send_dm(&self, to: PublicKey, body: &str) -> Result<()> {
-        let events = dm::build(&self.keys, to, body, vec![]).map_err(|e| SessionError::Other(e.to_string()))?;
-        for e in &events {
-            self.pool.publish(e).await?;
-        }
-        Ok(())
-    }
-
     // ─── Subscriptions ───────────────────────────────────────────────────
 
     async fn fetch_server(&self, gid: &str) -> Result<Vec<Event>> {
@@ -865,6 +1194,8 @@ impl Session {
         let me_hex = vec![me.to_hex()];
         let dm_newest = self.store.newest_tagged(&[Kind::GiftWrap.as_u16(), kinds::DM_LEGACY], 'p', &me_hex)?;
         self.pool.subscribe_keyed("dms", dm::filters(me, self.resume_from(dm_newest))).await?;
+        // Our block list (NIP-51 mute list, kept private).
+        self.pool.subscribe_keyed("mutes", vec![Filter::new().kind(Kind::MuteList).author(me)]).await?;
 
         let gids = self.servers()?;
         let mut groups = HashMap::new();
@@ -946,12 +1277,26 @@ impl Session {
             _ if event.kind == Kind::GiftWrap || event.kind == Kind::PrivateDirectMessage => {
                 if let Ok(msg) = dm::open(&self.keys, event) {
                     self.store.put_event(event)?;
-                    if !self.blocked()?.contains(&msg.sender) {
+                    let new = self.keep_dm(&event.id, &msg)?;
+                    if new && !self.blocked()?.contains(&msg.sender) {
+                        let counterparty = self.counterparty(&msg);
+                        self.want_profiles(&[counterparty]).await;
                         let _ = self.updates.send(Update::Dm(msg));
+                        let _ = self.updates.send(Update::Social);
                     }
                 } else if event.kind == Kind::GiftWrap {
                     self.try_key_share(event)?;
                 }
+            }
+            _ if event.kind == Kind::MuteList && event.pubkey == self.keys.public_key() => {
+                if matches!(self.store.put_event(event)?, crate::store::PutOutcome::Inserted) {
+                    self.apply_mute_list(event)?;
+                    let _ = self.updates.send(Update::Social);
+                }
+            }
+            _ if event.kind == Kind::Metadata => {
+                self.store.put_event(event)?;
+                let _ = self.updates.send(Update::Profile(event.pubkey));
             }
             kinds::SERVER_METADATA..=kinds::SERVER_INVITE => {
                 let Some(gid) = wire::server_gid(event) else { return Ok(()) };

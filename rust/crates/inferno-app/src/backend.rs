@@ -814,7 +814,7 @@ impl Backend {
                     self.publish_timeline();
                 }
             }
-            SessionUpdate::Dm(_) => {}
+            SessionUpdate::Dm(_) | SessionUpdate::Social | SessionUpdate::Profile(_) => {}
         }
     }
 

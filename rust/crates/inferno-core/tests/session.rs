@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use inferno_core::channel::send::Outgoing;
 use inferno_core::nostr_sdk::prelude::*;
+use inferno_core::social::{Friendship, Payload};
 use inferno_core::session::{ChannelSpec, Session, StartOptions, Update};
 use inferno_core::store::{RelaySource, Store};
 use tokio::sync::broadcast::Receiver;
@@ -68,7 +69,7 @@ async fn create_invite_join_chat_dm_and_restart() {
     // And the other way round, plus a DM.
     owner.send(&gid, &general, &Outgoing { content: "welcome", ..Default::default() }).await.unwrap();
     wait_for(&mut alice_rx, "owner's message", |u| matches!(u, Update::Channel { .. })).await;
-    owner.send_dm(alice_keys.public_key(), "psst").await.unwrap();
+    owner.send_dm(&alice_keys.public_key(), &Payload::Message { content: "psst".into(), files: vec![], spoiler: false }).await.unwrap();
     let dm = wait_for(&mut alice_rx, "the DM", |u| matches!(u, Update::Dm(_))).await;
     let Update::Dm(dm) = dm else { unreachable!() };
     assert_eq!((dm.sender, dm.body.as_str()), (owner_keys.public_key(), "psst"));
@@ -329,4 +330,73 @@ async fn search_finds_messages_by_text_author_and_channel() {
     assert_eq!(owner.search(&gid, &Query::parse("has: file"), 50).unwrap().len(), 1);
     let npub = inferno_core::nostr::nips::nip19::ToBech32::to_bech32(&owner.keys().public_key()).unwrap();
     assert_eq!(owner.search(&gid, &Query::parse(&format!("from: {}", &npub[..12])), 50).unwrap().len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn friends_dms_requests_blocks_and_saved_messages() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let (ak, bk, ck) = (Keys::generate(), Keys::generate(), Keys::generate());
+    let a = session(&ak, Store::open_in_memory().unwrap(), &url).await;
+    let b = session(&bk, Store::open_in_memory().unwrap(), &url).await;
+    let c = session(&ck, Store::open_in_memory().unwrap(), &url).await;
+    let (apk, bpk, cpk) = (ak.public_key(), bk.public_key(), ck.public_key());
+    let msg = |t: &str| Payload::Message { content: t.into(), files: vec![], spoiler: false };
+    let mut brx = b.updates();
+    let mut arx = a.updates();
+
+    // Friend request, accepted.
+    a.add_friend(&bpk).await.unwrap();
+    assert_eq!(a.friendship(&bpk).unwrap(), Friendship::Outgoing);
+    wait_for(&mut brx, "request", |u| matches!(u, Update::Social)).await;
+    assert_eq!(b.friendship(&apk).unwrap(), Friendship::Incoming);
+    b.answer_friend(&apk, true).await.unwrap();
+    assert_eq!(b.friendship(&apk).unwrap(), Friendship::Accepted);
+    wait_for(&mut arx, "accept", |_| a.friendship(&bpk).unwrap() == Friendship::Accepted).await;
+
+    // A conversation between friends, with an edit and a delete.
+    let first = a.send_dm(&bpk, &msg("hello")).await.unwrap();
+    let second = a.send_dm(&bpk, &msg("oops")).await.unwrap();
+    a.send_dm(&bpk, &Payload::Edit { id: first, content: "hello!".into() }).await.unwrap();
+    a.send_dm(&bpk, &Payload::Delete { id: second }).await.unwrap();
+    wait_for(&mut brx, "edits", |_| b.dm_messages(&apk).unwrap().first().is_some_and(|m| m.edited)).await;
+    let seen = b.dm_messages(&apk).unwrap();
+    assert_eq!(seen.len(), 1);
+    assert_eq!(seen[0].content, "hello!");
+    let conv = b.conversations().unwrap();
+    assert_eq!(conv.len(), 1);
+    assert!(!conv[0].request);
+    assert_eq!(conv[0].unread, 1);
+    b.mark_dm_read(&apk).unwrap();
+    assert_eq!(b.conversations().unwrap()[0].unread, 0);
+
+    // A stranger's message is a request until accepted.
+    c.send_dm(&bpk, &msg("buy my stuff")).await.unwrap();
+    wait_for(&mut brx, "stranger", |_| b.conversations().unwrap().len() == 2).await;
+    let req = b.conversations().unwrap().into_iter().find(|x| x.with == cpk).unwrap();
+    assert!(req.request);
+    b.accept_dm(&cpk).unwrap();
+    assert!(!b.conversations().unwrap().into_iter().find(|x| x.with == cpk).unwrap().request);
+
+    // Blocking hides them, and another device of b's learns it.
+    b.block(&cpk).await.unwrap();
+    assert!(b.conversations().unwrap().iter().all(|x| x.with != cpk));
+    let b2 = session(&bk, Store::open_in_memory().unwrap(), &url).await;
+    assert!(b2.blocked_list().unwrap().contains(&cpk));
+    let mut b2rx = b2.updates();
+    // Friends come back from the DMs alone.
+    if b2.friendship(&apk).unwrap() != Friendship::Accepted {
+        wait_for(&mut b2rx, "b2 friends", |_| b2.friendship(&apk).unwrap() == Friendship::Accepted).await;
+    }
+    b.unblock(&cpk).await.unwrap();
+    assert!(b.blocked_list().unwrap().is_empty());
+
+    // Saved Messages: a DM to ourselves.
+    a.send_dm(&apk, &msg("note to self")).await.unwrap();
+    assert!(a.conversations().unwrap().iter().any(|x| x.with == apk && x.preview == "note to self" && !x.request));
+
+    // Removing a friend clears it on both sides.
+    a.remove_friend(&bpk).await.unwrap();
+    assert_eq!(a.friendship(&bpk).unwrap(), Friendship::None);
+    wait_for(&mut brx, "removed", |_| b.friendship(&apk).unwrap() == Friendship::None).await;
 }

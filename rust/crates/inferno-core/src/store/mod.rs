@@ -10,6 +10,7 @@
 //!   unique index (Drift's helper only handled the primary key).
 
 pub(crate) mod events;
+mod dms;
 mod local;
 mod migrations;
 

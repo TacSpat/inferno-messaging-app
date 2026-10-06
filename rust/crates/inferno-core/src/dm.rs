@@ -55,11 +55,24 @@ pub fn build(
     body: &str,
     extra_tags: Vec<Tag>,
 ) -> Result<Vec<Event>, DmError> {
+    build_at(keys, recipient, body, extra_tags, Timestamp::now())
+}
+
+/// `build` with the rumor's timestamp chosen by the caller, so a burst of
+/// sends (a message then its edit) keeps its order.
+pub fn build_at(
+    keys: &Keys,
+    recipient: PublicKey,
+    body: &str,
+    extra_tags: Vec<Tag>,
+    created_at: Timestamp,
+) -> Result<Vec<Event>, DmError> {
     let mut tags = vec![Tag::public_key(recipient)];
     tags.extend(extra_tags);
 
     let mut rumor = EventBuilder::new(Kind::PrivateDirectMessage, body)
         .tags(tags)
+        .custom_created_at(created_at)
         .finalize_unsigned(keys.public_key());
     rumor.ensure_id();
 
