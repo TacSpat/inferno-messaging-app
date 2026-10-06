@@ -4,11 +4,11 @@ use serde_json::json;
 #[test]
 fn a_stale_server_list_cannot_drop_a_newer_join() {
     let mut phone = ServerList::default();
-    phone.set("inferno-a", true, 100);
+    phone.set_at("inferno-a", true, 100);
 
     let mut desktop = phone.clone();
-    desktop.set("inferno-b", true, 200);
-    phone.set("inferno-a", false, 150);
+    desktop.set_at("inferno-b", true, 200);
+    phone.set_at("inferno-a", false, 150);
 
     let mut merged = desktop.clone();
     merged.merge(&phone);
@@ -22,12 +22,21 @@ fn a_stale_server_list_cannot_drop_a_newer_join() {
 #[test]
 fn rejoining_after_leaving_wins_by_time() {
     let mut list = ServerList::default();
-    list.set("inferno-a", true, 100);
-    list.set("inferno-a", false, 200);
-    list.set("inferno-a", true, 150);
-    assert_eq!(list.members().count(), 0, "an older join can't undo a newer leave");
-    list.set("inferno-a", true, 300);
+    list.set_at("inferno-a", true, 100);
+    list.set_at("inferno-a", false, 200);
+    list.set_at("inferno-a", true, 150);
+    assert_eq!(list.members().count(), 0, "an older join learned elsewhere can't undo a newer leave");
+    list.set_at("inferno-a", true, 300);
     assert_eq!(list.members().collect::<Vec<_>>(), vec!["inferno-a"]);
+}
+
+#[test]
+fn a_local_leave_in_the_same_second_as_the_join_still_lands() {
+    let mut list = ServerList::default();
+    list.set("inferno-a", true, 100);
+    list.set("inferno-a", false, 100);
+    assert_eq!(list.members().count(), 0);
+    assert_eq!(list.state["inferno-a"].at, 101);
 }
 
 #[test]
@@ -36,7 +45,7 @@ fn reads_flutters_server_list_and_writes_one_it_can_read() {
     let mut list = ServerList::from_json(&flutter, 500);
     assert_eq!(list.members().count(), 2);
 
-    list.set("inferno-a", false, 600);
+    list.set_at("inferno-a", false, 600);
     let wire = list.to_json();
     assert_eq!(wire["servers"], json!(["inferno-b"]));
     assert_eq!(ServerList::from_json(&wire, 700), list, "our own form round-trips");

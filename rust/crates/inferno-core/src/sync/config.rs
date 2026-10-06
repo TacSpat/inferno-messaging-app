@@ -58,12 +58,23 @@ pub struct ServerList {
 }
 
 impl ServerList {
+    /// Records a local join or leave. It's the newest fact we know, so it
+    /// always lands, stamped after the current entry if the clock hasn't
+    /// moved on (joining and leaving in the same second would otherwise tie,
+    /// and ties keep the current entry).
     pub fn set(&mut self, gid: &str, member: bool, at: i64) {
-        merge_lww(&mut self.state, gid.to_owned(), Membership { member, at }, |m| m.at);
+        let at = self.state.get(gid).map_or(at, |m| at.max(m.at + 1));
+        self.state.insert(gid.to_owned(), Membership { member, at });
     }
 
     pub fn members(&self) -> impl Iterator<Item = &str> {
         self.state.iter().filter(|(_, m)| m.member).map(|(gid, _)| gid.as_str())
+    }
+
+    /// Records a membership as of `at`, keeping a newer one we already have
+    /// (for state learned elsewhere, unlike [`Self::set`]).
+    pub fn set_at(&mut self, gid: &str, member: bool, at: i64) {
+        merge_lww(&mut self.state, gid.to_owned(), Membership { member, at }, |m| m.at);
     }
 
     pub fn merge(&mut self, other: &ServerList) {
@@ -84,7 +95,7 @@ impl ServerList {
         if let Some(servers) = value.get("servers").and_then(Value::as_array) {
             for gid in servers.iter().filter_map(Value::as_str) {
                 if !list.state.contains_key(gid) {
-                    list.set(gid, true, published_at);
+                    list.set_at(gid, true, published_at);
                 }
             }
         }

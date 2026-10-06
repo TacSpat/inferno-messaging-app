@@ -2310,9 +2310,8 @@ impl MatchEvent for App {
         }
         if self.ui.button(cx, ids!(role_save)).clicked(actions) {
             self.read_role_editor(cx);
-            let bad = self.role_drafts.iter().find(|r| {
-                !r.everyone && !(r.color.len() == 7 && r.color.starts_with('#') && u32::from_str_radix(&r.color[1..], 16).is_ok())
-            });
+            let is_color = |c: &str| c.len() == 7 && c.starts_with('#') && u32::from_str_radix(&c[1..], 16).is_ok();
+            let bad = self.role_drafts.iter().find(|r| !r.everyone && !is_color(&r.color));
             match bad {
                 Some(r) => {
                     let msg = format!("⚠ \"{}\" isn't a #rrggbb color.", r.color);
