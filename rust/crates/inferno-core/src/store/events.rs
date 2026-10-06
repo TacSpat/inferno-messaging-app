@@ -255,4 +255,16 @@ impl Store {
         }
         Ok((have, newest))
     }
+
+    /// The newest stored event of any of `kinds`.
+    pub fn newest_of_kinds(&self, kinds: &[u16]) -> Result<Option<i64>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached("SELECT max(created_at) FROM events WHERE kind = ?1")?;
+        let mut newest = None;
+        for k in kinds {
+            let at: Option<i64> = stmt.query_row(params![k], |r| r.get(0))?;
+            newest = newest.max(at);
+        }
+        Ok(newest)
+    }
 }

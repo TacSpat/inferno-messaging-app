@@ -572,6 +572,17 @@ script_mod! {
     }
     let Field = TextInput{width: Fill height: 36}
     // Text edited in place on a card: no well, just the text.
+    let Toast = RoundedView{
+        visible: false
+        width: Fit height: Fit
+        padding: Inset{left: 16 right: 16 top: 8 bottom: 8}
+        new_batch: true
+        draw_bg.color: #x16a34a
+        draw_bg.border_radius: 8.0
+        draw_bg.border_size: 1.0
+        draw_bg.border_color: #x00000040
+        label := Txt{width: Fit text: "" draw_text.color: #xffffff draw_text.text_style.font_size: 9.5}
+    }
     let CardInput = TextInput{width: Fill height: Fit padding: Inset{left: 2 right: 2 top: 2 bottom: 2}
         draw_bg +: {pixel: fn() { return vec4(0.0, 0.0, 0.0, 0.0) }}
         draw_text +: {color: #xffffff color_empty: #xffffff59}
@@ -1859,6 +1870,15 @@ script_mod! {
                     }
 
                     // Context menus, opened at the pointer (ctxmenu.rs).
+                    // Rails' toasts: fixed top-4 right-4, rounded-lg, shadow,
+                    // green for notices, red for errors; gone after 4s.
+                    toast_layer := View{
+                        width: Fill height: Fit
+                        align: Align{x: 1.0}
+                        padding: Inset{top: 16 right: 16}
+                        flow: Down spacing: 8
+                        t0 := Toast{} t1 := Toast{} t2 := Toast{}
+                    }
                     // Rails' status emoji popover (320×380), emoji only.
                     status_layer := View{
                         visible: false
@@ -2122,6 +2142,11 @@ pub struct App {
     crop_drag: Option<DVec2>,
     #[rust]
     uploads: Uploads,
+    /// Showing notifications: (text, kind, when it goes).
+    #[rust]
+    toasts: Vec<(String, Toast, std::time::Instant)>,
+    #[rust]
+    toast_timer: Timer,
     /// The picker: frequently used, collapsed sections, tab, the sets.
     #[rust]
     picker_frequent: Vec<Cell>,
@@ -2186,6 +2211,15 @@ const APPEARANCE_PAGE: usize = 2;
 /// Picker tabs (Rails' order; GIFs wait for a Tenor key decision).
 const PICKER_STICKERS: usize = 1;
 const PICKER_EMOJI: usize = 2;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Toast {
+    Success,
+    Error,
+    Info,
+}
+
+const TOAST_SLOTS: [&[LiveId]; 3] = [ids!(t0), ids!(t1), ids!(t2)];
 
 const THEME_TILES: [(&[LiveId], &str); 7] = [
     (ids!(th_inferno), "inferno"),
@@ -3488,8 +3522,48 @@ impl App {
         self.ui.redraw(cx);
     }
 
-    fn notice(&self, cx: &mut Cx, text: &str) {
-        self.ui.label(cx, ids!(notice)).set_text(cx, text);
+    /// A notification card, top right (Rails' toast). Empty text does
+    /// nothing (callers used to clear the old notice row with it).
+    fn notice(&mut self, cx: &mut Cx, text: &str) {
+        self.toast(cx, text, Toast::Info);
+    }
+
+    fn toast(&mut self, cx: &mut Cx, text: &str, kind: Toast) {
+        let text = text.trim().trim_start_matches('⚠').trim();
+        if text.is_empty() {
+            return;
+        }
+        // The same message again just stays up longer.
+        self.toasts.retain(|(t, _, _)| t != text);
+        self.toasts.push((text.to_owned(), kind, std::time::Instant::now() + std::time::Duration::from_secs(4)));
+        while self.toasts.len() > TOAST_SLOTS.len() {
+            self.toasts.remove(0);
+        }
+        self.show_toasts(cx);
+        if self.toast_timer.is_empty() {
+            self.toast_timer = cx.start_interval(0.25);
+        }
+    }
+
+    fn show_toasts(&mut self, cx: &mut Cx) {
+        for (i, slot) in TOAST_SLOTS.iter().enumerate() {
+            let view = self.ui.view(cx, slot);
+            match self.toasts.get(i) {
+                Some((text, kind, _)) => {
+                    view.set_visible(cx, true);
+                    self.ui.label(cx, &[slot[0], id!(label)]).set_text(cx, text);
+                    let color = match kind {
+                        Toast::Success => lists::rgba(0x16a34a, 1.0),
+                        Toast::Error => theme::tok("danger", 1.0),
+                        Toast::Info => theme::tok("gray_800", 1.0),
+                    };
+                    let mut w = self.ui.widget(cx, slot);
+                    script_apply_eval!(cx, w, {draw_bg +: {color: #(color)}});
+                }
+                None => view.set_visible(cx, false),
+            }
+        }
+        self.ui.redraw(cx);
     }
 
     fn apply(&mut self, cx: &mut Cx, update: &backend::Update) {
@@ -3582,7 +3656,7 @@ impl App {
             }
             Update::Invite(link) => {
                 cx.copy_to_clipboard(link);
-                self.notice(cx, &format!("Invite link copied: {link}"));
+                self.toast(cx, "Invite link copied.", Toast::Success);
             }
             Update::Profile(p) => {
                 for (path, value) in [
@@ -3701,8 +3775,9 @@ impl App {
                     }
                 }
             }
+            Update::Notice(n) => self.toast(cx, n, Toast::Success),
             Update::Error(e) => {
-                self.notice(cx, &format!("⚠ {e}"));
+                self.toast(cx, e, Toast::Error);
                 self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ {e}"));
             }
             Update::Empty => {
@@ -3959,7 +4034,7 @@ impl MatchEvent for App {
         }
         if self.ui.view(cx, ids!(card_copy)).finger_up(actions).is_some_and(|e| !e.cancelled) {
             cx.copy_to_clipboard(&self.card.npub);
-            self.notice(cx, "User ID copied.");
+            self.toast(cx, "User ID copied.", Toast::Success);
             self.close_card(cx);
         }
         let member_ctx = self.ui.widget(cx, ids!(members)).borrow::<lists::MemberList>().and_then(|l| l.context(cx, actions));
@@ -4268,7 +4343,7 @@ impl MatchEvent for App {
             let name = theme::current().name.to_owned();
             self.saved_theme = name.clone();
             self.send(backend::Command::SetTheme(name));
-            self.notice(cx, "Theme saved.");
+            self.toast(cx, "Theme saved.", Toast::Success);
         }
         for (i, (nav, _)) in SETTINGS_PAGES.iter().enumerate() {
             if tapped(&self.ui, cx, nav) {
@@ -4328,7 +4403,7 @@ impl MatchEvent for App {
         }
         if self.ui.view(cx, ids!(profile_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) && !self.npub.is_empty() {
             cx.copy_to_clipboard(&self.npub);
-            self.notice(cx, &format!("Your npub was copied: {}", self.npub));
+            self.toast(cx, "Your public key was copied.", Toast::Success);
         }
         if self.ui.view(cx, ids!(invite_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) {
             self.send(backend::Command::CreateInvite);
@@ -4406,6 +4481,18 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        if self.toast_timer.is_event(event).is_some() {
+            let now = std::time::Instant::now();
+            let before = self.toasts.len();
+            self.toasts.retain(|(_, _, until)| *until > now);
+            if self.toasts.len() != before {
+                self.show_toasts(cx);
+            }
+            if self.toasts.is_empty() {
+                cx.stop_timer(self.toast_timer);
+                self.toast_timer = Timer::empty();
+            }
+        }
         for done in self.uploads.handle_event(cx, event) {
             self.upload_done(cx, done);
         }

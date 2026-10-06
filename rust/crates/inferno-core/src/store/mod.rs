@@ -57,6 +57,13 @@ impl Store {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
+    /// A consistent copy of the whole cache in a new file (SQLite's
+    /// VACUUM INTO): for backups, and for tests that restart from a cache.
+    pub fn snapshot_to(&self, path: &Path) -> Result<()> {
+        self.conn().execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+        Ok(())
+    }
+
     pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         // A panic mid-call leaves SQLite itself consistent (the transaction
         // rolls back), so a poisoned lock is safe to keep using.

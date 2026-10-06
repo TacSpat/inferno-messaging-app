@@ -436,3 +436,48 @@ async fn one_profile_per_person_follows_their_changes() {
     assert_eq!(p.color.as_deref(), Some("#123456"));
     assert!(a.known_people().unwrap().contains(&bpk));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn roles_given_while_offline_arrive_on_restart() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let dir = tempfile::tempdir().unwrap();
+    let (ak, bk) = (Keys::generate(), Keys::generate());
+    let a = session(&ak, Store::open_in_memory().unwrap(), &url).await;
+    let b_db = dir.path().join("b.sqlite3");
+    let b = session(&bk, Store::open(&b_db).unwrap(), &url).await;
+    let gid = a.create_server("x").await.unwrap();
+    let link = a.create_invite(&gid).await.unwrap();
+    let mut arx = a.updates();
+    b.join(&link).await.unwrap();
+    wait_for(&mut arx, "b joins", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+    // B's cache as it was when B closed. (Dropping the session doesn't stop
+    // its background tasks, which would keep writing to the same file.)
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let snapshot = dir.path().join("b-closed.sqlite3");
+    b.store().snapshot_to(&snapshot).unwrap();
+    drop(b);
+
+    // B is away: A makes a role and gives it to B.
+    let mut roles = a.server(&gid).unwrap().unwrap().roles;
+    roles.push(inferno_core::server::wire::Role {
+        id: "mods".into(),
+        name: "Mod".into(),
+        color: "#22c55e".into(),
+        position: 5,
+        hoist: true,
+        mentionable: true,
+        permissions: Default::default(),
+        role_type: String::new(),
+    });
+    a.save_roles(&gid, roles).await.unwrap();
+    a.set_member_roles(&gid, &bk.public_key(), &["mods".to_owned()]).await.unwrap();
+
+    // B comes back from that cache and catches up.
+    let b = session(&bk, Store::open(&snapshot).unwrap(), &url).await;
+    let mut brx = b.updates();
+    let has_role = |b: &Session| b.server(&gid).unwrap().unwrap().members.get(&bk.public_key()).is_some_and(|m| m.roles.contains(&"mods".to_owned()));
+    if !has_role(&b) {
+        wait_for(&mut brx, "catch-up", |_| has_role(&b)).await;
+    }
+}

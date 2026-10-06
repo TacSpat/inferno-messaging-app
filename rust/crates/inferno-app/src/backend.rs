@@ -303,6 +303,8 @@ pub enum Update {
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
     Invite(String),
     Error(String),
+    /// Something worked (a green notification).
+    Notice(String),
     /// Nothing selected: no servers yet.
     Empty,
 }
@@ -704,7 +706,7 @@ impl Backend {
             Command::AddFriend(pk) => {
                 let pk = PublicKey::from_hex(&pk).map_err(|e| e.to_string())?;
                 self.session.add_friend(&pk).await.map_err(|e| e.to_string())?;
-                Cx::post_action(Update::Error("Friend request sent.".into()));
+                Cx::post_action(Update::Notice("Friend request sent.".into()));
             }
             Command::AnswerFriend { pubkey, accept } => {
                 let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;

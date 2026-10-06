@@ -239,6 +239,7 @@ impl Session {
         session.resubscribe().await?;
         session.spawn_listener();
         session.catch_up_people();
+        session.catch_up_servers();
         session.spawn_batchers();
         Ok(session)
     }
@@ -910,6 +911,48 @@ impl Session {
         let mut v: Vec<PublicKey> = set.into_iter().collect();
         v.sort();
         Ok(v)
+    }
+
+    /// At startup: member, ban and invite events from while we were away.
+    /// The live subscription only starts now, so without this a role given
+    /// to us while the app was closed never arrived (we saw ourselves with
+    /// no roles and no colour). Every member event naming us is fetched in
+    /// full; the rest since the newest we hold.
+    fn catch_up_servers(&self) {
+        let Ok(gids) = self.servers() else { return };
+        if gids.is_empty() {
+            return;
+        }
+        let kinds_ = [kinds::SERVER_MEMBER, kinds::SERVER_BAN, kinds::SERVER_INVITE];
+        let since = self.store.newest_of_kinds(&kinds_).ok().flatten().and_then(|t| self.resume_from(Some(t)));
+        let mut recent = Filter::new().kinds(kinds_.map(Kind::Custom));
+        if let Some(t) = since {
+            recent = recent.since(t);
+        }
+        let mine = Filter::new().kind(Kind::Custom(kinds::SERVER_MEMBER)).pubkey(self.keys.public_key());
+        let (pool, store, updates, refresh) = (self.pool.clone(), self.store.clone(), self.updates.clone(), self.refresh.clone());
+        tokio::spawn(async move {
+            let events = match pool.fetch(vec![recent, mine]).await {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("server catch-up failed: {e}");
+                    return;
+                }
+            };
+            let mut touched = std::collections::BTreeSet::new();
+            for e in &events {
+                let Some(gid) = wire::server_gid(e) else { continue };
+                if gids.contains(&gid) && matches!(store.put_event(e), Ok(crate::store::PutOutcome::Inserted)) {
+                    touched.insert(gid);
+                }
+            }
+            if !touched.is_empty() {
+                refresh.notify_one();
+            }
+            for gid in touched {
+                let _ = updates.send(Update::Server(gid));
+            }
+        });
     }
 
     /// At startup: profiles that changed while we were away (since the newest
