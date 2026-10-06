@@ -9,7 +9,7 @@
 //! - Upserts use SQLite's own `ON CONFLICT ... DO UPDATE`, which works on any
 //!   unique index (Drift's helper only handled the primary key).
 
-mod events;
+pub(crate) mod events;
 mod local;
 mod migrations;
 
@@ -56,7 +56,7 @@ impl Store {
         Ok(Self { conn: Mutex::new(conn) })
     }
 
-    fn conn(&self) -> MutexGuard<'_, Connection> {
+    pub(crate) fn conn(&self) -> MutexGuard<'_, Connection> {
         // A panic mid-call leaves SQLite itself consistent (the transaction
         // rolls back), so a poisoned lock is safe to keep using.
         self.conn.lock().unwrap_or_else(|e| e.into_inner())

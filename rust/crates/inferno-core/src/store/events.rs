@@ -215,6 +215,6 @@ fn apply_deletion(tx: &Transaction, deletion: &Event) -> Result<()> {
     Ok(())
 }
 
-fn parse(json: &str) -> Result<Event> {
+pub(crate) fn parse(json: &str) -> Result<Event> {
     Event::from_json(json).map_err(|e| StoreError::Corrupt(e.to_string()))
 }

@@ -6,6 +6,7 @@ pub mod dtag;
 pub mod keys;
 pub mod kinds;
 pub mod relay;
+pub mod server;
 pub mod store;
 pub mod sync;
 pub mod vault;
