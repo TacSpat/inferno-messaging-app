@@ -39,6 +39,11 @@ pub enum Permission {
     MuteMembers,
     DeafenMembers,
     MoveMembers,
+    /// Rails' three on-by-default permissions: allowed unless a role turns
+    /// them off.
+    SendGifs,
+    SendCustomEmojis,
+    SendCustomStickers,
 }
 
 impl Permission {
@@ -71,6 +76,9 @@ impl Permission {
             MuteMembers => "mute_members",
             DeafenMembers => "deafen_members",
             MoveMembers => "move_members",
+            SendGifs => "send_gifs",
+            SendCustomEmojis => "send_custom_emojis",
+            SendCustomStickers => "send_custom_stickers",
         }
     }
 }
@@ -79,7 +87,8 @@ impl Permission {
 /// everything (as in Rails); `owner` grants nothing extra.
 pub fn grants(permissions: &Map<String, Value>, p: Permission) -> bool {
     let on = |k: &str| permissions.get(k) == Some(&Value::Bool(true));
-    on(Permission::Administrator.key()) || on(p.key())
+    let default_on = matches!(p, Permission::SendGifs | Permission::SendCustomEmojis | Permission::SendCustomStickers);
+    on(Permission::Administrator.key()) || on(p.key()) || (default_on && permissions.get(p.key()) != Some(&Value::Bool(false)))
 }
 
 /// Which permission an authority-bearing state event needs. Matches Rails'

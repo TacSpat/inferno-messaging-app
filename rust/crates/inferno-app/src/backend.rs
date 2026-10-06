@@ -46,6 +46,9 @@ pub struct ServerPerms {
     pub ban_members: bool,
     pub create_invite: bool,
     pub owner: bool,
+    pub send_custom_emojis: bool,
+    pub send_custom_stickers: bool,
+    pub send_gifs: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -266,6 +269,9 @@ pub enum Update {
     /// (with how many messages). Rows come as a `Timeline` keyed "@dm".
     DmHeader { person: Person, request: Option<usize> },
     People(Vec<Person>),
+    /// Custom emoji and stickers of every server we're in (Rails' picker
+    /// offers them across servers).
+    EmojiSets(Vec<crate::picker::ServerSet>),
     /// The `Authorization` header for upload `id`, and the servers to try.
     UploadAuth { id: u64, header: String, servers: Vec<String> },
     /// The theme this account uses (synced across devices).
@@ -306,6 +312,8 @@ pub enum Command {
     SelectServer(String),
     SelectChannel(String),
     Send { text: String, reply_to: Option<String>, spoiler: bool },
+    /// A sticker, sent as its own message.
+    SendSticker(String),
     Edit { id: String, text: String },
     Pin { id: String, pinned: bool },
     CreateServer(String),
@@ -749,6 +757,22 @@ impl Backend {
             Command::FindPeople(q) => {
                 let people = self.find_people(&q).await;
                 Cx::post_action(Update::People(people));
+            }
+            Command::SendSticker(url) if self.dm.is_some() => {
+                let to = self.dm.expect("checked");
+                self.session
+                    .send_dm(&to, &Payload::Message { content: url, files: vec![], spoiler: false })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_dm();
+            }
+            Command::SendSticker(url) => {
+                let (gid, ch) = self.selected()?;
+                self.session
+                    .send(&gid, &ch, &Outgoing { content: &url, sticker: true, ..Default::default() })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_timeline();
             }
             Command::Send { text, reply_to, spoiler } => {
                 let (gid, ch) = self.selected()?;
@@ -1313,7 +1337,28 @@ impl Backend {
         self.publish_server_keep_channel();
     }
 
+    fn publish_emoji_sets(&mut self) {
+        let sets = self
+            .session
+            .servers()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|gid| {
+                let state = self.session.server(gid).ok().flatten()?;
+                Some(crate::picker::ServerSet {
+                    gid: gid.clone(),
+                    name: state.metadata.name.clone(),
+                    emojis: state.emojis.iter().map(|e| (e.name.clone(), e.url.clone())).collect(),
+                    stickers: state.stickers.iter().map(|s| (s.name.clone(), s.url.clone())).collect(),
+                })
+            })
+            .filter(|s| !s.emojis.is_empty() || !s.stickers.is_empty())
+            .collect();
+        Cx::post_action(Update::EmojiSets(sets));
+    }
+
     fn publish_servers(&mut self) {
+        self.publish_emoji_sets();
         let gids: Vec<String> = self
             .session
             .servers()
@@ -1440,6 +1485,9 @@ impl Backend {
             ban_members: state.has(&me, inferno_core::server::Permission::BanMembers),
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
             owner: state.is_owner(&me),
+            send_custom_emojis: state.has(&me, inferno_core::server::Permission::SendCustomEmojis),
+            send_custom_stickers: state.has(&me, inferno_core::server::Permission::SendCustomStickers),
+            send_gifs: state.has(&me, inferno_core::server::Permission::SendGifs),
         };
         let roles = state.roles.iter().map(|r| RoleItem { id: r.id.clone(), name: r.name.clone() }).collect();
         let mut cats = state.structure.categories.clone();

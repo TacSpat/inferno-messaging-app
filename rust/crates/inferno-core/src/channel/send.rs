@@ -28,6 +28,8 @@ pub struct Outgoing<'a> {
     pub content: &'a str,
     pub reply_to: Option<EventId>,
     pub spoiler: bool,
+    /// The content is a sticker's URL (Rails' `["sticker"]` tag).
+    pub sticker: bool,
     pub mentions: Vec<PublicKey>,
     /// NIP-30 `(shortcode, url)` for custom emoji used in `content`.
     pub emoji: Vec<(String, String)>,
@@ -82,6 +84,9 @@ pub fn message(
     }
     if msg.spoiler {
         tags.push(Tag::parse(["spoiler"]).expect("tag"));
+    }
+    if msg.sticker {
+        tags.push(Tag::parse(["sticker"]).expect("tag"));
     }
     tags.extend(msg.mentions.iter().map(|p| Tag::public_key(*p)));
     for (code, url) in &msg.emoji {

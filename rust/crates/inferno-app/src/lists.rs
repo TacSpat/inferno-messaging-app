@@ -1018,3 +1018,126 @@ impl Widget for FriendList {
         self.view.handle_event(cx, event, scope);
     }
 }
+
+// ─── Emoji / sticker picker ──────────────────────────────────────────────
+
+/// What a click in the picker picked.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pick {
+    Cell(crate::picker::Cell),
+    /// (name, url)
+    Sticker(String, String),
+    /// A section header: collapse or expand it.
+    Toggle(String),
+}
+
+const CELL_SLOTS: [&[LiveId]; 9] = [ids!(c0), ids!(c1), ids!(c2), ids!(c3), ids!(c4), ids!(c5), ids!(c6), ids!(c7), ids!(c8)];
+const STICKER_SLOTS: [&[LiveId]; 3] = [ids!(s0), ids!(s1), ids!(s2)];
+
+#[derive(Script, ScriptHook, Widget)]
+pub struct PickerList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<crate::picker::Row>,
+}
+
+impl PickerList {
+    pub fn picked(&self, cx: &mut Cx, actions: &Actions) -> Option<Pick> {
+        use crate::picker::Row;
+        let list = self.view.portal_list(cx, ids!(list));
+        for (i, item) in list.items_with_actions(actions) {
+            let tapped = |path: &[LiveId]| item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+            match self.rows.get(i) {
+                Some(Row::Header { key, .. }) if item.as_view().finger_up(actions).is_some_and(|e| !e.cancelled) => {
+                    return Some(Pick::Toggle(key.clone()));
+                }
+                Some(Row::Cells(cells)) => {
+                    for (k, slot) in CELL_SLOTS.iter().enumerate() {
+                        if k < cells.len() && tapped(slot) {
+                            return Some(Pick::Cell(cells[k].clone()));
+                        }
+                    }
+                }
+                Some(Row::Stickers(st)) => {
+                    for (k, slot) in STICKER_SLOTS.iter().enumerate() {
+                        if k < st.len() && tapped(slot) {
+                            return Some(Pick::Sticker(st[k].0.clone(), st[k].1.clone()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+}
+
+impl Widget for PickerList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        use crate::picker::{Cell, Row};
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len());
+            while let Some(i) = list.next_visible_item(cx) {
+                match self.rows.get(i) {
+                    Some(Row::Header { title, collapsed, .. }) => {
+                        let row = list.item(cx, i, id!(Head));
+                        row.view(cx, ids!(open)).set_visible(cx, !*collapsed);
+                        row.view(cx, ids!(shut)).set_visible(cx, *collapsed);
+                        row.label(cx, ids!(title)).set_text(cx, &title.to_uppercase());
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(Row::Cells(cells)) => {
+                        let row = list.item(cx, i, id!(Cells));
+                        for (k, slot) in CELL_SLOTS.iter().enumerate() {
+                            let view = row.view(cx, slot);
+                            let glyph = row.label(cx, &[slot[0], id!(glyph)]);
+                            let img = row.image(cx, &[slot[0], id!(img)]);
+                            match cells.get(k) {
+                                Some(Cell::Unicode(s)) => {
+                                    view.set_visible(cx, true);
+                                    glyph.set_text(cx, s);
+                                    img.set_visible(cx, false);
+                                }
+                                Some(Cell::Custom { url, .. }) => {
+                                    view.set_visible(cx, true);
+                                    glyph.set_text(cx, "");
+                                    crate::images::show(cx, &img, Some(url));
+                                }
+                                None => view.set_visible(cx, false),
+                            }
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(Row::Stickers(st)) => {
+                        let row = list.item(cx, i, id!(Stickers));
+                        for (k, slot) in STICKER_SLOTS.iter().enumerate() {
+                            let view = row.view(cx, slot);
+                            let img = row.image(cx, &[slot[0], id!(img)]);
+                            match st.get(k) {
+                                Some((_, url)) => {
+                                    view.set_visible(cx, true);
+                                    crate::images::show(cx, &img, Some(url));
+                                }
+                                None => view.set_visible(cx, false),
+                            }
+                        }
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    Some(Row::Empty(t)) => {
+                        let row = list.item(cx, i, id!(Empty));
+                        row.set_text(cx, t);
+                        row.draw_all(cx, &mut Scope::empty());
+                    }
+                    None => {}
+                }
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}

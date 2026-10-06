@@ -15,6 +15,7 @@ mod lists;
 mod message_format;
 mod message_text;
 mod message_list;
+mod picker;
 mod rich_input;
 #[allow(dead_code)] // the other six themes land with runtime switching
 mod theme;
@@ -27,6 +28,8 @@ use makepad_widgets::*;
 use rich_input::RichInputWidgetRefExt;
 use crop::{Crop, Target};
 use uploads::Uploads;
+use picker::{Cell, ServerSet};
+use std::collections::HashSet;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
@@ -907,6 +910,99 @@ script_mod! {
         cursor: MouseCursor.Hand new_batch: true draw_bg.color: #0000 draw_bg.border_radius: 4.0
         label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.5}}}
 
+    // ─── Picker (Rails' unified picker) ─────────────────────────────
+    // Cells: Rails' w-8 h-8 text-xl; custom emoji w-6 h-6.
+    let EmojiCell = RoundedView{
+        width: 38 height: 36 flow: Overlay align: Center
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            on: uniform(gray_700)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(1. 1. self.rect_size.x - 2. self.rect_size.y - 2. 4.0)
+                sdf.fill(vec4(self.on.rgb, self.on.a * self.hover))
+                return sdf.result
+            }
+        }
+        glyph := Txt{text: "" draw_text.text_style.font_size: 15.0}
+        img := Image{visible: false width: 24 height: 24 fit: ImageFit.Smallest}
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.08}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.08}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+    }
+    let StickerCell = RoundedView{
+        width: 116 height: 116 padding: 4 align: Center
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_700 draw_bg.border_radius: 4.0
+        img := Image{visible: false width: 108 height: 108 fit: ImageFit.Smallest}
+    }
+    mod.widgets.PickerListBase = #(lists::PickerList::register_widget(vm))
+    mod.widgets.PickerList = set_type_default() do mod.widgets.PickerListBase{
+        width: Fill height: Fill
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Head := View{width: Fill height: 26 flow: Right spacing: 4 align: Align{y: 0.5}
+                padding: Inset{left: 4 top: 6} cursor: MouseCursor.Hand
+                open := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400
+                    draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}}
+                shut := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400
+                    draw_icon.svg: crate_resource("self:resources/icons/chevron_right.svg")}}
+                title := Txt{text: "" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 7.5}}
+            }
+            Cells := View{width: Fill height: Fit flow: Right
+                c0 := EmojiCell{}
+                c1 := EmojiCell{}
+                c2 := EmojiCell{}
+                c3 := EmojiCell{}
+                c4 := EmojiCell{}
+                c5 := EmojiCell{}
+                c6 := EmojiCell{}
+                c7 := EmojiCell{}
+                c8 := EmojiCell{}
+            }
+            Stickers := View{width: Fill height: Fit flow: Right spacing: 4 margin: Inset{bottom: 4}
+                s0 := StickerCell{} s1 := StickerCell{} s2 := StickerCell{}
+            }
+            Empty := Txt{width: Fill padding: 16 text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.5}
+        }
+    }
+    // Rails: tabs text-xs semibold, the active one with a 2px accent underline.
+    let PickerTab = View{width: Fill height: 36 flow: Down align: Align{x: 0.5 y: 1.0} cursor: MouseCursor.Hand
+        label := Txt{text: "" margin: Inset{bottom: 8} draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+        line := SolidView{width: Fill height: 2 draw_bg.color: accent}
+    }
+    // Rails' picker: 384 wide, min(420px, 60vh) tall, gray-800, 1px gray-700.
+    let PickerPanel = RoundedView{
+        visible: false
+        width: 384 height: 420
+        flow: Down
+        new_batch: true
+        draw_bg.color: gray_800
+        draw_bg.border_radius: 8.0
+        draw_bg.border_size: 1.0
+        draw_bg.border_color: gray_700
+        tabs := View{width: Fill height: Fit flow: Right padding: Inset{left: 8 right: 8}
+            tab_stickers := PickerTab{label.text: "Stickers"}
+            tab_emoji := PickerTab{label.text: "Emoji"}
+        }
+        SolidView{width: Fill height: 1 draw_bg.color: gray_700}
+        RoundedView{width: Fill height: 32 margin: 8 padding: Inset{left: 8 right: 8} align: Align{y: 0.5} new_batch: true
+            draw_bg.color: gray_900 draw_bg.border_radius: 4.0
+            search := TextInput{width: Fill height: 30 empty_text: "Search..."
+                draw_bg +: {pixel: fn() { return vec4(0.0, 0.0, 0.0, 0.0) }}
+                draw_text +: {color: gray_200 color_empty: gray_500}}
+        }
+        View{width: Fill height: Fill padding: Inset{left: 8 right: 8 bottom: 8}
+            items := mod.widgets.PickerList{}
+        }
+    }
+
     mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
     mod.widgets.ResultList = set_type_default() do mod.widgets.ResultListBase{
         width: Fill height: Fill
@@ -1245,6 +1341,10 @@ script_mod! {
                                         pins := mod.widgets.PinsList{}
                                     }
                                 }
+                                // Rails' picker: above the composer's right end.
+                                View{width: Fill height: Fill align: Align{x: 1.0 y: 1.0} padding: Inset{right: 16 bottom: 4}
+                                    composer_picker := PickerPanel{}
+                                }
                                 // Rails' message request: the messages stay hidden
                                 // behind a card until accepted.
                                 dm_request := SolidView{
@@ -1485,7 +1585,9 @@ script_mod! {
                                             View{width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
                                                 p_status_emoji := RoundedView{width: 32 height: 32 align: Center cursor: MouseCursor.Hand
                                                     new_batch: true draw_bg.color: #x00000040 draw_bg.border_radius: 6.0
-                                                    label := Txt{text: "🙂" draw_text.text_style.font_size: 12.0}}
+                                                    flow: Overlay
+                                                    label := Txt{text: "🙂" draw_text.text_style.font_size: 12.0}
+                                                    img := Image{visible: false width: 20 height: 20 fit: ImageFit.Smallest}}
                                                 p_status := CardInput{empty_text: "What are you up to?"
                                                     draw_text +: {color: #xffffffb3 text_style +: {font_size: 9.5}}}
                                             }
@@ -1757,6 +1859,18 @@ script_mod! {
                     }
 
                     // Context menus, opened at the pointer (ctxmenu.rs).
+                    // Rails' status emoji popover (320×380), emoji only.
+                    status_layer := View{
+                        visible: false
+                        width: Fill height: Fill
+                        status_picker := PickerPanel{visible: true width: 320 height: 380
+                            tabs +: {visible: false}
+                            clear_row := View{width: Fill height: Fit padding: Inset{left: 8 right: 8 bottom: 8}
+                                status_clear := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                                    Txt{text: "Clear status emoji" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}}
+                            }
+                        }
+                    }
                     card_layer := View{
                         visible: false
                         width: Fill height: Fill
@@ -2008,6 +2122,15 @@ pub struct App {
     crop_drag: Option<DVec2>,
     #[rust]
     uploads: Uploads,
+    /// The picker: frequently used, collapsed sections, tab, the sets.
+    #[rust]
+    picker_frequent: Vec<Cell>,
+    #[rust]
+    picker_collapsed: HashSet<String>,
+    #[rust]
+    picker_tab: usize,
+    #[rust]
+    emoji_sets: Vec<ServerSet>,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -2059,6 +2182,10 @@ const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 4] = [
 ];
 
 const APPEARANCE_PAGE: usize = 2;
+
+/// Picker tabs (Rails' order; GIFs wait for a Tenor key decision).
+const PICKER_STICKERS: usize = 1;
+const PICKER_EMOJI: usize = 2;
 
 const THEME_TILES: [(&[LiveId], &str); 7] = [
     (ids!(th_inferno), "inferno"),
@@ -3235,6 +3362,125 @@ impl App {
         }
     }
 
+    /// Which picker a pick or a rebuild is for.
+    fn picker_paths(status: bool) -> (&'static [LiveId], &'static [LiveId]) {
+        if status { (ids!(status_picker), ids!(status_picker.items)) } else { (ids!(composer_picker), ids!(composer_picker.items)) }
+    }
+
+    /// Custom emoji are allowed in DMs and where the role allows them.
+    fn picker_custom_ok(&self) -> bool {
+        self.home || self.perms.send_custom_emojis
+    }
+
+    fn refresh_picker(&mut self, cx: &mut Cx, status: bool) {
+        let (panel, items) = Self::picker_paths(status);
+        let search = self.ui.text_input(cx, &[panel[0], id!(search)]).text();
+        let stickers_ok = !status && (self.home || self.perms.send_custom_stickers);
+        if !stickers_ok && self.picker_tab == PICKER_STICKERS {
+            self.picker_tab = PICKER_EMOJI;
+        }
+        let rows = if status || self.picker_tab == PICKER_EMOJI {
+            picker::emoji_rows(&search, &self.picker_frequent, &self.emoji_sets, status || self.picker_custom_ok(), &self.picker_collapsed)
+        } else {
+            picker::sticker_rows(&search, &self.emoji_sets, &self.picker_collapsed)
+        };
+        if let Some(mut l) = self.ui.widget(cx, items).borrow_mut::<lists::PickerList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, &[items[0], items[1], id!(list)]));
+        if !status {
+            // Rails showed "no permission" text; tabs you can't use are hidden (Flutter).
+            self.ui.view(cx, ids!(composer_picker.tab_stickers)).set_visible(cx, stickers_ok);
+            for (path, tab) in [(ids!(composer_picker.tab_stickers), PICKER_STICKERS), (ids!(composer_picker.tab_emoji), PICKER_EMOJI)] {
+                let on = self.picker_tab == tab;
+                self.ui.view(cx, &[path[0], path[1], id!(line)]).set_visible(cx, on);
+                let mut label = self.ui.widget(cx, &[path[0], path[1], id!(label)]);
+                let c = if on { lists::rgba(0xffffff, 1.0) } else { theme::tok("gray_400", 1.0) };
+                script_apply_eval!(cx, label, {draw_text +: {color: #(c)}});
+            }
+        }
+        self.ui.redraw(cx);
+    }
+
+    fn set_composer_picker(&mut self, cx: &mut Cx, open: bool) {
+        self.ui.view(cx, ids!(composer_picker)).set_visible(cx, open);
+        if open {
+            self.refresh_picker(cx, false);
+            if let Some(mut s) = self.ui.text_input(cx, ids!(composer_picker.search)).borrow_mut() {
+                s.take_key_focus(cx);
+            }
+        }
+        self.ui.redraw(cx);
+    }
+
+    fn open_status_picker(&mut self, cx: &mut Cx) {
+        let r = self.ui.view(cx, ids!(p_status_emoji)).area().rect(cx);
+        let (x, y) = (r.pos.x, r.pos.y + r.size.y + 6.0);
+        let mut panel = self.ui.widget(cx, ids!(status_picker));
+        script_apply_eval!(cx, panel, {margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ui.view(cx, ids!(status_layer)).set_visible(cx, true);
+        self.ui.text_input(cx, ids!(status_picker.search)).set_text(cx, "");
+        self.refresh_picker(cx, true);
+    }
+
+    fn close_pickers(&mut self, cx: &mut Cx) {
+        self.ui.view(cx, ids!(composer_picker)).set_visible(cx, false);
+        self.ui.view(cx, ids!(status_layer)).set_visible(cx, false);
+        self.ui.redraw(cx);
+    }
+
+    /// Shows the status emoji on its button: unicode as text, custom as image.
+    fn show_status_emoji(&mut self, cx: &mut Cx) {
+        let e = self.status_emoji.clone();
+        let custom = e.strip_prefix(':').and_then(|x| x.strip_suffix(':')).and_then(|name| {
+            self.emoji_sets.iter().flat_map(|s| &s.emojis).find(|(n, _)| n == name).map(|(_, u)| u.clone())
+        });
+        let label = if e.is_empty() { "🙂".to_owned() } else if custom.is_some() { String::new() } else { e.clone() };
+        self.ui.label(cx, ids!(p_status_emoji.label)).set_text(cx, &label);
+        let img = self.ui.image(cx, ids!(p_status_emoji.img));
+        images::show(cx, &img, custom.as_deref());
+    }
+
+    fn picked(&mut self, cx: &mut Cx, status: bool, pick: lists::Pick) {
+        match pick {
+            lists::Pick::Toggle(key) => {
+                if !self.picker_collapsed.remove(&key) {
+                    self.picker_collapsed.insert(key);
+                }
+                picker::save(&self.picker_frequent, &self.picker_collapsed, self.picker_tab);
+                self.refresh_picker(cx, status);
+            }
+            lists::Pick::Cell(cell) => {
+                picker::record_use(&mut self.picker_frequent, cell.clone());
+                picker::save(&self.picker_frequent, &self.picker_collapsed, self.picker_tab);
+                if status {
+                    self.status_emoji = cell.text();
+                    self.show_status_emoji(cx);
+                } else {
+                    // At the caret, as Rails inserts it.
+                    let composer = self.ui.rich_input(cx, ids!(composer));
+                    let text = composer.text();
+                    let at = composer.borrow().map(|i| i.selection().cursor.index).unwrap_or(text.len()).min(text.len());
+                    let at = if text.is_char_boundary(at) { at } else { text.len() };
+                    let insert = cell.text();
+                    let new = format!("{}{}{}", &text[..at], insert, &text[at..]);
+                    composer.set_text(cx, &new);
+                    composer.set_cursor(
+                        cx,
+                        makepad_widgets::makepad_draw::text::selection::Cursor { index: at + insert.len(), prefer_next_row: false },
+                        false,
+                    );
+                    self.focus_composer(cx);
+                }
+                self.close_pickers(cx);
+            }
+            lists::Pick::Sticker(_, url) => {
+                self.send(backend::Command::SendSticker(url));
+                self.close_pickers(cx);
+            }
+        }
+    }
+
     fn show_search_panel(&mut self, cx: &mut Cx, open: bool) {
         self.ui.view(cx, ids!(search_panel)).set_visible(cx, open);
         self.ui.view(cx, ids!(member_col)).set_visible(cx, !open);
@@ -3352,8 +3598,7 @@ impl App {
                 self.draft_picture = p.picture.clone();
                 self.draft_banner = p.banner.clone();
                 self.status_emoji = p.status_emoji.clone();
-                let emoji = if p.status_emoji.is_empty() { "🙂" } else { p.status_emoji.as_str() };
-                self.ui.label(cx, ids!(p_status_emoji.label)).set_text(cx, emoji);
+                self.show_status_emoji(cx);
                 self.paint_profile_editor(cx);
                 self.show_profile_pictures(cx);
                 self.my_picture = Some(p.picture.clone()).filter(|u| !u.is_empty());
@@ -3377,6 +3622,10 @@ impl App {
                 self.ui.redraw(cx);
             }
             Update::Card(card) => self.show_card(cx, card),
+            Update::EmojiSets(sets) => {
+                self.emoji_sets = sets.clone();
+                self.show_status_emoji(cx);
+            }
             Update::UploadAuth { id, header, servers } => {
                 if let Some(done) = self.uploads.authorized(cx, *id, header.clone(), servers.clone()) {
                     self.upload_done(cx, done);
@@ -3467,6 +3716,10 @@ impl App {
 
 impl MatchEvent for App {
     fn handle_startup(&mut self, cx: &mut Cx) {
+        let (frequent, collapsed, tab) = picker::load();
+        self.picker_frequent = frequent;
+        self.picker_collapsed = collapsed;
+        self.picker_tab = if tab == PICKER_STICKERS { PICKER_STICKERS } else { PICKER_EMOJI };
         let w = window_state::load();
         self.requested_pos = Some(dvec2(w.x, w.y));
         self.ui.window(cx, ids!(main_window)).configure_window(
@@ -3517,6 +3770,37 @@ impl MatchEvent for App {
 
         // Home
         let tap = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId]| ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+        // Picker: open, tabs, search, picks.
+        if tap(&self.ui, cx, ids!(emoji_btn)) {
+            let open = !self.ui.view(cx, ids!(composer_picker)).visible();
+            self.set_composer_picker(cx, open);
+        }
+        if tap(&self.ui, cx, ids!(p_status_emoji)) {
+            self.open_status_picker(cx);
+        }
+        if tap(&self.ui, cx, ids!(status_clear)) {
+            self.status_emoji.clear();
+            self.show_status_emoji(cx);
+            self.close_pickers(cx);
+        }
+        for (path, tab) in [(ids!(composer_picker.tab_stickers), PICKER_STICKERS), (ids!(composer_picker.tab_emoji), PICKER_EMOJI)] {
+            if tap(&self.ui, cx, path) {
+                self.picker_tab = tab;
+                picker::save(&self.picker_frequent, &self.picker_collapsed, self.picker_tab);
+                self.refresh_picker(cx, false);
+            }
+        }
+        for status in [false, true] {
+            let (panel, items) = Self::picker_paths(status);
+            if self.ui.text_input(cx, &[panel[0], id!(search)]).changed(actions).is_some() {
+                self.refresh_picker(cx, status);
+            }
+            let pick = self.ui.widget(cx, items).borrow::<lists::PickerList>().and_then(|l| l.picked(cx, actions));
+            if let Some(pick) = pick {
+                self.picked(cx, status, pick);
+            }
+        }
+
         // Profile editor: pictures, live colours and initial.
         if tap(&self.ui, cx, ids!(ed_avatar)) {
             self.pick_picture(cx, Target::Avatar);
@@ -4173,7 +4457,9 @@ impl AppMain for App {
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {
-                if self.ui.view(cx, ids!(card_layer)).visible() {
+                if self.ui.view(cx, ids!(composer_picker)).visible() || self.ui.view(cx, ids!(status_layer)).visible() {
+                    self.close_pickers(cx);
+                } else if self.ui.view(cx, ids!(card_layer)).visible() {
                     self.close_card(cx);
                 } else if self.ui.view(cx, ids!(ctx_layer)).visible() {
                     self.close_menu(cx);
@@ -4209,6 +4495,14 @@ impl AppMain for App {
             self.last_press = m.abs;
             let suggest = self.ui.view(cx, ids!(search_suggest));
             self.press_in_suggest = suggest.visible() && suggest.area().rect(cx).contains(m.abs);
+            for (panel, button) in [(ids!(composer_picker), ids!(emoji_btn)), (ids!(status_picker), ids!(p_status_emoji))] {
+                let p = self.ui.view(cx, panel);
+                let inside = p.area().rect(cx).contains(m.abs) || self.ui.view(cx, button).area().rect(cx).contains(m.abs);
+                let shown = p.visible() && (panel[0] != id!(status_picker) || self.ui.view(cx, ids!(status_layer)).visible());
+                if shown && !inside {
+                    self.close_pickers(cx);
+                }
+            }
             if self.ui.view(cx, ids!(card_layer)).visible() && !self.ui.view(cx, ids!(card)).area().rect(cx).contains(m.abs) {
                 self.close_card(cx);
             }
