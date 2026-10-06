@@ -6,6 +6,7 @@ pub mod dtag;
 pub mod keys;
 pub mod kinds;
 pub mod relay;
+pub mod store;
 
 pub use nostr;
 pub use nostr_sdk;
