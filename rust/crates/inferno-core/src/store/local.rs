@@ -6,7 +6,7 @@ use rusqlite::{params, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 
 use super::{now_secs, Result, Store, StoreError};
-use crate::relay::DEFAULT_RELAYS;
+use crate::relay::{normalize_url, DEFAULT_RELAYS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelaySource {
@@ -42,6 +42,10 @@ pub struct RelayRow {
     pub source: RelaySource,
 }
 
+fn relay_key(url: &str) -> Result<String> {
+    normalize_url(url).ok_or_else(|| StoreError::InvalidRelayUrl(url.to_owned()))
+}
+
 impl Store {
     /// Adds any default relay that's missing. Never removes anything: relays
     /// the user added or learned via NIP-65 must survive restarts. Flutter's
@@ -55,6 +59,7 @@ impl Store {
 
     /// Adds a relay; a relay that's already present keeps its settings.
     pub fn add_relay(&self, url: &str, source: RelaySource) -> Result<()> {
+        let url = relay_key(url)?;
         self.conn().execute(
             "INSERT INTO relays (url, source, added_at) VALUES (?1, ?2, ?3)
              ON CONFLICT (url) DO NOTHING",
@@ -65,7 +70,7 @@ impl Store {
 
     /// Removing a relay is only ever an explicit user action.
     pub fn remove_relay(&self, url: &str) -> Result<()> {
-        self.conn().execute("DELETE FROM relays WHERE url = ?1", [url])?;
+        self.conn().execute("DELETE FROM relays WHERE url = ?1", [relay_key(url)?])?;
         Ok(())
     }
 
@@ -84,6 +89,7 @@ impl Store {
     }
 
     pub fn record_relay_connected(&self, url: &str) -> Result<()> {
+        let url = relay_key(url)?;
         self.conn().execute(
             "UPDATE relays SET last_connected_at = ?2, retry_count = 0, last_error = NULL WHERE url = ?1",
             params![url, now_secs()],
@@ -92,6 +98,7 @@ impl Store {
     }
 
     pub fn record_relay_error(&self, url: &str, error: &str) -> Result<()> {
+        let url = relay_key(url)?;
         self.conn().execute(
             "UPDATE relays SET last_error = ?2, retry_count = retry_count + 1 WHERE url = ?1",
             params![url, error],
@@ -162,6 +169,17 @@ impl Store {
             "INSERT INTO settings (key, value) VALUES (?1, ?2)
              ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             params![key, json],
+        )?;
+        Ok(())
+    }
+}
+
+impl Store {
+    pub fn set_relay_flags(&self, url: &str, read: bool, write: bool) -> Result<()> {
+        let url = relay_key(url)?;
+        self.conn().execute(
+            "UPDATE relays SET read = ?2, write = ?3 WHERE url = ?1",
+            params![url, read, write],
         )?;
         Ok(())
     }

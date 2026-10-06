@@ -24,6 +24,18 @@ pub const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.snort.social",
 ];
 
+/// The one spelling of a relay URL we store and compare: lowercase scheme
+/// and host, and no bare trailing slash, so `wss://Relay.x/` and `wss://relay.x`
+/// are the same relay. `None` if it isn't a ws(s) URL.
+pub fn normalize_url(url: &str) -> Option<String> {
+    let parsed = RelayUrl::parse(url.trim()).ok()?;
+    let s = parsed.to_string();
+    Some(match s.strip_suffix('/') {
+        Some(base) if !base.ends_with('/') && base.matches('/').count() == 2 => base.to_owned(),
+        _ => s,
+    })
+}
+
 const CONNECT_WAIT: Duration = Duration::from_secs(5);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -232,6 +244,15 @@ mod tests {
         assert_eq!(latest_per_address([a.clone(), b.clone()]).len(), 2);
         let mut guard = FreshnessGuard::default();
         assert!(guard.accept(&a) && guard.accept(&a));
+    }
+
+    #[test]
+    fn urls_normalize_to_one_spelling() {
+        assert_eq!(normalize_url("wss://relay.damus.io/").as_deref(), Some("wss://relay.damus.io"));
+        assert_eq!(normalize_url(" WSS://Relay.Damus.io ").as_deref(), Some("wss://relay.damus.io"));
+        assert_eq!(normalize_url("wss://x.example/path/").as_deref(), Some("wss://x.example/path/"));
+        assert_eq!(normalize_url("https://not.a.relay"), None);
+        assert_eq!(normalize_url("nonsense"), None);
     }
 
     #[tokio::test]

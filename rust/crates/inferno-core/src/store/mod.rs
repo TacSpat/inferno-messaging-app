@@ -25,6 +25,8 @@ pub use local::{RelayRow, RelaySource};
 pub enum StoreError {
     #[error(transparent)]
     Sqlite(#[from] rusqlite::Error),
+    #[error("not a relay URL: {0}")]
+    InvalidRelayUrl(String),
     #[error("stored event is corrupt: {0}")]
     Corrupt(String),
 }
