@@ -151,6 +151,9 @@ async fn reply_edit_and_pin_reach_the_other_client() {
     let first = owner.send(&gid, &general, &Outgoing { content: "typo hre", ..Default::default() }).await.unwrap();
     owner.send(&gid, &general, &Outgoing { content: "a reply", reply_to: Some(first.id), ..Default::default() }).await.unwrap();
     owner.edit(&gid, &general, first.id, "typo here").await.unwrap();
+    let doomed = owner.send(&gid, &general, &Outgoing { content: "delete me", ..Default::default() }).await.unwrap();
+    owner.delete_message(&gid, &general, doomed.id).await.unwrap();
+    assert!(owner.timeline(&gid, &general).unwrap().iter().all(|m| m.id != doomed.id));
     owner.pin(&gid, &general, first.id, true).await.unwrap();
 
     // Wait until Alice has all four events.

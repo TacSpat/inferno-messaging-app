@@ -38,6 +38,10 @@ pub enum SidebarRow {
 pub struct ServerPerms {
     pub manage_channels: bool,
     pub manage_server: bool,
+    pub manage_roles: bool,
+    pub manage_messages: bool,
+    pub kick_members: bool,
+    pub ban_members: bool,
     pub create_invite: bool,
     pub owner: bool,
 }
@@ -65,7 +69,16 @@ pub struct ChannelForm {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MemberRow {
     Header { text: String, color: u32 },
-    Member { name: String, initial: String, color: u32, avatar: u32 },
+    Member {
+        name: String,
+        initial: String,
+        color: u32,
+        avatar: u32,
+        pubkey: String,
+        roles: Vec<String>,
+        owner: bool,
+        me: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +174,11 @@ pub enum Command {
     MoveChannel { id: String, category: Option<String>, index: usize },
     LeaveServer,
     MarkRead(String),
+    DeleteMessage(String),
+    SetMemberRoles { pubkey: String, roles: Vec<String> },
+    Kick(String),
+    Timeout { pubkey: String, secs: i64 },
+    Ban { pubkey: String, reason: String },
 }
 
 // ─── Startup ─────────────────────────────────────────────────────────────
@@ -281,9 +299,18 @@ fn first_initial(name: &str) -> String {
     name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_else(|| "?".into())
 }
 
-fn member_row(state: &ServerState, pk: &PublicKey) -> MemberRow {
+fn member_row(state: &ServerState, pk: &PublicKey, me: &PublicKey) -> MemberRow {
     let d = display(state, pk);
-    MemberRow::Member { initial: first_initial(&d.name), name: d.name, color: d.color, avatar: d.avatar }
+    MemberRow::Member {
+        initial: first_initial(&d.name),
+        name: d.name,
+        color: d.color,
+        avatar: d.avatar,
+        pubkey: pk.to_hex(),
+        roles: state.members.get(pk).map(|m| m.roles.clone()).unwrap_or_default(),
+        owner: state.is_owner(pk),
+        me: pk == me,
+    }
 }
 
 fn hex_color(s: &str) -> Option<u32> {
@@ -485,6 +512,37 @@ impl Backend {
                 self.session.move_channel(&gid, &id, category.as_deref(), index).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
+            Command::DeleteMessage(id) => {
+                let (gid, ch) = self.selected()?;
+                let id = EventId::from_hex(&id).map_err(|e| e.to_string())?;
+                self.session.delete_message(&gid, &ch, id).await.map_err(|e| e.to_string())?;
+                self.publish_timeline();
+            }
+            Command::SetMemberRoles { pubkey, roles } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                self.session.set_member_roles(&gid, &pk, &roles).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::Kick(pubkey) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                self.session.kick(&gid, &pk).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::Timeout { pubkey, secs } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                let until = if secs > 0 { inferno_core::store::now_secs() + secs } else { 0 };
+                self.session.timeout(&gid, &pk, until).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::Ban { pubkey, reason } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let pk = PublicKey::from_hex(&pubkey).map_err(|e| e.to_string())?;
+                self.session.ban(&gid, &pk, &reason).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
             Command::MarkRead(id) => {
                 self.session.store().mark_read(&id, inferno_core::store::now_secs()).map_err(|e| e.to_string())?;
             }
@@ -644,12 +702,12 @@ impl Backend {
         hoisted.sort_by_key(|r| std::cmp::Reverse(r.position));
         let push_group = |members: &mut Vec<MemberRow>, title: String, color: u32, list: &[&inferno_core::server::Member]| {
             members.push(MemberRow::Header { text: format!("{title} — {}", list.len()), color });
-            members.extend(list.iter().map(|m| member_row(&state, &m.pubkey)));
+            members.extend(list.iter().map(|m| member_row(&state, &m.pubkey, &me)));
         };
         if let Some(owner) = state.owner.filter(|o| !state.members.contains_key(o)) {
             // The owner has no member event of their own when they made the server here.
             members.push(MemberRow::Header { text: "OWNER — 1".into(), color: 0x878583 });
-            members.push(member_row(&state, &owner));
+            members.push(member_row(&state, &owner, &me));
         }
         for r in hoisted {
             if let Some(list) = by_role.get(&Some(r.id.clone())) {
@@ -670,6 +728,10 @@ impl Backend {
         let perms = ServerPerms {
             manage_channels: state.has(&me, inferno_core::server::Permission::ManageChannels),
             manage_server: state.has(&me, inferno_core::server::Permission::ManageServer),
+            manage_roles: state.has(&me, inferno_core::server::Permission::ManageRoles),
+            manage_messages: state.has(&me, inferno_core::server::Permission::ManageMessages),
+            kick_members: state.has(&me, inferno_core::server::Permission::KickMembers),
+            ban_members: state.has(&me, inferno_core::server::Permission::BanMembers),
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
             owner: state.is_owner(&me),
         };

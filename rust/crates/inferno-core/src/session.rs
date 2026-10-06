@@ -698,6 +698,17 @@ impl Session {
         Ok(event)
     }
 
+    /// Deletes a message (ours, or anyone's with manage_messages).
+    pub async fn delete_message(&self, gid: &str, channel_id: &str, target: EventId) -> Result<Event> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let channel = state.channel(channel_id).ok_or(SessionError::Unknown)?;
+        let original = self.store.get_event(&target)?.ok_or(SessionError::Unknown)?;
+        let event = send::delete(&self.keys, &state, channel, &original)?;
+        self.publish(&event).await?;
+        let _ = self.updates.send(Update::Channel { gid: gid.into(), channel_id: channel_id.into() });
+        Ok(event)
+    }
+
     /// Pins or unpins a message (needs manage_messages).
     pub async fn pin(&self, gid: &str, channel_id: &str, target: EventId, pinned: bool) -> Result<Event> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;

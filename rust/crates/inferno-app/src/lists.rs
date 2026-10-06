@@ -310,6 +310,20 @@ pub struct MemberList {
     pub rows: Vec<MemberRow>,
 }
 
+impl MemberList {
+    /// Right-click on a member: (row index, window position).
+    pub fn context(&self, cx: &mut Cx, actions: &Actions) -> Option<(usize, DVec2)> {
+        let list = self.view.portal_list(cx, ids!(list));
+        list.items_with_actions(actions).into_iter().find_map(|(i, item)| {
+            item.as_view()
+                .finger_down(actions)
+                .filter(|e| !e.device.is_primary_hit())
+                .map(|e| (i, e.abs))
+                .filter(|_| matches!(self.rows.get(i), Some(MemberRow::Member { .. })))
+        })
+    }
+}
+
 impl Widget for MemberList {
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
@@ -325,7 +339,7 @@ impl Widget for MemberList {
                         row.set_text(cx, text);
                         row.draw_all(cx, &mut Scope::empty());
                     }
-                    MemberRow::Member { name, initial, color, avatar } => {
+                    MemberRow::Member { name, initial, color, avatar, .. } => {
                         let row = list.item(cx, i, id!(Member));
                         let mut face = row.widget(cx, ids!(face.avatar));
                         let a = rgba(*avatar, 1.0);

@@ -40,6 +40,8 @@ pub enum MessageAction {
     Reply(usize),
     Edit(usize),
     Pin(usize),
+    /// Right-click on a row at a window position.
+    Context(usize, DVec2),
 }
 
 /// Spec: a jumped-to message flashes accent/.3, fading over 4s.
@@ -167,6 +169,12 @@ impl MessageList {
             if item.as_view().finger_hover_out(actions).is_some() && self.hovered == Some(index) {
                 self.hovered = None;
                 crate::lists::redraw_items(cx, &list);
+            }
+            if let Some(e) = item.as_view().finger_down(actions) {
+                if !e.device.is_primary_hit() && self.rows.get(index).is_some_and(|r| !r.id.is_empty()) {
+                    out = Some(MessageAction::Context(index, e.abs));
+                    continue;
+                }
             }
             let clicked = |path: &[LiveId]| item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
             if clicked(ids!(toolbar.reply_btn)) {

@@ -343,7 +343,7 @@ script_mod! {
             width: Fill height: Fill
             flow: Down
             Header := RoleHeader{text: ""}
-            Member := MemberItem{}
+            Member := MemberItem{cursor: MouseCursor.Default}
         }
     }
 
@@ -1013,6 +1013,11 @@ pub struct App {
     ctx: Vec<CtxSlotData>,
     #[rust]
     ctx_back: Vec<CtxMenuData>,
+    /// The items of the open menu, so a submenu can come back to it.
+    #[rust]
+    ctx_items: Vec<ctxmenu::Item>,
+    #[rust]
+    members: Vec<backend::MemberRow>,
     #[rust]
     ctx_at: DVec2,
     /// Category picked when the channel page opened (create mode).
@@ -1083,7 +1088,7 @@ impl App {
             .borrow::<message_list::MessageList>()
             .and_then(|l| {
                 let i = match action {
-                    MessageAction::Reply(i) | MessageAction::Edit(i) | MessageAction::Pin(i) => i,
+                    MessageAction::Reply(i) | MessageAction::Edit(i) | MessageAction::Pin(i) | MessageAction::Context(i, _) => i,
                 };
                 l.row(i).cloned()
             });
@@ -1105,6 +1110,11 @@ impl App {
                 self.focus_composer(cx);
             }
             MessageAction::Pin(_) => self.send(backend::Command::Pin { id: row.id.clone(), pinned: !row.pinned }),
+            MessageAction::Context(i, at) => {
+                let items = self.message_menu(i, &row);
+                self.open_menu(cx, items, at);
+                return;
+            }
         }
         self.ui.redraw(cx);
     }
@@ -1219,6 +1229,7 @@ impl App {
 
     fn open_menu(&mut self, cx: &mut Cx, items: Vec<ctxmenu::Item>, at: DVec2) {
         let slots = ctxmenu::layout(&items);
+        self.ctx_items = items;
         if slots.is_empty() {
             return;
         }
@@ -1250,9 +1261,17 @@ impl App {
         self.ui.redraw(cx);
     }
 
+    /// Replaces the open menu with a submenu, remembering where it was.
+    fn open_submenu(&mut self, cx: &mut Cx, items: Vec<ctxmenu::Item>) {
+        self.ctx_back.push(CtxMenuData { items: self.ctx_items.clone() });
+        let at = self.ctx_at;
+        self.open_menu(cx, items, at);
+    }
+
     fn close_menu(&mut self, cx: &mut Cx) {
         self.ctx.clear();
         self.ctx_back.clear();
+        self.ctx_items.clear();
         self.ui.view(cx, ids!(ctx_layer)).set_visible(cx, false);
         self.ui.redraw(cx);
     }
@@ -1334,13 +1353,182 @@ impl App {
         }
     }
 
-    /// Message and member menu actions (filled in with those menus).
-    fn run_message_or_member_action(&mut self, _cx: &mut Cx, _action: ctxmenu::Action) {}
+    fn message_row(&self, cx: &mut Cx, i: usize) -> Option<backend::MessageRow> {
+        self.ui.widget(cx, ids!(messages)).borrow::<message_list::MessageList>().and_then(|l| l.row(i).cloned())
+    }
+
+    /// Rails' message menu, for what exists so far (reactions, images and
+    /// links join with those features).
+    fn message_menu(&self, i: usize, row: &backend::MessageRow) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let link = inferno_core::nostr::prelude::EventId::from_hex(&row.id)
+            .ok()
+            .and_then(|id| {
+                use inferno_core::nostr::nips::nip19::ToBech32;
+                inferno_core::nostr::nips::nip19::Nip19Event::new(id).to_bech32().ok()
+            })
+            .map(|n| format!("nostr:{n}"))
+            .unwrap_or_default();
+        let mut v = vec![
+            Item::new("Reply", A::Reply(i)),
+            Item::Separator,
+            Item::new("Copy Text", A::Copy(row.body.clone().unwrap_or_default())),
+            Item::new("Copy Message Link", A::Copy(link)),
+        ];
+        if self.perms.manage_messages {
+            v.push(Item::new(if row.pinned { "Unpin Message" } else { "Pin Message" }, A::Pin(i)));
+        }
+        if row.own {
+            v.push(Item::Separator);
+            v.push(Item::new("Edit Message", A::Edit(i)));
+            v.push(Item::danger("Delete Message", A::DeleteMessage(i)));
+        } else if self.perms.manage_messages {
+            v.push(Item::Separator);
+            v.push(Item::danger("Delete Message", A::DeleteMessage(i)));
+        }
+        v
+    }
+
+    fn member(&self, pubkey: &str) -> Option<(String, Vec<String>, bool, bool)> {
+        self.members.iter().find_map(|m| match m {
+            backend::MemberRow::Member { name, pubkey: pk, roles, owner, me, .. } if pk == pubkey => {
+                Some((name.clone(), roles.clone(), *owner, *me))
+            }
+            _ => None,
+        })
+    }
+
+    /// Rails' member menu, with Flutter's timeout presets and ban reason.
+    fn member_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let Some((name, _, owner, me)) = self.member(pubkey) else { return vec![] };
+        let p = &self.perms;
+        let mut v = vec![Item::new("Mention", A::Mention(name.clone()))];
+        if p.manage_roles && !owner {
+            v.push(Item::Separator);
+            v.push(Item::new("Roles  ›", A::RolesFor(pubkey.into())));
+        }
+        if !me && !owner && (p.kick_members || p.ban_members) {
+            v.push(Item::Separator);
+            if p.kick_members {
+                v.push(Item::new("Timeout  ›", A::TimeoutFor(pubkey.into())));
+                v.push(Item::danger(format!("Kick {name}"), A::Kick(pubkey.into())));
+            }
+            if p.ban_members {
+                v.push(Item::danger(format!("Ban {name}"), A::Ban(pubkey.into())));
+            }
+        }
+        v.push(Item::Separator);
+        let npub = inferno_core::nostr::prelude::PublicKey::from_hex(pubkey)
+            .ok()
+            .and_then(|pk| {
+                use inferno_core::nostr::nips::nip19::ToBech32;
+                pk.to_bech32().ok()
+            })
+            .unwrap_or_else(|| pubkey.to_owned());
+        v.push(Item::new("Copy User ID", A::Copy(npub)));
+        v
+    }
+
+    fn roles_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let held = self.member(pubkey).map(|m| m.1).unwrap_or_default();
+        let mut v = vec![Item::new("‹  Back", A::Back), Item::Separator];
+        for r in self.roles.iter().filter(|r| r.name != "@everyone") {
+            let mark = if held.contains(&r.id) { "✓" } else { "  " };
+            v.push(Item::new(format!("{mark}  {}", r.name), A::ToggleRole { member: pubkey.into(), role: r.id.clone() }));
+        }
+        v
+    }
+
+    fn timeout_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let mut v = vec![Item::new("‹  Back", A::Back), Item::Separator];
+        for (label, secs) in [
+            ("60 seconds", 60),
+            ("5 minutes", 300),
+            ("10 minutes", 600),
+            ("1 hour", 3_600),
+            ("1 day", 86_400),
+            ("1 week", 604_800),
+        ] {
+            v.push(Item::new(label, A::Timeout { member: pubkey.into(), secs }));
+        }
+        v.push(Item::Separator);
+        v.push(Item::new("Remove Timeout", A::Timeout { member: pubkey.into(), secs: 0 }));
+        v
+    }
+
+    /// Message and member menu actions.
+    fn run_message_or_member_action(&mut self, cx: &mut Cx, action: ctxmenu::Action) {
+        use ctxmenu::Action as A;
+        use message_list::MessageAction as M;
+        match action {
+            A::Reply(i) => self.message_action(cx, M::Reply(i)),
+            A::Edit(i) => self.message_action(cx, M::Edit(i)),
+            A::Pin(i) => self.message_action(cx, M::Pin(i)),
+            A::DeleteMessage(_) => self.confirm(
+                cx,
+                Pending::Menu(action),
+                "Delete Message",
+                "Are you sure you want to delete this message? This can't be undone.",
+                "Delete",
+                false,
+            ),
+            A::Mention(name) => {
+                let composer = self.ui.text_input(cx, ids!(composer));
+                let mut text = composer.text();
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
+                }
+                text.push_str(&format!("@{name} "));
+                composer.set_text(cx, &text);
+                self.focus_composer(cx);
+            }
+            A::RolesFor(pk) => {
+                let items = self.roles_menu(&pk);
+                self.open_submenu(cx, items);
+            }
+            A::TimeoutFor(pk) => {
+                let items = self.timeout_menu(&pk);
+                self.open_submenu(cx, items);
+            }
+            A::ToggleRole { member, role } => {
+                let mut roles = self.member(&member).map(|m| m.1).unwrap_or_default();
+                if let Some(i) = roles.iter().position(|r| *r == role) {
+                    roles.remove(i);
+                } else {
+                    roles.push(role);
+                }
+                self.send(backend::Command::SetMemberRoles { pubkey: member, roles });
+            }
+            A::Timeout { member, secs } => self.send(backend::Command::Timeout { pubkey: member, secs }),
+            A::Kick(ref pk) => {
+                let name = self.member(pk).map(|m| m.0).unwrap_or_default();
+                let body = format!("Kick {name} from {}?", self.server_name);
+                self.confirm(cx, Pending::Menu(action), "Kick Member", &body, "Kick", false);
+            }
+            A::Ban(ref pk) => {
+                let name = self.member(pk).map(|m| m.0).unwrap_or_default();
+                let body = format!("Ban {name} from {}?", self.server_name);
+                self.confirm(cx, Pending::Menu(action), "Ban Member", &body, "Ban", true);
+            }
+            A::Back => {
+                if let Some(prev) = self.ctx_back.pop() {
+                    let at = self.ctx_at;
+                    let back = std::mem::take(&mut self.ctx_back);
+                    self.open_menu(cx, prev.items, at);
+                    self.ctx_back = back;
+                }
+            }
+            _ => {}
+        }
+    }
 
     /// The confirmed side of a pending action.
     fn run_confirmed(&mut self, cx: &mut Cx, pending: Pending) {
         use ctxmenu::Action as A;
-        let _reason = self.ui.text_input(cx, ids!(confirm_input)).text();
+        let reason = self.ui.text_input(cx, ids!(confirm_input)).text();
         match pending {
             Pending::Leave => self.send(backend::Command::LeaveServer),
             Pending::Menu(A::DeleteChannel(id)) => {
@@ -1348,6 +1536,13 @@ impl App {
                 self.close_pages(cx);
             }
             Pending::Menu(A::DeleteCategory(id)) => self.send(backend::Command::DeleteCategory(id)),
+            Pending::Menu(A::DeleteMessage(i)) => {
+                if let Some(row) = self.message_row(cx, i) {
+                    self.send(backend::Command::DeleteMessage(row.id));
+                }
+            }
+            Pending::Menu(A::Kick(pk)) => self.send(backend::Command::Kick(pk)),
+            Pending::Menu(A::Ban(pk)) => self.send(backend::Command::Ban { pubkey: pk, reason: reason.trim().to_owned() }),
             Pending::Menu(_) => {}
         }
     }
@@ -1397,6 +1592,7 @@ impl App {
                     list.can_manage = perms.manage_channels;
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
+                self.members = members.clone();
                 if let Some(mut list) = self.ui.widget(cx, ids!(members)).borrow_mut::<lists::MemberList>() {
                     list.rows = members.clone();
                 }
@@ -1510,6 +1706,13 @@ impl MatchEvent for App {
         if let Some(gid) = rail_click {
             self.send(backend::Command::SelectServer(gid));
         }
+        let member_ctx = self.ui.widget(cx, ids!(members)).borrow::<lists::MemberList>().and_then(|l| l.context(cx, actions));
+        if let Some((i, at)) = member_ctx {
+            if let Some(backend::MemberRow::Member { pubkey, .. }) = self.members.get(i).cloned() {
+                let items = self.member_menu(&pubkey);
+                self.open_menu(cx, items, at);
+            }
+        }
         let sidebar_action = self
             .ui
             .widget(cx, ids!(channels))
@@ -1580,7 +1783,11 @@ impl MatchEvent for App {
         for (i, slot) in CTX_SLOTS.iter().enumerate() {
             if tapped(&self.ui, cx, &[id!(ctx_menu), *slot, id!(item)]) {
                 if let Some(d) = self.ctx.get(i).cloned() {
-                    self.close_menu(cx);
+                    use ctxmenu::Action as A;
+                    let stays_open = matches!(d.action, A::Back | A::RolesFor(_) | A::TimeoutFor(_));
+                    if !stays_open {
+                        self.close_menu(cx);
+                    }
                     self.run_menu_action(cx, d.action);
                 }
             }
