@@ -2136,6 +2136,7 @@ script_mod! {
                             srv_nav_title := NavHeader{text: "SERVER"}
                             snav_overview := NavItem{label.text: "Overview"}
                             snav_voice := NavItem{label.text: "Voice"}
+                            snav_relays := NavItem{label.text: "Relays"}
                             expression_hdr := NavHeader{text: "EXPRESSION"}
                             snav_emoji := NavItem{label.text: "Emoji"}
                             snav_stickers := NavItem{label.text: "Stickers"}
@@ -2475,6 +2476,24 @@ script_mod! {
                                 Txt{margin: Inset{top: 8 bottom: 8} text: "CHANNEL SETTINGS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
                                 vo_channels := mod.widgets.PeopleList{height: 320
                                     list +: {Empty +: {text: "No voice channels yet. Create a voice channel to configure its settings."}}}
+                            }
+
+                            // Rails' server relays: used besides each member's own.
+                            spage_relays := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Relays" margin: Inset{bottom: 2}}
+                                Hint{margin: Inset{bottom: 16} text: "Configure which relays this server uses for federation and channel sync. Server-specific relays are used in addition to your global relays, and go into invite links."}
+                                Card{flow: Right spacing: 8 align: Align{y: 0.5}
+                                    srl_input := TextInput{width: Fill height: 36 empty_text: "wss://relay.example.com"}
+                                    srl_add := Button{text: "Add Relay"}
+                                }
+                                Txt{margin: Inset{top: 8 bottom: 8} text: "SERVER RELAYS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                srl_list := mod.widgets.PeopleList{height: 200
+                                    list +: {Empty +: {text: "No server relays: members use their own."}}}
+                                Txt{margin: Inset{top: 8 bottom: 8} text: "GLOBAL RELAYS (INHERITED)" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                srl_global := mod.widgets.PeopleList{height: 240
+                                    list +: {Empty +: {text: "All your relays are server relays too."}}}
                             }
 
                             spage_audit := View{
@@ -2917,7 +2936,7 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 9] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 10] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
@@ -2927,6 +2946,7 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 9] = [
     (ids!(snav_stickers), ids!(spage_stickers)),
     (ids!(snav_audit), ids!(spage_audit)),
     (ids!(snav_voice), ids!(spage_voice)),
+    (ids!(snav_relays), ids!(spage_relays)),
 ];
 
 /// Whether the role drafts differ from what's saved, in what the editor
@@ -3726,7 +3746,7 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 9] {
+    fn srv_page_allowed(&self) -> [bool; 10] {
         let p = &self.perms;
         [
             p.manage_server,
@@ -3739,6 +3759,7 @@ impl App {
             p.manage_server,
             // Rails shows Voice to every member; only admins change it.
             true,
+            p.manage_server,
         ]
     }
 
@@ -3807,6 +3828,7 @@ impl App {
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_audit.list)));
         self.fill_voice(cx);
+        self.fill_server_relays(cx);
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
@@ -3945,6 +3967,33 @@ impl App {
             l.rows = bans;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    fn fill_server_relays(&mut self, cx: &mut Cx) {
+        let o = self.srv.clone();
+        let mine: Vec<lists::PersonRow> = o
+            .server_relays
+            .iter()
+            .map(|u| lists::PersonRow {
+                id: u.clone(),
+                name: u.clone(),
+                detail: if o.global_relays.contains(u) { "Also one of your relays".into() } else { "Server relay".into() },
+                a: Some("Remove".into()),
+                b: None,
+            })
+            .collect();
+        let global: Vec<lists::PersonRow> = o
+            .global_relays
+            .iter()
+            .filter(|u| !o.server_relays.contains(u))
+            .map(|u| lists::PersonRow { id: u.clone(), name: u.clone(), detail: "Global relay · Managed in user settings".into(), a: None, b: None })
+            .collect();
+        for (path, rows, list) in [(ids!(srl_list), mine, ids!(srl_list.list)), (ids!(srl_global), global, ids!(srl_global.list))] {
+            if let Some(mut l) = self.ui.widget(cx, path).borrow_mut::<lists::PeopleList>() {
+                l.rows = rows;
+            }
+            lists::redraw_items(cx, &self.ui.portal_list(cx, list));
+        }
     }
 
     /// Rails' voice page from the settings snapshot.
@@ -6025,6 +6074,17 @@ impl MatchEvent for App {
                 afk_action: if kick { "kick".into() } else { "move".into() },
             });
             self.toast(cx, "Voice settings saved.", Toast::Success);
+        }
+        if self.ui.button(cx, ids!(srl_add)).clicked(actions) || self.ui.text_input(cx, ids!(srl_input)).returned(actions).is_some() {
+            let url = self.ui.text_input(cx, ids!(srl_input)).text();
+            if !url.trim().is_empty() {
+                self.send(backend::Command::AddServerRelay(url));
+                self.ui.text_input(cx, ids!(srl_input)).set_text(cx, "");
+            }
+        }
+        let srl_rm = self.ui.widget(cx, ids!(srl_list)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        if let Some((url, _)) = srl_rm {
+            self.send(backend::Command::RemoveServerRelay(url));
         }
         if self.ui.button(cx, ids!(vo_volunteer)).clicked(actions) {
             self.send(backend::Command::VoiceProvider(!self.srv.me_provider));

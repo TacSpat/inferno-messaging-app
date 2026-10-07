@@ -221,6 +221,9 @@ pub struct ServerSettings {
     pub stickers: Vec<CustomItem>,
     /// Newest first, at most 200.
     pub audit: Vec<AuditItem>,
+    /// Rails' server relays (in the metadata), and ours they add to.
+    pub server_relays: Vec<String>,
+    pub global_relays: Vec<String>,
     pub voice_enabled: bool,
     /// Names of the members whose LiveKit accounts power voice (Rails).
     pub voice_providers: Vec<String>,
@@ -521,6 +524,8 @@ pub enum Command {
     /// Nest a voice channel under a hearth (or out of one with `None`).
     NestChannel { id: String, hearth: Option<String>, index: Option<usize> },
     MoveCategory { id: String, index: usize },
+    AddServerRelay(String),
+    RemoveServerRelay(String),
     SaveVoice { enabled: bool, afk_channel: Option<String>, afk_timeout: u32, afk_action: String },
     /// Add or remove ourselves as a voice provider.
     VoiceProvider(bool),
@@ -1185,6 +1190,25 @@ impl Backend {
             Command::NestChannel { id, hearth, index } => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 self.session.nest_channel(&gid, &id, hearth.as_deref(), index).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::AddServerRelay(url) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let url = inferno_core::relay::normalize_url(url.trim()).ok_or("That isn't a relay address (wss://…).")?;
+                self.session
+                    .update_metadata(&gid, move |m| {
+                        if !m.relays.contains(&url) {
+                            m.relays.push(url);
+                        }
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.session.resubscribe().await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::RemoveServerRelay(url) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.update_metadata(&gid, move |m| m.relays.retain(|r| *r != url)).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
             Command::SaveVoice { enabled, afk_channel, afk_timeout, afk_action } => {
@@ -2056,6 +2080,8 @@ impl Backend {
             }
         }
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            server_relays: m.relays.clone(),
+            global_relays: self.session.relays().unwrap_or_default().into_iter().map(|r| r.url).collect(),
             voice_enabled: m.voice_enabled,
             voice_providers: m.voice_providers.iter().map(|pk| display(&state, pk, &people).name).collect(),
             me_provider: m.voice_providers.contains(&me),

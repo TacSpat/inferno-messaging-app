@@ -1777,6 +1777,17 @@ impl Session {
         }
 
         let gids = self.servers()?;
+        // Servers' own relays (Rails' server relays), used besides ours.
+        let mut extra: Vec<String> = Vec::new();
+        for gid in &gids {
+            if let Some(state) = self.server(gid)? {
+                extra.extend(state.metadata.relays.iter().filter_map(|r| crate::relay::normalize_url(r)));
+            }
+        }
+        if !extra.is_empty() {
+            self.pool.add_relays(&extra).await?;
+            self.pool.connect().await;
+        }
         let mut groups = HashMap::new();
         for gid in &gids {
             if let Some(state) = self.server(gid)? {
