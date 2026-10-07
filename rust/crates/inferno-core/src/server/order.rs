@@ -18,7 +18,7 @@ pub fn root_items(s: &Structure) -> Vec<RootItem> {
     let mut items: Vec<(i64, u8, String, RootItem)> = s
         .channels
         .iter()
-        .filter(|c| c.category.is_none() && c.parent.is_none())
+        .filter(|c| c.category.is_none() && s.hearth_of(&c.id).is_none())
         .map(|c| (c.position, 0, c.id.clone(), RootItem::Channel(c.id.clone())))
         .chain(s.categories.iter().map(|c| (c.position, 1, c.id.clone(), RootItem::Category(c.id.clone()))))
         .collect();
@@ -28,9 +28,50 @@ pub fn root_items(s: &Structure) -> Vec<RootItem> {
 
 /// Channel ids in `category`, in order.
 pub fn in_category(s: &Structure, category: &str) -> Vec<String> {
-    let mut chans: Vec<_> = s.channels.iter().filter(|c| c.category.as_deref() == Some(category) && c.parent.is_none()).collect();
+    let mut chans: Vec<_> = s.channels.iter().filter(|c| c.category.as_deref() == Some(category) && s.hearth_of(&c.id).is_none()).collect();
     chans.sort_by(|a, b| (a.position, &a.id).cmp(&(b.position, &b.id)));
     chans.into_iter().map(|c| c.id.clone()).collect()
+}
+
+/// The embers directly under hearth `id`, in order.
+pub fn embers(s: &Structure, id: &str) -> Vec<String> {
+    let mut chans: Vec<_> = s.channels.iter().filter(|c| s.hearth_of(&c.id) == Some(id)).collect();
+    chans.sort_by(|a, b| (a.position, &a.id).cmp(&(b.position, &b.id)));
+    chans.into_iter().map(|c| c.id.clone()).collect()
+}
+
+/// A channel row as the sidebar draws it under its hearths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Nested {
+    pub id: String,
+    /// 0 at the top; 1 and 2 for embers.
+    pub depth: usize,
+    /// Last among its hearth's embers (the connector ends here).
+    pub last: bool,
+    /// Per level above it, whether that level's line continues past this
+    /// row (the ancestor there has later siblings).
+    pub guides: Vec<bool>,
+}
+
+/// `id` followed by its embers, depth first, as Rails nests them.
+pub fn with_embers(s: &Structure, id: &str) -> Vec<Nested> {
+    fn go(s: &Structure, id: &str, depth: usize, last: bool, guides: Vec<bool>, out: &mut Vec<Nested>) {
+        out.push(Nested { id: id.to_owned(), depth, last, guides: guides.clone() });
+        if depth + 1 >= Structure::MAX_NESTING + 1 {
+            return;
+        }
+        let kids = embers(s, id);
+        let mut next = guides;
+        if depth > 0 {
+            next.push(!last);
+        }
+        for (i, k) in kids.iter().enumerate() {
+            go(s, k, depth + 1, i + 1 == kids.len(), next.clone(), out);
+        }
+    }
+    let mut out = Vec::new();
+    go(s, id, 0, true, Vec::new(), &mut out);
+    out
 }
 
 fn renumber_root(s: &mut Structure, order: &[RootItem]) {
@@ -133,6 +174,34 @@ mod tests {
             video_enabled: false,
             post_only: false,
         }
+    }
+
+    fn voice(id: &str, parent: Option<&str>, pos: i64) -> Channel {
+        Channel { kind: "voice".into(), parent: parent.map(str::to_owned), ..chan(id, Some("cat"), pos) }
+    }
+
+    #[test]
+    fn embers_nest_under_their_hearth() {
+        let mut s = sample();
+        s.channels.push(voice("hearth", None, 2));
+        s.channels.push(voice("e1", Some("hearth"), 0));
+        s.channels.push(voice("e2", Some("hearth"), 1));
+        s.channels.push(voice("deep", Some("e1"), 0));
+        assert_eq!(in_category(&s, "cat"), ["a", "b", "hearth"], "embers aren't top-level");
+        let rows = with_embers(&s, "hearth");
+        let ids: Vec<_> = rows.iter().map(|r| (r.id.as_str(), r.depth, r.last)).collect();
+        assert_eq!(ids, [("hearth", 0, true), ("e1", 1, false), ("deep", 2, true), ("e2", 1, true)]);
+        assert_eq!(rows[2].guides, vec![true], "e1 has a later sibling, so its line runs past deep");
+
+        // Rails' rules: voice hearths only, no loops, three levels at most.
+        assert!(s.check_hearth("a", "b").is_err(), "text hearth");
+        assert!(s.check_hearth("hearth", "e1").is_err(), "loop");
+        assert!(s.check_hearth("e2", "deep").is_err(), "a fourth level");
+        assert!(s.check_hearth("e2", "e1").is_ok());
+
+        // A broken parent from elsewhere: shown at the top instead of lost.
+        s.channels.push(voice("orphan", Some("gone"), 3));
+        assert!(in_category(&s, "cat").contains(&"orphan".to_string()));
     }
 
     fn sample() -> Structure {

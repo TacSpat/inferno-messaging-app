@@ -151,6 +151,72 @@ pub struct Structure {
 }
 
 impl Structure {
+    /// Rails' nesting depth: a channel plus up to two hearths above it.
+    pub const MAX_NESTING: usize = 3;
+
+    /// The hearth `id` is drawn under, if its `parent` is usable: a voice
+    /// channel here, not itself, no loop, within Rails' three levels.
+    /// Anything else (a deleted or text parent from another client) puts it
+    /// back at the top of its category.
+    pub fn hearth_of(&self, id: &str) -> Option<&str> {
+        let c = self.channels.iter().find(|c| c.id == id)?;
+        let parent = c.parent.as_deref()?;
+        self.check_hearth(id, parent).ok().map(|_| parent)
+    }
+
+    /// The hearths above `id`, nearest first (stops at a broken link).
+    pub fn ancestors(&self, id: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur = id.to_owned();
+        while let Some(p) = self.channels.iter().find(|c| c.id == cur).and_then(|c| c.parent.clone()) {
+            if p == id || out.contains(&p) || out.len() > Self::MAX_NESTING {
+                break;
+            }
+            out.push(p.clone());
+            cur = p;
+        }
+        out
+    }
+
+    /// Whether `parent` can be `id`'s hearth (Rails' `parent_channel_valid`).
+    pub fn check_hearth(&self, id: &str, parent: &str) -> Result<(), &'static str> {
+        let p = self.channels.iter().find(|c| c.id == parent).ok_or("that hearth doesn't exist")?;
+        if p.kind != "voice" {
+            return Err("a hearth must be a voice channel");
+        }
+        if parent == id {
+            return Err("a channel can't be its own hearth");
+        }
+        let above = self.ancestors(parent);
+        if above.iter().any(|a| a == id) {
+            return Err("that would make a loop");
+        }
+        // The hearth's own chain must itself be sound.
+        if above.iter().any(|a| self.channels.iter().find(|c| &c.id == a).is_none_or(|c| c.kind != "voice")) {
+            return Err("that hearth isn't nested properly");
+        }
+        // Depth of the hearth's subtree under `id` counts too, when moving.
+        let depth_below = self.depth_below(id);
+        if above.len() + 1 + depth_below + 1 > Self::MAX_NESTING {
+            return Err("channels nest at most three levels deep");
+        }
+        Ok(())
+    }
+
+    /// How many levels of embers sit under `id`.
+    fn depth_below(&self, id: &str) -> usize {
+        fn go(s: &Structure, id: &str, seen: &mut Vec<String>) -> usize {
+            if seen.iter().any(|x| x == id) || seen.len() > Structure::MAX_NESTING {
+                return 0;
+            }
+            seen.push(id.to_owned());
+            let d = s.channels.iter().filter(|c| c.parent.as_deref() == Some(id)).map(|c| 1 + go(s, &c.id, seen)).max().unwrap_or(0);
+            seen.pop();
+            d
+        }
+        go(self, id, &mut Vec::new())
+    }
+
     pub fn channel_is_root(&self, id: &str) -> bool {
         self.channels.iter().any(|c| c.id == id && c.category.is_none())
     }

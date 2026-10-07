@@ -34,7 +34,19 @@ pub struct ServerItem {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidebarRow {
     Category { id: String, name: String },
-    Channel { id: String, name: String, voice: bool, encrypted: bool, category: Option<String> },
+    Channel {
+        id: String,
+        name: String,
+        voice: bool,
+        encrypted: bool,
+        category: Option<String>,
+        /// Nesting under hearths (Rails' embers): 0 at the top.
+        depth: u8,
+        /// Last ember of its hearth: the connector ends here.
+        last: bool,
+        /// Per level above, whether that level's line runs on past this row.
+        guides: Vec<bool>,
+    },
 }
 
 /// What we may do in the selected server (drives which controls show).
@@ -229,6 +241,13 @@ pub struct ChannelForm {
     pub allowed_roles: Vec<String>,
     pub post_only: bool,
     pub nsfw: bool,
+    /// Voice: Rails' Hearth (the voice channel this one nests under).
+    pub hearth: Option<String>,
+    pub voice_bitrate: u32,
+    pub voice_user_limit: u32,
+    pub video_enabled: bool,
+    /// How deep it sits (0 = top); a hearth must be at depth 0 or 1.
+    pub depth: u8,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -488,6 +507,9 @@ pub enum Command {
     DeleteCategory(String),
     /// Move a channel to `index` within `category` (None = top level).
     MoveChannel { id: String, category: Option<String>, index: usize },
+    /// Nest a voice channel under a hearth (or out of one with `None`).
+    NestChannel { id: String, hearth: Option<String>, index: Option<usize> },
+    MoveCategory { id: String, index: usize },
     LeaveServer,
     MarkRead(String),
     DeleteMessage(String),
@@ -1087,6 +1109,10 @@ impl Backend {
                             allowed_roles: form.allowed_roles.clone(),
                             post_only: form.post_only,
                             nsfw: form.nsfw,
+                            hearth: form.hearth.clone(),
+                            voice_bitrate: form.voice_bitrate,
+                            voice_user_limit: form.voice_user_limit,
+                            video_enabled: form.video_enabled,
                         };
                         let id = self.session.create_channel(&gid, &spec).await.map_err(|e| e.to_string())?;
                         if !form.voice {
@@ -1101,6 +1127,12 @@ impl Backend {
                                 c.topic = f.topic;
                                 c.post_only = f.post_only;
                                 c.nsfw = f.nsfw;
+                                if c.kind == "voice" {
+                                    c.parent = f.hearth;
+                                    c.voice_bitrate = f.voice_bitrate;
+                                    c.voice_user_limit = f.voice_user_limit;
+                                    c.video_enabled = f.video_enabled;
+                                }
                                 if c.encrypted {
                                     let mut o = c.permission_overrides.clone();
                                     o.insert("allowed_role_ids".into(), serde_json::json!(f.allowed_roles));
@@ -1134,6 +1166,16 @@ impl Backend {
             Command::DeleteCategory(id) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 self.session.delete_category(&gid, &id).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::NestChannel { id, hearth, index } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.nest_channel(&gid, &id, hearth.as_deref(), index).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::MoveCategory { id, index } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.move_category(&gid, &id, index).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
             Command::MoveChannel { id, category, index } => {
@@ -1715,28 +1757,31 @@ impl Backend {
         // read are hidden, as Rails does.
         let me = self.session.keys().public_key();
         let readable = |c: &inferno_core::server::wire::Channel| state.can_read(&me, c);
-        let row = |c: &inferno_core::server::wire::Channel| SidebarRow::Channel {
-            id: c.id.clone(),
-            name: c.name.clone(),
-            voice: c.kind == "voice",
-            encrypted: c.encrypted,
-            category: c.category.clone(),
+        // A channel and its embers (Rails' Hearth/Ember nesting).
+        let push_tree = |sidebar: &mut Vec<SidebarRow>, id: &str| {
+            for n in inferno_core::server::order::with_embers(&state.structure, id) {
+                let Some(c) = state.channel(&n.id).filter(|c| readable(c)) else { continue };
+                sidebar.push(SidebarRow::Channel {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    voice: c.kind == "voice",
+                    encrypted: c.encrypted,
+                    category: c.category.clone(),
+                    depth: n.depth as u8,
+                    last: n.last,
+                    guides: n.guides.clone(),
+                });
+            }
         };
         let mut sidebar = Vec::new();
         for item in inferno_core::server::order::root_items(&state.structure) {
             match item {
-                inferno_core::server::order::RootItem::Channel(id) => {
-                    if let Some(c) = state.channel(&id).filter(|c| readable(c)) {
-                        sidebar.push(row(c));
-                    }
-                }
+                inferno_core::server::order::RootItem::Channel(id) => push_tree(&mut sidebar, &id),
                 inferno_core::server::order::RootItem::Category(id) => {
                     let name = state.structure.categories.iter().find(|c| c.id == id).map(|c| c.name.to_uppercase()).unwrap_or_default();
                     sidebar.push(SidebarRow::Category { id: id.clone(), name });
                     for cid in inferno_core::server::order::in_category(&state.structure, &id) {
-                        if let Some(c) = state.channel(&cid).filter(|c| readable(c)) {
-                            sidebar.push(row(c));
-                        }
+                        push_tree(&mut sidebar, &cid);
                     }
                 }
             }
@@ -1816,6 +1861,11 @@ impl Backend {
                 allowed_roles: inferno_core::server::state::allowed_role_ids(c),
                 post_only: c.post_only,
                 nsfw: c.nsfw,
+                hearth: state.structure.hearth_of(&c.id).map(str::to_owned),
+                voice_bitrate: c.voice_bitrate,
+                voice_user_limit: c.voice_user_limit,
+                video_enabled: c.video_enabled,
+                depth: state.structure.ancestors(&c.id).len() as u8,
             })
             .collect();
         let mut role_forms: Vec<RoleForm> = state

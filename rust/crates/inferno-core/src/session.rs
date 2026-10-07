@@ -80,7 +80,7 @@ pub struct SearchHit {
 }
 
 /// What `Session::create_channel` makes.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ChannelSpec {
     pub name: String,
     pub voice: bool,
@@ -91,6 +91,59 @@ pub struct ChannelSpec {
     pub allowed_roles: Vec<String>,
     pub post_only: bool,
     pub nsfw: bool,
+    /// Voice: the hearth to nest under (Rails' parent channel).
+    pub hearth: Option<String>,
+    pub voice_bitrate: u32,
+    pub voice_user_limit: u32,
+    pub video_enabled: bool,
+}
+
+impl Default for ChannelSpec {
+    fn default() -> Self {
+        ChannelSpec {
+            name: String::new(),
+            voice: false,
+            category: None,
+            topic: String::new(),
+            encrypted: false,
+            allowed_roles: Vec::new(),
+            post_only: false,
+            nsfw: false,
+            hearth: None,
+            voice_bitrate: 64_000,
+            voice_user_limit: 0,
+            video_enabled: false,
+        }
+    }
+}
+
+/// Puts channel `id` under `hearth` (last among its embers, in the hearth's
+/// category), or takes it out to the end of its category.
+fn nest(structure: &mut wire::Structure, id: &str, hearth: Option<&str>) -> Result<()> {
+    let current = structure.channels.iter().find(|c| c.id == id).and_then(|c| c.parent.clone());
+    if current.as_deref() == hearth {
+        return Ok(());
+    }
+    match hearth {
+        Some(h) => {
+            structure.check_hearth(id, h).map_err(|e| SessionError::Other(e.into()))?;
+            let category = structure.channels.iter().find(|c| c.id == h).and_then(|c| c.category.clone());
+            let position = order::embers(structure, h).len() as i64;
+            let c = structure.channels.iter_mut().find(|c| c.id == id).ok_or(SessionError::Unknown)?;
+            c.parent = Some(h.to_owned());
+            c.category = category;
+            c.position = position;
+        }
+        None => {
+            let category = {
+                let c = structure.channels.iter_mut().find(|c| c.id == id).ok_or(SessionError::Unknown)?;
+                c.parent = None;
+                c.category.clone()
+            };
+            order::move_channel(structure, id, category.as_deref(), usize::MAX);
+        }
+    }
+    Ok(())
 }
 
 const CHANNEL_KINDS: [u16; 4] = [kinds::CHANNEL_MESSAGE, kinds::CHANNEL_DELETE, kinds::PIN, kinds::REACTION];
@@ -698,9 +751,9 @@ impl Session {
             channel_pubkey: key.as_ref().map(|k| k.public_key().to_hex()),
             sidechat: None,
             parent: None,
-            voice_bitrate: 64_000,
-            voice_user_limit: 0,
-            video_enabled: false,
+            voice_bitrate: spec.voice_bitrate,
+            voice_user_limit: spec.voice_user_limit,
+            video_enabled: spec.video_enabled,
             post_only: spec.post_only,
         };
         let mut structure = state.structure.clone();
@@ -716,6 +769,9 @@ impl Session {
                 .unwrap_or(usize::MAX),
         };
         order::move_channel(&mut structure, &id, spec.category.as_deref(), index);
+        if spec.voice && spec.hearth.is_some() {
+            nest(&mut structure, &id, spec.hearth.as_deref())?;
+        }
 
         if let Some(key) = key {
             // Readers as the new structure will define them.
@@ -731,6 +787,28 @@ impl Session {
         self.publish_structure(gid, &structure).await?;
         self.after_structure_change(gid).await?;
         Ok(id)
+    }
+
+    /// Edits several channels in one structure publish (the voice page).
+    /// Names, kinds, nesting and keys aren't changed here.
+    pub async fn edit_channels(&self, gid: &str, edit: impl Fn(&mut wire::Channel)) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        for c in structure.channels.iter_mut() {
+            let before = c.clone();
+            edit(c);
+            *c = wire::Channel {
+                voice_bitrate: c.voice_bitrate,
+                voice_user_limit: c.voice_user_limit,
+                video_enabled: c.video_enabled,
+                ..before
+            };
+        }
+        if structure == state.structure {
+            return Ok(());
+        }
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
     }
 
     pub async fn create_category(&self, gid: &str, name: &str) -> Result<String> {
@@ -753,12 +831,18 @@ impl Session {
         let channel = structure.channels.iter_mut().find(|c| c.id == id).ok_or(SessionError::Unknown)?;
         let before = channel.clone();
         edit(channel);
-        // The key, the group and the id aren't editable here.
+        // The key, the group and the id aren't editable here; nesting goes
+        // through `nest` so it's checked and placed.
         channel.id = before.id.clone();
         channel.group_id = before.group_id.clone();
         channel.encrypted = before.encrypted;
         channel.channel_pubkey = before.channel_pubkey.clone();
-        let after = channel.clone();
+        let hearth = std::mem::replace(&mut channel.parent, before.parent.clone());
+        if channel.kind != "voice" && hearth.is_some() && hearth != before.parent {
+            return Err(SessionError::Other("only voice channels nest under a hearth".into()));
+        }
+        nest(&mut structure, id, hearth.as_deref())?;
+        let after = structure.channels.iter().find(|c| c.id == id).cloned().ok_or(SessionError::Unknown)?;
         self.publish_structure(gid, &structure).await?;
 
         if after.encrypted {
@@ -797,6 +881,10 @@ impl Session {
         if structure.channels.len() == before {
             return Err(SessionError::Unknown);
         }
+        // Rails: a hearth's embers stay, at the top of their category.
+        for c in structure.channels.iter_mut().filter(|c| c.parent.as_deref() == Some(id)) {
+            c.parent = None;
+        }
         self.publish_structure(gid, &structure).await?;
         self.after_structure_change(gid).await
     }
@@ -814,11 +902,57 @@ impl Session {
     }
 
     /// Moves a channel to `index` within `category` (`None` = root).
+    /// Moves a channel to `index` in `category` (`None` = top level). An
+    /// ember dragged out leaves its hearth (Rails); its own embers follow it.
     pub async fn move_channel(&self, gid: &str, id: &str, category: Option<&str>, index: usize) -> Result<()> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         let mut structure = state.structure.clone();
+        if let Some(c) = structure.channels.iter_mut().find(|c| c.id == id) {
+            c.parent = None;
+        }
+        // Embers keep their hearth's category.
+        let cat = category.map(str::to_owned);
+        let mut stack = vec![id.to_owned()];
+        while let Some(h) = stack.pop() {
+            for c in structure.channels.iter_mut().filter(|c| c.parent.as_deref() == Some(h.as_str())) {
+                c.category = cat.clone();
+                stack.push(c.id.clone());
+            }
+        }
         if !order::move_channel(&mut structure, id, category, index) {
             return Err(SessionError::Unknown);
+        }
+        self.publish_structure(gid, &structure).await?;
+        self.after_structure_change(gid).await
+    }
+
+    /// Nests a voice channel under `hearth` as its last ember (Rails' drag
+    /// and hover), or takes it out with `None`.
+    pub async fn nest_channel(&self, gid: &str, id: &str, hearth: Option<&str>, index: Option<usize>) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let mut structure = state.structure.clone();
+        if structure.channels.iter().find(|c| c.id == id).is_none_or(|c| c.kind != "voice") {
+            return Err(SessionError::Other("only voice channels nest under a hearth".into()));
+        }
+        nest(&mut structure, id, hearth)?;
+        if let (Some(h), Some(index)) = (hearth, index) {
+            // At `index` among its new siblings, renumbered 0..n.
+            let mut order: Vec<String> = order::embers(&structure, h).into_iter().filter(|e| e != id).collect();
+            order.insert(index.min(order.len()), id.to_owned());
+            for (pos, e) in order.iter().enumerate() {
+                if let Some(c) = structure.channels.iter_mut().find(|c| &c.id == e) {
+                    c.position = pos as i64;
+                }
+            }
+        }
+        // Its embers move to the hearth's category with it.
+        let cat = structure.channels.iter().find(|c| c.id == id).and_then(|c| c.category.clone());
+        let mut stack = vec![id.to_owned()];
+        while let Some(h) = stack.pop() {
+            for c in structure.channels.iter_mut().filter(|c| c.parent.as_deref() == Some(h.as_str())) {
+                c.category = cat.clone();
+                stack.push(c.id.clone());
+            }
         }
         self.publish_structure(gid, &structure).await?;
         self.after_structure_change(gid).await

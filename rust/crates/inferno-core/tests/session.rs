@@ -626,3 +626,31 @@ async fn prune_spares_the_owner_us_and_role_holders() {
     // A 30-day window: they joined just now, so nobody.
     assert!(owner.prune_candidates(&gid, 30, true).await.unwrap().is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn hearths_and_embers() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    let voice = |name: &str, hearth: Option<String>| ChannelSpec { name: name.into(), voice: true, hearth, ..Default::default() };
+    let hearth = owner.create_channel(&gid, &voice("lounge", None)).await.unwrap();
+    let ember = owner.create_channel(&gid, &voice("corner", Some(hearth.clone()))).await.unwrap();
+    let deeper = owner.create_channel(&gid, &voice("nook", Some(ember.clone()))).await.unwrap();
+    assert!(owner.create_channel(&gid, &voice("too-deep", Some(deeper.clone()))).await.is_err(), "three levels at most");
+    let text = owner.server(&gid).unwrap().unwrap().structure.channels.iter().find(|c| c.kind == "text").unwrap().id.clone();
+    assert!(owner.update_channel(&gid, &text, |c| c.parent = Some(hearth.clone())).await.is_err(), "text channels don't nest");
+    assert!(owner.update_channel(&gid, &hearth, |c| c.parent = Some(deeper.clone())).await.is_err(), "no loops");
+
+    let s = owner.server(&gid).unwrap().unwrap().structure;
+    assert_eq!(s.hearth_of(&ember), Some(hearth.as_str()));
+    let rows: Vec<_> = inferno_core::server::order::with_embers(&s, &hearth).into_iter().map(|r| r.depth).collect();
+    assert_eq!(rows, [0, 1, 2]);
+
+    // Unnesting, and deleting a hearth, keep the embers.
+    owner.update_channel(&gid, &deeper, |c| c.parent = None).await.unwrap();
+    owner.delete_channel(&gid, &hearth).await.unwrap();
+    let s = owner.server(&gid).unwrap().unwrap().structure;
+    assert!(s.channels.iter().any(|c| c.id == ember && c.parent.is_none()));
+    assert!(s.channels.iter().any(|c| c.id == deeper && c.parent.is_none()));
+}

@@ -113,6 +113,54 @@ script_mod! {
         draw_bg.border_radius: 4.0
         hash := Txt{text: "#" draw_text.color: gray_400_60 draw_text.text_style.font_size: 12.5}
         name := Txt{width: Fill text: "channel" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5}
+        // Rails' drop zone label while a dragged channel hovers here.
+        nest_hint := Txt{visible: false text: "Nest as ember" draw_text.color: accent_light draw_text.text_style.font_size: 8.5}
+    }
+
+    // Rails' ember connectors (.voice-child-channels): 26px per level, a
+    // 2px accent line 10px left of the ember, curving into a 7px branch;
+    // lines run on past rows whose ancestors have later embers. A soft
+    // wider stroke stands in for Rails' drop-shadow glow.
+    let TreeLines = View{
+        width: 0 height: 33
+        show_bg: true
+        draw_bg +: {
+            depth: uniform(0.0)
+            last: uniform(1.0)
+            g0: uniform(0.0)
+            line: uniform(accent_light)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let h = self.rect_size.y
+                let mid = h * 0.5
+                let x = self.depth * 26.0 - 10.0
+                let c = self.line
+                if self.g0 > 0.5 {
+                    sdf.move_to(16.0, 0.0)
+                    sdf.line_to(16.0, h)
+                    sdf.stroke(vec4(c.x, c.y, c.z, 0.12), 5.0)
+                    sdf.move_to(16.0, 0.0)
+                    sdf.line_to(16.0, h)
+                    sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
+                }
+                sdf.move_to(x, 0.0)
+                sdf.line_to(x, mid - 6.0)
+                sdf.arc_to(x + 6.0, mid - 6.0, 6.0, 3.14159, 1.5708)
+                sdf.line_to(x + 7.0, mid)
+                sdf.stroke(vec4(c.x, c.y, c.z, 0.12), 5.0)
+                sdf.move_to(x, 0.0)
+                sdf.line_to(x, mid - 6.0)
+                sdf.arc_to(x + 6.0, mid - 6.0, 6.0, 3.14159, 1.5708)
+                sdf.line_to(x + 7.0, mid)
+                sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
+                if self.last < 0.5 {
+                    sdf.move_to(x, mid - 6.0)
+                    sdf.line_to(x, h)
+                    sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
+                }
+                return sdf.result
+            }
+        }
     }
 
     let CategoryHeader = View{
@@ -446,7 +494,9 @@ script_mod! {
             Channel := View{
                 width: Fill height: Fit
                 margin: Inset{left: 8 right: 8 top: 1 bottom: 1}
+                flow: Right
                 cursor: MouseCursor.Hand
+                tree := TreeLines{}
                 item := ChannelItem{}
             }
             // Active: gray-600 fill with a 2px accent left border.
@@ -2005,6 +2055,24 @@ script_mod! {
                                 FieldLabel{text: "TOPIC"}
                                 ch_topic := Field{empty_text: "What's this channel about?"}
                             }
+                            // Rails' Voice Settings card (voice channels only).
+                            ch_voice := Card{visible: false
+                                Txt{text: "Voice Settings" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                                View{width: Fill height: Fit flow: Right spacing: 12
+                                    View{width: Fill height: Fit flow: Down
+                                        FieldLabel{text: "BITRATE" margin: Inset{top: 12 bottom: 6}}
+                                        ch_bitrate := DropDown{width: Fill labels: ["32 kbps", "64 kbps", "96 kbps", "128 kbps", "256 kbps"]}
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        FieldLabel{text: "USER LIMIT" margin: Inset{top: 12 bottom: 6}}
+                                        ch_limit := Field{empty_text: "0 = unlimited"}
+                                    }
+                                }
+                                FieldLabel{text: "HEARTH"}
+                                ch_hearth := DropDown{width: Fill labels: ["None (standalone)"]}
+                                Hint{margin: Inset{top: 4} text: "Audio from the hearth radiates down to all its embers"}
+                                ch_video := CheckBox{margin: Inset{top: 8} text: "Enable video"}
+                            }
                             Card{
                                 ch_nsfw := CheckBox{text: "Age-Restricted Channel (NSFW)"}
                                 ch_post_only := CheckBox{text: "Post-only (only moderators can post)"}
@@ -2720,6 +2788,9 @@ pub struct App {
     custom_pending: Option<(String, String)>,
     #[rust]
     custom_file_name: Option<String>,
+    /// Channel ids behind the Hearth dropdown's entries (after "None").
+    #[rust]
+    hearth_options: Vec<String>,
     /// Prune preview: (pubkey, name, last activity).
     #[rust]
     prune: Vec<(String, String, Option<i64>)>,
@@ -2831,6 +2902,9 @@ const SERVER_TYPES: [(&str, &str); 5] = [
     ("work_team", "Work & Team"),
     ("adult", "18+"),
 ];
+
+/// Rails' voice bitrates (bits per second), in the dropdown's order.
+const BITRATES: [u32; 5] = [32_000, 64_000, 96_000, 128_000, 256_000];
 
 /// Rails' invite choices: seconds to expiry (0 = never) and max uses (0 = unlimited).
 const INVITE_EXPIRY: [i64; 7] = [0, 30 * 60, 3600, 6 * 3600, 12 * 3600, 86400, 7 * 86400];
@@ -3064,8 +3138,49 @@ impl App {
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(ch_roles.list)));
         self.ui.view(cx, ids!(ch_roles_box)).set_visible(cx, form.encrypted);
+        let form = if creating { backend::ChannelForm { voice_bitrate: 64_000, ..form } } else { form };
+        self.fill_voice_card(cx, &form, id.as_deref(), creating && form.voice);
         self.ui.view(cx, ids!(channel_page)).set_visible(cx, true);
         self.ui.redraw(cx);
+    }
+
+    /// Rails' Voice Settings card: bitrate, user limit, hearth, video. The
+    /// hearths offered are voice channels at most one level down, not this
+    /// one or anything nested under it.
+    fn fill_voice_card(&mut self, cx: &mut Cx, form: &backend::ChannelForm, id: Option<&str>, voice: bool) {
+        let voice = voice || form.voice;
+        self.ui.view(cx, ids!(ch_voice)).set_visible(cx, voice);
+        let bit = BITRATES.iter().position(|b| *b == form.voice_bitrate).unwrap_or(1);
+        self.ui.drop_down(cx, ids!(ch_bitrate)).set_selected_item(cx, bit);
+        self.ui.text_input(cx, ids!(ch_limit)).set_text(cx, &form.voice_user_limit.to_string());
+        self.ui.check_box(cx, ids!(ch_video)).set_active(cx, form.video_enabled, Animate::No);
+        let under = |c: &backend::ChannelForm| -> bool {
+            // Is `c` this channel or one of its embers?
+            let mut cur = c.id.clone();
+            for _ in 0..4 {
+                if cur.as_deref() == id && id.is_some() {
+                    return true;
+                }
+                cur = self.channel_forms.iter().find(|f| f.id == cur).and_then(|f| f.hearth.clone());
+                if cur.is_none() {
+                    break;
+                }
+            }
+            false
+        };
+        let options: Vec<(String, String)> = self
+            .channel_forms
+            .iter()
+            .filter(|c| c.voice && c.depth < 2 && !under(c))
+            .map(|c| (c.id.clone().unwrap_or_default(), format!("{}{}", "\u{a0}\u{a0}".repeat(c.depth as usize), c.name)))
+            .collect();
+        let mut labels = vec!["None (standalone)".to_owned()];
+        labels.extend(options.iter().map(|(_, n)| n.clone()));
+        let pick = form.hearth.as_ref().and_then(|h| options.iter().position(|(i, _)| i == h)).map_or(0, |i| i + 1);
+        self.hearth_options = options.into_iter().map(|(i, _)| i).collect();
+        let dd = self.ui.drop_down(cx, ids!(ch_hearth));
+        dd.set_labels(cx, labels);
+        dd.set_selected_item(cx, pick);
     }
 
     fn open_category_page(&mut self, cx: &mut Cx, id: Option<String>) {
@@ -5341,6 +5456,12 @@ impl MatchEvent for App {
                 let items = self.sidebar_menu(row.as_ref());
                 self.open_menu(cx, items, dvec2(at.0, at.1));
             }
+            Some(lists::ChannelListAction::Nest { id, hearth, index }) => {
+                self.send(backend::Command::NestChannel { id, hearth: Some(hearth), index });
+            }
+            Some(lists::ChannelListAction::MoveCategory { id, index }) => {
+                self.send(backend::Command::MoveCategory { id, index });
+            }
             Some(lists::ChannelListAction::Move { id, category, index }) => {
                 self.send(backend::Command::MoveChannel { id, category, index })
             }
@@ -5421,6 +5542,12 @@ impl MatchEvent for App {
         if tapped(&self.ui, cx, ids!(ch_cancel)) || tapped(&self.ui, cx, ids!(cat_cancel)) {
             self.close_pages(cx);
         }
+        if self.ui.drop_down(cx, ids!(ch_type)).changed(actions).is_some() {
+            let voice = self.ui.drop_down(cx, ids!(ch_type)).selected_item() == 1;
+            let form = backend::ChannelForm { voice, voice_bitrate: 64_000, ..Default::default() };
+            self.fill_voice_card(cx, &form, None, voice);
+            self.ui.redraw(cx);
+        }
         if self.ui.check_box(cx, ids!(ch_encrypted)).changed(actions).is_some() {
             let on = self.ui.check_box(cx, ids!(ch_encrypted)).active(cx);
             self.ui.view(cx, ids!(ch_roles_box)).set_visible(cx, on);
@@ -5448,6 +5575,16 @@ impl MatchEvent for App {
                 allowed_roles: allowed,
                 post_only: self.ui.check_box(cx, ids!(ch_post_only)).active(cx),
                 nsfw: self.ui.check_box(cx, ids!(ch_nsfw)).active(cx),
+                hearth: self
+                    .ui
+                    .drop_down(cx, ids!(ch_hearth))
+                    .selected_item()
+                    .checked_sub(1)
+                    .and_then(|i| self.hearth_options.get(i).cloned()),
+                voice_bitrate: BITRATES[self.ui.drop_down(cx, ids!(ch_bitrate)).selected_item().min(BITRATES.len() - 1)],
+                voice_user_limit: self.ui.text_input(cx, ids!(ch_limit)).text().trim().parse::<u32>().unwrap_or(0).min(99),
+                video_enabled: self.ui.check_box(cx, ids!(ch_video)).active(cx),
+                depth: 0,
             };
             self.send(backend::Command::SaveChannel(form));
             self.close_pages(cx);

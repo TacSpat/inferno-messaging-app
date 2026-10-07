@@ -84,6 +84,10 @@ pub enum ChannelListAction {
     /// Right-click on a row (`None` = empty sidebar space) at window `at`.
     Context { row: Option<SidebarRow>, at: (f64, f64) },
     Move { id: String, category: Option<String>, index: usize },
+    /// Make a voice channel an ember of `hearth` (at `index` among its
+    /// embers, or last).
+    Nest { id: String, hearth: String, index: Option<usize> },
+    MoveCategory { id: String, index: usize },
 }
 
 /// A press on a channel row that may turn into a drag.
@@ -98,6 +102,14 @@ struct Drag {
 
 /// Pointer travel before a press on a row becomes a drag.
 const DRAG_THRESHOLD: f64 = 5.0;
+/// Rails' channel_reorder_controller: hovering a voice channel this long
+/// while dragging offers "Nest as ember".
+const NEST_HOVER_SECS: f64 = 0.6;
+/// Rails' auto-scroll: within this many points of an edge, at this speed.
+const SCROLL_EDGE: f64 = 40.0;
+const SCROLL_SPEED: f64 = 8.0;
+/// Rails' MAX_DEPTH: three levels.
+const MAX_LEVELS: u8 = 3;
 
 #[derive(Script, ScriptHook, Widget)]
 pub struct ChannelList {
@@ -114,9 +126,119 @@ pub struct ChannelList {
     hovered: Option<usize>,
     #[rust]
     drag: Option<Drag>,
+    /// Hovered voice channel while dragging, and whether "Nest as ember"
+    /// is armed (after NEST_HOVER_SECS).
+    #[rust]
+    nest: Option<(usize, bool)>,
+    #[rust]
+    nest_timer: Timer,
+    #[rust]
+    scroll_timer: Timer,
+    #[rust]
+    scroll_dir: f64,
 }
 
 impl ChannelList {
+    fn depth(&self, i: usize) -> Option<u8> {
+        match self.rows.get(i) {
+            Some(SidebarRow::Channel { depth, .. }) => Some(*depth),
+            _ => None,
+        }
+    }
+
+    fn is_voice(&self, i: usize) -> bool {
+        matches!(self.rows.get(i), Some(SidebarRow::Channel { voice: true, .. }))
+    }
+
+    fn row_id(&self, i: usize) -> Option<String> {
+        match self.rows.get(i)? {
+            SidebarRow::Channel { id, .. } | SidebarRow::Category { id, .. } => Some(id.clone()),
+        }
+    }
+
+    /// One past the last row of `i`'s embers (rows that move with it).
+    fn subtree_end(&self, i: usize) -> usize {
+        let Some(d) = self.depth(i) else { return i + 1 };
+        let mut j = i + 1;
+        while self.depth(j).is_some_and(|x| x > d) {
+            j += 1;
+        }
+        j
+    }
+
+    /// The row of the hearth that ember row `i` sits under.
+    fn hearth_row(&self, i: usize) -> Option<usize> {
+        let d = self.depth(i)?.checked_sub(1)?;
+        (0..i).rev().find(|&j| self.depth(j) == Some(d))
+    }
+
+    /// Whether the dragged row may become an ember of row `t`.
+    fn can_nest(&self, dragged: usize, t: usize) -> bool {
+        let end = self.subtree_end(dragged);
+        if !self.is_voice(dragged) || !self.is_voice(t) || (dragged..end).contains(&t) {
+            return false;
+        }
+        let d = self.depth(dragged).unwrap_or(0);
+        let below = (dragged..end).filter_map(|j| self.depth(j)).max().unwrap_or(d) - d;
+        self.depth(t).unwrap_or(0) + 1 + below < MAX_LEVELS
+    }
+
+    /// The row under the pointer at `y`.
+    fn row_at_y(&self, cx: &Cx, y: f64) -> Option<usize> {
+        let list = self.view.portal_list(cx, ids!(list));
+        let list_ref = list.borrow()?;
+        list_ref.items().iter().map(|(i, item)| (*i, item.widget.area().rect(cx))).find(|(_, r)| r.size.y > 0.0 && y >= r.pos.y && y < r.pos.y + r.size.y).map(|(i, _)| i)
+    }
+
+    fn clear_nest(&mut self, cx: &mut Cx) {
+        if self.nest.take().is_some() {
+            cx.stop_timer(self.nest_timer);
+            redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
+        }
+    }
+
+    fn stop_scroll(&mut self, cx: &mut Cx) {
+        self.scroll_dir = 0.0;
+        cx.stop_timer(self.scroll_timer);
+        self.scroll_timer = Timer::empty();
+    }
+
+    /// What dropping dragged channel row `d` at `slot` does: nest among a
+    /// hearth's embers, or move in a category or the top level.
+    fn channel_drop(&self, d: usize, slot: usize) -> Option<ChannelListAction> {
+        let id = self.row_id(d)?;
+        let end = self.subtree_end(d);
+        if (d..=end).contains(&slot) {
+            return None;
+        }
+        // Between a hearth's embers: an ember there, in that place.
+        if let Some(next_d) = self.depth(slot).filter(|x| *x > 0) {
+            if self.is_voice(d) {
+                if let Some(h) = self.hearth_row(slot) {
+                    let below = (d..end).filter_map(|j| self.depth(j)).max().unwrap_or(0) - self.depth(d).unwrap_or(0);
+                    if next_d + below < MAX_LEVELS {
+                        let index = (h + 1..slot).filter(|&j| !(d..end).contains(&j) && self.depth(j) == Some(next_d)).count();
+                        return Some(ChannelListAction::Nest { id, hearth: self.row_id(h)?, index: Some(index) });
+                    }
+                }
+            }
+        }
+        let (category, index) = self.target(d, slot)?;
+        Some(ChannelListAction::Move { id, category, index })
+    }
+
+    /// Dropping category row `c` before row `slot`: its place among the
+    /// top-level items (a slot inside a category lands after it).
+    fn category_drop(&self, c: usize, slot: usize) -> Option<ChannelListAction> {
+        let id = self.row_id(c)?;
+        let index = self.rows[..slot.min(self.rows.len())]
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != c)
+            .filter(|(_, r)| matches!(r, SidebarRow::Category { .. } | SidebarRow::Channel { category: None, depth: 0, .. }))
+            .count();
+        Some(ChannelListAction::MoveCategory { id, index })
+    }
     /// Where among the rows the pointer at `y` would drop, and the y of the
     /// drop line, from the rows currently drawn.
     fn slot_at(&self, cx: &Cx, y: f64) -> Option<(usize, f64)> {
@@ -151,7 +273,13 @@ impl ChannelList {
 
     /// Turns "insert before row `slot`" into a container and index.
     fn target(&self, dragged: usize, slot: usize) -> Option<(Option<String>, usize)> {
-        let rows: Vec<(usize, &SidebarRow)> = self.rows.iter().enumerate().filter(|(i, _)| *i != dragged).collect();
+        // Embers ride with their hearth; they don't count as places.
+        let rows: Vec<(usize, &SidebarRow)> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(i, r)| !(dragged..self.subtree_end(dragged)).contains(i) && !matches!(r, SidebarRow::Channel { depth, .. } if *depth > 0))
+            .collect();
         // Position of the slot among the remaining rows.
         let at = rows.iter().take_while(|(i, _)| *i < slot).count();
         let before = &rows[..at];
@@ -215,7 +343,7 @@ impl ChannelList {
                     self.drag = None;
                     continue;
                 }
-                if matches!(row, Some(SidebarRow::Channel { .. })) {
+                if row.is_some() {
                     self.drag = Some(Drag { row: i, start_y: e.abs.y, moving: false, slot: None });
                 }
             }
@@ -225,15 +353,51 @@ impl ChannelList {
                         d.moving = true;
                     }
                     if d.moving {
-                        let slot = self.slot_at(cx, e.abs.y);
-                        d.slot = slot.map(|(s, _)| s);
-                        self.show_drop_line(cx, slot.map(|(_, y)| y));
+                        // Hover a voice channel to arm nesting (channels only).
+                        let over = self.row_at_y(cx, e.abs.y).filter(|&t| self.depth(i).is_some() && self.can_nest(i, t));
+                        match (over, self.nest) {
+                            (Some(t), Some((n, _))) if n == t => {}
+                            (Some(t), _) => {
+                                self.clear_nest(cx);
+                                self.nest = Some((t, false));
+                                self.nest_timer = cx.start_timeout(NEST_HOVER_SECS);
+                            }
+                            (None, _) => self.clear_nest(cx),
+                        }
+                        if matches!(self.nest, Some((_, true))) {
+                            d.slot = None;
+                            self.show_drop_line(cx, None);
+                        } else {
+                            let slot = self.slot_at(cx, e.abs.y);
+                            d.slot = slot.map(|(s, _)| s);
+                            self.show_drop_line(cx, slot.map(|(_, y)| y));
+                        }
+                        // Rails' edge auto-scroll.
+                        let r = self.view.area().rect(cx);
+                        let dir = if e.abs.y < r.pos.y + SCROLL_EDGE {
+                            -1.0
+                        } else if e.abs.y > r.pos.y + r.size.y - SCROLL_EDGE {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                        if dir == 0.0 {
+                            self.stop_scroll(cx);
+                        } else if self.scroll_dir == 0.0 {
+                            self.scroll_dir = dir;
+                            self.scroll_timer = cx.start_interval(1.0 / 60.0);
+                        } else {
+                            self.scroll_dir = dir;
+                        }
                     }
                     self.drag = Some(d);
                 }
             }
             if let Some(e) = view.finger_up(actions) {
                 let drag = self.drag.take();
+                let nest = self.nest;
+                self.clear_nest(cx);
+                self.stop_scroll(cx);
                 self.show_drop_line(cx, None);
                 if drag.as_ref().is_some_and(|d| d.moving) {
                     // The rows are about to move under the pointer.
@@ -241,13 +405,13 @@ impl ChannelList {
                 }
                 match (drag, row) {
                     (Some(d), Some(SidebarRow::Channel { id, .. })) if d.moving && d.row == i => {
-                        let moved = d
-                            .slot
-                            .filter(|s| *s != d.row && *s != d.row + 1)
-                            .and_then(|s| self.target(d.row, s));
-                        if let Some((category, index)) = moved {
-                            out = Some(ChannelListAction::Move { id, category, index });
-                        }
+                        out = match nest {
+                            Some((t, true)) => self.row_id(t).map(|hearth| ChannelListAction::Nest { id, hearth, index: None }),
+                            _ => d.slot.and_then(|s| self.channel_drop(d.row, s)),
+                        };
+                    }
+                    (Some(d), Some(SidebarRow::Category { .. })) if d.moving && d.row == i => {
+                        out = d.slot.filter(|s| *s != d.row).and_then(|s| self.category_drop(d.row, s));
                     }
                     (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled && e.device.is_primary_hit() => {
                         out = Some(ChannelListAction::Select(id));
@@ -268,6 +432,24 @@ impl ChannelList {
     }
 }
 
+impl ChannelList {
+    fn handle_timers(&mut self, cx: &mut Cx, event: &Event) {
+        if self.nest_timer.is_event(event).is_some() {
+            if let Some((t, false)) = self.nest {
+                self.nest = Some((t, true));
+                self.show_drop_line(cx, None);
+                redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
+            }
+        }
+        if self.scroll_timer.is_event(event).is_some() && self.scroll_dir != 0.0 {
+            let list = self.view.portal_list(cx, ids!(list));
+            let (first, scroll) = (list.first_id(), list.borrow().map(|l| l.first_scroll()).unwrap_or(0.0));
+            list.set_first_id_and_scroll(first, scroll - self.scroll_dir * SCROLL_SPEED);
+            self.view.redraw(cx);
+        }
+    }
+}
+
 impl Widget for ChannelList {
     fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
         while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
@@ -283,9 +465,23 @@ impl Widget for ChannelList {
                         row.view(cx, ids!(add)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
-                    SidebarRow::Channel { id, name, voice, encrypted, .. } => {
+                    SidebarRow::Channel { id, name, voice, encrypted, depth, last, guides, .. } => {
                         let active = self.selected.as_deref() == Some(id.as_str());
                         let row = list.item(cx, i, if active { id!(ActiveChannel) } else { id!(Channel) });
+                        let nesting = self.nest == Some((i, true));
+                        let mut item = row.widget(cx, ids!(item));
+                        let bg = if nesting { crate::theme::tok("accent", 0.15) } else { rgba(0, 0.0) };
+                        if !active {
+                            script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
+                        }
+                        row.widget(cx, ids!(item.nest_hint)).set_visible(cx, nesting);
+                        if !active {
+                            let mut tree = row.widget(cx, ids!(tree));
+                            let (w, d) = (*depth as f64 * 26.0, *depth as f64);
+                            let l = if *last { 1.0 } else { 0.0 };
+                            let g0 = if guides.first().copied().unwrap_or(false) { 1.0 } else { 0.0 };
+                            script_apply_eval!(cx, tree, {width: #(w) draw_bg +: {depth: #(d) last: #(l) g0: #(g0)}});
+                        }
                         let glyph = if *voice { "🔊" } else if *encrypted { "🔒" } else { "#" };
                         row.label(cx, ids!(item.hash)).set_text(cx, glyph);
                         row.label(cx, ids!(item.name)).set_text(cx, name);
@@ -298,6 +494,7 @@ impl Widget for ChannelList {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.handle_timers(cx, event);
         self.view.handle_event(cx, event, scope);
     }
 }
