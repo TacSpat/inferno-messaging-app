@@ -5,7 +5,7 @@
 #![allow(dead_code, clippy::all)]
 
 use makepad_widgets::{
-    image::ImageWidgetRefExt, view::ViewWidgetRefExt,
+    image::ImageWidgetRefExt, label::LabelWidgetRefExt, view::ViewWidgetRefExt,
     makepad_derive_widget::*, makepad_draw::*, text_flow::TextFlow, widget::*,
 };
 
@@ -163,9 +163,12 @@ pub struct MessageText {
     /// inline widget when it closes.
     #[rust]
     open_link: Option<(String, String)>,
-    /// Images and GIFs drawn this pass: (item id, url).
+    /// Images and GIFs drawn this pass: (item id, url, name).
     #[rust]
-    media: Vec<(LiveId, String)>,
+    media: Vec<(LiveId, String, String)>,
+    /// Videos, sounds and files drawn this pass: (item id, what a click does).
+    #[rust]
+    files: Vec<(LiveId, MessageTextAction)>,
     /// The GIF under the pointer: its flame shows (Flutter).
     #[rust]
     hover_media: Option<String>,
@@ -218,7 +221,7 @@ impl Widget for MessageText {
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         let actions = cx.capture_actions(|cx| self.text_flow.handle_event(cx, event, scope));
-        for (id, url) in self.media.clone() {
+        for (id, url, name) in self.media.clone() {
             let item = self.text_flow.existing_item(id);
             if item.as_view().finger_hover_in(&actions).is_some() && self.hover_media.as_deref() != Some(url.as_str()) {
                 self.hover_media = Some(url.clone());
@@ -232,7 +235,13 @@ impl Widget for MessageText {
             if tapped(&[live_id!(fire)]) {
                 cx.widget_action(self.widget_uid(), MessageTextAction::FavoriteGif(url.clone()));
             } else if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
-                cx.widget_action(self.widget_uid(), MessageTextAction::Link(url.clone()));
+                cx.widget_action(self.widget_uid(), MessageTextAction::View { url: url.clone(), name: name.clone() });
+            }
+        }
+        for (id, action) in self.files.clone() {
+            let item = self.text_flow.existing_item(id);
+            if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+                cx.widget_action(self.widget_uid(), action);
             }
         }
         for (i, (range, target)) in self.targets.clone().into_iter().enumerate() {
@@ -267,6 +276,7 @@ impl Widget for MessageText {
         self.auto_id = 0;
         self.targets.clear();
         self.media.clear();
+        self.files.clear();
         self.open_link = None;
 
         self.begin(cx, walk);
@@ -422,9 +432,60 @@ impl MessageText {
                         item.draw_all_unscoped(cx);
                         continue;
                     }
+                    use crate::message_format::{split_file_target, AUDIO_SCHEME, FILE_SCHEME, IMAGE_SCHEME, VIDEO_SCHEME};
+                    if let Some(rest) = target.strip_prefix(VIDEO_SCHEME) {
+                        let (dim, url) = split_file_target(rest);
+                        // Its own shape, inside Rails' max-w-lg max-h-96.
+                        let (w, h) = dim
+                            .split_once('x')
+                            .and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?)))
+                            .filter(|(w, h)| *w > 0.0 && *h > 0.0)
+                            .map(|(w, h)| {
+                                let k = (480.0 / w).min(320.0 / h).min(1.0);
+                                ((w * k).max(160.0), (h * k).max(90.0))
+                            })
+                            .unwrap_or((400.0, 225.0));
+                        self.auto_id += 1;
+                        let id = LiveId(0x5649_4445_0000 + self.auto_id);
+                        tf.new_line_collapsed(cx);
+                        let mut item = tf.item(cx, id, live_id!(video));
+                        script_apply_eval!(cx, item, {width: #(w) height: #(h)});
+                        item.label(cx, ids!(name.label)).set_text(cx, &text);
+                        item.draw_all_unscoped(cx);
+                        tf.new_line_collapsed(cx);
+                        let dims = dim.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
+                        self.files.push((id, MessageTextAction::Play { url: url.to_owned(), name: text, audio: false, dims }));
+                        continue;
+                    }
+                    let attach = target.strip_prefix(FILE_SCHEME).map(|r| (r, false)).or_else(|| target.strip_prefix(AUDIO_SCHEME).map(|r| (r, true)));
+                    if let Some((rest, audio)) = attach {
+                        let (size, url) = split_file_target(rest);
+                        self.auto_id += 1;
+                        let id = LiveId(0x4649_4c45_0000 + self.auto_id);
+                        tf.new_line_collapsed(cx);
+                        let item = tf.item(cx, id, if audio { live_id!(audio) } else { live_id!(attach) });
+                        item.label(cx, ids!(info.name)).set_text(cx, &text);
+                        let size = size.parse::<u64>().ok().map(inferno_core::media::human_size);
+                        let size_label = item.label(cx, ids!(info.size));
+                        size_label.set_visible(cx, size.is_some());
+                        size_label.set_text(cx, size.as_deref().unwrap_or(""));
+                        item.draw_all_unscoped(cx);
+                        tf.new_line_collapsed(cx);
+                        let action = if audio {
+                            MessageTextAction::Play { url: url.to_owned(), name: text, audio: true, dims: None }
+                        } else {
+                            MessageTextAction::Link(url.to_owned())
+                        };
+                        self.files.push((id, action));
+                        continue;
+                    }
+                    let (target, forced) = match target.strip_prefix(IMAGE_SCHEME) {
+                        Some(rest) => (split_file_target(rest).1.to_owned(), true),
+                        None => (target, false),
+                    };
                     // Rails' unfurl_images: an image link becomes the image
                     // (max 384×288, rounded), on its own line.
-                    if crate::message_format::is_media(&target) {
+                    if forced || crate::message_format::is_media(&target) {
                         self.auto_id += 1;
                         let id = LiveId(0x4d45_4449_0000 + self.auto_id);
                         tf.new_line_collapsed(cx);
@@ -443,7 +504,8 @@ impl MessageText {
                         }
                         item.draw_all_unscoped(cx);
                         tf.new_line_collapsed(cx);
-                        self.media.push((id, target));
+                        let name = if forced { text } else { crate::message_format::file_name(None, &target) };
+                        self.media.push((id, target, name));
                         continue;
                     }
                     let index = self.targets.len();
@@ -796,4 +858,8 @@ pub enum MessageTextAction {
     Mention(String),
     /// The 🔥 on a GIF in a message.
     FavoriteGif(String),
+    /// An image to open in the viewer.
+    View { url: String, name: String },
+    /// A video or sound to play.
+    Play { url: String, name: String, audio: bool, dims: Option<(f64, f64)> },
 }

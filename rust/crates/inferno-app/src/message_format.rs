@@ -4,6 +4,8 @@
 //! Makepad's Markdown widget (CommonMark), so this rewrites the text into
 //! the CommonMark that renders the same way.
 
+use inferno_core::media::{kind_of, FileMeta, MediaKind};
+
 /// Mentions become links to `mention:<target>`, drawn as Rails' pills:
 /// `mention:<hex pubkey>`, `mention:everyone` (also @here) or
 /// `mention:role:<rrggbb>`.
@@ -48,8 +50,80 @@ pub fn is_media(url: &str) -> bool {
         || file.split('.').next().is_some_and(|stem| stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+#[cfg(test)]
 pub fn to_markdown(body: &str, resolve: Resolve) -> String {
     to_markdown_with(body, resolve, &|_| None)
+}
+
+/// Files in a message (Rails' attachments): a link whose file is known to
+/// be a video, audio or other file becomes `[name](<scheme meta|url>)`,
+/// drawn as the player or the file card. `meta` is `WxH` for videos and
+/// the byte size for the rest, either possibly empty.
+pub const IMAGE_SCHEME: &str = "image:";
+pub const VIDEO_SCHEME: &str = "video:";
+pub const AUDIO_SCHEME: &str = "audio:";
+pub const FILE_SCHEME: &str = "attach:";
+
+/// What's known about a link's file: its imeta tag, or what the server
+/// said its type is. `None` means nothing is known.
+pub type Files<'a> = &'a dyn Fn(&str) -> Option<FileMeta>;
+
+/// `(meta, url)` from a file link's target after its scheme.
+pub fn split_file_target(rest: &str) -> (&str, &str) {
+    rest.split_once('|').unwrap_or(("", rest))
+}
+
+/// The name shown for a file: its own, else the last part of its URL.
+pub fn file_name(meta: Option<&FileMeta>, url: &str) -> String {
+    meta.map(|m| m.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| {
+        let path = url.split(['?', '#']).next().unwrap_or(url);
+        path.trim_end_matches('/').rsplit('/').next().unwrap_or(path).to_owned()
+    })
+}
+
+/// Whether a link is a Blossom blob (a 64-hex name), which says nothing
+/// about its type without an extension.
+pub fn is_blob(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or(url);
+    let file = path.rsplit('/').next().unwrap_or("");
+    let stem = file.split('.').next().unwrap_or("");
+    stem.len() == 64 && stem.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+fn escape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if c.is_ascii_punctuation() {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The markdown for a link to a file, or `None` to leave it a plain link
+/// (or Rails' unfurled image).
+fn file_link(url: &str, files: Files) -> Option<String> {
+    let meta = files(url);
+    let kind = match &meta {
+        Some(m) => m.kind(),
+        // Without a description only the extension says, and only a video's
+        // or a sound's changes how it looks; a web page stays a link.
+        None => match kind_of(url, "") {
+            k @ (MediaKind::Video | MediaKind::Audio) => k,
+            MediaKind::File if is_blob(url) && url.contains('.') && url.rsplit('/').next().is_some_and(|f| f.contains('.')) => MediaKind::File,
+            _ => return None,
+        },
+    };
+    let (scheme, info) = match kind {
+        // Unfurled as Rails does; a named one keeps its name for the viewer.
+        MediaKind::Image if is_media(url) && meta.as_ref().is_none_or(|m| m.name.is_empty()) => return None,
+        MediaKind::Image => (IMAGE_SCHEME, String::new()),
+        MediaKind::Video => (VIDEO_SCHEME, meta.as_ref().and_then(|m| m.dim).map(|(w, h)| format!("{w}x{h}")).unwrap_or_default()),
+        MediaKind::Audio => (AUDIO_SCHEME, meta.as_ref().and_then(|m| m.size).map(|s| s.to_string()).unwrap_or_default()),
+        MediaKind::File => (FILE_SCHEME, meta.as_ref().and_then(|m| m.size).map(|s| s.to_string()).unwrap_or_default()),
+    };
+    Some(format!("[{}](<{scheme}{info}|{url}>)", escape(&file_name(meta.as_ref(), url))))
 }
 
 /// Custom emoji in messages: `:name:` with a known image becomes an
@@ -94,7 +168,12 @@ fn is_pictographic(c: char) -> bool {
     matches!(c as u32, 0x1F300..=0x1FAFF | 0x2600..=0x27BF | 0x1F1E6..=0x1F1FF | 0x2B00..=0x2BFF)
 }
 
+#[cfg(test)]
 pub fn to_markdown_with(body: &str, resolve: Resolve, emoji: Resolve) -> String {
+    to_markdown_full(body, resolve, emoji, &|_| None)
+}
+
+pub fn to_markdown_full(body: &str, resolve: Resolve, emoji: Resolve, files: Files) -> String {
     let big = emoji_only(body, emoji);
     let mut out = String::with_capacity(body.len() + 16);
     let mut in_fence = false;
@@ -107,7 +186,7 @@ pub fn to_markdown_with(body: &str, resolve: Resolve, emoji: Resolve) -> String 
         } else if in_fence {
             out.push_str(line);
         } else {
-            out.push_str(&inline(line, resolve, emoji, big));
+            out.push_str(&inline(line, resolve, emoji, files, big));
         }
         if i + 1 < lines.len() {
             // Redcarpet's hard_wrap: a single newline is a line break.
@@ -121,7 +200,7 @@ pub fn to_markdown_with(body: &str, resolve: Resolve, emoji: Resolve) -> String 
 }
 
 /// Autolinks and mentions, outside inline code spans.
-fn inline(line: &str, resolve: Resolve, emoji: Resolve, big: bool) -> String {
+fn inline(line: &str, resolve: Resolve, emoji: Resolve, files: Files, big: bool) -> String {
     let mut out = String::with_capacity(line.len());
     for (k, part) in line.split('`').enumerate() {
         if k > 0 {
@@ -137,9 +216,14 @@ fn inline(line: &str, resolve: Resolve, emoji: Resolve, big: bool) -> String {
             if (w.starts_with("https://") || w.starts_with("http://")) && !w.contains("](") {
                 // Trailing punctuation stays outside the link.
                 let trimmed = w.trim_end_matches(['.', ',', ')', '!', '?', ';', ':']);
-                out.push('<');
-                out.push_str(trimmed);
-                out.push('>');
+                match file_link(trimmed, files) {
+                    Some(link) => out.push_str(&link),
+                    None => {
+                        out.push('<');
+                        out.push_str(trimmed);
+                        out.push('>');
+                    }
+                }
                 out.push_str(&w[trimmed.len()..]);
             } else if let Some(name) = w.strip_prefix('@').filter(|n| !n.is_empty()) {
                 let len: usize = name.chars().take_while(|c| c.is_alphanumeric() || *c == '_').map(char::len_utf8).sum();
@@ -224,6 +308,27 @@ mod tests {
         let bare = link.strip_prefix("nostr:").unwrap();
         assert_eq!(super::invite_link(&format!("({bare})")).as_deref(), Some(bare));
         assert_eq!(super::invite_link("naddr1junk and nothing else"), None);
+    }
+
+    #[test]
+    fn files_become_players_and_cards() {
+        use inferno_core::media::FileMeta;
+        let none = |_: &str| None::<String>;
+        let nof = |_: &str| None::<FileMeta>;
+        let blob = format!("https://b.example/{}", "a".repeat(64));
+        let meta = |u: &str| {
+            (u.ends_with('a')).then(|| FileMeta { url: u.into(), mime: "video/mp4".into(), name: "my clip.mp4".into(), size: None, dim: Some((640, 360)) })
+        };
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &meta), format!("[my clip\\.mp4](<video:640x360|{blob}>)"));
+        assert_eq!(
+            super::to_markdown_full("see https://x.example/a.webm", &none, &none, &nof),
+            "see [a\\.webm](<video:|https://x.example/a.webm>)"
+        );
+        let pdf = format!("{blob}.pdf");
+        assert_eq!(super::to_markdown_full(&pdf, &none, &none, &nof), format!("[{}\\.pdf](<attach:|{pdf}>)", "a".repeat(64)));
+        assert_eq!(super::to_markdown_full("https://x.example/doc.pdf", &none, &none, &nof), "<https://x.example/doc.pdf>", "a web page's file stays a link");
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &nof), format!("<{blob}>"), "an unknown blob unfurls as an image");
+        assert_eq!(super::split_file_target("640x360|https://u"), ("640x360", "https://u"));
     }
 
     #[test]

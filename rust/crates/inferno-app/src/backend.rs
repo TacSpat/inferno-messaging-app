@@ -331,6 +331,8 @@ pub struct MessageRow {
     /// Custom emoji it may use: name → image (its NIP-30 tags first, then
     /// the server's own).
     pub emojis: HashMap<String, String>,
+    /// Its files' descriptions (NIP-92), for the players and cards.
+    pub files: Vec<inferno_core::media::FileMeta>,
 }
 
 /// An invite link's card, as it resolves.
@@ -513,7 +515,9 @@ pub enum Update {
 pub enum Command {
     SelectServer(String),
     SelectChannel(String),
-    Send { text: String, reply_to: Option<String>, spoiler: bool },
+    /// `files`: uploaded attachments; their URLs follow the text, as Rails
+    /// sends them.
+    Send { text: String, reply_to: Option<String>, spoiler: bool, files: Vec<inferno_core::media::FileMeta> },
     /// A sticker, sent as its own message.
     SendSticker(String),
     GifLibrary,
@@ -923,10 +927,11 @@ impl Backend {
                 self.channel = Some(id);
                 self.publish_channel();
             }
-            Command::Send { text, spoiler, .. } if self.dm.is_some() => {
+            Command::Send { text, spoiler, files, .. } if self.dm.is_some() => {
                 let to = self.dm.expect("checked");
+                let files = files.into_iter().map(|f| f.url).collect();
                 self.session
-                    .send_dm(&to, &Payload::Message { content: text, files: vec![], spoiler })
+                    .send_dm(&to, &Payload::Message { content: text, files, spoiler })
                     .await
                     .map_err(|e| e.to_string())?;
                 self.publish_dm();
@@ -1047,8 +1052,15 @@ impl Backend {
                     .map_err(|e| e.to_string())?;
                 self.publish_timeline();
             }
-            Command::Send { text, reply_to, spoiler } => {
+            Command::Send { text, reply_to, spoiler, files } => {
                 let (gid, ch) = self.selected()?;
+                let mut text = text;
+                for f in &files {
+                    if !text.is_empty() {
+                        text.push('\n');
+                    }
+                    text.push_str(&f.url);
+                }
                 let reply_to = reply_to.and_then(|id| EventId::from_hex(&id).ok());
                 // NIP-30 tags, so other clients can draw our server's emoji.
                 let emoji = self
@@ -1059,7 +1071,7 @@ impl Backend {
                     .map(|st| inferno_core::server::custom::emoji_tags(&st, &text))
                     .unwrap_or_default();
                 self.session
-                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, spoiler, emoji, ..Default::default() })
+                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, spoiler, emoji, files, ..Default::default() })
                     .await
                     .map_err(|e| e.to_string())?;
                 self.publish_timeline();
@@ -1689,6 +1701,7 @@ impl Backend {
                 system: false,
                 invite,
                 emojis: all_emojis.clone(),
+                files: Vec::new(),
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -2339,6 +2352,7 @@ impl Backend {
                     e.extend(m.emoji.clone());
                     e
                 },
+                files: m.files.clone(),
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);

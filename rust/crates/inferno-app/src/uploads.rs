@@ -15,6 +15,8 @@ pub enum Purpose {
     /// Uploaded as picked, not cropped.
     Emoji,
     Sticker,
+    /// A file for the next message (Rails' attachments), as picked.
+    Attachment,
 }
 
 impl Purpose {
@@ -24,7 +26,7 @@ impl Purpose {
         match self {
             Purpose::Avatar => Target::Avatar,
             Purpose::Banner | Purpose::ServerBanner => Target::Banner,
-            Purpose::ServerIcon | Purpose::Emoji | Purpose::Sticker => Target::Icon,
+            Purpose::ServerIcon | Purpose::Emoji | Purpose::Sticker | Purpose::Attachment => Target::Icon,
         }
     }
 
@@ -58,8 +60,8 @@ pub struct Uploads {
 
 /// How an upload ended.
 pub enum Done {
-    Uploaded { purpose: Purpose, url: String },
-    Failed { purpose: Purpose, error: String },
+    Uploaded { id: u64, purpose: Purpose, url: String },
+    Failed { id: u64, purpose: Purpose, error: String },
 }
 
 impl Uploads {
@@ -84,7 +86,7 @@ impl Uploads {
         let job = self.jobs.get_mut(&id)?;
         let Some(server) = job.servers.get(job.next).cloned() else {
             let job = self.jobs.remove(&id)?;
-            return Some(Done::Failed { purpose: job.purpose, error: "No upload server took the file.".into() });
+            return Some(Done::Failed { id, purpose: job.purpose, error: "No upload server took the file.".into() });
         };
         let mut req = HttpRequest::new(format!("{}/upload", server.trim_end_matches('/')), HttpMethod::PUT);
         req.set_header("Authorization".into(), job.header.clone());
@@ -117,7 +119,7 @@ impl Uploads {
                     let server = job.servers[job.next].clone();
                     let url = inferno_core::blossom::uploaded_url(&server, &job.sha256, &body);
                     let job = self.jobs.remove(&id).expect("present");
-                    done.push(Done::Uploaded { purpose: job.purpose, url });
+                    done.push(Done::Uploaded { id, purpose: job.purpose, url });
                 }
                 None => {
                     // That server said no (or wasn't there): the next one.

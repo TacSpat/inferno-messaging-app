@@ -1,7 +1,7 @@
 //! A minimal in-memory Blossom server (BUD-01/02) for local testing:
 //! `PUT /upload` with a kind 24242 authorization whose `x` tag matches the
-//! body's sha256, and `GET /<sha256>[.ext]`. HTTP/1.1, one request per
-//! connection.
+//! body's sha256, and `GET /<sha256>[.ext]` with byte ranges (players seek
+//! with them). HTTP/1.1, one request per connection.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -86,8 +86,10 @@ async fn handle(mut stream: TcpStream, blobs: Blobs, port: u16) -> std::io::Resu
             let sha = p.trim_start_matches('/').split('.').next().unwrap_or_default().to_owned();
             let blob = blobs.lock().unwrap().get(&sha).cloned();
             match blob {
-                Some((mime, bytes)) if method == "GET" => respond(&mut stream, 200, &mime, &bytes).await,
-                Some((mime, _)) => respond(&mut stream, 200, &mime, b"").await,
+                Some((mime, bytes)) => {
+                    let range = headers.get("range").and_then(|r| byte_range(r, bytes.len()));
+                    respond_blob(&mut stream, method == "HEAD", &mime, &bytes, range).await
+                }
                 None => respond(&mut stream, 404, "text/plain", b"not found").await,
             }
         }
@@ -115,6 +117,36 @@ fn authorized(header: Option<&str>, sha: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// `bytes=a-b`, `bytes=a-` or `bytes=-n` within `len`, as (first, last).
+fn byte_range(header: &str, len: usize) -> Option<(usize, usize)> {
+    let spec = header.trim().strip_prefix("bytes=")?.split(',').next()?.trim();
+    let (a, b) = spec.split_once('-')?;
+    let last = len.checked_sub(1)?;
+    let (first, end) = match (a.trim(), b.trim()) {
+        ("", n) => (len.saturating_sub(n.parse().ok()?), last),
+        (a, "") => (a.parse().ok()?, last),
+        (a, b) => (a.parse().ok()?, b.parse::<usize>().ok()?.min(last)),
+    };
+    (first <= end).then_some((first, end))
+}
+
+/// A blob, whole or the asked-for part (206), headers only for HEAD.
+async fn respond_blob(stream: &mut TcpStream, head_only: bool, mime: &str, bytes: &[u8], range: Option<(usize, usize)>) -> std::io::Result<()> {
+    let (status, part, extra) = match range {
+        Some((a, b)) => ("206 Partial Content", &bytes[a..=b], format!("Content-Range: bytes {a}-{b}/{}\r\n", bytes.len())),
+        None => ("200 OK", bytes, String::new()),
+    };
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {mime}\r\nContent-Length: {}\r\nAccept-Ranges: bytes\r\n{extra}Access-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        part.len()
+    );
+    stream.write_all(head.as_bytes()).await?;
+    if !head_only {
+        stream.write_all(part).await?;
+    }
+    stream.shutdown().await
+}
+
 async fn respond(stream: &mut TcpStream, status: u16, mime: &str, body: &[u8]) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
@@ -131,4 +163,18 @@ async fn respond(stream: &mut TcpStream, status: u16, mime: &str, body: &[u8]) -
     stream.write_all(head.as_bytes()).await?;
     stream.write_all(body).await?;
     stream.shutdown().await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn byte_ranges() {
+        use super::byte_range;
+        assert_eq!(byte_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(byte_range("bytes=900-", 1000), Some((900, 999)));
+        assert_eq!(byte_range("bytes=-100", 1000), Some((900, 999)));
+        assert_eq!(byte_range("bytes=990-2000", 1000), Some((990, 999)));
+        assert_eq!(byte_range("bytes=1000-", 1000), None);
+        assert_eq!(byte_range("items=0-1", 1000), None);
+    }
 }

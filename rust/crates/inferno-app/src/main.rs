@@ -15,6 +15,9 @@ mod lists;
 mod message_format;
 mod message_text;
 mod message_list;
+mod media_probe;
+mod media_view;
+mod attachments;
 mod picker;
 mod rich_input;
 #[allow(dead_code)] // the other six themes land with runtime switching
@@ -32,6 +35,8 @@ use makepad_widgets::*;
 use rich_input::RichInputWidgetRefExt;
 use crop::{Crop, Target};
 use uploads::Uploads;
+use media_view::Viewer;
+use attachments::Attachment;
 use picker::{Cell, GifView, ServerSet};
 use inferno_core::gifs::{Collection as GifCollection, Gif};
 use std::collections::HashSet;
@@ -59,6 +64,7 @@ script_mod! {
     let accent_light = #(theme::tok("accent_light", 1.0))
     let accent_dark = #(theme::tok("accent_dark", 1.0))
     let confirm = #(theme::tok("confirm", 1.0))
+    let danger = #(theme::tok("danger", 1.0))
     // Tints used across the shell (spec: one faint accent glow everywhere).
     let accent_00 = #(theme::tok("accent", 0.0))
     let accent_06 = #(theme::tok("accent", 0.06))
@@ -305,6 +311,48 @@ script_mod! {
         }
     }
 
+    // The viewers' actions: Rails' accent-light Download link, Flutter's
+    // Copy Link and Open.
+    let ViewerAction = View{width: Fit height: Fit flow: Right spacing: 4 align: Align{y: 0.5} padding: 4
+        cursor: MouseCursor.Hand
+        ico := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: accent_light}
+        label := Label{draw_text.color: accent_light draw_text.text_style.font_size: 10}
+    }
+    // Rails' close: a 32px gray-800 circle, gray-600 border.
+    let ViewerClose = RoundedView{width: 32 height: 32 align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_800 draw_bg.border_radius: 16.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+        Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_400
+            draw_icon.svg: crate_resource("self:resources/icons/close.svg")}
+    }
+    // Rails' .vp-btn: 20px icons in gray-200.
+    let VpBtn = View{width: Fit height: Fit flow: Overlay padding: 2 cursor: MouseCursor.Hand}
+    let VpIco = Icon{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xe5e7eb}
+    // Rails' seek and volume bars: 4px white/20 tracks, the played part in
+    // the accent; the volume has a 12px white knob.
+    let VpBar = View{
+        width: Fill height: 14 cursor: MouseCursor.Hand
+        show_bg: true
+        draw_bg +: {
+            fill: instance(0.0)
+            knob: instance(0.0)
+            color: uniform(accent)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let w = self.rect_size.x
+                let cy = self.rect_size.y * 0.5
+                sdf.box(0.0, cy - 2.0, w, 4.0, 2.0)
+                sdf.fill(vec4(1.0, 1.0, 1.0, 0.2))
+                sdf.box(0.0, cy - 2.0, max(w * self.fill, 0.01), 4.0, 2.0)
+                sdf.fill(mix(self.color, vec4(1.0, 1.0, 1.0, 1.0), self.knob))
+                if self.knob > 0.5 {
+                    sdf.circle(clamp(w * self.fill, 6.0, w - 6.0), cy, 6.0)
+                    sdf.fill(vec4(1.0, 1.0, 1.0, 1.0))
+                }
+                return sdf.result
+            }
+        }
+    }
+
     // A message body, rendered as Rails does (message_format.rs).
     let MsgBody = mod.widgets.MessageText{
         width: Fill height: Fit
@@ -352,6 +400,48 @@ script_mod! {
                 new_batch: true draw_bg.color: #x00000099 draw_bg.border_radius: 16.0
                 icon := Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xffffffcc
                     draw_icon.svg: crate_resource("self:resources/icons/inferno.svg")}}
+        }
+        // Rails' video attachment: max-w-lg max-h-96, the big play button
+        // over it; it plays in the viewer.
+        video := RoundedView{
+            width: 400 height: 225 flow: Overlay align: Center
+            margin: Inset{top: 4 bottom: 4}
+            cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: #x000000 draw_bg.border_radius: 4.0
+            play := Ico{icon_walk: Walk{width: 64 height: 64} draw_icon.color: #xffffff
+                draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
+            name := View{width: Fill height: Fill align: Align{x: 0.0 y: 1.0} padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
+                label := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}}
+        }
+        // Rails' file attachment: gray-800, rounded-lg, the file icon and
+        // its name in accent-light (Flutter adds the size).
+        attach := RoundedView{
+            width: Fit height: Fit flow: Right align: Align{y: 0.5} spacing: 8
+            margin: Inset{top: 4 bottom: 4}
+            padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+            icon := Ico{icon_walk: Walk{width: 24 height: 24} draw_icon.color: gray_400
+                draw_icon.svg: crate_resource("self:resources/icons/file.svg")}
+            info := View{width: Fit height: Fit flow: Down spacing: 2
+                name := Label{draw_text.color: accent_light draw_text.text_style.font_size: 9.5}
+                size := Label{draw_text.color: gray_400 draw_text.text_style.font_size: 8}}
+        }
+        // Rails' audio attachment: the name, then the player.
+        audio := RoundedView{
+            width: Fit height: Fit flow: Right align: Align{y: 0.5} spacing: 8
+            margin: Inset{top: 4 bottom: 4}
+            padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+            cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+            icon := Ico{icon_walk: Walk{width: 24 height: 24} draw_icon.color: gray_400
+                draw_icon.svg: crate_resource("self:resources/icons/music.svg")}
+            info := View{width: Fit height: Fit flow: Down spacing: 2
+                name := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 9.5}
+                size := Label{draw_text.color: gray_400 draw_text.text_style.font_size: 8}}
+            play := RoundedView{width: 28 height: 28 align: Center draw_bg.color: accent draw_bg.border_radius: 7.0
+                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #xffffff
+                    draw_icon.svg: crate_resource("self:resources/icons/play.svg")}}
         }
         link_color: accent_light
         mention_color: accent
@@ -600,6 +690,24 @@ script_mod! {
             flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
         close := ToolBtn{padding: 2 Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_400
             draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+    }
+
+    // Rails' file preview: a gray-700 strip over the input, a chip per
+    // file (a 64px picture, or the name), a danger × at its corner.
+    let AttachChip = View{visible: false width: Fit height: Fit flow: Overlay padding: Inset{top: 6 right: 6}
+        margin: Inset{right: 2 bottom: 2}
+        RoundedView{width: Fit height: Fit flow: Down padding: 8 spacing: 2 new_batch: true
+            draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+            thumb := Image{visible: false width: 64 height: 64 fit: ImageFit.CropToFill draw_bg.border_radius: 4.0}
+            name := Txt{width: 100 text: "" draw_text.color: gray_200 draw_text.text_style.font_size: 8.5
+                flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+            state := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8}
+        }
+        View{width: Fill height: Fit align: Align{x: 1.0}
+            x := RoundedView{width: 20 height: 20 margin: Inset{top: -6 right: -6} align: Center cursor: MouseCursor.Hand new_batch: true
+                draw_bg.color: danger draw_bg.border_radius: 5.0
+                Ico{icon_walk: Walk{width: 10 height: 10} draw_icon.color: #xffffff
+                    draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}}
     }
 
     // Composer icon: gray-400, accent on hover (Rails' ember buttons).
@@ -1771,6 +1879,24 @@ script_mod! {
                                         who.text: "Editing message"}
                                     spoiler_bar := ComposerBar{lead.text: "This message will be sent as a spoiler"
                                         lead.draw_text.color: gray_300}
+                                    attach_bar := View{visible: false width: Fill height: Fit flow: Flow.Right{wrap: true}
+                                        padding: Inset{left: 16 right: 10 top: 4 bottom: 8}
+                                        show_bg: true new_batch: true
+                                        draw_bg +: {
+                                            fill: uniform(gray_700)
+                                            rule: uniform(gray_600)
+                                            pixel: fn() {
+                                                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                                                sdf.box(0. 0. self.rect_size.x self.rect_size.y + 8.0 8.0)
+                                                sdf.fill(self.fill)
+                                                sdf.rect(0. self.rect_size.y - 1.0 self.rect_size.x 1.0)
+                                                sdf.fill(self.rule)
+                                                return sdf.result
+                                            }
+                                        }
+                                        a0 := AttachChip{} a1 := AttachChip{} a2 := AttachChip{} a3 := AttachChip{} a4 := AttachChip{}
+                                        a5 := AttachChip{} a6 := AttachChip{} a7 := AttachChip{} a8 := AttachChip{} a9 := AttachChip{}
+                                    }
                                 }
                                 // Rails' input bar: gray-600, radius 8, 1px accent/.2
                                 // border; focused, the border goes to accent/.5 with a
@@ -2652,6 +2778,101 @@ script_mod! {
                     // Styled confirmation (Flutter's improvement over Rails'
                     // native confirm): black/60 backdrop, gray-800 radius 12,
                     // max 448 (spec: modals).
+                    // Rails' image lightbox: black/80, the picture at most
+                    // 90% × 85%, its name and Download under it; Flutter's
+                    // Copy Link and Open beside them.
+                    lightbox := Modal{
+                        bg_view +: {draw_bg +: {color: #x000000cc}}
+                        content +: {
+                            width: Fill height: Fill
+                            lb_root := View{
+                                width: Fill height: Fill flow: Overlay
+                                show_bg: true draw_bg.color: #x00000000
+                                View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 0.5}
+                                    padding: Inset{left: 48 right: 48 top: 48 bottom: 24}
+                                    lb_stage := View{width: Fill height: Fill flow: Overlay align: Align{x: 0.0 y: 0.0}
+                                        clip_x: true clip_y: true
+                                        lb_img := Image{width: 10 height: 10 fit: ImageFit.Stretch draw_bg.border_radius: 8.0}
+                                    }
+                                    lb_bar := View{width: Fit height: Fit flow: Right spacing: 16 align: Align{y: 0.5} margin: Inset{top: 12}
+                                        show_bg: true draw_bg.color: #x00000000
+                                        lb_name := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 10}
+                                        lb_copy := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/link.svg") label.text: "Copy Link"}
+                                        lb_open := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/external.svg") label.text: "Open"}
+                                        lb_save := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/download.svg") label.text: "Download"}
+                                    }
+                                }
+                                View{width: Fill height: Fit flow: Right padding: 16
+                                    View{width: Fill height: 1}
+                                    lb_close := ViewerClose{}
+                                }
+                            }
+                        }
+                    }
+
+                    // Rails' video player (video_player_controller): the big
+                    // play button while paused; under the video a bar of play,
+                    // time, seek, volume and fullscreen that hides 2s into
+                    // playback. Sounds play here too.
+                    player := Modal{
+                        bg_view +: {draw_bg +: {color: #x000000cc}}
+                        content +: {
+                            width: Fill height: Fill
+                            pl_root := View{
+                                width: Fill height: Fill flow: Overlay
+                                show_bg: true draw_bg.color: #x00000000
+                                View{width: Fill height: Fill flow: Down align: Align{x: 0.5 y: 0.5}
+                                    padding: Inset{left: 48 right: 48 top: 48 bottom: 24}
+                                    pl_stage := View{width: Fill height: Fill align: Align{x: 0.5 y: 0.5}
+                                        pl_box := RoundedView{width: 640 height: 360 flow: Overlay new_batch: true
+                                            draw_bg.color: #x000000 draw_bg.border_radius: 4.0
+                                            pl_video := Video{width: Fill height: Fill show_controls: false}
+                                            pl_audio := View{visible: false width: Fill height: Fill flow: Down align: Center spacing: 12
+                                                show_bg: true draw_bg.color: gray_900 new_batch: true
+                                                Ico{icon_walk: Walk{width: 64 height: 64} draw_icon.color: gray_400
+                                                    draw_icon.svg: crate_resource("self:resources/icons/music.svg")}
+                                                pl_audio_name := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 11}
+                                            }
+                                            pl_big := View{visible: false width: Fill height: Fill align: Center new_batch: true
+                                                Ico{icon_walk: Walk{width: 64 height: 64} draw_icon.color: #xffffff
+                                                    draw_icon.svg: crate_resource("self:resources/icons/play.svg")}}
+                                            View{width: Fill height: Fill flow: Down new_batch: true
+                                                View{width: Fill height: Fill}
+                                                pl_bar := View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                                    padding: Inset{left: 10 right: 10 top: 14 bottom: 8}
+                                                    show_bg: true
+                                                    draw_bg +: {pixel: fn() {return vec4(0.0, 0.0, 0.0, 0.8 * self.pos.y)}}
+                                                    pl_play := VpBtn{
+                                                        play := VpIco{draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
+                                                        pause := VpIco{draw_icon.svg: crate_resource("self:resources/icons/pause.svg")}}
+                                                    pl_time := Label{text: "0:00 / 0:00" draw_text.color: gray_400 draw_text.text_style.font_size: 9}
+                                                    pl_seek := VpBar{width: Fill}
+                                                    pl_vol := VpBtn{
+                                                        on := VpIco{draw_icon.svg: crate_resource("self:resources/icons/volume.svg")}
+                                                        off := VpIco{draw_icon.svg: crate_resource("self:resources/icons/volume_off.svg")}}
+                                                    pl_vol_bar := VpBar{width: 60 draw_bg.knob: 1.0}
+                                                    pl_fs := VpBtn{
+                                                        VpIco{draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    pl_info := View{width: Fit height: Fit flow: Right spacing: 16 align: Align{y: 0.5} margin: Inset{top: 12}
+                                        show_bg: true draw_bg.color: #x00000000
+                                        pl_name := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 10}
+                                        pl_copy := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/link.svg") label.text: "Copy Link"}
+                                        pl_open := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/external.svg") label.text: "Open"}
+                                        pl_save := ViewerAction{ico.draw_icon.svg: crate_resource("self:resources/icons/download.svg") label.text: "Download"}
+                                    }
+                                }
+                                View{width: Fill height: Fit flow: Right padding: 16
+                                    View{width: Fill height: 1}
+                                    pl_close := ViewerClose{}
+                                }
+                            }
+                        }
+                    }
+
                     // Rails' picture editor: drag to reposition, slider to zoom.
                     crop_dialog := Modal{
                         content +: {
@@ -2836,6 +3057,15 @@ script_mod! {
 pub struct App {
     #[live]
     ui: WidgetRef,
+    /// The image lightbox or the video player, when open.
+    #[rust]
+    viewer: Viewer,
+    /// Files picked for the next message (Rails' pendingFiles).
+    #[rust]
+    attachments: Vec<Attachment>,
+    /// A message waiting on its files to finish uploading.
+    #[rust]
+    queued_send: Option<(String, Option<String>, bool)>,
     /// Where we asked the window to be, to learn the decoration offset.
     #[rust]
     requested_pos: Option<DVec2>,
@@ -4906,6 +5136,7 @@ impl App {
             uploads::Purpose::ServerBanner => (live_id!(pick_srv_banner), "Choose a server banner"),
             uploads::Purpose::Emoji => (live_id!(pick_emoji), "Choose an emoji image"),
             uploads::Purpose::Sticker => (live_id!(pick_sticker), "Choose a sticker image"),
+            uploads::Purpose::Attachment => (live_id!(pick_attach), "Attach files"),
         };
         // UI tests can't drive the system dialog: INFERNO_TEST_PICK=<file>
         // stands in for the user's choice.
@@ -4964,7 +5195,7 @@ impl App {
             uploads::Purpose::Banner => "Edit Banner",
             uploads::Purpose::ServerIcon => "Edit Server Icon",
             uploads::Purpose::ServerBanner => "Edit Server Banner",
-            uploads::Purpose::Emoji | uploads::Purpose::Sticker => "Edit Image",
+            uploads::Purpose::Emoji | uploads::Purpose::Sticker | uploads::Purpose::Attachment => "Edit Image",
         };
         self.ui.label(cx, ids!(crop_title)).set_text(cx, title);
         self.ui.slider(cx, ids!(crop_zoom)).set_value(cx, 1.0);
@@ -4992,6 +5223,8 @@ impl App {
             uploads::Purpose::ServerBanner => ids!(sp_banner),
             uploads::Purpose::Emoji => ids!(em_preview.img),
             uploads::Purpose::Sticker => ids!(st_preview.img),
+            // Attachments aren't edited; their chips show them.
+            uploads::Purpose::Attachment => ids!(attach_bar),
         }
     }
 
@@ -5021,12 +5254,15 @@ impl App {
 
     fn upload_done(&mut self, cx: &mut Cx, done: uploads::Done) {
         match done {
-            uploads::Done::Uploaded { purpose, url } => {
+            uploads::Done::Uploaded { id, purpose: uploads::Purpose::Attachment, url } => self.attachment_uploaded(cx, id, Ok(url)),
+            uploads::Done::Failed { id, purpose: uploads::Purpose::Attachment, error } => self.attachment_uploaded(cx, id, Err(error)),
+            uploads::Done::Uploaded { purpose, url, .. } => {
                 match purpose {
                     uploads::Purpose::Avatar => self.draft_picture = url,
                     uploads::Purpose::Banner => self.draft_banner = url,
                     uploads::Purpose::ServerIcon => self.srv_icon = url,
                     uploads::Purpose::ServerBanner => self.srv_banner = url,
+                    uploads::Purpose::Attachment => {}
                     uploads::Purpose::Emoji | uploads::Purpose::Sticker => {
                         let sticker = purpose == uploads::Purpose::Sticker;
                         if let Some((name, description)) = self.custom_pending.take() {
@@ -5045,7 +5281,7 @@ impl App {
                 }
                 self.picture_note(cx, purpose, "Uploaded. Save Changes to keep it.");
             }
-            uploads::Done::Failed { purpose, error } => {
+            uploads::Done::Failed { purpose, error, .. } => {
                 self.picture_note(cx, purpose, &format!("⚠ Upload failed: {error}"));
             }
         }
@@ -5227,7 +5463,7 @@ impl App {
                 self.refresh_picker(cx, false);
             }
             lists::Pick::Gif(gif) => {
-                self.send(backend::Command::Send { text: gif.url, reply_to: None, spoiler: false });
+                self.send(backend::Command::Send { text: gif.url, reply_to: None, spoiler: false, files: vec![] });
                 self.close_pickers(cx);
             }
             lists::Pick::Fire(gif) => self.send(backend::Command::ToggleGifFavorite(gif)),
@@ -5374,6 +5610,15 @@ impl App {
                 if new_channel {
                     self.clear_bars(cx);
                     self.ui.view(cx, ids!(pins_panel)).set_visible(cx, false);
+                    // Files belong to the channel they were picked in (Rails
+                    // drops them with the page); a message waiting on them
+                    // would otherwise go to this one.
+                    if self.queued_send.is_some() {
+                        self.toast(cx, "Upload cancelled: you changed channels", Toast::Info);
+                    }
+                    if self.has_attachments() {
+                        self.clear_attachments(cx);
+                    }
                 }
                 let jump = self.pending_jump.take_if(|(ch, _)| ch == channel_id).map(|(_, id)| id);
                 if let Some(mut list) = self.ui.widget(cx, ids!(messages)).borrow_mut::<message_list::MessageList>() {
@@ -5589,6 +5834,11 @@ impl MatchEvent for App {
     }
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        self.viewer_handle_actions(cx, actions);
+        self.attachments_handle_actions(cx, actions);
+        if self.ui.view(cx, ids!(attach_btn)).finger_up(actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+            self.pick_attachments(cx);
+        }
         for action in actions {
             if let Some(update) = action.downcast_ref::<backend::Update>() {
                 self.apply(cx, update);
@@ -5610,6 +5860,8 @@ impl MatchEvent for App {
                 message_text::MessageTextAction::Link(url) if url.starts_with("https://") || url.starts_with("http://") => {
                     cx.open_url(&url, OpenUrlInPlace::No);
                 }
+                message_text::MessageTextAction::View { url, name } => self.open_image(cx, &url, &name),
+                message_text::MessageTextAction::Play { url, name, audio, dims } => self.open_player(cx, &url, &name, audio, dims),
                 message_text::MessageTextAction::FavoriteGif(url) => {
                     self.send(backend::Command::ToggleGifFavorite(Gif { url, preview: String::new() }));
                 }
@@ -6597,14 +6849,22 @@ impl MatchEvent for App {
         let send_now = tapped(&self.ui, cx, ids!(send_btn)).then(|| composer.text());
         if let Some(text) = composer.returned(actions).map(|(t, _)| t).or(send_now) {
             let text = text.trim();
-            if !text.is_empty() {
+            let files = self.editing.is_none() && self.has_attachments();
+            if files && self.attachments_failed() {
+                self.toast(cx, "Some files didn't upload: retry or remove them", Toast::Error);
+            } else if !text.is_empty() || files {
+                self.notice(cx, "");
                 match self.editing.take() {
                     Some(id) => self.send(backend::Command::Edit { id, text: text.to_owned() }),
                     None => {
                         let reply_to = self.reply_to.take();
                         let spoiler = std::mem::take(&mut self.spoiler);
                         self.ui.view(cx, ids!(spoiler_bar)).set_visible(cx, false);
-                        self.send(backend::Command::Send { text: text.to_owned(), reply_to, spoiler });
+                        if files {
+                            self.send_with_attachments(cx, text.to_owned(), reply_to, spoiler);
+                        } else {
+                            self.send(backend::Command::Send { text: text.to_owned(), reply_to, spoiler, files: vec![] });
+                        }
                     }
                 }
                 self.ui.view(cx, ids!(reply_bar)).set_visible(cx, false);
@@ -6618,7 +6878,6 @@ impl MatchEvent for App {
                 if let Some(mut input) = composer.borrow_mut() {
                     input.take_key_focus(cx);
                 }
-                self.notice(cx, "");
             }
         }
     }
@@ -6626,6 +6885,13 @@ impl MatchEvent for App {
 
 impl AppMain for App {
     fn script_mod(vm: &mut ScriptVm) -> ScriptValue {
+        // Makepad's video first tries a zero-copy DMA-Buf pipeline, which
+        // stalls ~3s before giving up on many drivers; chat clips play fine
+        // from system memory. Set this early, before any thread reads the
+        // environment. INFERNO_VIDEO_ZERO_COPY=1 keeps Makepad's default.
+        if std::env::var_os("INFERNO_VIDEO_ZERO_COPY").is_none() && std::env::var_os("MAKEPAD_GST_NO_DMABUF").is_none() {
+            std::env::set_var("MAKEPAD_GST_NO_DMABUF", "1");
+        }
         crate::makepad_widgets::script_mod(vm);
         rich_input::script_mod(vm);
         message_text::script_mod(vm);
@@ -6647,6 +6913,11 @@ impl AppMain for App {
         }
         for done in self.uploads.handle_event(cx, event) {
             self.upload_done(cx, done);
+        }
+        media_probe::send(cx);
+        self.viewer_handle_event(cx, event);
+        if media_probe::handle_event(event) {
+            self.ui.widget(cx, ids!(messages)).redraw(cx);
         }
         if self.gif_timer.is_event(event).is_some() {
             self.gif_timer = Timer::empty();
