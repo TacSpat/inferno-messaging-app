@@ -109,6 +109,31 @@ pub enum Update {
     Profile(PublicKey),
 }
 
+/// Rails' invite states, plus being banned from the server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InviteStatus {
+    Valid,
+    Expired,
+    /// Revoked, or not found under the server's owner.
+    Revoked,
+    MaxedOut,
+    Banned,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvitePreview {
+    pub gid: String,
+    pub name: String,
+    pub about: String,
+    pub picture: Option<String>,
+    pub age_restricted: bool,
+    /// Known when we're in it (we don't fetch a stranger's member list).
+    pub members: Option<usize>,
+    pub status: InviteStatus,
+    /// We're already a member: Rails' "Joined".
+    pub joined: bool,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
     #[error(transparent)]
@@ -417,6 +442,63 @@ impl Session {
         self.publish(&publish::revoke_invite(&self.keys, &state, code)?).await?;
         let _ = self.updates.send(Update::Server(gid.into()));
         Ok(())
+    }
+
+    /// What an invite link leads to, for its card in a message. A server
+    /// we're in answers from local state; otherwise one small fetch of the
+    /// exact addresses involved (metadata, roles, the invite, its author's
+    /// membership, our ban), resolved under the same owner rule as joining.
+    /// Nothing fetched is stored: a preview isn't a join.
+    pub async fn preview_invite(&self, link: &str) -> Result<InvitePreview> {
+        let link: InviteLink = invite_link::parse(link).ok_or(SessionError::BadInvite)?;
+        let me = self.keys.public_key();
+        let local = self.server(&link.gid)?.filter(|s| s.is_member(&me) || s.is_owner(&me));
+        let (state, joined) = match local {
+            Some(state) => (state, true),
+            None => {
+                let ids = [dtag::metadata(&link.gid), dtag::roles(&link.gid)];
+                let events = self
+                    .pool
+                    .fetch(vec![
+                        Filter::new()
+                            .kinds([kinds::SERVER_METADATA, kinds::SERVER_ROLES].map(Kind::Custom))
+                            .identifiers(ids),
+                        Filter::new()
+                            .kind(Kind::Custom(kinds::SERVER_INVITE))
+                            .identifier(dtag::invite(&link.gid, &link.code)),
+                        Filter::new().kind(Kind::Custom(kinds::SERVER_MEMBER)).identifier(dtag::member(&link.gid, &link.author.to_hex())),
+                        Filter::new().kind(Kind::Custom(kinds::SERVER_BAN)).identifier(dtag::ban(&link.gid, &me.to_hex())),
+                    ])
+                    .await?;
+                let events: Vec<Event> =
+                    events.into_iter().filter(|e| wire::server_gid(e).as_deref() == Some(link.gid.as_str())).collect();
+                let owner = invite_link::resolve_owner(&link, &events);
+                (ServerState::resolve(&link.gid, owner, &events), false)
+            }
+        };
+        if state.metadata.name.is_empty() && !joined {
+            return Err(SessionError::Unknown);
+        }
+        let now = now_secs();
+        let status = match state.invites.get(&link.code).filter(|i| i.created_by == link.author) {
+            _ if state.is_banned(&me) => InviteStatus::Banned,
+            None => InviteStatus::Revoked,
+            Some(i) if i.expires_at != 0 && i.expires_at <= now => InviteStatus::Expired,
+            // Uses are only countable where we see every member.
+            Some(i) if joined && i.max_uses > 0 && state.invite_uses(&link.code) >= i.max_uses => InviteStatus::MaxedOut,
+            Some(_) => InviteStatus::Valid,
+        };
+        let m = &state.metadata;
+        Ok(InvitePreview {
+            gid: link.gid.clone(),
+            name: m.name.clone(),
+            about: m.about.clone(),
+            picture: m.picture.clone(),
+            age_restricted: m.age_restricted || m.server_type == "adult",
+            members: joined.then(|| state.members.len().max(1)),
+            status,
+            joined,
+        })
     }
 
     pub async fn join(&self, link: &str) -> Result<String> {

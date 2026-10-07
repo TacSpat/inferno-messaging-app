@@ -13,6 +13,23 @@ pub const MENTION_SCHEME: &str = "mention:";
 /// roles): the `mention:` target after the scheme.
 pub type Resolve<'a> = &'a dyn Fn(&str) -> Option<String>;
 
+/// The first Inferno invite link in `body`, as written (with its
+/// `nostr:` prefix if it has one), so the card can stand in for it.
+pub fn invite_link(body: &str) -> Option<String> {
+    let mut rest = body;
+    while let Some(i) = rest.find("naddr1") {
+        let tail = &rest[i..];
+        let len = tail.bytes().take_while(|b| b.is_ascii_lowercase() || b.is_ascii_digit()).count();
+        let naddr = &tail[..len];
+        if inferno_core::server::invite_link::parse(naddr).is_some() {
+            let start = if rest[..i].ends_with("nostr:") { i - 6 } else { i };
+            return Some(rest[start..i + len].to_owned());
+        }
+        rest = &tail[len.max(1)..];
+    }
+    None
+}
+
 #[cfg(test)]
 pub fn plain(_: &str) -> Option<String> {
     None
@@ -110,6 +127,18 @@ mod tests {
 
     fn to_markdown(s: &str) -> String {
         md(s, &|w: &str| (w == "tac").then(|| "abc".to_owned()))
+    }
+
+    #[test]
+    fn finds_invite_links() {
+        use inferno_core::nostr_sdk::prelude::Keys;
+        let author = Keys::generate().public_key();
+        let link = inferno_core::server::invite_link::encode("inferno-Ab3dE6gH9jK1", "XyZ9", &author, &[]).unwrap();
+        let body = format!("join us! {link} see you");
+        assert_eq!(super::invite_link(&body).as_deref(), Some(link.as_str()));
+        let bare = link.strip_prefix("nostr:").unwrap();
+        assert_eq!(super::invite_link(&format!("({bare})")).as_deref(), Some(bare));
+        assert_eq!(super::invite_link("naddr1junk and nothing else"), None);
     }
 
     #[test]

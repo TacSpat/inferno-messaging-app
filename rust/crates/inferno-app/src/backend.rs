@@ -175,6 +175,17 @@ pub struct MessageRow {
     /// Same author, under 5 minutes, not a reply: drawn without the header.
     pub grouped: bool,
     pub system: bool,
+    /// The first invite link in the body and its card (Rails' embed).
+    pub invite: Option<(String, InviteCard)>,
+}
+
+/// An invite link's card, as it resolves.
+#[derive(Debug, Clone, PartialEq)]
+pub enum InviteCard {
+    Loading,
+    /// Nothing on our relays answers for it.
+    Unavailable,
+    Ready(inferno_core::session::InvitePreview),
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -473,7 +484,19 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     let options = StartOptions { seed_default_relays: custom_relays.is_empty() };
     let session = Session::start_with(keys, store, options).await.map_err(|e| e.to_string())?;
 
-    let mut ui = Backend { session: session.clone(), server: None, channel: None, home: false, dm: None, vault, npub: identity.npub(), backed_up };
+    let (preview_tx, mut preview_rx) = mpsc::unbounded_channel();
+    let mut ui = Backend {
+        session: session.clone(),
+        server: None,
+        channel: None,
+        home: false,
+        dm: None,
+        vault,
+        npub: identity.npub(),
+        backed_up,
+        previews: HashMap::new(),
+        preview_tx,
+    };
     if let Ok(Some(serde_json::Value::String(theme))) = session.synced_setting("theme") {
         Cx::post_action(Update::Theme(theme));
     }
@@ -493,6 +516,10 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
                 if let Err(e) = ui.command(cmd).await {
                     Cx::post_action(Update::Error(e));
                 }
+            }
+            Some((link, card)) = preview_rx.recv() => {
+                ui.previews.insert(link, card);
+                ui.republish_messages();
             }
             _ = async { tokio::time::sleep_until(people_due.expect("guarded")).await }, if people_due.is_some() => {
                 people_due = None;
@@ -524,6 +551,9 @@ struct Backend {
     vault: Vault<OsKeyring>,
     npub: String,
     backed_up: bool,
+    /// Invite cards by link, resolved once each (relays rate-limit).
+    previews: HashMap<String, InviteCard>,
+    preview_tx: mpsc::UnboundedSender<(String, InviteCard)>,
 }
 
 fn initials(name: &str) -> String {
@@ -862,6 +892,8 @@ impl Backend {
             }
             Command::Join(link) => {
                 let gid = self.session.join(link.trim()).await.map_err(|e| e.to_string())?;
+                self.forget_previews(&gid);
+                self.home = false;
                 self.server = Some(gid);
                 self.channel = None;
                 self.publish_servers();
@@ -1258,6 +1290,7 @@ impl Backend {
             let prev = i.checked_sub(1).map(|p| &messages[p]);
             let grouped = prev.is_some_and(|p| p.author == m.author && m.created_at - p.created_at < 300);
             let (name, avatar) = if m.author == me { (my_name.clone(), me_person.avatar) } else { (person.name.clone(), person.avatar) };
+            let invite = self.invite_card(&m.content);
             let mut body = m.content.clone();
             for f in &m.files {
                 body.push('\n');
@@ -1284,6 +1317,7 @@ impl Backend {
                 pinned: false,
                 grouped,
                 system: false,
+                invite,
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -1369,6 +1403,7 @@ impl Backend {
     fn session_update(&mut self, update: SessionUpdate) {
         match update {
             SessionUpdate::Server(gid) => {
+                self.forget_previews(&gid);
                 self.publish_servers();
                 if self.server.as_deref() == Some(gid.as_str()) {
                     self.publish_server_keep_channel();
@@ -1397,6 +1432,39 @@ impl Backend {
         self.publish_home();
         if self.dm.is_some() {
             self.publish_dm();
+        }
+    }
+
+    /// The card for the first invite link in `body`, starting its lookup
+    /// the first time the link is seen.
+    fn invite_card(&mut self, body: &str) -> Option<(String, InviteCard)> {
+        let link = crate::message_format::invite_link(body)?;
+        if let Some(card) = self.previews.get(&link) {
+            return Some((link, card.clone()));
+        }
+        self.previews.insert(link.clone(), InviteCard::Loading);
+        let (session, tx, key) = (self.session.clone(), self.preview_tx.clone(), link.clone());
+        tokio::spawn(async move {
+            let card = match session.preview_invite(&key).await {
+                Ok(p) => InviteCard::Ready(p),
+                Err(_) => InviteCard::Unavailable,
+            };
+            let _ = tx.send((key, card));
+        });
+        Some((link, InviteCard::Loading))
+    }
+
+    /// Cards for `gid` are stale once its state changes (joined, revoked…).
+    fn forget_previews(&mut self, gid: &str) {
+        self.previews.retain(|_, c| !matches!(c, InviteCard::Ready(p) if p.gid == gid));
+    }
+
+    /// Redraws whichever conversation is open.
+    fn republish_messages(&mut self) {
+        if self.home {
+            self.publish_dm();
+        } else {
+            self.publish_timeline();
         }
     }
 
@@ -1666,14 +1734,16 @@ impl Backend {
     }
 
     fn publish_timeline(&mut self) {
-        let people = People::new(&self.session);
         let (Some(gid), Some(ch)) = (self.server.clone(), self.channel.clone()) else { return };
         let Ok(Some(state)) = self.session.server(&gid) else { return };
         let Ok(timeline) = self.session.timeline(&gid, &ch) else { return };
+        let mut invites: Vec<_> = timeline.iter().map(|m| m.content.as_deref().and_then(|c| self.invite_card(c))).collect();
+        let people = People::new(&self.session);
         let by_id: HashMap<EventId, usize> = timeline.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
         let mut rows = Vec::with_capacity(timeline.len());
         for (i, m) in timeline.iter().enumerate() {
             let d = display(&state, &m.author, &people);
+            let invite = invites[i].take();
             let prev = i.checked_sub(1).map(|p| &timeline[p]);
             let grouped = prev.is_some_and(|p| p.author == m.author && m.reply_to.is_none() && m.created_at - p.created_at < 300);
             let reply = m.reply_to.and_then(|id| by_id.get(&id)).map(|&pi| {
@@ -1698,6 +1768,7 @@ impl Backend {
                 pinned: m.pinned,
                 grouped,
                 system: false,
+                invite,
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);

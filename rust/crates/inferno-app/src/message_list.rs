@@ -52,6 +52,8 @@ pub enum MessageAction {
     Context(usize, DVec2),
     /// Click on the author's avatar or name, at a window position.
     Author(usize, DVec2),
+    /// Join (or open, once joined) the server of the row's invite card.
+    Invite(usize),
 }
 
 /// Spec: a jumped-to message flashes accent/.3, fading over 4s.
@@ -123,6 +125,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 }),
                 edited: m.edited,
                 pinned: false,
+                invite: None,
                 grouped: demo::grouped(i.checked_sub(1).map(|p| &history[p]), m),
                 system: m.system,
             }
@@ -187,7 +190,9 @@ impl MessageList {
                 }
             }
             let clicked = |path: &[LiveId]| item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
-            if clicked(ids!(toolbar.reply_btn)) {
+            if clicked(ids!(line.content.invite.join)) {
+                out = Some(MessageAction::Invite(index));
+            } else if clicked(ids!(toolbar.reply_btn)) {
                 out = Some(MessageAction::Reply(index));
             } else if clicked(ids!(toolbar.edit_btn)) {
                 out = Some(MessageAction::Edit(index));
@@ -209,6 +214,66 @@ impl MessageList {
         }
         self.view.redraw(cx);
     }
+}
+
+/// Fills a row's invite card (Rails' embed states, Flutter's Join).
+fn fill_invite(cx: &mut Cx, card: &WidgetRef, invite: Option<&crate::backend::InviteCard>) {
+    use crate::backend::InviteCard;
+    use inferno_core::session::InviteStatus;
+    let Some(invite) = invite else {
+        card.set_visible(cx, false);
+        return;
+    };
+    card.set_visible(cx, true);
+    let (name, picture, kicker, detail, button, live) = match invite {
+        InviteCard::Loading => ("Resolving invite…".to_owned(), None, "", String::new(), None, true),
+        InviteCard::Unavailable => ("Unknown server".to_owned(), None, "", "Invite Unavailable".to_owned(), None, false),
+        InviteCard::Ready(p) => {
+            let reason = match p.status {
+                InviteStatus::Valid => None,
+                InviteStatus::Expired => Some("Invite Expired"),
+                InviteStatus::Revoked => Some("Invite No Longer Valid"),
+                InviteStatus::MaxedOut => Some("Invite Reached Max Uses"),
+                InviteStatus::Banned => Some("You are banned from this server"),
+            };
+            let mut bits = Vec::new();
+            if let Some(n) = p.members {
+                bits.push(format!("{n} Member{}", if n == 1 { "" } else { "s" }));
+            }
+            if p.age_restricted {
+                bits.push("18+".into());
+            }
+            // Rails: a dead invite shows its reason, even to members.
+            let kicker = "You've been invited to join a server";
+            match reason {
+                Some(r) => (p.name.clone(), p.picture.clone(), "", r.to_owned(), None, false),
+                None if p.joined => (p.name.clone(), p.picture.clone(), kicker, bits.join(" · "), Some("Joined"), true),
+                None => (p.name.clone(), p.picture.clone(), kicker, bits.join(" · "), Some("Join"), true),
+            }
+        }
+    };
+    let initial = name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
+    card.label(cx, ids!(icon.initial)).set_text(cx, if matches!(invite, InviteCard::Ready(_)) { &initial } else { "?" });
+    crate::images::show(cx, &card.image(cx, ids!(icon.pic)), picture.as_deref());
+    card.label(cx, ids!(kicker)).set_text(cx, kicker);
+    card.widget(cx, ids!(kicker)).set_visible(cx, !kicker.is_empty());
+    let mut name_w = card.widget(cx, ids!(name));
+    let fg = if live { rgba(0xffffff, 1.0) } else { crate::theme::tok("gray_400", 1.0) };
+    script_apply_eval!(cx, name_w, {draw_text +: {color: #(fg)}});
+    name_w.set_text(cx, &name);
+    card.label(cx, ids!(detail)).set_text(cx, &detail);
+    card.widget(cx, ids!(detail)).set_visible(cx, !detail.is_empty());
+    let mut j = card.widget(cx, ids!(join));
+    j.set_visible(cx, button.is_some());
+    if let Some(text) = button {
+        card.label(cx, ids!(join.label)).set_text(cx, text);
+        let bg = if text == "Joined" { crate::theme::tok("gray_700", 1.0) } else { crate::theme::tok("confirm", 1.0) };
+        script_apply_eval!(cx, j, {draw_bg +: {color: #(bg)}});
+    }
+    let mut c = card.clone();
+    let alpha = if live { 0.6 } else { 0.4 };
+    let bg = crate::theme::tok("gray_800", alpha);
+    script_apply_eval!(cx, c, {draw_bg +: {color: #(bg)}});
 }
 
 impl Widget for MessageList {
@@ -258,17 +323,22 @@ impl Widget for MessageList {
                 script_apply_eval!(cx, row_bg, {draw_bg +: {flash: #(flash)}});
 
                 // Markdown re-lays-out on every set, so only set what changed.
+                // The card stands in for its link, as in Rails.
+                let body = match &msg.invite {
+                    Some((link, _)) => body.replacen(link.as_str(), "", 1),
+                    None => body.to_owned(),
+                };
                 let mentions = &self.mentions;
                 let resolve = |word: &str| mentions.get(&word.to_lowercase()).cloned();
-                let set_body = |cx: &mut Cx, w: WidgetRef| {
-                    let md = crate::message_format::to_markdown(body, &resolve);
-                    if w.text() != md {
-                        w.set_text(cx, &md);
-                    }
-                };
+                let md = crate::message_format::to_markdown(body.trim(), &resolve);
+                let w = item.widget(cx, ids!(line.content.body));
+                if w.text() != md {
+                    w.set_text(cx, &md);
+                }
+                w.set_visible(cx, !md.trim().is_empty());
+                let card = item.widget(cx, ids!(line.content.invite));
+                fill_invite(cx, &card, msg.invite.as_ref().map(|(_, c)| c));
                 if msg.grouped {
-                    let w = item.widget(cx, ids!(line.body));
-                    set_body(cx, w);
                     item.draw_all(cx, &mut Scope::empty());
                     continue;
                 }
@@ -289,8 +359,6 @@ impl Widget for MessageList {
                 row.label(cx, ids!(content.head.time)).set_text(cx, &format!("{}{edited}{pinned}", clock(msg.at)));
                 row.view(cx, ids!(content.reply)).set_visible(cx, msg.reply.is_some());
                 row.label(cx, ids!(content.reply.text)).set_text(cx, msg.reply.as_deref().unwrap_or(""));
-                let w = row.widget(cx, ids!(content.body));
-                set_body(cx, w);
                 item.draw_all(cx, &mut Scope::empty());
             }
         }

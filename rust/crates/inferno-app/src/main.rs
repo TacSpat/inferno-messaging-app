@@ -69,6 +69,7 @@ script_mod! {
     let gray_700_50 = #(theme::tok("gray_700", 0.5))
     let gray_100_60 = #(theme::tok("gray_100", 0.6))
     let gray_400_60 = #(theme::tok("gray_400", 0.6))
+    let gray_800_60 = #(theme::tok("gray_800", 0.6))
 
     let Txt = Label{
         draw_text.color: gray_100
@@ -217,6 +218,38 @@ script_mod! {
 
 
 
+    // Rails' invite embed (max-w-sm, rounded-lg, gray-800/60, gray-700
+    // border, 48px rounded-xl icon) with Flutter's Join button; "Joined"
+    // opens the server. Dead invites dim with Rails' reason.
+    let InviteCard = RoundedView{
+        visible: false
+        width: 384 height: Fit
+        margin: Inset{top: 6 bottom: 2}
+        padding: Inset{left: 12 right: 12 top: 12 bottom: 12}
+        flow: Right spacing: 12
+        align: Align{y: 0.5}
+        new_batch: true
+        draw_bg.color: gray_800_60
+        draw_bg.border_radius: 4.0
+        draw_bg.border_size: 1.0
+        draw_bg.border_color: gray_700
+        icon := RoundedView{width: 48 height: 48 flow: Overlay align: Center new_batch: true
+            draw_bg.color: gray_700 draw_bg.border_radius: 6.0
+            initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 12.0}}
+            pic := Image{visible: false width: 48 height: 48 fit: ImageFit.CropToFill draw_bg.border_radius: 6.0}
+        }
+        View{width: Fill height: Fit flow: Down spacing: 2
+            kicker := Txt{text: "You've been invited to join a server" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
+            name := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+            detail := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+        }
+        join := RoundedView{width: Fit height: Fit padding: Inset{left: 14 right: 14 top: 7 bottom: 7}
+            cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: confirm draw_bg.border_radius: 4.0
+            label := Txt{text: "Join" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
+        }
+    }
+
     // A message body, rendered as Rails does (message_format.rs).
     let MsgBody = mod.widgets.MessageText{
         width: Fill height: Fit
@@ -335,6 +368,7 @@ script_mod! {
                             time := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
                         }
                         body := MsgBody{}
+                        invite := InviteCard{}
                     }
                 }
                 slot := ToolbarSlot{}
@@ -347,7 +381,10 @@ script_mod! {
                     width: Fill height: Fit
                     flow: Right
                     View{width: 40 height: 1 margin: Inset{right: 16}}
-                    body := MsgBody{}
+                    content := View{width: Fill height: Fit flow: Down
+                        body := MsgBody{}
+                        invite := InviteCard{}
+                    }
                 }
                 slot := ToolbarSlot{}
             }
@@ -2336,6 +2373,7 @@ pub enum Pending {
     DeleteRole(String),
     DeleteServer,
     RevokeInvite(String),
+    JoinInvite(String),
 }
 
 /// One filled context-menu slot (separator above, action, label, danger).
@@ -2458,12 +2496,26 @@ impl App {
                     | MessageAction::Edit(i)
                     | MessageAction::Pin(i)
                     | MessageAction::Context(i, _)
-                    | MessageAction::Author(i, _) => i,
+                    | MessageAction::Author(i, _)
+                    | MessageAction::Invite(i) => i,
                 };
                 l.row(i).cloned()
             });
         let Some(row) = row else { return };
         match action {
+            MessageAction::Invite(_) => {
+                let Some((link, backend::InviteCard::Ready(p))) = row.invite.clone() else { return };
+                if p.joined {
+                    self.set_home(cx, false);
+                    self.send(backend::Command::SelectServer(p.gid.clone()));
+                } else if p.age_restricted {
+                    // Rails: joining an 18+ server is a confirmation.
+                    let body = format!("{} is age-restricted (18+). By joining, you confirm you are 18 years of age or older.", p.name);
+                    self.confirm(cx, Pending::JoinInvite(link), "Age-restricted server", &body, "I am 18 or older — Join", false);
+                } else {
+                    self.join_invite(cx, link);
+                }
+            }
             MessageAction::Author(_, at) => {
                 // Rails: below the click, left-aligned.
                 self.card_at = Some(at + dvec2(0.0, 8.0));
@@ -3037,6 +3089,7 @@ impl App {
                 self.ui.redraw(cx);
             }
             Pending::RevokeInvite(code) => self.send(backend::Command::RevokeInvite(code)),
+            Pending::JoinInvite(link) => self.join_invite(cx, link),
             Pending::Menu(_) => {}
         }
     }
@@ -3115,6 +3168,13 @@ impl App {
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
         self.fill_people(cx);
+    }
+
+    /// Joins from an invite card and goes there.
+    fn join_invite(&mut self, cx: &mut Cx, link: String) {
+        self.set_home(cx, false);
+        self.send(backend::Command::Join(link));
+        self.toast(cx, "Joining…", Toast::Info);
     }
 
     /// Invite People: Rails hands out the server's open invite rather than

@@ -6,7 +6,7 @@ use std::time::Duration;
 use inferno_core::channel::send::Outgoing;
 use inferno_core::nostr_sdk::prelude::*;
 use inferno_core::social::{Friendship, Payload};
-use inferno_core::session::{ChannelSpec, Session, StartOptions, Update};
+use inferno_core::session::{ChannelSpec, InviteStatus, Session, StartOptions, Update};
 use inferno_core::store::{RelaySource, Store};
 use tokio::sync::broadcast::Receiver;
 
@@ -497,6 +497,9 @@ async fn invite_uses_limits_and_revocation() {
     // One use: Alice takes it, Bob is turned away.
     let once = owner.create_invite(&gid, 1, 0).await.unwrap();
     assert!(once.contains("naddr1"));
+    // A stranger's preview comes from the relay, not from local state.
+    let p = bob.preview_invite(&once).await.unwrap();
+    assert_eq!((p.name.as_str(), p.status, p.joined, p.members), ("x", InviteStatus::Valid, false, None));
     alice.join(&once).await.unwrap();
     wait_for(&mut owner_rx, "alice's join", |u| matches!(u, Update::Server(g) if *g == gid)).await;
     let state = owner.server(&gid).unwrap().unwrap();
@@ -520,6 +523,10 @@ async fn invite_uses_limits_and_revocation() {
     owner.revoke_invite(&gid, &open_code).await.unwrap();
     assert!(!owner.server(&gid).unwrap().unwrap().invites.contains_key(&open_code));
     assert!(bob.join(&open).await.is_err(), "revoked");
+    assert_eq!(bob.preview_invite(&open).await.unwrap().status, InviteStatus::Revoked);
+    assert_eq!(bob.preview_invite(&expired).await.unwrap().status, InviteStatus::Expired);
+    let mine = alice.preview_invite(&once).await.unwrap();
+    assert!(mine.joined && mine.status == InviteStatus::MaxedOut, "{mine:?}");
 
     // Alice keeps her invite on record through a profile refresh.
     alice.update_profile(&Default::default()).await.unwrap();
