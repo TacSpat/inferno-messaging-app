@@ -28,6 +28,7 @@ pub struct ServerItem {
     pub gid: String,
     pub name: String,
     pub initials: String,
+    pub picture: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,6 +47,7 @@ pub struct ServerPerms {
     pub kick_members: bool,
     pub ban_members: bool,
     pub create_invite: bool,
+    pub manage_invites: bool,
     pub owner: bool,
     pub send_custom_emojis: bool,
     pub send_custom_stickers: bool,
@@ -79,15 +81,41 @@ pub struct BanItem {
     pub reason: String,
 }
 
+/// An active invite, as Rails' invites page lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InviteItem {
+    pub code: String,
+    pub link: String,
+    pub by: String,
+    pub created_at: i64,
+    pub uses: u32,
+    /// 0 = unlimited.
+    pub max_uses: u32,
+    /// 0 = never.
+    pub expires_at: i64,
+    pub can_revoke: bool,
+}
+
 /// Everything the server settings pages show.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ServerSettings {
     pub name: String,
     pub about: String,
+    pub picture: String,
+    pub banner: String,
+    /// Flutter's catalog tag: community, friends_family, gaming, work_team, adult.
+    pub server_type: String,
     pub discoverable: bool,
     pub age_restricted: bool,
     pub welcome_enabled: bool,
     pub welcome_message: String,
+    /// `None` = the first text channel (Rails' "Default (#general)").
+    pub welcome_channel: Option<String>,
+    /// Text channels by position, for the welcome channel choice.
+    pub text_channels: Vec<RoleItem>,
+    pub member_count: usize,
+    /// Newest first.
+    pub invites: Vec<InviteItem>,
     /// Highest position first, as Rails lists them.
     pub roles: Vec<RoleForm>,
     pub bans: Vec<BanItem>,
@@ -327,7 +355,9 @@ pub enum Command {
     Pin { id: String, pinned: bool },
     CreateServer(String),
     Join(String),
-    CreateInvite,
+    /// `max_uses` 0 = unlimited, `expires_in` seconds, 0 = never.
+    CreateInvite { max_uses: u32, expires_in: i64 },
+    RevokeInvite(String),
     SaveProfile(ProfileForm),
     Backup(String),
     AddRelay(String),
@@ -957,6 +987,10 @@ impl Backend {
                     .update_metadata(&gid, move |m| {
                         m.name = o.name.trim().to_owned();
                         m.about = o.about;
+                        m.picture = Some(o.picture).filter(|u| !u.is_empty());
+                        m.banner = Some(o.banner).filter(|u| !u.is_empty());
+                        m.server_type = o.server_type;
+                        m.welcome_channel = o.welcome_channel;
                         m.discoverable = o.discoverable;
                         m.age_restricted = o.age_restricted;
                         m.welcome_enabled = o.welcome_enabled;
@@ -1082,10 +1116,16 @@ impl Backend {
                 self.channel = None;
                 self.publish_servers();
             }
-            Command::CreateInvite => {
+            Command::CreateInvite { max_uses, expires_in } => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
-                let link = self.session.create_invite(&gid).await.map_err(|e| e.to_string())?;
+                let expires_at = if expires_in > 0 { inferno_core::store::now_secs() + expires_in } else { 0 };
+                let link = self.session.create_invite(&gid, max_uses, expires_at).await.map_err(|e| e.to_string())?;
                 Cx::post_action(Update::Invite(link));
+            }
+            Command::RevokeInvite(code) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.revoke_invite(&gid, &code).await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Notice("Invite revoked.".into()));
             }
         }
         Ok(())
@@ -1403,15 +1443,10 @@ impl Backend {
         let items: Vec<ServerItem> = gids
             .iter()
             .map(|gid| {
-                let name = self
-                    .session
-                    .server(gid)
-                    .ok()
-                    .flatten()
-                    .map(|s| s.metadata.name.clone())
-                    .filter(|n| !n.is_empty())
-                    .unwrap_or_else(|| "…".into());
-                ServerItem { gid: gid.clone(), initials: initials(&name), name }
+                let meta = self.session.server(gid).ok().flatten().map(|s| s.metadata);
+                let name = meta.as_ref().map(|m| m.name.clone()).filter(|n| !n.is_empty()).unwrap_or_else(|| "…".into());
+                let picture = meta.and_then(|m| m.picture);
+                ServerItem { gid: gid.clone(), initials: initials(&name), name, picture }
             })
             .collect();
         if self.server.is_none() {
@@ -1518,6 +1553,7 @@ impl Backend {
             kick_members: state.has(&me, inferno_core::server::Permission::KickMembers),
             ban_members: state.has(&me, inferno_core::server::Permission::BanMembers),
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
+            manage_invites: state.has(&me, inferno_core::server::Permission::ManageInvites),
             owner: state.is_owner(&me),
             send_custom_emojis: state.has(&me, inferno_core::server::Permission::SendCustomEmojis),
             send_custom_stickers: state.has(&me, inferno_core::server::Permission::SendCustomStickers),
@@ -1563,10 +1599,38 @@ impl Backend {
             .iter()
             .map(|(pk, b)| BanItem { pubkey: pk.to_hex(), name: display(&state, pk, &people).name, reason: b.reason.clone() })
             .collect();
+        let mut invites: Vec<InviteItem> = state
+            .invites
+            .values()
+            .filter_map(|i| {
+                Some(InviteItem {
+                    code: i.code.clone(),
+                    link: self.session.invite_link(&gid, &i.code)?,
+                    by: display(&state, &i.created_by, &people).name,
+                    created_at: i.created_at,
+                    uses: state.invite_uses(&i.code),
+                    max_uses: i.max_uses,
+                    expires_at: i.expires_at,
+                    can_revoke: state.may_revoke(&me, i),
+                })
+            })
+            .collect();
+        invites.sort_by_key(|i| std::cmp::Reverse(i.created_at));
+        let mut text: Vec<_> = state.structure.channels.iter().filter(|c| c.kind != "voice").collect();
+        text.sort_by_key(|c| c.position);
+        let text_channels = text.into_iter().map(|c| RoleItem { id: c.id.clone(), name: c.name.clone() }).collect();
         let m = &state.metadata;
         Cx::post_action(Update::ServerSettings(ServerSettings {
             name: m.name.clone(),
             about: m.about.clone(),
+            picture: m.picture.clone().unwrap_or_default(),
+            banner: m.banner.clone().unwrap_or_default(),
+            server_type: m.server_type.clone(),
+            welcome_channel: m.welcome_channel.clone(),
+            text_channels,
+            // The owner of a new server has no member event yet.
+            member_count: state.members.len() + usize::from(state.owner.is_some_and(|o| !state.members.contains_key(&o))),
+            invites,
             discoverable: m.discoverable,
             age_restricted: m.age_restricted,
             welcome_enabled: m.welcome_enabled,

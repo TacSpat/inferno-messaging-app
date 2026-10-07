@@ -46,7 +46,7 @@ async fn create_invite_join_chat_dm_and_restart() {
     let mut alice_rx = alice.updates();
 
     let gid = owner.create_server("Test Inferno").await.unwrap();
-    let link = owner.create_invite(&gid).await.unwrap();
+    let link = owner.create_invite(&gid, 0, 0).await.unwrap();
 
     assert_eq!(alice.join(&link).await.unwrap(), gid);
     let state = alice.server(&gid).unwrap().unwrap();
@@ -126,7 +126,7 @@ async fn encrypted_channel_keys_reach_members_who_join_later() {
 
     // Alice joins after the channel exists; the owner's session sees her
     // join and shares the key, and her session accepts it.
-    let link = owner.create_invite(&gid).await.unwrap();
+    let link = owner.create_invite(&gid, 0, 0).await.unwrap();
     alice.join(&link).await.unwrap();
     wait_for(&mut alice_rx, "the key share", |u| matches!(u, Update::Channel { channel_id, .. } if *channel_id == vault)).await;
 
@@ -147,7 +147,7 @@ async fn reply_edit_and_pin_reach_the_other_client() {
 
     let gid = owner.create_server("x").await.unwrap();
     let general = owner.server(&gid).unwrap().unwrap().structure.channels[0].id.clone();
-    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
 
     let first = owner.send(&gid, &general, &Outgoing { content: "typo hre", ..Default::default() }).await.unwrap();
     owner.send(&gid, &general, &Outgoing { content: "a reply", reply_to: Some(first.id), ..Default::default() }).await.unwrap();
@@ -180,7 +180,7 @@ async fn a_profile_update_shows_up_for_other_members() {
     let mut owner_rx = owner.updates();
 
     let gid = owner.create_server("x").await.unwrap();
-    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
     wait_for(&mut owner_rx, "alice's join", |u| matches!(u, Update::Server(g) if *g == gid)).await;
 
     alice
@@ -219,7 +219,7 @@ async fn role_limited_encrypted_channel_and_ordering() {
     let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
 
     let gid = owner.create_server("x").await.unwrap();
-    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
 
     // Admin-only encrypted channel: Alice has no role, so no key, no access.
     let admins = owner
@@ -256,7 +256,7 @@ async fn roles_moderation_and_metadata_round_trip() {
     let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
     let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
     let gid = owner.create_server("x").await.unwrap();
-    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
     let a = alice_keys.public_key();
 
     // A moderator role, assigned to Alice.
@@ -295,7 +295,7 @@ async fn deleting_a_server_removes_it_for_members() {
     let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
     let mut alice_rx = alice.updates();
     let gid = owner.create_server("doomed").await.unwrap();
-    alice.join(&owner.create_invite(&gid).await.unwrap()).await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
     assert_eq!(alice.servers().unwrap(), vec![gid.clone()]);
 
     owner.delete_server(&gid).await.unwrap();
@@ -410,7 +410,7 @@ async fn one_profile_per_person_follows_their_changes() {
     let a = session(&ak, Store::open_in_memory().unwrap(), &url).await;
     let b = session(&bk, Store::open_in_memory().unwrap(), &url).await;
     let gid = a.create_server("x").await.unwrap();
-    let link = a.create_invite(&gid).await.unwrap();
+    let link = a.create_invite(&gid, 0, 0).await.unwrap();
     let mut arx = a.updates();
     b.join(&link).await.unwrap();
     wait_for(&mut arx, "b joins", |u| matches!(u, Update::Server(g) if *g == gid)).await;
@@ -447,7 +447,7 @@ async fn roles_given_while_offline_arrive_on_restart() {
     let b_db = dir.path().join("b.sqlite3");
     let b = session(&bk, Store::open(&b_db).unwrap(), &url).await;
     let gid = a.create_server("x").await.unwrap();
-    let link = a.create_invite(&gid).await.unwrap();
+    let link = a.create_invite(&gid, 0, 0).await.unwrap();
     let mut arx = a.updates();
     b.join(&link).await.unwrap();
     wait_for(&mut arx, "b joins", |u| matches!(u, Update::Server(g) if *g == gid)).await;
@@ -480,4 +480,49 @@ async fn roles_given_while_offline_arrive_on_restart() {
     if !has_role(&b) {
         wait_for(&mut brx, "catch-up", |_| has_role(&b)).await;
     }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invite_uses_limits_and_revocation() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let alice_keys = Keys::generate();
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let bob = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let mut owner_rx = owner.updates();
+
+    let gid = owner.create_server("x").await.unwrap();
+
+    // One use: Alice takes it, Bob is turned away.
+    let once = owner.create_invite(&gid, 1, 0).await.unwrap();
+    assert!(once.contains("naddr1"));
+    alice.join(&once).await.unwrap();
+    wait_for(&mut owner_rx, "alice's join", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+    let state = owner.server(&gid).unwrap().unwrap();
+    let code = state.members[&alice_keys.public_key()].invite.clone().unwrap();
+    assert_eq!(state.invite_uses(&code), 1);
+    assert!(bob.join(&once).await.is_err(), "used up");
+
+    // Expired and revoked invites don't let anyone in either.
+    let expired = owner.create_invite(&gid, 0, 1).await.unwrap();
+    assert!(bob.join(&expired).await.is_err(), "expired");
+    let open = owner.create_invite(&gid, 0, 0).await.unwrap();
+    let open_code = owner
+        .server(&gid)
+        .unwrap()
+        .unwrap()
+        .invites
+        .keys()
+        .find(|c| owner.invite_link(&gid, c).as_deref() == Some(open.as_str()))
+        .cloned()
+        .unwrap();
+    owner.revoke_invite(&gid, &open_code).await.unwrap();
+    assert!(!owner.server(&gid).unwrap().unwrap().invites.contains_key(&open_code));
+    assert!(bob.join(&open).await.is_err(), "revoked");
+
+    // Alice keeps her invite on record through a profile refresh.
+    alice.update_profile(&Default::default()).await.unwrap();
+    let state = alice.server(&gid).unwrap().unwrap();
+    assert_eq!(state.members[&alice_keys.public_key()].invite.as_deref(), Some(code.as_str()));
 }

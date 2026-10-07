@@ -389,11 +389,34 @@ impl Session {
     }
 
     /// Publishes an invite and returns its `nostr:naddr1…` link.
-    pub async fn create_invite(&self, gid: &str) -> Result<String> {
+    /// `max_uses` 0 = unlimited; `expires_at` 0 = never.
+    pub async fn create_invite(&self, gid: &str, max_uses: u32, expires_at: i64) -> Result<String> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         let code = publish::new_public_id()[..8].to_owned();
-        self.publish(&publish::invite(&self.keys, &state, &code, 0, 0)?).await?;
-        invite_link::encode(gid, &code, &self.keys.public_key(), &[]).ok_or(SessionError::Unknown)
+        self.publish(&publish::invite(&self.keys, &state, &code, max_uses, expires_at)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        self.invite_link(gid, &code).ok_or(SessionError::Unknown)
+    }
+
+    /// The link for one of `gid`'s invites, with relay hints so a client
+    /// that doesn't share our relays can still find the server (Flutter's
+    /// improvement; Rails' links carried none).
+    pub fn invite_link(&self, gid: &str, code: &str) -> Option<String> {
+        let state = self.server(gid).ok()??;
+        let invite = state.invites.get(code)?;
+        let mut hints: Vec<String> = state.metadata.relays.clone();
+        if hints.is_empty() {
+            hints = self.store.relays().ok()?.into_iter().map(|r| r.url).collect();
+        }
+        hints.truncate(3);
+        invite_link::encode(gid, code, &invite.created_by, &hints)
+    }
+
+    pub async fn revoke_invite(&self, gid: &str, code: &str) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        self.publish(&publish::revoke_invite(&self.keys, &state, code)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
     }
 
     pub async fn join(&self, link: &str) -> Result<String> {
@@ -407,18 +430,20 @@ impl Session {
         self.store.pin_server_owner(&link.gid, &owner)?;
 
         let state = self.server(&link.gid)?.ok_or(SessionError::Unknown)?;
-        // max_uses isn't checked: without a server counting uses, nothing
-        // trustworthy says how many times an invite has been used.
-        // The invite must be on record (not revoked) from the link's author.
+        // The invite must be on record (not revoked) from the link's author,
+        // unexpired, and not used up. Uses are counted from members' own
+        // join events, so it's a courtesy limit, not a hard one.
         let invite_ok = state.invites.get(&link.code).is_some_and(|i| {
-            i.created_by == link.author && (i.expires_at == 0 || i.expires_at > now_secs())
+            i.created_by == link.author
+                && (i.expires_at == 0 || i.expires_at > now_secs())
+                && (i.max_uses == 0 || state.invite_uses(&link.code) < i.max_uses)
         });
         if !invite_ok || state.is_banned(&self.keys.public_key()) {
             return Err(SessionError::BadInvite);
         }
 
         let me = profile::member_profile(&self.my_profile()?);
-        self.publish(&publish::join(&self.keys, &link.gid, "", &me, now_secs())?).await?;
+        self.publish(&publish::join(&self.keys, &link.gid, "", &me, now_secs(), Some(&link.code))?).await?;
         self.store.set_server_membership(&link.gid, true)?;
         self.push_config();
         self.backfill(&state).await?;
@@ -1231,13 +1256,13 @@ impl Session {
             let Some(member) = state.members.get(&me).cloned() else {
                 // The owner of a server made here has no member event yet.
                 if state.is_owner(&me) {
-                    self.publish(&publish::join(&self.keys, &gid, "", &me_profile, now_secs())?).await?;
+                    self.publish(&publish::join(&self.keys, &gid, "", &me_profile, now_secs(), None)?).await?;
                 }
                 continue;
             };
             let nickname = member.nickname.clone().unwrap_or_default();
             let joined = member.joined_at.unwrap_or_else(now_secs);
-            self.publish(&publish::join(&self.keys, &gid, &nickname, &me_profile, joined)?).await?;
+            self.publish(&publish::join(&self.keys, &gid, &nickname, &me_profile, joined, member.invite.as_deref())?).await?;
             let _ = self.updates.send(Update::Server(gid));
         }
         Ok(())

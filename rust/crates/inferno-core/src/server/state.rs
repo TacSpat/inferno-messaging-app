@@ -33,6 +33,8 @@ pub struct Member {
     /// When the current timeout was issued, so receivers can drop messages
     /// sent during it.
     pub timed_out_since: Option<i64>,
+    /// The invite they joined with, as they said so themselves.
+    pub invite: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +49,7 @@ pub struct Invite {
     pub max_uses: u32,
     pub expires_at: i64,
     pub created_by: PublicKey,
+    pub created_at: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -188,6 +191,8 @@ impl ServerState {
                     profile: profile_src.profile,
                     timed_out_until: timeout,
                     timed_out_since: timeout_since,
+                    invite: newest(events.iter().copied().filter(|e| is_self(e) && wire::member(e).invite.is_some()))
+                        .and_then(|e| wire::member(e).invite),
                 },
             );
         }
@@ -239,6 +244,9 @@ impl ServerState {
         items
     }
 
+    /// The newest word on each code. A revocation counts only from the
+    /// invite's creator or someone with manage_invites (Rails' rule), so a
+    /// member who may only create invites can't revoke other people's.
     fn resolve_invites(&self, invites: &[&Event]) -> BTreeMap<String, Invite> {
         let mut by_code: HashMap<String, Vec<&Event>> = HashMap::new();
         for e in invites {
@@ -248,10 +256,27 @@ impl ServerState {
             .into_iter()
             .filter(|(code, _)| !code.is_empty())
             .filter_map(|(code, events)| {
-                let e = newest(events.into_iter().filter(|e| self.may_publish(&e.pubkey, kinds::SERVER_INVITE)))?;
+                let allowed: Vec<&Event> =
+                    events.into_iter().filter(|e| self.may_publish(&e.pubkey, kinds::SERVER_INVITE)).collect();
+                let first = allowed
+                    .iter()
+                    .copied()
+                    .filter(|e| !wire::invite(e).revoked)
+                    .min_by_key(|e| (e.created_at, e.id))?;
+                let creator = first.pubkey;
+                let e = newest(allowed.iter().copied().filter(|e| {
+                    !wire::invite(e).revoked || e.pubkey == creator || self.has(&e.pubkey, Permission::ManageInvites)
+                }))?;
                 let i = wire::invite(e);
                 (!i.revoked).then(|| {
-                    (code.clone(), Invite { code, max_uses: i.max_uses, expires_at: i.expires_at, created_by: e.pubkey })
+                    let invite = Invite {
+                        code: code.clone(),
+                        max_uses: i.max_uses,
+                        expires_at: i.expires_at,
+                        created_by: e.pubkey,
+                        created_at: first.created_at.as_secs() as i64,
+                    };
+                    (code, invite)
                 })
             })
             .collect()
@@ -302,6 +327,16 @@ impl ServerState {
             (Some(since), Some(until)) => since <= at && at < until,
             _ => false,
         })
+    }
+
+    /// Members who joined with `code`.
+    pub fn invite_uses(&self, code: &str) -> u32 {
+        self.members.values().filter(|m| m.invite.as_deref() == Some(code)).count() as u32
+    }
+
+    /// Whether `pk` may revoke `invite` (Rails: its creator or manage_invites).
+    pub fn may_revoke(&self, pk: &PublicKey, invite: &Invite) -> bool {
+        invite.created_by == *pk || self.has(pk, Permission::ManageInvites)
     }
 
     pub fn channel(&self, id: &str) -> Option<&Channel> {

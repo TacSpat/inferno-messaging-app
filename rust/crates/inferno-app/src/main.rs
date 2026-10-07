@@ -83,13 +83,16 @@ script_mod! {
     // ─── Server rail ─────────────────────────────────────────────────
     // 72px, gray-950, 12px vertical padding, 8px gaps, 48px icons with a
     // 16px radius (12 when active), active icon filled accent-dark → accent.
+    // (Makepad draws a corner at twice its border_radius number.)
     let RailIcon = RoundedView{
         width: 48 height: 48
+        flow: Overlay
         align: Center
         new_batch: true
         draw_bg.color: gray_700
-        draw_bg.border_radius: 16.0
+        draw_bg.border_radius: 8.0
         initials := Txt{text: "?" draw_text.text_style.font_size: 10.5}
+        pic := Image{visible: false width: 48 height: 48 fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}
     }
 
     let RailSlot = View{
@@ -385,7 +388,8 @@ script_mod! {
                 icon := RailIcon{
                     draw_bg.color: accent
                     draw_bg.color_2: accent_dark
-                    draw_bg.border_radius: 12.0
+                    draw_bg.border_radius: 6.0
+                    pic +: {draw_bg.border_radius: 6.0}
                 }
             }
         }
@@ -604,6 +608,10 @@ script_mod! {
         draw_text.text_style: theme.font_bold{font_size: 15.0}
     }
     let Hint = Txt{width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+    let Divider = SolidView{width: Fill height: 1 margin: Inset{top: 24} draw_bg.color: gray_700}
+    // Rails' text button (Remove Icon): danger-light, no well.
+    let LinkBtn = View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+        label := Txt{text: "" draw_text.color: #xf87171 draw_text.text_style.font_size: 9.0}}
 
     mod.widgets.RolePickerBase = #(lists::RolePicker::register_widget(vm))
     mod.widgets.RolePicker = set_type_default() do mod.widgets.RolePickerBase{
@@ -1827,34 +1835,125 @@ script_mod! {
                             draw_bg.color: gray_800
                             srv_nav_title := NavHeader{text: "SERVER"}
                             snav_overview := NavItem{label.text: "Overview"}
-                            NavHeader{text: "PEOPLE"}
+                            people_hdr := NavHeader{text: "PEOPLE"}
                             snav_members := NavItem{label.text: "Members"}
                             snav_roles := NavItem{label.text: "Roles"}
-                            NavHeader{text: "MODERATION"}
+                            snav_invites := NavItem{label.text: "Invites"}
+                            moderation_hdr := NavHeader{text: "MODERATION"}
                             snav_bans := NavItem{label.text: "Bans"}
-                            snav_delete := NavItem{margin: Inset{top: 16} label.text: "Delete Server" label.draw_text.color: #xf87171}
+                            SolidView{width: Fill height: 1 margin: Inset{top: 16 bottom: 8} draw_bg.color: gray_700}
+                            snav_delete := NavItem{label.text: "Delete Server" label.draw_text.color: #xf87171}
                         }
                         ScrollYView{
                             width: Fill height: Fill
                             flow: Down
                             padding: Inset{left: 40 right: 40 top: 32 bottom: 32}
 
+                            // Rails' server profile: the form, and beside it the
+                            // card people see on invites, updated as you type.
                             spage_overview := View{
+                                width: Fill height: Fit flow: Right spacing: 32
+                                View{width: Fill height: Fit flow: Down
+                                    PageTitle{text: "Server Profile" margin: Inset{bottom: 2}}
+                                    Hint{text: "Customize how your server appears in invite links"}
+                                    FieldLabel{text: "NAME"}
+                                    so_name := Field{}
+                                    FieldLabel{text: "DESCRIPTION"}
+                                    so_about := TextInput{width: Fill height: Fit{min: 64} is_multiline: true empty_text: "What's this server about?"}
+                                    Divider{}
+                                    FieldLabel{text: "ICON" margin: Inset{bottom: 2}}
+                                    Hint{text: "We recommend an image of at least 512x512." margin: Inset{bottom: 10}}
+                                    View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                        so_icon_pick := Button{text: "Change Server Icon"}
+                                        so_icon_remove := LinkBtn{label.text: "Remove Icon"}
+                                    }
+                                    Divider{}
+                                    FieldLabel{text: "BANNER" margin: Inset{bottom: 2}}
+                                    Hint{text: "Recommended size: 960x540. Shown on your invite page." margin: Inset{bottom: 10}}
+                                    View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                        so_banner_pick := Button{text: "Upload Banner"}
+                                        so_banner_remove := LinkBtn{label.text: "Remove Banner"}
+                                    }
+                                    Divider{}
+                                    // Flutter's catalog tag.
+                                    FieldLabel{text: "SERVER TYPE" margin: Inset{bottom: 2}}
+                                    Hint{text: "Shown as a tag in server discovery." margin: Inset{bottom: 8}}
+                                    so_type := DropDown{width: 240 labels: ["Community", "Friends & Family", "Gaming", "Work & Team", "18+"]}
+                                    FieldLabel{text: "SERVER CONFIGURATION"}
+                                    so_discoverable := CheckBox{text: "Public server"}
+                                    Hint{margin: Inset{left: 13 bottom: 8} text: "Anyone can discover and join this server through connected relays. When disabled, users need an invite link."}
+                                    so_age := CheckBox{text: "Age restricted (18+)"}
+                                    Hint{margin: Inset{left: 13} text: "Members must confirm they are 18+ to join."}
+                                    Divider{}
+                                    FieldLabel{text: "WELCOME MESSAGE"}
+                                    so_welcome_on := CheckBox{text: "Send a welcome message when someone joins"}
+                                    FieldLabel{text: "WELCOME CHANNEL"}
+                                    so_welcome_ch := DropDown{width: Fill labels: ["Default (first text channel)"]}
+                                    FieldLabel{text: "MESSAGE TEMPLATE"}
+                                    so_welcome := Field{empty_text: "Welcome to the server, {user}!"}
+                                    Hint{margin: Inset{top: 4} text: "Use {user} for display name, {tag} for username, {server} for server name"}
+                                    View{width: Fill height: Fit margin: Inset{top: 24} flow: Right spacing: 12 align: Align{y: 0.5}
+                                        so_save := Button{text: "Save Changes"}
+                                        so_note := Hint{text: ""}
+                                    }
+                                }
+                                View{width: 288 height: Fit flow: Down
+                                    FieldLabel{text: "PREVIEW" margin: Inset{top: 4 bottom: 10}}
+                                    RoundedView{width: 288 height: Fit flow: Down new_batch: true
+                                        draw_bg.color: gray_950 draw_bg.border_radius: 8.0
+                                        View{width: Fill height: 112 flow: Overlay
+                                            RoundedView{width: Fill height: 112 draw_bg.color: gray_700 draw_bg.border_radius: 8.0}
+                                            sp_banner := Image{visible: false width: Fill height: 112 fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}
+                                        }
+                                        View{width: Fill height: Fit flow: Down padding: Inset{left: 16 right: 16 bottom: 16} margin: Inset{top: -32}
+                                            RoundedView{width: 72 height: 72 padding: 4 new_batch: true
+                                                draw_bg.color: gray_950 draw_bg.border_radius: 10.0
+                                                sp_icon := RoundedView{width: 64 height: 64 flow: Overlay align: Center new_batch: true
+                                                    draw_bg.color: gray_700 draw_bg.border_radius: 8.0
+                                                    initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                                                    pic := Image{visible: false width: 64 height: 64 fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}
+                                                }
+                                            }
+                                            sp_name := Txt{margin: Inset{top: 8} text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                            sp_about := Txt{width: Fill margin: Inset{top: 2} text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                            View{width: Fill height: Fit margin: Inset{top: 6} flow: Right spacing: 6 align: Align{y: 0.5}
+                                                RoundedView{width: 8 height: 8 draw_bg.color: gray_500 draw_bg.border_radius: 4.0}
+                                                sp_members := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                                sp_type := RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true
+                                                    draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+                                                    label := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.0}}
+                                                sp_age := RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true
+                                                    draw_bg.color: #xef444426 draw_bg.border_radius: 4.0
+                                                    Txt{text: "18+" draw_text.color: #xf87171 draw_text.text_style.font_size: 8.0}}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Rails' invites page: generate with limits, then the
+                            // active list with copy and revoke.
+                            spage_invites := View{
+                                visible: false
                                 width: 768 height: Fit flow: Down
-                                PageTitle{text: "Server Overview"}
-                                FieldLabel{text: "SERVER NAME"}
-                                so_name := Field{}
-                                FieldLabel{text: "DESCRIPTION"}
-                                so_about := Field{empty_text: "What's this server about?"}
-                                FieldLabel{text: "SERVER CONFIGURATION"}
-                                so_discoverable := CheckBox{text: "Discoverable (listed in server discovery)"}
-                                so_age := CheckBox{text: "Age-restricted (18+)"}
-                                FieldLabel{text: "WELCOME MESSAGE"}
-                                so_welcome_on := CheckBox{text: "Post a welcome message when someone joins"}
-                                so_welcome := Field{empty_text: "Welcome {user} to {server}!"}
-                                View{width: Fill height: Fit margin: Inset{top: 20} flow: Right spacing: 12 align: Align{y: 0.5}
-                                    so_save := Button{text: "Save Changes"}
-                                    so_note := Hint{text: ""}
+                                PageTitle{text: "Invites" margin: Inset{bottom: 16}}
+                                Card{
+                                    Txt{text: "GENERATE A NEW INVITE" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    View{width: Fill height: Fit margin: Inset{top: 10} flow: Right spacing: 12 align: Align{y: 1.0}
+                                        View{width: 180 height: Fit flow: Down spacing: 4
+                                            Txt{text: "Expire After" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                            inv_expires := DropDown{width: Fill labels: ["Never", "30 minutes", "1 hour", "6 hours", "12 hours", "1 day", "7 days"]}
+                                        }
+                                        View{width: 180 height: Fit flow: Down spacing: 4
+                                            Txt{text: "Max Uses" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                            inv_max := DropDown{width: Fill labels: ["Unlimited", "1 use", "5 uses", "10 uses", "25 uses", "50 uses", "100 uses"]}
+                                        }
+                                        inv_generate := Button{text: "Generate Invite"}
+                                    }
+                                }
+                                inv_title := Txt{margin: Inset{top: 8 bottom: 8} text: "ACTIVE INVITES (0)" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                srv_invites := mod.widgets.PeopleList{
+                                    list +: {Empty +: {text: "No active invites. Create one above to invite people to your server."}}
                                 }
                             }
 
@@ -2000,8 +2099,12 @@ script_mod! {
                                                 let p = self.pos * self.rect_size
                                                 let c = self.rect_size * 0.5
                                                 let r = min(self.rect_size.x, self.rect_size.y) * 0.4
-                                                let d = length(p - c) - r
-                                                let a = clamp(d + 0.5, 0.0, 1.0) * 0.55 * self.circle
+                                                // 1: avatar circle; 2: icon square (rounded as the rail shows it).
+                                                let rr = r * 0.33
+                                                let q = abs(p - c) - vec2(r - rr, r - rr)
+                                                let sq = length(max(q, vec2(0.0, 0.0))) + min(max(q.x, q.y), 0.0) - rr
+                                                let d = mix(length(p - c) - r, sq, step(1.5, self.circle))
+                                                let a = clamp(d + 0.5, 0.0, 1.0) * 0.55 * min(self.circle, 1.0)
                                                 return vec4(0.0, 0.0, 0.0, a)
                                             }
                                         }
@@ -2183,12 +2286,17 @@ pub struct App {
     draft_picture: String,
     #[rust]
     draft_banner: String,
+    /// The server icon and banner being edited on the overview page.
+    #[rust]
+    srv_icon: String,
+    #[rust]
+    srv_banner: String,
     /// The status emoji being edited (picked from the emoji dropdown).
     #[rust]
     status_emoji: String,
     /// The picture editor's state and the picked image's pixels.
     #[rust]
-    crop: Option<(Crop, Vec<u32>)>,
+    crop: Option<(Crop, Vec<u32>, uploads::Purpose)>,
     #[rust]
     crop_drag: Option<DVec2>,
     #[rust]
@@ -2227,6 +2335,7 @@ pub enum Pending {
     Leave,
     DeleteRole(String),
     DeleteServer,
+    RevokeInvite(String),
 }
 
 /// One filled context-menu slot (separator above, action, label, danger).
@@ -2249,12 +2358,26 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 4] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 5] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
+    (ids!(snav_invites), ids!(spage_invites)),
     (ids!(snav_bans), ids!(spage_bans)),
 ];
+
+/// Flutter's server types: (wire value, label), in the dropdown's order.
+const SERVER_TYPES: [(&str, &str); 5] = [
+    ("community", "Community"),
+    ("friends_family", "Friends & Family"),
+    ("gaming", "Gaming"),
+    ("work_team", "Work & Team"),
+    ("adult", "18+"),
+];
+
+/// Rails' invite choices: seconds to expiry (0 = never) and max uses (0 = unlimited).
+const INVITE_EXPIRY: [i64; 7] = [0, 30 * 60, 3600, 6 * 3600, 12 * 3600, 86400, 7 * 86400];
+const INVITE_USES: [u32; 7] = [0, 1, 5, 10, 25, 50, 100];
 
 const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 4] = [
     (ids!(nav_account), ids!(page_account)),
@@ -2913,6 +3036,7 @@ impl App {
                 self.send(backend::Command::DeleteServer);
                 self.ui.redraw(cx);
             }
+            Pending::RevokeInvite(code) => self.send(backend::Command::RevokeInvite(code)),
             Pending::Menu(_) => {}
         }
     }
@@ -2920,12 +3044,13 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 4] {
+    fn srv_page_allowed(&self) -> [bool; 5] {
         let p = &self.perms;
         [
             p.manage_server,
             p.manage_server || p.manage_roles,
             p.manage_server || p.manage_roles,
+            p.create_invite || p.manage_invites,
             p.manage_server || p.ban_members,
         ]
     }
@@ -2936,6 +3061,8 @@ impl App {
             self.ui.view(cx, nav).set_visible(cx, allowed[i]);
         }
         self.ui.view(cx, ids!(snav_delete)).set_visible(cx, self.perms.owner);
+        self.ui.widget(cx, ids!(people_hdr)).set_visible(cx, allowed[1] || allowed[2] || allowed[3]);
+        self.ui.widget(cx, ids!(moderation_hdr)).set_visible(cx, allowed[4]);
         self.ui.label(cx, ids!(srv_nav_title)).set_text(cx, &self.server_name.to_uppercase());
         self.fill_srv_pages(cx);
         if let Some(first) = allowed.iter().position(|a| *a) {
@@ -2972,10 +3099,90 @@ impl App {
         for (path, v) in [(ids!(so_discoverable), o.discoverable), (ids!(so_age), o.age_restricted), (ids!(so_welcome_on), o.welcome_enabled)] {
             self.ui.check_box(cx, path).set_active(cx, v, Animate::No);
         }
+        let ty = SERVER_TYPES.iter().position(|(v, _)| *v == o.server_type).unwrap_or(0);
+        self.ui.drop_down(cx, ids!(so_type)).set_selected_item(cx, ty);
+        let mut labels = vec!["Default (first text channel)".to_owned()];
+        labels.extend(o.text_channels.iter().map(|c| format!("#{}", c.name)));
+        let dd = self.ui.drop_down(cx, ids!(so_welcome_ch));
+        dd.set_labels(cx, labels);
+        let ch = o.welcome_channel.as_ref().and_then(|w| o.text_channels.iter().position(|c| &c.id == w)).map_or(0, |i| i + 1);
+        dd.set_selected_item(cx, ch);
+        self.srv_icon = o.picture.clone();
+        self.srv_banner = o.banner.clone();
+        self.paint_server_preview(cx);
+        self.fill_invites(cx);
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
         self.fill_people(cx);
+    }
+
+    /// Invite People: Rails hands out the server's open invite rather than
+    /// making a new one each time; a new one never expires.
+    fn invite_people(&mut self, cx: &mut Cx) {
+        let now = chrono::Utc::now().timestamp();
+        let open = self.srv.invites.iter().find(|i| {
+            i.can_revoke && (i.expires_at == 0 || i.expires_at > now + 3600) && (i.max_uses == 0 || i.uses < i.max_uses)
+        });
+        match open {
+            Some(i) => {
+                cx.copy_to_clipboard(&i.link);
+                self.toast(cx, "Invite link copied.", Toast::Success);
+            }
+            None => self.send(backend::Command::CreateInvite { max_uses: 0, expires_in: 0 }),
+        }
+    }
+
+    /// The overview's preview card, from what the form says now.
+    fn paint_server_preview(&mut self, cx: &mut Cx) {
+        let name = self.ui.text_input(cx, ids!(so_name)).text();
+        let about = self.ui.text_input(cx, ids!(so_about)).text();
+        let initial = name.trim().chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
+        self.ui.label(cx, ids!(sp_name)).set_text(cx, &name);
+        self.ui.label(cx, ids!(sp_about)).set_text(cx, &about);
+        self.ui.widget(cx, ids!(sp_about)).set_visible(cx, !about.trim().is_empty());
+        self.ui.label(cx, ids!(sp_icon.initial)).set_text(cx, &initial);
+        let n = self.srv.member_count;
+        self.ui.label(cx, ids!(sp_members)).set_text(cx, &format!("{n} Member{}", if n == 1 { "" } else { "s" }));
+        let ty = self.ui.drop_down(cx, ids!(so_type)).selected_item().min(SERVER_TYPES.len() - 1);
+        self.ui.label(cx, ids!(sp_type.label)).set_text(cx, SERVER_TYPES[ty].1);
+        let age = self.ui.check_box(cx, ids!(so_age)).active(cx);
+        self.ui.view(cx, ids!(sp_age)).set_visible(cx, age && SERVER_TYPES[ty].0 != "adult");
+        let (icon, banner) = (self.srv_icon.clone(), self.srv_banner.clone());
+        images::show(cx, &self.ui.image(cx, ids!(sp_icon.pic)), Some(icon.as_str()).filter(|u| !u.is_empty()));
+        images::show(cx, &self.ui.image(cx, ids!(sp_banner)), Some(banner.as_str()).filter(|u| !u.is_empty()));
+        self.ui.view(cx, ids!(so_icon_remove)).set_visible(cx, !icon.is_empty());
+        self.ui.view(cx, ids!(so_banner_remove)).set_visible(cx, !banner.is_empty());
+        self.ui.redraw(cx);
+    }
+
+    /// Rails' active invites: the link with Copy, then who made it, when,
+    /// uses and expiry; Revoke for its creator and invite managers.
+    fn fill_invites(&mut self, cx: &mut Cx) {
+        let now = chrono::Utc::now().timestamp();
+        let rows: Vec<lists::PersonRow> = self
+            .srv
+            .invites
+            .iter()
+            .filter(|i| i.expires_at == 0 || i.expires_at > now)
+            .map(|i| {
+                let uses = if i.max_uses > 0 { format!("{}/{} uses", i.uses, i.max_uses) } else { format!("{} uses", i.uses) };
+                let expiry = if i.expires_at > 0 { format!("expires in {}", time_fmt::in_words(i.expires_at - now)) } else { "Never expires".into() };
+                let link: String = i.link.chars().take(56).collect();
+                lists::PersonRow {
+                    id: i.code.clone(),
+                    name: format!("{link}…"),
+                    detail: format!("by {} · {} ago · {uses} · {expiry}", i.by, time_fmt::in_words(now - i.created_at)),
+                    a: Some("Copy".into()),
+                    b: i.can_revoke.then(|| "Revoke".to_owned()),
+                }
+            })
+            .collect();
+        self.ui.label(cx, ids!(inv_title)).set_text(cx, &format!("ACTIVE INVITES ({})", rows.len()));
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_invites)).borrow_mut::<lists::PeopleList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_invites.list)));
     }
 
     fn fill_people(&mut self, cx: &mut Cx) {
@@ -3345,22 +3552,29 @@ impl App {
         images::show(cx, &img, banner.as_deref());
     }
 
+    /// Where notes about `purpose`'s picture go.
+    fn picture_note(&mut self, cx: &mut Cx, purpose: uploads::Purpose, text: &str) {
+        let path: &[LiveId] = if purpose.server() { ids!(so_note) } else { ids!(profile_note) };
+        self.ui.label(cx, path).set_text(cx, text);
+    }
+
     /// Opens the system picker for a picture.
-    fn pick_picture(&mut self, cx: &mut Cx, target: Target) {
-        let id = match target {
-            Target::Avatar => live_id!(pick_avatar),
-            Target::Banner => live_id!(pick_banner),
+    fn pick_picture(&mut self, cx: &mut Cx, purpose: uploads::Purpose) {
+        let (id, title) = match purpose {
+            uploads::Purpose::Avatar => (live_id!(pick_avatar), "Choose a picture"),
+            uploads::Purpose::Banner => (live_id!(pick_banner), "Choose a banner"),
+            uploads::Purpose::ServerIcon => (live_id!(pick_srv_icon), "Choose a server icon"),
+            uploads::Purpose::ServerBanner => (live_id!(pick_srv_banner), "Choose a server banner"),
         };
         // UI tests can't drive the system dialog: INFERNO_TEST_PICK=<file>
         // stands in for the user's choice.
         if let Ok(path) = std::env::var("INFERNO_TEST_PICK") {
             match std::fs::read(&path) {
-                Ok(bytes) => self.open_crop(cx, target, &bytes),
-                Err(e) => self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ {path}: {e}")),
+                Ok(bytes) => self.open_crop(cx, purpose, &bytes),
+                Err(e) => self.picture_note(cx, purpose, &format!("⚠ {path}: {e}")),
             }
             return;
         }
-        let title = if target == Target::Avatar { "Choose a picture" } else { "Choose a banner" };
         let dialog = FileDialog::new()
             .set_id(id)
             .set_title(title.into())
@@ -3370,39 +3584,50 @@ impl App {
     }
 
     /// A picked file: decode it into the editor (Rails' crop modal).
-    fn open_crop(&mut self, cx: &mut Cx, target: Target, bytes: &[u8]) {
+    fn open_crop(&mut self, cx: &mut Cx, purpose: uploads::Purpose, bytes: &[u8]) {
         const MAX_BYTES: usize = 20 * 1024 * 1024;
         if bytes.len() > MAX_BYTES {
-            self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ That file is over 20 MB.");
+            self.picture_note(cx, purpose, "⚠ That file is over 20 MB.");
             return;
         }
         let image = match decode_image_from_data(bytes) {
             Ok(i) if i.width > 0 && i.height > 0 => i,
             _ => {
-                self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ That doesn't look like an image this app can read.");
+                self.picture_note(cx, purpose, "⚠ That doesn't look like an image this app can read.");
                 return;
             }
         };
-        let view_h = if target == Target::Avatar { 300.0 } else { 200.0 };
+        let target = purpose.target();
+        let view_h = if target == Target::Banner { 200.0 } else { 300.0 };
         let crop = Crop::new(target, (image.width as f64, image.height as f64), (480.0, view_h));
         let pixels = image.data.clone();
         let texture = image.into_new_texture(cx);
         self.ui.image(cx, ids!(crop_img)).set_texture(cx, Some(texture));
         let mut view = self.ui.widget(cx, ids!(crop_view));
         script_apply_eval!(cx, view, {height: #(view_h)});
-        let circle = if target == Target::Avatar { 1.0 } else { 0.0 };
+        let shape = match target {
+            Target::Avatar => 1.0,
+            Target::Icon => 2.0,
+            Target::Banner => 0.0,
+        };
         let mut mask = self.ui.widget(cx, ids!(crop_mask));
-        script_apply_eval!(cx, mask, {draw_bg +: {circle: #(circle)}});
-        self.ui.label(cx, ids!(crop_title)).set_text(cx, if target == Target::Avatar { "Edit Avatar" } else { "Edit Banner" });
+        script_apply_eval!(cx, mask, {draw_bg +: {circle: #(shape)}});
+        let title = match purpose {
+            uploads::Purpose::Avatar => "Edit Avatar",
+            uploads::Purpose::Banner => "Edit Banner",
+            uploads::Purpose::ServerIcon => "Edit Server Icon",
+            uploads::Purpose::ServerBanner => "Edit Server Banner",
+        };
+        self.ui.label(cx, ids!(crop_title)).set_text(cx, title);
         self.ui.slider(cx, ids!(crop_zoom)).set_value(cx, 1.0);
-        self.crop = Some((crop, pixels));
+        self.crop = Some((crop, pixels, purpose));
         self.layout_crop(cx);
         self.ui.modal(cx, ids!(crop_dialog)).open(cx);
     }
 
     /// Places the picture in the editor viewport from the crop state.
     fn layout_crop(&mut self, cx: &mut Cx) {
-        let Some((crop, _)) = &self.crop else { return };
+        let Some((crop, _, _)) = &self.crop else { return };
         let s = crop.scale();
         let (w, h, x, y) = (crop.src.0 * s, crop.src.1 * s, crop.offset.0, crop.offset.1);
         let mut img = self.ui.widget(cx, ids!(crop_img));
@@ -3410,34 +3635,36 @@ impl App {
         self.ui.redraw(cx);
     }
 
-    /// Apply: bake the crop, show it on the card at once, and upload it.
+    /// Where `purpose`'s picture shows while it's being edited.
+    fn picture_preview(purpose: uploads::Purpose) -> &'static [LiveId] {
+        match purpose {
+            uploads::Purpose::Avatar => ids!(ed_face.pic),
+            uploads::Purpose::Banner => ids!(ed_banner_img),
+            uploads::Purpose::ServerIcon => ids!(sp_icon.pic),
+            uploads::Purpose::ServerBanner => ids!(sp_banner),
+        }
+    }
+
+    /// Apply: bake the crop, show it at once, and upload it.
     fn apply_crop(&mut self, cx: &mut Cx) {
-        let Some((crop, pixels)) = self.crop.take() else { return };
+        let Some((crop, pixels, purpose)) = self.crop.take() else { return };
         let png = match crop.encode(&pixels) {
             Ok(p) => p,
             Err(e) => {
-                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ Couldn't prepare the picture: {e}"));
+                self.picture_note(cx, purpose, &format!("⚠ Couldn't prepare the picture: {e}"));
                 return;
             }
         };
         let (w, h) = crop.output_size();
         if let Ok(buffer) = ImageBuffer::new(&crop.render(&pixels), w, h) {
             let texture = buffer.into_new_texture(cx);
-            let path: &[LiveId] = match crop.target {
-                Target::Avatar => ids!(ed_face.pic),
-                Target::Banner => ids!(ed_banner_img),
-            };
-            let img = self.ui.image(cx, path);
+            let img = self.ui.image(cx, Self::picture_preview(purpose));
             img.set_texture(cx, Some(texture));
             img.set_visible(cx, true);
         }
-        let purpose = match crop.target {
-            Target::Avatar => uploads::Purpose::Avatar,
-            Target::Banner => uploads::Purpose::Banner,
-        };
         let (id, sha256) = self.uploads.start(purpose, png, "image/png");
         self.send(backend::Command::UploadAuth { id, sha256 });
-        self.ui.label(cx, ids!(profile_note)).set_text(cx, "Uploading…");
+        self.picture_note(cx, purpose, "Uploading…");
         self.ui.modal(cx, ids!(crop_dialog)).close(cx);
         self.ui.redraw(cx);
     }
@@ -3448,11 +3675,16 @@ impl App {
                 match purpose {
                     uploads::Purpose::Avatar => self.draft_picture = url,
                     uploads::Purpose::Banner => self.draft_banner = url,
+                    uploads::Purpose::ServerIcon => self.srv_icon = url,
+                    uploads::Purpose::ServerBanner => self.srv_banner = url,
                 }
-                self.ui.label(cx, ids!(profile_note)).set_text(cx, "Uploaded. Save Changes to keep it.");
+                if purpose.server() {
+                    self.paint_server_preview(cx);
+                }
+                self.picture_note(cx, purpose, "Uploaded. Save Changes to keep it.");
             }
-            uploads::Done::Failed { error, .. } => {
-                self.ui.label(cx, ids!(profile_note)).set_text(cx, &format!("⚠ Upload failed: {error}"));
+            uploads::Done::Failed { purpose, error } => {
+                self.picture_note(cx, purpose, &format!("⚠ Upload failed: {error}"));
             }
         }
     }
@@ -4042,10 +4274,10 @@ impl MatchEvent for App {
 
         // Profile editor: pictures, live colours and initial.
         if tap(&self.ui, cx, ids!(ed_avatar)) {
-            self.pick_picture(cx, Target::Avatar);
+            self.pick_picture(cx, uploads::Purpose::Avatar);
         }
         if tap(&self.ui, cx, ids!(ed_banner)) {
-            self.pick_picture(cx, Target::Banner);
+            self.pick_picture(cx, uploads::Purpose::Banner);
         }
         for path in [ids!(p_color), ids!(p_color_2), ids!(p_display), ids!(p_username)] {
             if self.ui.text_input(cx, path).changed(actions).is_some() {
@@ -4059,20 +4291,20 @@ impl MatchEvent for App {
                 FileDialogAction::FileSelected { id, paths } => (*id, paths.first().and_then(|p| std::fs::read(p).ok())),
                 _ => continue,
             };
-            let target = if id == live_id!(pick_avatar) {
-                Target::Avatar
-            } else if id == live_id!(pick_banner) {
-                Target::Banner
-            } else {
-                continue;
+            let purpose = match id {
+                id if id == live_id!(pick_avatar) => uploads::Purpose::Avatar,
+                id if id == live_id!(pick_banner) => uploads::Purpose::Banner,
+                id if id == live_id!(pick_srv_icon) => uploads::Purpose::ServerIcon,
+                id if id == live_id!(pick_srv_banner) => uploads::Purpose::ServerBanner,
+                _ => continue,
             };
             match bytes {
-                Some(b) => self.open_crop(cx, target, &b),
-                None => self.ui.label(cx, ids!(profile_note)).set_text(cx, "⚠ Couldn't read that file."),
+                Some(b) => self.open_crop(cx, purpose, &b),
+                None => self.picture_note(cx, purpose, "⚠ Couldn't read that file."),
             }
         }
         if let Some(z) = self.ui.slider(cx, ids!(crop_zoom)).slided(actions) {
-            if let Some((crop, _)) = self.crop.as_mut() {
+            if let Some((crop, _, _)) = self.crop.as_mut() {
                 crop.set_zoom(z);
             }
             self.layout_crop(cx);
@@ -4267,7 +4499,7 @@ impl MatchEvent for App {
         }
         if tapped(&self.ui, cx, ids!(menu_invite)) {
             self.set_server_menu(cx, false);
-            self.send(backend::Command::CreateInvite);
+            self.invite_people(cx);
         }
         if tapped(&self.ui, cx, ids!(menu_leave)) {
             self.set_server_menu(cx, false);
@@ -4418,17 +4650,67 @@ impl MatchEvent for App {
             self.confirm(cx, Pending::DeleteServer, "Delete Server", &body, "Delete Server", false);
         }
         if self.ui.button(cx, ids!(so_save)).clicked(actions) {
+            let ty = self.ui.drop_down(cx, ids!(so_type)).selected_item().min(SERVER_TYPES.len() - 1);
+            let ch = self.ui.drop_down(cx, ids!(so_welcome_ch)).selected_item();
             let o = backend::ServerSettings {
                 name: self.ui.text_input(cx, ids!(so_name)).text(),
                 about: self.ui.text_input(cx, ids!(so_about)).text(),
+                picture: self.srv_icon.clone(),
+                banner: self.srv_banner.clone(),
+                server_type: SERVER_TYPES[ty].0.to_owned(),
                 discoverable: self.ui.check_box(cx, ids!(so_discoverable)).active(cx),
                 age_restricted: self.ui.check_box(cx, ids!(so_age)).active(cx),
                 welcome_enabled: self.ui.check_box(cx, ids!(so_welcome_on)).active(cx),
                 welcome_message: self.ui.text_input(cx, ids!(so_welcome)).text(),
+                welcome_channel: ch.checked_sub(1).and_then(|i| self.srv.text_channels.get(i)).map(|c| c.id.clone()),
                 ..Default::default()
             };
             self.send(backend::Command::SaveOverview(o));
-            self.ui.label(cx, ids!(so_note)).set_text(cx, "Saved ✓");
+            self.ui.label(cx, ids!(so_note)).set_text(cx, "");
+            self.toast(cx, "Server settings saved.", Toast::Success);
+        }
+        if self.ui.button(cx, ids!(so_icon_pick)).clicked(actions) {
+            self.pick_picture(cx, uploads::Purpose::ServerIcon);
+        }
+        if self.ui.button(cx, ids!(so_banner_pick)).clicked(actions) {
+            self.pick_picture(cx, uploads::Purpose::ServerBanner);
+        }
+        // Rails' Remove buttons did nothing; these clear it until Save.
+        if tap(&self.ui, cx, ids!(so_icon_remove)) {
+            self.srv_icon.clear();
+            self.paint_server_preview(cx);
+            self.ui.label(cx, ids!(so_note)).set_text(cx, "Save Changes to remove it.");
+        }
+        if tap(&self.ui, cx, ids!(so_banner_remove)) {
+            self.srv_banner.clear();
+            self.paint_server_preview(cx);
+            self.ui.label(cx, ids!(so_note)).set_text(cx, "Save Changes to remove it.");
+        }
+        let typed = [ids!(so_name), ids!(so_about)].into_iter().any(|p| self.ui.text_input(cx, p).changed(actions).is_some());
+        if typed
+            || self.ui.drop_down(cx, ids!(so_type)).changed(actions).is_some()
+            || self.ui.check_box(cx, ids!(so_age)).changed(actions).is_some()
+        {
+            self.paint_server_preview(cx);
+        }
+        if self.ui.button(cx, ids!(inv_generate)).clicked(actions) {
+            let e = self.ui.drop_down(cx, ids!(inv_expires)).selected_item();
+            let m = self.ui.drop_down(cx, ids!(inv_max)).selected_item();
+            self.send(backend::Command::CreateInvite {
+                max_uses: INVITE_USES.get(m).copied().unwrap_or(0),
+                expires_in: INVITE_EXPIRY.get(e).copied().unwrap_or(0),
+            });
+        }
+        let inv_btn = self.ui.widget(cx, ids!(srv_invites)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        match inv_btn {
+            Some((code, 0)) => {
+                if let Some(i) = self.srv.invites.iter().find(|i| i.code == code) {
+                    cx.copy_to_clipboard(&i.link);
+                    self.toast(cx, "Invite link copied.", Toast::Success);
+                }
+            }
+            Some((code, _)) => self.confirm(cx, Pending::RevokeInvite(code), "Revoke Invite", "Revoke this invite? Its link stops working.", "Revoke", false),
+            None => {}
         }
         let role_click = self.ui.widget(cx, ids!(role_list)).borrow::<lists::RoleList>().and_then(|l| l.clicked(cx, actions));
         if let Some(i) = role_click {
@@ -4570,7 +4852,7 @@ impl MatchEvent for App {
             self.toast(cx, "Your public key was copied.", Toast::Success);
         }
         if self.ui.view(cx, ids!(invite_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) {
-            self.send(backend::Command::CreateInvite);
+            self.invite_people(cx);
         }
         if self.ui.button(cx, ids!(create_server)).clicked(actions) {
             let name = self.ui.text_input(cx, ids!(new_server_name)).text();
@@ -4666,7 +4948,7 @@ impl AppMain for App {
             match event.hits(cx, area) {
                 Hit::FingerDown(fe) => self.crop_drag = Some(fe.abs),
                 Hit::FingerMove(fe) => {
-                    if let (Some(last), Some((crop, _))) = (self.crop_drag, self.crop.as_mut()) {
+                    if let (Some(last), Some((crop, _, _))) = (self.crop_drag, self.crop.as_mut()) {
                         crop.drag(fe.abs.x - last.x, fe.abs.y - last.y);
                         self.crop_drag = Some(fe.abs);
                         self.layout_crop(cx);
@@ -4678,7 +4960,8 @@ impl AppMain for App {
         }
         if images::handle_event(cx, event) {
             // A picture arrived: rows recorded before it need redrawing.
-            let lists: [&[LiveId]; 6] = [
+            let lists: [&[LiveId]; 7] = [
+                ids!(rail.list),
                 ids!(members.list),
                 ids!(messages.list),
                 ids!(dms.list),
@@ -4688,6 +4971,9 @@ impl AppMain for App {
             ];
             for list in lists {
                 lists::redraw_items(cx, &self.ui.portal_list(cx, list));
+            }
+            if self.ui.view(cx, ids!(srv_settings)).visible() {
+                self.paint_server_preview(cx);
             }
             if let Some(card) = self.ui.view(cx, ids!(card_layer)).visible().then(|| self.card.clone()) {
                 let img = self.ui.image(cx, ids!(card.ring.avatar.pic));

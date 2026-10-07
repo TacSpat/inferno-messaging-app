@@ -10,6 +10,25 @@ use makepad_widgets::*;
 pub enum Purpose {
     Avatar,
     Banner,
+    ServerIcon,
+    ServerBanner,
+}
+
+impl Purpose {
+    /// The editor shape for it.
+    pub fn target(self) -> crate::crop::Target {
+        use crate::crop::Target;
+        match self {
+            Purpose::Avatar => Target::Avatar,
+            Purpose::Banner | Purpose::ServerBanner => Target::Banner,
+            Purpose::ServerIcon => Target::Icon,
+        }
+    }
+
+    /// For the server's pictures (notes go to the overview page).
+    pub fn server(self) -> bool {
+        matches!(self, Purpose::ServerIcon | Purpose::ServerBanner)
+    }
 }
 
 struct Job {

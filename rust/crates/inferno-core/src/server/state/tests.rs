@@ -291,3 +291,33 @@ fn hoisted_roles_sort_first() {
     let order: Vec<_> = state.sorted_members().iter().map(|m| m.pubkey).collect();
     assert_eq!(order[0], t.admin.public_key());
 }
+
+#[test]
+fn only_the_creator_or_an_invite_manager_revokes() {
+    let t = T::new();
+    let mut events = t.base();
+    let invite = |who: &Keys, code: &str, revoked: bool| {
+        let mut tags = vec![s(&["d", &dtag::invite(GID, code)]), s(&["server", GID]), s(&["code", code])];
+        if revoked {
+            tags.push(s(&["revoked", "true"]));
+        } else {
+            tags.push(s(&["created_by", &who.public_key().to_hex()]));
+        }
+        t.ev(who, kinds::SERVER_INVITE, tags)
+    };
+    events.push(invite(&t.admin, "ADM", false));
+    events.push(invite(&t.alice, "ALI", false));
+    events.push(invite(&t.alice, "ALI2", false));
+    let state = t.resolve(&events);
+    assert_eq!(state.invites["ADM"].created_by, t.admin.public_key());
+
+    // Alice may create invites but not revoke the admin's.
+    events.push(invite(&t.alice, "ADM", true));
+    // She may revoke her own; the admin may revoke anyone's.
+    events.push(invite(&t.alice, "ALI", true));
+    events.push(invite(&t.admin, "ALI2", true));
+    let state = t.resolve(&events);
+    assert!(state.invites.contains_key("ADM"));
+    assert!(!state.invites.contains_key("ALI"));
+    assert!(!state.invites.contains_key("ALI2"));
+}

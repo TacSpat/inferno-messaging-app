@@ -11,6 +11,8 @@ pub enum Target {
     Avatar,
     /// 960px wide, the viewport's aspect (Rails).
     Banner,
+    /// A server icon: a 512px square, shown with rounded corners.
+    Icon,
 }
 
 /// Editor state, in viewport points. The image's top-left sits at `offset`
@@ -41,7 +43,7 @@ impl Crop {
     /// the whole banner viewport.
     pub fn region(&self) -> (f64, f64, f64, f64) {
         match self.target {
-            Target::Avatar => {
+            Target::Avatar | Target::Icon => {
                 let d = self.view.0.min(self.view.1) * 0.8;
                 ((self.view.0 - d) / 2.0, (self.view.1 - d) / 2.0, d, d)
             }
@@ -75,7 +77,7 @@ impl Crop {
     }
 
     /// The image always covers the output region: no empty edges on a banner,
-    /// no gap inside the avatar circle.
+    /// no gap inside the avatar circle or icon square.
     fn clamp(&mut self) {
         let s = self.scale();
         let (rx, ry, rw, rh) = self.region();
@@ -104,7 +106,7 @@ impl Crop {
 
     pub fn output_size(&self) -> (usize, usize) {
         match self.target {
-            Target::Avatar => (512, 512),
+            Target::Avatar | Target::Icon => (512, 512),
             Target::Banner => (960, (960.0 * self.view.1 / self.view.0).round().max(1.0) as usize),
         }
     }
@@ -202,6 +204,13 @@ mod tests {
         c.drag(5.0, -3.0);
         assert_eq!(c.offset, centred);
         assert_eq!(c.output_size(), (960, 400));
+    }
+
+    #[test]
+    fn icons_are_square_and_unclipped() {
+        let c = Crop::new(Target::Icon, (2.0, 2.0), (300.0, 300.0));
+        assert_eq!(c.output_size(), (512, 512));
+        assert_eq!(c.render(&[0xff00ff00; 4])[3], 255, "the corner stays: rounding is the viewer's");
     }
 
     #[test]

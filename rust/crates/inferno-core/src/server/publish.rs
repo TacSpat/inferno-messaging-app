@@ -151,10 +151,15 @@ pub fn join(
     nickname: &str,
     profile: &super::wire::MemberProfile,
     joined_at: i64,
+    invite: Option<&str>,
 ) -> Result<Event, PublishError> {
     let mut tags = member_base(gid, &keys.public_key());
     tags.push(t(&["nickname", nickname]));
     tags.push(t(&["joined_at", &joined_at.to_string()]));
+    // Ours: which invite brought us in, so its uses can be counted.
+    if let Some(code) = invite {
+        tags.push(t(&["invite", code]));
+    }
     let opt = |v: &Option<String>| v.clone().unwrap_or_default();
     for (k, v) in [
         ("profile_name", profile.name.clone()),
@@ -247,6 +252,21 @@ pub fn invite(keys: &Keys, state: &ServerState, code: &str, max_uses: u32, expir
     sign(keys, kinds::SERVER_INVITE, tags)
 }
 
+/// Revokes an invite with Rails' tags (d, server, code, revoked).
+pub fn revoke_invite(keys: &Keys, state: &ServerState, code: &str) -> Result<Event, PublishError> {
+    let invite = state.invites.get(code).ok_or(PublishError::NotAllowed)?;
+    if !state.may_revoke(&keys.public_key(), invite) {
+        return Err(PublishError::NotAllowed);
+    }
+    let tags = vec![
+        Tag::identifier(dtag::invite(&state.gid, code)),
+        t(&["server", &state.gid]),
+        t(&["code", code]),
+        t(&["revoked", "true"]),
+    ];
+    sign(keys, kinds::SERVER_INVITE, tags)
+}
+
 /// A new server: the owner's metadata, roles (`@everyone` with Rails'
 /// defaults) and structure with one text channel. Publish all three.
 pub fn create_server(keys: &Keys, name: &str) -> Result<(String, Vec<Event>), PublishError> {
@@ -330,7 +350,7 @@ mod tests {
         let alice = Keys::generate();
         let (gid, mut events) = create_server(&owner, "x").unwrap();
         let profile = crate::server::wire::MemberProfile { name: "alice".into(), ..Default::default() };
-        events.push(join(&alice, &gid, "", &profile, 0).unwrap());
+        events.push(join(&alice, &gid, "", &profile, 0, None).unwrap());
         let state = ServerState::resolve(&gid, owner.public_key(), &events);
         assert!(state.is_member(&alice.public_key()));
         assert_eq!(ban(&alice, &state, &owner.public_key(), "").unwrap_err(), PublishError::NotAllowed);

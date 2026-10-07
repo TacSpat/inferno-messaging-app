@@ -141,7 +141,7 @@ mod owner_tests {
         let owner = Keys::generate();
         let alice = Keys::generate();
         let (gid, mut events) = publish::create_server(&owner, "real").unwrap();
-        events.push(publish::join(&alice, &gid, "", &Default::default(), 0).unwrap());
+        events.push(publish::join(&alice, &gid, "", &Default::default(), 0, None).unwrap());
         let state = ServerState::resolve(&gid, owner.public_key(), &events);
         events.push(publish::invite(&alice, &state, "AAA", 0, 0).unwrap());
 

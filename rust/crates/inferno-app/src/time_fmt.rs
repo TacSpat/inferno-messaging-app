@@ -14,6 +14,23 @@ pub fn clock(at: i64) -> String {
 }
 
 /// Rails' `%m/%d/%Y %l:%M %p`: "10/05/2026 4:30 PM".
+/// Rails' distance_of_time_in_words, for a span in seconds: "5 minutes",
+/// "about 1 hour", "3 days".
+pub fn in_words(secs: i64) -> String {
+    let s = secs.max(0);
+    let mins = (s + 30) / 60;
+    let plural = |n: i64, unit: &str| if n == 1 { format!("1 {unit}") } else { format!("{n} {unit}s") };
+    match mins {
+        0 => "less than a minute".into(),
+        1..=44 => plural(mins, "minute"),
+        45..=89 => "about 1 hour".into(),
+        90..=1439 => format!("about {}", plural((mins + 30) / 60, "hour")),
+        1440..=2519 => "1 day".into(),
+        2520..=43199 => plural((mins + 720) / 1440, "day"),
+        _ => format!("about {}", plural((mins + 21600) / 43200, "month")),
+    }
+}
+
 pub fn date_time(at: i64) -> String {
     date_time_in(at, &Local)
 }
@@ -72,6 +89,16 @@ mod tests {
 
     // 2026-10-05 21:30 UTC.
     const AT: i64 = 1_791_235_800;
+
+    #[test]
+    fn words_like_rails() {
+        assert_eq!(in_words(10), "less than a minute");
+        assert_eq!(in_words(5 * 60), "5 minutes");
+        assert_eq!(in_words(3599), "about 1 hour");
+        assert_eq!(in_words(6 * 3600), "about 6 hours");
+        assert_eq!(in_words(86400), "1 day");
+        assert_eq!(in_words(7 * 86400), "7 days");
+    }
 
     #[test]
     fn formats_in_the_given_zone() {

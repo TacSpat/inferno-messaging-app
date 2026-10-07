@@ -61,6 +61,8 @@ impl Widget for RailList {
                 let active = self.selected.as_deref() == Some(s.gid.as_str());
                 let row = list.item(cx, i, if active { id!(Active) } else { id!(Idle) });
                 row.label(cx, ids!(icon.initials)).set_text(cx, &s.initials);
+                let img = row.image(cx, ids!(icon.pic));
+                crate::images::show(cx, &img, s.picture.as_deref());
                 row.draw_all(cx, &mut Scope::empty());
             }
         }
