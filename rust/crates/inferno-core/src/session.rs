@@ -242,7 +242,14 @@ pub struct Session {
     /// GIFs shared on Nostr, fetched at most every few minutes; searches
     /// filter this locally (relays rate-limit).
     gif_cache: Mutex<Option<(std::time::Instant, Vec<Event>)>>,
+    /// Relays that do full-text search (NIP-50) for GIFs; the big general
+    /// relays refuse search filters. Connected the first time it's needed.
+    gif_relays: Vec<String>,
+    gif_pool: tokio::sync::OnceCell<Option<Arc<RelayPool>>>,
 }
+
+/// Public relays known to answer NIP-50 searches over GIF metadata.
+pub const DEFAULT_GIF_RELAYS: [&str; 1] = ["wss://relay.ditto.pub"];
 
 impl Drop for Session {
     /// Wakes the batchers so they notice the session is gone and exit.
@@ -328,6 +335,14 @@ impl Session {
             started_at: Timestamp::now(),
             refresh: Arc::new(tokio::sync::Notify::new()),
             gif_cache: Mutex::new(None),
+            // INFERNO_GIF_RELAYS overrides; private setups (and tests) that
+            // configure their own relays get none unless they ask.
+            gif_relays: match std::env::var("INFERNO_GIF_RELAYS") {
+                Ok(v) => v.split(',').filter_map(|r| crate::relay::normalize_url(r.trim())).collect(),
+                Err(_) if options.seed_default_relays => DEFAULT_GIF_RELAYS.iter().map(|r| r.to_string()).collect(),
+                Err(_) => Vec::new(),
+            },
+            gif_pool: tokio::sync::OnceCell::new(),
             config_dirty: Arc::new(tokio::sync::Notify::new()),
         });
         session.rebuild_channel_keys()?;
@@ -1673,18 +1688,55 @@ impl Session {
     }
 
     /// GIFs shared on Nostr (NIP-94) matching `query`; no service or key.
+    /// Recent ones from our relays (fetched at most every few minutes and
+    /// filtered here), plus a full-text search on the GIF search relays.
     pub async fn nostr_gifs(&self, query: &str) -> Result<Vec<crate::gifs::Gif>> {
+        use crate::gif_search::{nostr_filter, nostr_gifs, ranked_gifs};
         const FRESH: std::time::Duration = std::time::Duration::from_secs(300);
         let cached = self.gif_cache.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let events = match cached {
+        let recent = match cached {
             Some((at, events)) if at.elapsed() < FRESH => events,
             _ => {
-                let events = self.pool.fetch(vec![crate::gif_search::nostr_filter(500)]).await?;
+                let events = self.pool.fetch(vec![nostr_filter(500)]).await?;
                 *self.gif_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), events.clone()));
                 events
             }
         };
-        Ok(crate::gif_search::nostr_gifs(&events, query))
+        let mut gifs = Vec::new();
+        if let Some(pool) = self.gif_search_pool().await {
+            let mut filter = nostr_filter(80);
+            if !query.trim().is_empty() {
+                filter = filter.search(query.trim());
+            }
+            match pool.fetch(vec![filter]).await {
+                // The search relay ranks its matches; keep its order.
+                Ok(found) if !query.trim().is_empty() => gifs = ranked_gifs(&found),
+                Ok(found) => gifs = nostr_gifs(&found, ""),
+                Err(e) => tracing::warn!("GIF search relays: {e}"),
+            }
+        }
+        for g in nostr_gifs(&recent, query) {
+            if !gifs.iter().any(|x| x.url == g.url) {
+                gifs.push(g);
+            }
+        }
+        gifs.truncate(120);
+        Ok(gifs)
+    }
+
+    async fn gif_search_pool(&self) -> Option<Arc<RelayPool>> {
+        self.gif_pool
+            .get_or_init(|| async {
+                if self.gif_relays.is_empty() {
+                    return None;
+                }
+                let pool = RelayPool::new(self.keys.clone());
+                pool.add_relays(&self.gif_relays).await.ok()?;
+                pool.connect().await;
+                Some(Arc::new(pool))
+            })
+            .await
+            .clone()
     }
 
     /// Whether we've been through `gid`'s onboarding (on any device).

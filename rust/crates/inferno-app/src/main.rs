@@ -5068,7 +5068,10 @@ impl App {
             self.ui.view(cx, &[panel[0], id!(new_collection)]).set_visible(cx, false);
         }
         let rows = if on_gifs {
-            picker::gif_rows(&self.gif_view, &search, &self.gif_favorites, &self.gif_collections, &self.gif_results)
+            // GIFs whose link is dead (or won't decode) are left out.
+            let mut results = self.gif_results.clone();
+            results.gifs.retain(|g| !images::failed(&g.preview) && !images::failed(&g.url));
+            picker::gif_rows(&self.gif_view, &search, &self.gif_favorites, &self.gif_collections, &results)
         } else if status || self.picker_tab == PICKER_EMOJI {
             picker::emoji_rows(&search, &self.picker_frequent, &self.emoji_sets, status || self.picker_custom_ok(), &self.picker_collapsed)
         } else {
@@ -6666,6 +6669,9 @@ impl AppMain for App {
             }
             if self.ui.view(cx, ids!(srv_settings)).visible() {
                 self.paint_server_preview(cx);
+            }
+            if self.picker_tab == PICKER_GIFS && !self.gif_results.gifs.is_empty() {
+                self.refresh_picker(cx, false);
             }
             if let Some(pic) = self.wizard.as_ref().map(|w| w.0.picture.clone()) {
                 images::show(cx, &self.ui.image(cx, ids!(wz_icon.pic)), pic.as_deref());

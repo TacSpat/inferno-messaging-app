@@ -90,38 +90,54 @@ fn usable(url: &str) -> bool {
     url.starts_with("https://") || url.starts_with("http://127.0.0.1") || url.starts_with("http://localhost")
 }
 
+/// A shared GIF event as a picker GIF, if it is one we can show.
+fn as_gif(e: &Event) -> Option<(Gif, String)> {
+    let tag = |name: &str| e.tags.iter().find(|t| t.kind().to_string() == name).and_then(|t| t.content()).map(str::to_owned);
+    let url = tag("url").filter(|u| usable(u))?;
+    if e.kind != Kind::FileMetadata || tag("m").as_deref() != Some("image/gif") {
+        return None;
+    }
+    let mut text = e.content.to_lowercase();
+    for name in ["summary", "alt"] {
+        if let Some(s) = tag(name) {
+            text.push(' ');
+            text.push_str(&s.to_lowercase());
+        }
+    }
+    for t in e.tags.iter().filter(|t| t.kind().to_string() == "t") {
+        if let Some(s) = t.content() {
+            text.push(' ');
+            text.push_str(&s.to_lowercase());
+        }
+    }
+    let preview = tag("thumb").filter(|u| usable(u)).unwrap_or_else(|| url.clone());
+    Some((Gif { url, preview }, text))
+}
+
 /// Shared GIFs matching every word of `query` in their description,
 /// summary, alt text or hashtags (newest first, one per URL). An empty
 /// query matches all.
 pub fn nostr_gifs(events: &[Event], query: &str) -> Vec<Gif> {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
-    let mut sorted: Vec<&Event> = events.iter().filter(|e| e.kind == Kind::FileMetadata).collect();
+    let mut sorted: Vec<&Event> = events.iter().collect();
     sorted.sort_by(|a, b| b.created_at.cmp(&a.created_at));
     let mut out: Vec<Gif> = Vec::new();
     for e in sorted {
-        let tag = |name: &str| e.tags.iter().find(|t| t.kind().to_string() == name).and_then(|t| t.content()).map(str::to_owned);
-        let Some(url) = tag("url").filter(|u| usable(u)) else { continue };
-        if tag("m").as_deref() != Some("image/gif") {
-            continue;
+        let Some((gif, text)) = as_gif(e) else { continue };
+        if words.iter().all(|w| text.contains(w.as_str())) && !out.iter().any(|g| g.url == gif.url) {
+            out.push(gif);
         }
-        let mut text = e.content.to_lowercase();
-        for name in ["summary", "alt"] {
-            if let Some(s) = tag(name) {
-                text.push(' ');
-                text.push_str(&s.to_lowercase());
-            }
+    }
+    out
+}
+
+/// A search relay's matches as GIFs, in the relay's order (one per URL).
+pub fn ranked_gifs(events: &[Event]) -> Vec<Gif> {
+    let mut out: Vec<Gif> = Vec::new();
+    for (gif, _) in events.iter().filter_map(as_gif) {
+        if !out.iter().any(|g| g.url == gif.url) {
+            out.push(gif);
         }
-        for t in e.tags.iter().filter(|t| t.kind().to_string() == "t") {
-            if let Some(s) = t.content() {
-                text.push(' ');
-                text.push_str(&s.to_lowercase());
-            }
-        }
-        if !words.iter().all(|w| text.contains(w.as_str())) || out.iter().any(|g| g.url == url) {
-            continue;
-        }
-        let preview = tag("thumb").filter(|u| usable(u)).unwrap_or_else(|| url.clone());
-        out.push(Gif { url, preview });
     }
     out
 }

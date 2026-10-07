@@ -20,6 +20,18 @@ static TRIED: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 /// requests without one, so we fetch and hand the bytes to its decoder.
 static PENDING: Mutex<Option<HashMap<LiveId, String>>> = Mutex::new(None);
 
+/// URLs that didn't download or decode, so lists can leave them out.
+static FAILED: Mutex<Option<std::collections::HashSet<String>>> = Mutex::new(None);
+
+fn mark_failed(url: &str) {
+    FAILED.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(url.to_owned());
+}
+
+/// Whether `url` failed to load (this run).
+pub fn failed(url: &str) -> bool {
+    FAILED.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|f| f.contains(url))
+}
+
 const USER_AGENT: &str = "Inferno/0.1 (Nostr chat client)";
 /// Bigger downloads are refused (animated GIFs can be large).
 const MAX_DOWNLOAD: usize = 25 * 1024 * 1024;
@@ -81,6 +93,7 @@ pub fn handle_event(cx: &mut Cx, event: &Event) -> bool {
     match event {
         Event::NetworkResponses(e) => {
             handle_image_cache_network_responses(cx, e);
+            let mut failures = false;
             for r in e.iter() {
                 let (id, body) = match r {
                     NetworkResponse::HttpResponse { request_id, response } => (
@@ -91,18 +104,26 @@ pub fn handle_event(cx: &mut Cx, event: &Event) -> bool {
                     _ => continue,
                 };
                 let url = PENDING.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(HashMap::new).remove(&id);
-                let (Some(url), Some(body)) = (url, body) else { continue };
+                let Some(url) = url else { continue };
+                let Some(body) = body else {
+                    mark_failed(&url);
+                    failures = true;
+                    continue;
+                };
                 // Decoded off the UI thread; the result comes back as an
                 // AsyncImageLoad action (handled below).
                 let _ = load_image_from_data_async(cx, Path::new(&url), body);
             }
-            false
+            failures
         }
         Event::Actions(actions) => {
             let mut ready = false;
             for action in actions {
                 if let Some(AsyncImageLoad { image_path, result }) = action.downcast_ref() {
                     if let Some(result) = result.borrow_mut().take() {
+                        if result.is_err() {
+                            mark_failed(&image_path.to_string_lossy());
+                        }
                         process_async_image_load(cx, image_path, result);
                     }
                     ready = true;
