@@ -1156,6 +1156,60 @@ impl Widget for CustomList {
     }
 }
 
+// ─── Audit log ───────────────────────────────────────────────────────────
+
+use crate::backend::AuditItem;
+
+/// Rails' audit log rows: a tinted icon by kind, "actor did something",
+/// and when.
+#[derive(Script, ScriptHook, Widget)]
+pub struct AuditList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<AuditItem>,
+}
+
+impl Widget for AuditList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let now = chrono::Utc::now().timestamp();
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len().max(1));
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some(r) = self.rows.get(i) else {
+                    if i == 0 {
+                        list.item(cx, i, id!(Empty)).draw_all(cx, &mut Scope::empty());
+                    }
+                    continue;
+                };
+                let row = list.item(cx, i, id!(Entry));
+                // blue, purple, green, amber, red, cyan (Rails' -400s).
+                let color = [0x60a5fa, 0xc084fc, 0x4ade80, 0xfbbf24, 0xf87171, 0x22d3ee][r.tone.min(5) as usize];
+                let mut badge = row.widget(cx, ids!(badge));
+                let (bg, fg) = (rgba(color, 0.2), rgba(color, 1.0));
+                script_apply_eval!(cx, badge, {draw_bg +: {color: #(bg)}});
+                let icon = match r.tone { 2 => 1, 4 => 2, 5 => 3, _ => 0 };
+                for (k, path) in [ids!(badge.edit), ids!(badge.user), ids!(badge.ban), ids!(badge.link)].into_iter().enumerate() {
+                    let mut ico = row.widget(cx, path);
+                    let c = if k == icon { fg } else { rgba(0, 0.0) };
+                    script_apply_eval!(cx, ico, {draw_icon +: {color: #(c)}});
+                }
+                row.label(cx, ids!(text.line.actor)).set_text(cx, &r.actor);
+                row.label(cx, ids!(text.line.what)).set_text(cx, &r.text);
+                let when = format!("{} ago · {}", crate::time_fmt::in_words(now - r.at), crate::time_fmt::date_time(r.at));
+                row.label(cx, ids!(text.when)).set_text(cx, &when);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────────
 
 /// Flutter's server catalog: cards three to a row.

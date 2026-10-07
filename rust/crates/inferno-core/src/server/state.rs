@@ -316,7 +316,7 @@ impl ServerState {
             .any(|r| grants(&r.permissions, p))
     }
 
-    fn may_publish(&self, pk: &PublicKey, kind: u16) -> bool {
+    pub fn may_publish(&self, pk: &PublicKey, kind: u16) -> bool {
         self.is_owner(pk) || required_for(kind).is_some_and(|p| self.has(pk, p))
     }
 

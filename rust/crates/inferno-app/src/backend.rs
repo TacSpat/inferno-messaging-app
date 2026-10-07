@@ -149,6 +149,16 @@ pub struct MemberInfo {
     pub me: bool,
 }
 
+/// One audit log line: who, what, when, and Rails' colour for the kind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AuditItem {
+    pub actor: String,
+    pub text: String,
+    pub at: i64,
+    /// Rails' badge colours: 0 blue, 1 purple, 2 green, 3 amber, 4 red, 5 cyan.
+    pub tone: u8,
+}
+
 /// A custom emoji or sticker, as the Expression pages list them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomItem {
@@ -197,6 +207,8 @@ pub struct ServerSettings {
     pub members: Vec<MemberInfo>,
     pub emojis: Vec<CustomItem>,
     pub stickers: Vec<CustomItem>,
+    /// Newest first, at most 200.
+    pub audit: Vec<AuditItem>,
     /// Our highest role position (Flutter's hierarchy rule: we may edit,
     /// reorder and hand out only roles below it); `i64::MAX` for the owner.
     pub my_rank: i64,
@@ -1880,7 +1892,40 @@ impl Backend {
             .iter()
             .map(|s| CustomItem { name: s.name.clone(), description: s.description.clone(), url: s.url.clone(), by: by(&s.creator) })
             .collect();
+        let audit = self
+            .session
+            .audit_log(&gid)
+            .unwrap_or_default()
+            .into_iter()
+            .take(200)
+            .map(|e| {
+                use inferno_core::server::audit::Action as A;
+                let name = |pk: &PublicKey| display(&state, pk, &people).name;
+                let (text, tone) = match &e.action {
+                    A::Settings => ("updated server settings".to_owned(), 0),
+                    A::Channels => ("updated channels".into(), 0),
+                    A::Roles => ("updated roles".into(), 1),
+                    A::Emojis => ("updated emojis".into(), 3),
+                    A::Stickers => ("updated stickers".into(), 3),
+                    A::Joined => ("joined the server".into(), 2),
+                    A::Left => ("left the server".into(), 2),
+                    A::Kicked(t) => (format!("kicked {}", name(t)), 4),
+                    A::TimedOut { target, secs } => {
+                        (format!("timed out {} for {}", name(target), crate::time_fmt::in_words(*secs).trim_start_matches("about ")), 3)
+                    }
+                    A::TimeoutLifted(t) => (format!("removed {}'s timeout", name(t)), 2),
+                    A::RolesChanged(t) => (format!("changed {}'s roles", name(t)), 1),
+                    A::Banned { target, reason } if reason.is_empty() => (format!("banned {}", name(target)), 4),
+                    A::Banned { target, reason } => (format!("banned {} — {reason}", name(target)), 4),
+                    A::Unbanned(t) => (format!("unbanned {}", name(t)), 2),
+                    A::InviteCreated => ("created an invite".into(), 5),
+                    A::InviteRevoked => ("revoked an invite".into(), 5),
+                };
+                AuditItem { actor: name(&e.actor), text, at: e.at, tone }
+            })
+            .collect();
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            audit,
             emojis,
             stickers,
             members: member_infos,

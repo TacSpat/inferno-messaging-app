@@ -191,6 +191,8 @@ pub fn set_roles(keys: &Keys, state: &ServerState, target: &PublicKey, role_ids:
     let mut roles = vec!["roles".to_owned()];
     roles.extend(role_ids.iter().cloned());
     tags.push(Tag::parse(roles).expect("tag"));
+    // Ours, for the audit log: which change this event is.
+    tags.push(t(&["action", "roles"]));
     carry_member_state(keys, state, target, &mut tags, false, true);
     sign(keys, kinds::SERVER_MEMBER, tags)
 }
@@ -229,6 +231,7 @@ pub fn timeout(keys: &Keys, state: &ServerState, target: &PublicKey, until: i64)
     let mut tags = member_base(&state.gid, target);
     tags.push(t(&["timed_out_until", &until.to_string()]));
     tags.push(t(&["timed_out_by", &keys.public_key().to_hex()]));
+    tags.push(t(&["action", "timeout"]));
     carry_member_state(keys, state, target, &mut tags, true, false);
     sign(keys, kinds::SERVER_MEMBER, tags)
 }

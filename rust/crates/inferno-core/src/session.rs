@@ -451,6 +451,13 @@ impl Session {
         invite_link::encode(gid, code, &invite.created_by, &hints)
     }
 
+    /// The server's audit log, newest first (see `server::audit`).
+    pub fn audit_log(&self, gid: &str) -> Result<Vec<crate::server::audit::Entry>> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let events = self.store.server_events(gid)?;
+        Ok(crate::server::audit::entries(&state, &events))
+    }
+
     /// Publishes a changed emoji or sticker list (`custom` builds it).
     async fn publish_custom(&self, gid: &str, build: impl FnOnce(&ServerState) -> std::result::Result<Event, crate::server::custom::CustomError>) -> Result<()> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;

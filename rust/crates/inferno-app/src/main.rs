@@ -1265,6 +1265,30 @@ script_mod! {
         }
     }
 
+    mod.widgets.AuditListBase = #(lists::AuditList::register_widget(vm))
+    mod.widgets.AuditList = set_type_default() do mod.widgets.AuditListBase{
+        width: Fill height: 640
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Entry := RoundedView{width: Fill height: Fit margin: Inset{bottom: 4} padding: Inset{left: 16 right: 16 top: 12 bottom: 12}
+                flow: Right spacing: 12 align: Align{y: 0.5} new_batch: true
+                draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+                badge := RoundedView{width: 32 height: 32 flow: Overlay align: Center new_batch: true draw_bg.border_radius: 16.0
+                    edit := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/edit.svg")}
+                    user := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/users.svg")}
+                    ban := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/user_x.svg")}
+                    link := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/link.svg")}}
+                text := View{width: Fill height: Fit flow: Down spacing: 2
+                    line := View{width: Fill height: Fit flow: Right spacing: 5
+                        actor := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                        what := Txt{width: Fill text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 10.0}}
+                    when := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}}
+            }
+            Empty := Hint{text: "No audit log entries yet." margin: 8}
+        }
+    }
+
     mod.widgets.DiscoverListBase = #(lists::DiscoverList::register_widget(vm))
     mod.widgets.DiscoverList = set_type_default() do mod.widgets.DiscoverListBase{
         width: Fill height: 380
@@ -2048,6 +2072,7 @@ script_mod! {
                             snav_roles := NavItem{label.text: "Roles"}
                             snav_invites := NavItem{label.text: "Invites"}
                             moderation_hdr := NavHeader{text: "MODERATION"}
+                            snav_audit := NavItem{label.text: "Audit Log"}
                             snav_bans := NavItem{label.text: "Bans"}
                             SolidView{width: Fill height: 1 margin: Inset{top: 16 bottom: 8} draw_bg.color: gray_700}
                             snav_delete := NavItem{label.text: "Delete Server" label.draw_text.color: #xf87171}
@@ -2314,6 +2339,13 @@ script_mod! {
                                 }
                                 st_title := Txt{margin: Inset{top: 8 bottom: 10} text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
                                 st_list := mod.widgets.StickerList{}
+                            }
+
+                            spage_audit := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Audit Log" margin: Inset{bottom: 16}}
+                                srv_audit := mod.widgets.AuditList{}
                             }
 
                             spage_bans := View{
@@ -2743,7 +2775,7 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 7] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 8] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
@@ -2751,6 +2783,7 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 7] = [
     (ids!(snav_bans), ids!(spage_bans)),
     (ids!(snav_emoji), ids!(spage_emoji)),
     (ids!(snav_stickers), ids!(spage_stickers)),
+    (ids!(snav_audit), ids!(spage_audit)),
 ];
 
 /// Whether the role drafts differ from what's saved, in what the editor
@@ -3499,7 +3532,7 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 7] {
+    fn srv_page_allowed(&self) -> [bool; 8] {
         let p = &self.perms;
         [
             p.manage_server,
@@ -3509,6 +3542,7 @@ impl App {
             p.manage_server || p.ban_members,
             p.create_emojis || p.manage_emojis || p.manage_server,
             p.create_stickers || p.manage_emojis || p.manage_server,
+            p.manage_server,
         ]
     }
 
@@ -3520,7 +3554,7 @@ impl App {
         self.ui.view(cx, ids!(snav_delete)).set_visible(cx, self.perms.owner);
         self.ui.widget(cx, ids!(people_hdr)).set_visible(cx, allowed[1] || allowed[2] || allowed[3]);
         self.ui.widget(cx, ids!(expression_hdr)).set_visible(cx, allowed[5] || allowed[6]);
-        self.ui.widget(cx, ids!(moderation_hdr)).set_visible(cx, allowed[4]);
+        self.ui.widget(cx, ids!(moderation_hdr)).set_visible(cx, allowed[4] || allowed[7]);
         self.ui.label(cx, ids!(srv_nav_title)).set_text(cx, &self.server_name.to_uppercase());
         self.fill_srv_pages(cx);
         if let Some(first) = allowed.iter().position(|a| *a) {
@@ -3572,6 +3606,10 @@ impl App {
         self.paint_server_preview(cx);
         self.fill_invites(cx);
         self.fill_custom(cx);
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_audit)).borrow_mut::<lists::AuditList>() {
+            l.rows = o.audit.clone();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_audit.list)));
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);

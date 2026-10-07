@@ -1,6 +1,7 @@
 //! Servers: the custom kinds 31750–31757 parsed into typed state, and the
 //! authority rules that decide which signers' events count.
 
+pub mod audit;
 pub mod auth;
 pub mod custom;
 pub mod invite_link;
