@@ -496,6 +496,7 @@ pub enum Update {
     Invite(String),
     Discovery(Vec<inferno_core::session::Listing>),
     Onboarding(Onboarding),
+    NostrGifs { query: String, gifs: Vec<Gif> },
     /// (pubkey hex, name, last activity we know of).
     PrunePreview(Vec<(String, String, Option<i64>)>),
     Error(String),
@@ -550,6 +551,8 @@ pub enum Command {
     AddServerRelay(String),
     SaveOnboarding { enabled: bool, rules: Vec<String>, highlights: Vec<String>, self_assignable: Vec<String> },
     PreviewOnboarding,
+    /// GIFs shared on Nostr for `query` (empty = recent); answers `NostrGifs`.
+    NostrGifs(String),
     /// Done with the wizard: the roles picked.
     FinishOnboarding { gid: String, roles: Vec<String> },
     RemoveServerRelay(String),
@@ -1248,6 +1251,10 @@ impl Backend {
                 }
                 Cx::post_action(Update::Notice("Onboarding saved.".into()));
                 self.publish_server_keep_channel();
+            }
+            Command::NostrGifs(query) => {
+                let gifs = self.session.nostr_gifs(&query).await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::NostrGifs { query, gifs });
             }
             Command::PreviewOnboarding => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;

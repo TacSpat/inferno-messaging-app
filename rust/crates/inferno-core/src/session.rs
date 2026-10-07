@@ -239,6 +239,9 @@ pub struct Session {
     refresh: Arc<tokio::sync::Notify>,
     /// Wakes the background task that debounces config pushes.
     config_dirty: Arc<tokio::sync::Notify>,
+    /// GIFs shared on Nostr, fetched at most every few minutes; searches
+    /// filter this locally (relays rate-limit).
+    gif_cache: Mutex<Option<(std::time::Instant, Vec<Event>)>>,
 }
 
 impl Drop for Session {
@@ -324,6 +327,7 @@ impl Session {
             groups: Mutex::new(HashMap::new()),
             started_at: Timestamp::now(),
             refresh: Arc::new(tokio::sync::Notify::new()),
+            gif_cache: Mutex::new(None),
             config_dirty: Arc::new(tokio::sync::Notify::new()),
         });
         session.rebuild_channel_keys()?;
@@ -1666,6 +1670,21 @@ impl Session {
         self.publish(&publish::join(&self.keys, gid, &nickname, &me_profile, joined, invite.as_deref(), &ids)?).await?;
         let _ = self.updates.send(Update::Server(gid.into()));
         Ok(())
+    }
+
+    /// GIFs shared on Nostr (NIP-94) matching `query`; no service or key.
+    pub async fn nostr_gifs(&self, query: &str) -> Result<Vec<crate::gifs::Gif>> {
+        const FRESH: std::time::Duration = std::time::Duration::from_secs(300);
+        let cached = self.gif_cache.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let events = match cached {
+            Some((at, events)) if at.elapsed() < FRESH => events,
+            _ => {
+                let events = self.pool.fetch(vec![crate::gif_search::nostr_filter(500)]).await?;
+                *self.gif_cache.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), events.clone()));
+                events
+            }
+        };
+        Ok(crate::gif_search::nostr_gifs(&events, query))
     }
 
     /// Whether we've been through `gid`'s onboarding (on any device).

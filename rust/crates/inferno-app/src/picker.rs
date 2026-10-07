@@ -49,6 +49,19 @@ pub enum GifView {
     Home,
     Favorites,
     Collection(String),
+    Trending,
+}
+
+/// What a GIF search or Trending shows while it loads and after.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct GifResults {
+    /// The search text ("" for Trending).
+    pub query: String,
+    pub gifs: Vec<inferno_core::gifs::Gif>,
+    pub loading: bool,
+    pub error: Option<String>,
+    /// From GIFs shared on Nostr rather than KLIPY.
+    pub nostr: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,13 +177,14 @@ pub fn sticker_rows(search: &str, sets: &[ServerSet], collapsed: &HashSet<String
     rows
 }
 
-/// The GIF tab. Search needs a GIF service (Tenor), which isn't set up, so
-/// searching says so; favorites and collections work without one.
+/// The GIF tab: Rails' tiles (favorites, trending, collections), and
+/// search or trending results from KLIPY or Nostr.
 pub fn gif_rows(
     view: &GifView,
     search: &str,
     favorites: &[inferno_core::gifs::Gif],
     collections: &[inferno_core::gifs::Collection],
+    results: &GifResults,
 ) -> Vec<Row> {
     let fav: HashSet<&str> = favorites.iter().map(|g| g.url.as_str()).collect();
     let grid = |gifs: &[inferno_core::gifs::Gif]| -> Vec<Row> {
@@ -178,8 +192,21 @@ pub fn gif_rows(
             .map(|c| Row::Gifs(c.iter().map(|g| (g.clone(), fav.contains(g.url.as_str()))).collect()))
             .collect()
     };
-    if !search.trim().is_empty() {
-        return vec![Row::Empty("GIF search needs a Tenor API key, which isn't set up yet. Favorites and collections work without it.".into())];
+    if !search.trim().is_empty() || *view == GifView::Trending {
+        let mut rows = if results.loading && results.gifs.is_empty() {
+            vec![Row::Empty("Searching…".into())]
+        } else if results.gifs.is_empty() {
+            let why = results.error.clone().map(|e| format!("{e}. ")).unwrap_or_default();
+            vec![Row::Empty(if results.nostr {
+                format!("{why}No GIFs shared on Nostr match that yet.")
+            } else {
+                format!("{why}No GIFs found.")
+            })]
+        } else {
+            grid(&results.gifs)
+        };
+        rows.push(Row::Empty(if results.nostr { "GIFs shared on Nostr".into() } else { "Powered by KLIPY".into() }));
+        return rows;
     }
     match view {
         GifView::Home => {
@@ -192,6 +219,7 @@ pub fn gif_rows(
             vec![Row::Empty("No favorites yet. Paste a GIF link above, or press 🔥 on a GIF in chat.".into())]
         }
         GifView::Favorites => grid(favorites),
+        GifView::Trending => Vec::new(),
         GifView::Collection(id) => match collections.iter().find(|c| c.id == *id) {
             Some(c) if c.gifs.is_empty() => vec![Row::Empty("Nothing here yet. Right-click a GIF to add it to this collection.".into())],
             Some(c) => grid(&c.gifs),
@@ -303,13 +331,22 @@ mod tests {
         let g = |u: &str| Gif { url: u.into(), preview: u.into() };
         let favs = vec![g("a"), g("b"), g("c")];
         let cols = vec![Collection { id: "1".into(), name: "Lol".into(), gifs: vec![g("a")] }];
-        let home = gif_rows(&GifView::Home, "", &favs, &cols);
+        let none = GifResults::default();
+        let home = gif_rows(&GifView::Home, "", &favs, &cols, &none);
         assert_eq!(home[0], Row::Tiles(vec![GifTile::Favorites(3), GifTile::Trending]));
         assert!(matches!(&home[1], Row::Tiles(t) if t.len() == 2 && t[1] == GifTile::NewCollection));
-        let fav_rows = gif_rows(&GifView::Favorites, "", &favs, &cols);
+        let fav_rows = gif_rows(&GifView::Favorites, "", &favs, &cols, &none);
         assert_eq!(fav_rows.len(), 2);
-        assert!(matches!(&gif_rows(&GifView::Collection("1".into()), "", &favs, &cols)[0], Row::Gifs(v) if v[0].1));
-        assert!(matches!(&gif_rows(&GifView::Home, "cats", &favs, &cols)[0], Row::Empty(_)));
+        assert!(matches!(&gif_rows(&GifView::Collection("1".into()), "", &favs, &cols, &none)[0], Row::Gifs(v) if v[0].1));
+        // Searching shows results (here still loading), then the source.
+        let loading = GifResults { query: "cats".into(), loading: true, ..Default::default() };
+        let rows = gif_rows(&GifView::Home, "cats", &favs, &cols, &loading);
+        assert!(matches!(&rows[0], Row::Empty(t) if t == "Searching…"));
+        assert!(matches!(rows.last(), Some(Row::Empty(t)) if t == "Powered by KLIPY"));
+        let found = GifResults { query: "cats".into(), gifs: favs.clone(), nostr: true, ..Default::default() };
+        let rows = gif_rows(&GifView::Home, "cats", &favs, &cols, &found);
+        assert!(matches!(&rows[0], Row::Gifs(_)));
+        assert!(matches!(rows.last(), Some(Row::Empty(t)) if t == "GIFs shared on Nostr"));
     }
 
     #[test]

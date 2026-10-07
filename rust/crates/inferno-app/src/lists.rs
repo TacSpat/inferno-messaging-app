@@ -1927,7 +1927,7 @@ impl Widget for PickerList {
                             view.set_visible(cx, true);
                             let (icon, name, sub) = match tile {
                                 GifTile::Favorites(n) => ("🔥", "Favorites".to_owned(), format!("{n}")),
-                                GifTile::Trending => ("📈", "Trending GIFs".to_owned(), "Needs a Tenor key".to_owned()),
+                                GifTile::Trending => ("📈", "Trending GIFs".to_owned(), String::new()),
                                 GifTile::Collection { name, count, .. } => ("📁", name.clone(), format!("{count}")),
                                 GifTile::NewCollection => ("➕", "New collection".to_owned(), String::new()),
                             };

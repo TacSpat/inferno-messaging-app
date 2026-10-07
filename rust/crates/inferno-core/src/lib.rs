@@ -6,6 +6,7 @@ pub mod channel;
 pub mod dm;
 pub mod dtag;
 pub mod gifs;
+pub mod gif_search;
 pub mod keys;
 pub mod kinds;
 pub mod relay;

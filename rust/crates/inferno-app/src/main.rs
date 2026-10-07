@@ -21,6 +21,10 @@ mod rich_input;
 mod theme;
 mod time_fmt;
 mod uploads;
+mod gif_service;
+
+use gif_service::GifService;
+use picker::GifResults;
 mod window_state;
 
 use makepad_widgets::*;
@@ -1184,7 +1188,8 @@ script_mod! {
                     Txt{text: "‹ Back" draw_text.color: gray_300 draw_text.text_style.font_size: 9.0}}
                 gif_title := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
             }
-            gif_link := TextInput{width: Fill height: 30 empty_text: "Paste a GIF link to add it to favorites"}
+            gif_link_row := View{width: Fill height: Fit
+                gif_link := TextInput{width: Fill height: 30 empty_text: "Paste a GIF link to add it to favorites"}}
         }
         new_collection := View{visible: false width: Fill height: Fit padding: Inset{left: 8 right: 8 bottom: 6}
             collection_name := TextInput{width: Fill height: 30 empty_text: "Name the collection, then press Enter"}
@@ -2980,6 +2985,13 @@ pub struct App {
     emoji_sets: Vec<ServerSet>,
     #[rust]
     gif_view: GifView,
+    #[rust]
+    gif_results: GifResults,
+    #[rust]
+    gifs: GifService,
+    /// Debounces GIF searches while typing.
+    #[rust]
+    gif_timer: Timer,
     #[rust]
     gif_favorites: Vec<Gif>,
     #[rust]
@@ -5017,6 +5029,19 @@ impl App {
         self.home || self.perms.send_custom_emojis
     }
 
+    /// Looks up GIFs for `query` ("" = trending): KLIPY with a key, GIFs
+    /// shared on Nostr without one (or when KLIPY fails).
+    fn start_gif_query(&mut self, cx: &mut Cx, query: String) {
+        use inferno_core::gif_search::Query;
+        self.gif_results = picker::GifResults { query: query.clone(), loading: true, nostr: !self.gifs.has_key(), ..Default::default() };
+        if self.gifs.has_key() {
+            self.gifs.request(cx, if query.trim().is_empty() { Query::Trending } else { Query::Search(query) });
+        } else {
+            self.send(backend::Command::NostrGifs(query));
+        }
+        self.refresh_picker(cx, false);
+    }
+
     fn refresh_picker(&mut self, cx: &mut Cx, status: bool) {
         let (panel, items) = Self::picker_paths(status);
         let search = self.ui.text_input(cx, &[panel[0], id!(search)]).text();
@@ -5026,22 +5051,24 @@ impl App {
             self.picker_tab = PICKER_EMOJI;
         }
         let on_gifs = !status && self.picker_tab == PICKER_GIFS;
-        self.ui.view(cx, &[panel[0], id!(gif_bar)]).set_visible(cx, on_gifs && self.gif_view != GifView::Home);
-        self.ui.view(cx, &[panel[0], id!(gif_link)]).set_visible(cx, on_gifs && self.gif_view == GifView::Favorites);
+        self.ui.view(cx, &[panel[0], id!(gif_bar)]).set_visible(cx, on_gifs && (self.gif_view != GifView::Home || !search.trim().is_empty()));
+        self.ui.view(cx, &[panel[0], id!(gif_link_row)]).set_visible(cx, on_gifs && self.gif_view == GifView::Favorites);
         if on_gifs {
             let title = match &self.gif_view {
                 GifView::Home => String::new(),
                 GifView::Favorites => "🔥 Favorites".into(),
+                GifView::Trending => "📈 Trending".into(),
                 GifView::Collection(id) => {
                     format!("📁 {}", self.gif_collections.iter().find(|c| c.id == *id).map(|c| c.name.as_str()).unwrap_or(""))
                 }
             };
+            let title = if search.trim().is_empty() { title } else { format!("🔍 \u{201c}{}\u{201d}", search.trim()) };
             self.ui.label(cx, &[panel[0], id!(gif_title)]).set_text(cx, &title);
         } else {
             self.ui.view(cx, &[panel[0], id!(new_collection)]).set_visible(cx, false);
         }
         let rows = if on_gifs {
-            picker::gif_rows(&self.gif_view, &search, &self.gif_favorites, &self.gif_collections)
+            picker::gif_rows(&self.gif_view, &search, &self.gif_favorites, &self.gif_collections, &self.gif_results)
         } else if status || self.picker_tab == PICKER_EMOJI {
             picker::emoji_rows(&search, &self.picker_frequent, &self.emoji_sets, status || self.picker_custom_ok(), &self.picker_collapsed)
         } else {
@@ -5151,7 +5178,10 @@ impl App {
                 match tile {
                     GifTile::Favorites(_) => self.gif_view = GifView::Favorites,
                     GifTile::Collection { id, .. } => self.gif_view = GifView::Collection(id),
-                    GifTile::Trending => self.toast(cx, "Trending GIFs need a Tenor API key, which isn't set up yet.", Toast::Info),
+                    GifTile::Trending => {
+                        self.gif_view = GifView::Trending;
+                        self.start_gif_query(cx, String::new());
+                    }
                     GifTile::NewCollection => {
                         self.ui.view(cx, ids!(composer_picker.new_collection)).set_visible(cx, true);
                         if let Some(mut i) = self.ui.text_input(cx, ids!(composer_picker.collection_name)).borrow_mut() {
@@ -5329,6 +5359,13 @@ impl App {
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(pins.list)));
             }
             Update::Onboarding(o) => self.open_wizard(cx, o.clone()),
+            Update::NostrGifs { query, gifs } => {
+                if self.gif_results.query == *query {
+                    let error = self.gif_results.error.take();
+                    self.gif_results = picker::GifResults { query: query.clone(), gifs: gifs.clone(), nostr: true, error, loading: false };
+                    self.refresh_picker(cx, false);
+                }
+            }
             Update::PrunePreview(rows) => {
                 self.prune = rows.clone();
                 self.show_prune(cx, true);
@@ -5596,6 +5633,12 @@ impl MatchEvent for App {
         for status in [false, true] {
             let (panel, items) = Self::picker_paths(status);
             if self.ui.text_input(cx, &[panel[0], id!(search)]).changed(actions).is_some() {
+                // GIF searches wait for a pause in typing.
+                if !status && self.picker_tab == PICKER_GIFS {
+                    cx.stop_timer(self.gif_timer);
+                    self.gif_timer = cx.start_timeout(0.35);
+                    self.gif_results.loading = true;
+                }
                 self.refresh_picker(cx, status);
             }
             let pick = self.ui.widget(cx, items).borrow::<lists::PickerList>().and_then(|l| l.picked(cx, actions));
@@ -6564,6 +6607,31 @@ impl AppMain for App {
         }
         for done in self.uploads.handle_event(cx, event) {
             self.upload_done(cx, done);
+        }
+        if self.gif_timer.is_event(event).is_some() {
+            self.gif_timer = Timer::empty();
+            let q = self.ui.text_input(cx, ids!(composer_picker.search)).text();
+            if !q.trim().is_empty() {
+                self.start_gif_query(cx, q);
+            }
+        }
+        if let Some((q, result)) = self.gifs.handle_event(event) {
+            let text = match &q {
+                inferno_core::gif_search::Query::Search(t) => t.clone(),
+                inferno_core::gif_search::Query::Trending => String::new(),
+            };
+            match result {
+                Ok(page) => {
+                    self.gif_results = picker::GifResults { query: text, gifs: page.gifs, ..Default::default() };
+                    self.refresh_picker(cx, false);
+                }
+                // KLIPY down or refusing: fall back to Nostr, saying why.
+                Err(e) => {
+                    self.gif_results = picker::GifResults { query: text.clone(), loading: true, nostr: true, error: Some(e), ..Default::default() };
+                    self.send(backend::Command::NostrGifs(text));
+                    self.refresh_picker(cx, false);
+                }
+            }
         }
         // Dragging the picture in the editor.
         if self.crop.is_some() {
