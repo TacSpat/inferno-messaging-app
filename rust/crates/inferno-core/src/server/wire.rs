@@ -252,6 +252,8 @@ pub struct MemberEvent {
     pub timed_out_by: Option<PublicKey>,
     /// The invite code the member joined with (their own events only).
     pub invite: Option<String>,
+    /// Whether the event carries a profile at all (moderators' don't).
+    pub has_profile: bool,
     pub profile: MemberProfile,
 }
 
@@ -266,6 +268,7 @@ pub fn member(event: &Event) -> MemberEvent {
         timed_out_until: tag(event, "timed_out_until").and_then(|s| s.parse().ok()),
         timed_out_by: tag(event, "timed_out_by").and_then(|p| PublicKey::from_hex(p).ok()),
         invite: nonempty("invite"),
+        has_profile: tag(event, "profile_name").is_some() || tag(event, "profile_display_name").is_some(),
         profile: MemberProfile {
             name: one("profile_name").unwrap_or_default(),
             display_name: one("profile_display_name").unwrap_or_default(),

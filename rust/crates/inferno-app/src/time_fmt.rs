@@ -31,6 +31,13 @@ pub fn in_words(secs: i64) -> String {
     }
 }
 
+/// Rails' "%b %d, %Y" (Oct 06, 2026), in the device's zone.
+pub fn date_short(at: i64) -> String {
+    chrono::DateTime::from_timestamp(at, 0)
+        .map(|t| t.with_timezone(&chrono::Local).format("%b %d, %Y").to_string())
+        .unwrap_or_default()
+}
+
 pub fn date_time(at: i64) -> String {
     date_time_in(at, &Local)
 }

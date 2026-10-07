@@ -191,10 +191,29 @@ pub fn set_roles(keys: &Keys, state: &ServerState, target: &PublicKey, role_ids:
     let mut roles = vec!["roles".to_owned()];
     roles.extend(role_ids.iter().cloned());
     tags.push(Tag::parse(roles).expect("tag"));
-    if let Some(m) = state.members.get(target) {
-        tags.push(t(&["nickname", m.nickname.as_deref().unwrap_or("")]));
-    }
+    carry_member_state(keys, state, target, &mut tags, false, true);
     sign(keys, kinds::SERVER_MEMBER, tags)
+}
+
+/// A moderator's member events for one person share one address, so each
+/// replaces the last: a timeout must restate their roles and a role change
+/// their timeout, or one silently undoes the other. Each part is restated
+/// only by someone whose word on it counts.
+fn carry_member_state(keys: &Keys, state: &ServerState, target: &PublicKey, tags: &mut Vec<Tag>, roles: bool, timeout: bool) {
+    let me = keys.public_key();
+    let Some(m) = state.members.get(target) else { return };
+    tags.push(t(&["nickname", m.nickname.as_deref().unwrap_or("")]));
+    if roles && state.has(&me, Permission::ManageRoles) {
+        let mut row = vec!["roles".to_owned()];
+        row.extend(m.roles.iter().cloned());
+        tags.push(Tag::parse(row).expect("tag"));
+    }
+    if timeout && (state.has(&me, Permission::KickMembers) || state.has(&me, Permission::ManageRoles)) {
+        if let Some(until) = m.timed_out_until.filter(|&u| u > crate::store::now_secs()) {
+            tags.push(t(&["timed_out_until", &until.to_string()]));
+            tags.push(t(&["timed_out_by", &me.to_hex()]));
+        }
+    }
 }
 
 pub fn kick(keys: &Keys, state: &ServerState, target: &PublicKey) -> Result<Event, PublishError> {
@@ -210,6 +229,7 @@ pub fn timeout(keys: &Keys, state: &ServerState, target: &PublicKey, until: i64)
     let mut tags = member_base(&state.gid, target);
     tags.push(t(&["timed_out_until", &until.to_string()]));
     tags.push(t(&["timed_out_by", &keys.public_key().to_hex()]));
+    carry_member_state(keys, state, target, &mut tags, true, false);
     sign(keys, kinds::SERVER_MEMBER, tags)
 }
 
@@ -324,6 +344,43 @@ pub fn create_server(keys: &Keys, name: &str) -> Result<(String, Vec<Event>), Pu
 mod tests {
     use super::*;
     use crate::server::wire;
+
+    #[test]
+    fn role_and_timeout_events_dont_undo_each_other() {
+        // Relays keep one event per (author, d-tag), and a moderator's role
+        // change and timeout for a member share that address.
+        let owner = Keys::generate();
+        let alice = Keys::generate();
+        let (gid, mut events) = create_server(&owner, "x").unwrap();
+        let profile = wire::MemberProfile { name: "alice".into(), ..Default::default() };
+        events.push(join(&alice, &gid, "", &profile, 0, None).unwrap());
+        let mut state = ServerState::resolve(&gid, owner.public_key(), &events);
+        let role = state.roles[0].id.clone();
+        let until = crate::store::now_secs() + 600;
+        let stamp = |e: Event, at: u64| -> Event {
+            let b = EventBuilder::new(e.kind, e.content.clone()).tags(e.tags.to_vec()).custom_created_at(Timestamp::from(at));
+            b.finalize(&owner).unwrap()
+        };
+        let base = crate::store::now_secs() as u64;
+        events.push(stamp(set_roles(&owner, &state, &alice.public_key(), &[role.clone()]).unwrap(), base + 1));
+        events = crate::relay::latest_per_address(events);
+        state = ServerState::resolve(&gid, owner.public_key(), &events);
+        events.push(stamp(timeout(&owner, &state, &alice.public_key(), until).unwrap(), base + 2));
+        events = crate::relay::latest_per_address(events);
+        state = ServerState::resolve(&gid, owner.public_key(), &events);
+        let m = &state.members[&alice.public_key()];
+        assert_eq!(m.roles, vec![role.clone()], "the timeout kept her role");
+        assert_eq!(m.timed_out_until, Some(until));
+        assert_eq!(m.profile.name, "alice", "a moderator's event doesn't blank her profile");
+
+        // And taking the role away keeps the timeout.
+        events.push(stamp(set_roles(&owner, &state, &alice.public_key(), &[]).unwrap(), base + 3));
+        events = crate::relay::latest_per_address(events);
+        state = ServerState::resolve(&gid, owner.public_key(), &events);
+        let m = &state.members[&alice.public_key()];
+        assert!(m.roles.is_empty());
+        assert_eq!(m.timed_out_until, Some(until));
+    }
 
     #[test]
     fn builders_round_trip_through_the_parsers() {

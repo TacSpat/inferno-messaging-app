@@ -934,6 +934,145 @@ impl Widget for ResultList {
 }
 
 
+// ─── Members page ────────────────────────────────────────────────────────
+
+use crate::backend::MemberInfo;
+use std::collections::HashSet;
+
+/// Draws a `CheckBox16` on or off (visibility doesn't stick on icons in
+/// list rows, so the mark is coloured in or out).
+pub fn set_check(cx: &mut Cx, check: &WidgetRef, on: bool) {
+    let mut c = check.clone();
+    let bg = if on { crate::theme::tok("accent", 1.0) } else { crate::theme::tok("gray_900", 1.0) };
+    script_apply_eval!(cx, c, {draw_bg +: {color: #(bg)}});
+    let mut mark = check.widget(cx, ids!(mark));
+    let fg = rgba(0xffffff, if on { 1.0 } else { 0.0 });
+    script_apply_eval!(cx, mark, {draw_icon +: {color: #(fg)}});
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MemberAdminAction {
+    /// Checkbox: (pubkey).
+    Check(String),
+    Roles(String, DVec2),
+    Timeout(String, DVec2),
+    RemoveTimeout(String),
+    Kick(String),
+    Ban(String),
+}
+
+/// Rails' members list: checkbox, avatar, name with a Timed out badge,
+/// joined date, role chips, and the moderation buttons we're allowed.
+#[derive(Script, ScriptHook, Widget)]
+pub struct MemberAdminList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub rows: Vec<MemberInfo>,
+    #[rust]
+    pub selected: HashSet<String>,
+    #[rust]
+    pub can_roles: bool,
+    #[rust]
+    pub can_kick: bool,
+    #[rust]
+    pub can_ban: bool,
+}
+
+impl MemberAdminList {
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> Option<MemberAdminAction> {
+        let list = self.view.portal_list(cx, ids!(list));
+        for (i, item) in list.items_with_actions(actions) {
+            let Some(r) = self.rows.get(i) else { continue };
+            let pk = r.pubkey.clone();
+            let up = |path: &[LiveId]| item.view(cx, path).finger_up(actions).filter(|e| !e.cancelled).map(|e| e.abs);
+            if up(ids!(slot.check)).is_some() {
+                if !self.selected.remove(&pk) {
+                    self.selected.insert(pk.clone());
+                }
+                redraw_items(cx, &list);
+                return Some(MemberAdminAction::Check(pk));
+            }
+            if let Some(at) = up(ids!(actions.roles)) {
+                return Some(MemberAdminAction::Roles(pk, at));
+            }
+            if let Some(at) = up(ids!(actions.timeout)) {
+                return Some(if r.timed_out_until.is_some() { MemberAdminAction::RemoveTimeout(pk) } else { MemberAdminAction::Timeout(pk, at) });
+            }
+            if up(ids!(actions.kick)).is_some() {
+                return Some(MemberAdminAction::Kick(pk));
+            }
+            if up(ids!(actions.ban)).is_some() {
+                return Some(MemberAdminAction::Ban(pk));
+            }
+        }
+        None
+    }
+}
+
+impl Widget for MemberAdminList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.rows.len().max(1));
+            while let Some(i) = list.next_visible_item(cx) {
+                let Some(r) = self.rows.get(i) else {
+                    if i == 0 {
+                        list.item(cx, i, id!(Empty)).draw_all(cx, &mut Scope::empty());
+                    }
+                    continue;
+                };
+                let row = list.item(cx, i, id!(Member));
+                let moderatable = !r.owner && !r.me && (self.can_kick || self.can_ban);
+                let check = row.widget(cx, ids!(slot.check));
+                check.set_visible(cx, moderatable);
+                let on = self.selected.contains(&r.pubkey);
+                set_check(cx, &check, on);
+                let mut av = row.widget(cx, ids!(avatar));
+                let fill = rgba(r.avatar, 1.0);
+                script_apply_eval!(cx, av, {draw_bg +: {color: #(fill)}});
+                row.label(cx, ids!(avatar.initial)).set_text(cx, &r.initial);
+                let img = row.image(cx, ids!(avatar.pic));
+                crate::images::show(cx, &img, r.picture.as_deref());
+                row.label(cx, ids!(info.top.name)).set_text(cx, &r.name);
+                row.view(cx, ids!(info.top.timed_out)).set_visible(cx, r.timed_out_until.is_some());
+                let joined = r.joined_at.map(|t| format!("Joined {}", crate::time_fmt::date_short(t))).unwrap_or_default();
+                let sub = if r.owner { if joined.is_empty() { "Server owner".to_owned() } else { format!("Server owner · {joined}") } } else { joined };
+                row.label(cx, ids!(info.sub)).set_text(cx, &sub);
+                // Up to three role chips, then "+n"; @everyone when none.
+                let chips: Vec<(String, u32)> =
+                    if r.roles.is_empty() { vec![("@everyone".into(), 0x99aab5)] } else { r.roles.iter().take(3).cloned().collect() };
+                for (k, path) in [ids!(chips.c0), ids!(chips.c1), ids!(chips.c2)].into_iter().enumerate() {
+                    let chip = row.widget(cx, path);
+                    match chips.get(k) {
+                        Some((name, color)) => {
+                            chip.set_visible(cx, true);
+                            let mut dot = row.widget(cx, &[path[0], path[1], id!(dot)]);
+                            let col = rgba(*color, 1.0);
+                            script_apply_eval!(cx, dot, {draw_bg +: {color: #(col)}});
+                            row.label(cx, &[path[0], path[1], id!(name)]).set_text(cx, name);
+                        }
+                        None => chip.set_visible(cx, false),
+                    }
+                }
+                let more = r.roles.len().saturating_sub(3);
+                row.label(cx, ids!(chips.more)).set_text(cx, &if more > 0 { format!("+{more}") } else { String::new() });
+                row.view(cx, ids!(actions.roles)).set_visible(cx, self.can_roles && !r.owner);
+                row.view(cx, ids!(actions.timeout)).set_visible(cx, moderatable && self.can_kick);
+                row.label(cx, ids!(actions.timeout.t)).set_text(cx, if r.timed_out_until.is_some() { "Remove Timeout" } else { "Timeout" });
+                row.view(cx, ids!(actions.kick)).set_visible(cx, moderatable && self.can_kick);
+                row.view(cx, ids!(actions.ban)).set_visible(cx, moderatable && self.can_ban);
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────────
 
 /// Flutter's server catalog: cards three to a row.

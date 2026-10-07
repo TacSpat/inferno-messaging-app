@@ -27,6 +27,8 @@ pub enum Action {
     /// Opens the timeout submenu for a member.
     TimeoutFor(String),
     Timeout { member: String, secs: i64 },
+    /// Members page: time out everyone selected.
+    BatchTimeout(i64),
     Kick(String),
     Ban(String),
     /// Opens (or starts) a DM with this pubkey.

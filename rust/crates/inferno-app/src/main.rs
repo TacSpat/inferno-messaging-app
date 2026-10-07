@@ -1165,6 +1165,64 @@ script_mod! {
         }
     }
 
+    // Rails' checkbox: 16px, gray-900 well; accent with a check when on.
+    let CheckBox16 = RoundedView{width: 16 height: 16 align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_900 draw_bg.border_radius: 2.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+        mark := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff00
+            draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
+
+    // Rails' role badge: gray-700 pill, coloured dot, name.
+    let RoleBadge = RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 6 right: 8 top: 2 bottom: 2}
+        flow: Right spacing: 4 align: Align{y: 0.5} new_batch: true
+        draw_bg.color: gray_700 draw_bg.border_radius: 2.0
+        dot := RoundedView{width: 8 height: 8 draw_bg.color: #x99aab5 draw_bg.border_radius: 4.0}
+        name := Txt{text: "" draw_text.color: gray_200 draw_text.text_style.font_size: 8.0}}
+
+    mod.widgets.MemberAdminListBase = #(lists::MemberAdminList::register_widget(vm))
+    mod.widgets.MemberAdminList = set_type_default() do mod.widgets.MemberAdminListBase{
+        width: Fill height: 560
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Member := RoundedView{
+                width: Fill height: Fit
+                margin: Inset{bottom: 8}
+                padding: Inset{left: 16 right: 12 top: 12 bottom: 12}
+                flow: Right spacing: 12
+                align: Align{y: 0.5}
+                new_batch: true
+                draw_bg.color: gray_800
+                draw_bg.border_radius: 4.0
+                // An empty slot where there's nothing to select (Rails).
+                slot := View{width: 16 height: 16
+                    check := CheckBox16{}}
+                avatar := RoundedView{width: 40 height: 40 flow: Overlay align: Center new_batch: true
+                    draw_bg.color: #x1e1c1b draw_bg.border_radius: 20.0
+                    initial := Txt{text: "?" draw_text.color: #xffffff}
+                    pic := Image{visible: false width: 40 height: 40 fit: ImageFit.CropToFill draw_bg.border_radius: 20.0}}
+                info := View{width: 220 height: Fit flow: Down spacing: 2
+                    top := View{width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+                        name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                        timed_out := RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 1 bottom: 1}
+                            new_batch: true draw_bg.color: #xf59e0b33 draw_bg.border_radius: 2.0
+                            Txt{text: "Timed out" draw_text.color: #xfbbf24 draw_text.text_style.font_size: 7.5}}
+                    }
+                    sub := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
+                }
+                chips := View{width: Fill height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                    c0 := RoleBadge{} c1 := RoleBadge{} c2 := RoleBadge{}
+                    more := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}}
+                actions := View{width: Fit height: Fit flow: Right spacing: 6
+                    roles := SmallBtn{t.text: "Manage Roles"}
+                    timeout := SmallBtn{t.text: "Timeout" t.draw_text.color: #xfbbf24}
+                    kick := SmallBtn{t.text: "Kick" t.draw_text.color: #xf87171}
+                    ban := SmallBtn{t.text: "Ban" t.draw_text.color: #xf87171}
+                }
+            }
+            Empty := Hint{text: "No members match." margin: 8}
+        }
+    }
+
     mod.widgets.DiscoverListBase = #(lists::DiscoverList::register_widget(vm))
     mod.widgets.DiscoverList = set_type_default() do mod.widgets.DiscoverListBase{
         width: Fill height: 380
@@ -2145,11 +2203,30 @@ script_mod! {
                                 }
                             }
 
+                            // Rails' members page: search, a batch bar while
+                            // some are selected, select all, the list.
                             spage_members := View{
                                 visible: false
-                                width: 768 height: Fit flow: Down
-                                srv_members_title := PageTitle{text: "Members"}
-                                srv_members := mod.widgets.PeopleList{}
+                                width: Fill height: Fit flow: Down
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5} margin: Inset{bottom: 16}
+                                    srv_members_title := PageTitle{width: Fill text: "Members" margin: 0}
+                                    mem_search := TextInput{width: 220 height: 32 empty_text: "Search members..."}
+                                }
+                                mem_batch := RoundedView{visible: false width: Fill height: Fit margin: Inset{bottom: 12}
+                                    padding: Inset{left: 16 right: 12 top: 8 bottom: 8} flow: Right spacing: 8 align: Align{y: 0.5}
+                                    new_batch: true draw_bg.color: accent_12 draw_bg.border_radius: 4.0
+                                    draw_bg.border_size: 1.0 draw_bg.border_color: accent_20
+                                    mem_selected := Txt{width: Fill text: "" draw_text.color: accent_light}
+                                    mem_batch_timeout := SmallBtn{t.text: "Timeout" t.draw_text.color: #xfbbf24}
+                                    mem_batch_kick := SmallBtn{t.text: "Kick" t.draw_text.color: #xf87171}
+                                    mem_batch_ban := SmallBtn{t.text: "Ban" t.draw_text.color: #xf87171}
+                                }
+                                mem_select_all := View{width: Fit height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                    padding: Inset{left: 16 bottom: 8} cursor: MouseCursor.Hand
+                                    mem_all_box := CheckBox16{}
+                                    Txt{text: "Select all" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                                }
+                                srv_members := mod.widgets.MemberAdminList{}
                             }
 
                             spage_bans := View{
@@ -2543,6 +2620,8 @@ pub enum Pending {
     DeleteServer,
     RevokeInvite(String),
     JoinInvite(String),
+    BatchKick(Vec<String>),
+    BatchBan(Vec<String>),
     /// (gid, owner hex) from discovery.
     JoinPublic(String, String),
 }
@@ -3143,20 +3222,25 @@ impl App {
         v
     }
 
-    fn roles_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+    /// A member's roles to toggle: only those below our own highest
+    /// (Flutter's hierarchy rule).
+    fn roles_menu(&self, pubkey: &str, back: bool) -> Vec<ctxmenu::Item> {
         use ctxmenu::{Action as A, Item};
         let held = self.member(pubkey).map(|m| m.1).unwrap_or_default();
-        let mut v = vec![Item::new("‹  Back", A::Back), Item::Separator];
-        for r in self.roles.iter().filter(|r| r.name != "@everyone") {
+        let mut v = if back { vec![Item::new("‹  Back", A::Back), Item::Separator] } else { vec![] };
+        let rank = self.srv.my_rank;
+        let assignable: std::collections::HashSet<&str> =
+            self.srv.roles.iter().filter(|r| !r.everyone && r.position < rank).map(|r| r.id.as_str()).collect();
+        for r in self.roles.iter().filter(|r| assignable.contains(r.id.as_str())) {
             let mark = if held.contains(&r.id) { "✓" } else { "  " };
             v.push(Item::new(format!("{mark}  {}", r.name), A::ToggleRole { member: pubkey.into(), role: r.id.clone() }));
         }
         v
     }
 
-    fn timeout_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+    fn timeout_menu(&self, pubkey: &str, back: bool) -> Vec<ctxmenu::Item> {
         use ctxmenu::{Action as A, Item};
-        let mut v = vec![Item::new("‹  Back", A::Back), Item::Separator];
+        let mut v = if back { vec![Item::new("‹  Back", A::Back), Item::Separator] } else { vec![] };
         for (label, secs) in [
             ("60 seconds", 60),
             ("5 minutes", 300),
@@ -3170,6 +3254,14 @@ impl App {
         v.push(Item::Separator);
         v.push(Item::new("Remove Timeout", A::Timeout { member: pubkey.into(), secs: 0 }));
         v
+    }
+
+    fn batch_timeout_menu(&self) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        [("60 seconds", 60), ("5 minutes", 300), ("10 minutes", 600), ("1 hour", 3_600), ("1 day", 86_400), ("1 week", 604_800)]
+            .into_iter()
+            .map(|(label, secs)| Item::new(label, A::BatchTimeout(secs)))
+            .collect()
     }
 
     /// Message and member menu actions.
@@ -3199,11 +3291,11 @@ impl App {
                 self.focus_composer(cx);
             }
             A::RolesFor(pk) => {
-                let items = self.roles_menu(&pk);
+                let items = self.roles_menu(&pk, true);
                 self.open_submenu(cx, items);
             }
             A::TimeoutFor(pk) => {
-                let items = self.timeout_menu(&pk);
+                let items = self.timeout_menu(&pk, true);
                 self.open_submenu(cx, items);
             }
             A::ToggleRole { member, role } => {
@@ -3216,6 +3308,12 @@ impl App {
                 self.send(backend::Command::SetMemberRoles { pubkey: member, roles });
             }
             A::Timeout { member, secs } => self.send(backend::Command::Timeout { pubkey: member, secs }),
+            A::BatchTimeout(secs) => {
+                for pk in self.selected_members(cx) {
+                    self.send(backend::Command::Timeout { pubkey: pk, secs });
+                }
+                self.clear_member_selection(cx);
+            }
             A::Kick(ref pk) => {
                 let name = self.member(pk).map(|m| m.0).unwrap_or_default();
                 let body = format!("Kick {name} from {}?", self.server_name);
@@ -3277,6 +3375,18 @@ impl App {
             }
             Pending::RevokeInvite(code) => self.send(backend::Command::RevokeInvite(code)),
             Pending::JoinInvite(link) => self.join_invite(cx, link),
+            Pending::BatchKick(pks) => {
+                for pk in pks {
+                    self.send(backend::Command::Kick(pk));
+                }
+                self.clear_member_selection(cx);
+            }
+            Pending::BatchBan(pks) => {
+                for pk in pks {
+                    self.send(backend::Command::Ban { pubkey: pk, reason: reason.trim().to_owned() });
+                }
+                self.clear_member_selection(cx);
+            }
             Pending::JoinPublic(gid, owner) => {
                 self.send(backend::Command::JoinPublic { gid, owner });
                 self.toast(cx, "Joining…", Toast::Info);
@@ -3462,32 +3572,23 @@ impl App {
 
     fn fill_people(&mut self, cx: &mut Cx) {
         let p = self.perms.clone();
-        let names: std::collections::HashMap<String, String> =
-            self.roles.iter().map(|r| (r.id.clone(), r.name.clone())).collect();
-        let people: Vec<lists::PersonRow> = self
-            .members
-            .iter()
-            .filter_map(|m| match m {
-                backend::MemberRow::Member { name, pubkey, roles, owner, me, .. } => {
-                    let role_names: Vec<String> = roles.iter().filter_map(|r| names.get(r).cloned()).collect();
-                    let detail = if *owner { "Owner".to_owned() } else if role_names.is_empty() { "No roles".to_owned() } else { role_names.join(", ") };
-                    let actionable = !*owner && !*me;
-                    Some(lists::PersonRow {
-                        id: pubkey.clone(),
-                        name: name.clone(),
-                        detail,
-                        a: (actionable && p.kick_members).then(|| "Kick".to_owned()),
-                        b: (actionable && p.ban_members).then(|| "Ban".to_owned()),
-                    })
-                }
-                _ => None,
-            })
-            .collect();
-        self.ui.label(cx, ids!(srv_members_title)).set_text(cx, &format!("Members ({})", people.len()));
-        if let Some(mut l) = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::PeopleList>() {
-            l.rows = people;
+        let q = self.ui.text_input(cx, ids!(mem_search)).text().trim().to_lowercase();
+        let rows: Vec<backend::MemberInfo> =
+            self.srv.members.iter().filter(|m| q.is_empty() || m.name.to_lowercase().contains(&q)).cloned().collect();
+        self.ui.label(cx, ids!(srv_members_title)).set_text(cx, &format!("Members ({})", self.srv.members.len()));
+        let present: std::collections::HashSet<String> = self.srv.members.iter().map(|m| m.pubkey.clone()).collect();
+        let mut selected = 0;
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::MemberAdminList>() {
+            l.rows = rows;
+            l.can_roles = p.manage_roles;
+            l.can_kick = p.kick_members;
+            l.can_ban = p.ban_members;
+            // Whoever left or was removed drops out of the selection.
+            l.selected.retain(|pk| present.contains(pk));
+            selected = l.selected.len();
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_members.list)));
+        self.paint_member_batch(cx, selected);
         let bans: Vec<lists::PersonRow> = self
             .srv
             .bans
@@ -3504,6 +3605,35 @@ impl App {
             l.rows = bans;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    /// Rails' batch bar: shown while members are selected.
+    fn paint_member_batch(&mut self, cx: &mut Cx, selected: usize) {
+        let p = &self.perms;
+        let any = p.kick_members || p.ban_members;
+        self.ui.view(cx, ids!(mem_select_all)).set_visible(cx, any);
+        self.ui.view(cx, ids!(mem_batch)).set_visible(cx, selected > 0);
+        self.ui.label(cx, ids!(mem_selected)).set_text(cx, &format!("{selected} selected"));
+        self.ui.view(cx, ids!(mem_batch_timeout)).set_visible(cx, p.kick_members);
+        self.ui.view(cx, ids!(mem_batch_kick)).set_visible(cx, p.kick_members);
+        self.ui.view(cx, ids!(mem_batch_ban)).set_visible(cx, p.ban_members);
+        let selectable = self.srv.members.iter().filter(|m| !m.owner && !m.me).count();
+        let all = selected > 0 && selected == selectable;
+        let b = self.ui.widget(cx, ids!(mem_all_box));
+        lists::set_check(cx, &b, all);
+        self.ui.redraw(cx);
+    }
+
+    fn clear_member_selection(&mut self, cx: &mut Cx) {
+        if let Some(mut l) = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::MemberAdminList>() {
+            l.selected.clear();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_members.list)));
+        self.paint_member_batch(cx, 0);
+    }
+
+    fn selected_members(&self, cx: &mut Cx) -> Vec<String> {
+        self.ui.widget(cx, ids!(srv_members)).borrow::<lists::MemberAdminList>().map(|l| l.selected.iter().cloned().collect()).unwrap_or_default()
     }
 
     /// Whether we may change the selected role: manage_roles, and below our
@@ -5225,11 +5355,58 @@ impl MatchEvent for App {
                 self.confirm(cx, Pending::DeleteRole(r.id), "Delete Role", &body, "Delete Role", false);
             }
         }
-        let member_btn = self.ui.widget(cx, ids!(srv_members)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
-        match member_btn {
-            Some((pk, 0)) => self.run_menu_action(cx, ctxmenu::Action::Kick(pk)),
-            Some((pk, _)) => self.run_menu_action(cx, ctxmenu::Action::Ban(pk)),
-            None => {}
+        let member_act = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::MemberAdminList>().and_then(|mut l| l.handle_list_actions(cx, actions));
+        if let Some(act) = member_act {
+            use lists::MemberAdminAction as M;
+            match act {
+                M::Check(_) => {
+                    let n = self.selected_members(cx).len();
+                    self.paint_member_batch(cx, n);
+                }
+                M::Roles(pk, at) => {
+                    let items = self.roles_menu(&pk, false);
+                    self.open_menu(cx, items, at);
+                }
+                M::Timeout(pk, at) => {
+                    let items = self.timeout_menu(&pk, false);
+                    self.open_menu(cx, items, at);
+                }
+                M::RemoveTimeout(pk) => self.send(backend::Command::Timeout { pubkey: pk, secs: 0 }),
+                M::Kick(pk) => self.run_menu_action(cx, ctxmenu::Action::Kick(pk)),
+                M::Ban(pk) => self.run_menu_action(cx, ctxmenu::Action::Ban(pk)),
+            }
+        }
+        if self.ui.text_input(cx, ids!(mem_search)).changed(actions).is_some() {
+            self.fill_people(cx);
+        }
+        if tap(&self.ui, cx, ids!(mem_select_all)) {
+            let selectable: Vec<String> = self.srv.members.iter().filter(|m| !m.owner && !m.me).map(|m| m.pubkey.clone()).collect();
+            let n = if let Some(mut l) = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::MemberAdminList>() {
+                if l.selected.len() == selectable.len() && !selectable.is_empty() {
+                    l.selected.clear();
+                } else {
+                    l.selected = selectable.into_iter().collect();
+                }
+                l.selected.len()
+            } else {
+                0
+            };
+            lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_members.list)));
+            self.paint_member_batch(cx, n);
+        }
+        if let Some(e) = self.ui.view(cx, ids!(mem_batch_timeout)).finger_up(actions).filter(|e| !e.cancelled) {
+            let items = self.batch_timeout_menu();
+            self.open_menu(cx, items, e.abs);
+        }
+        if tap(&self.ui, cx, ids!(mem_batch_kick)) {
+            let pks = self.selected_members(cx);
+            let body = format!("Kick {} members from {}?", pks.len(), self.server_name);
+            self.confirm(cx, Pending::BatchKick(pks), "Kick Members", &body, "Kick", false);
+        }
+        if tap(&self.ui, cx, ids!(mem_batch_ban)) {
+            let pks = self.selected_members(cx);
+            let body = format!("Ban {} members from {}?", pks.len(), self.server_name);
+            self.confirm(cx, Pending::BatchBan(pks), "Ban Members", &body, "Ban", true);
         }
         let ban_btn = self.ui.widget(cx, ids!(srv_bans)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
         if let Some((pk, _)) = ban_btn {

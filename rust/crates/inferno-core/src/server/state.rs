@@ -176,8 +176,12 @@ impl ServerState {
             let timeout = timeout_event.and_then(|e| wire::member(e).timed_out_until).filter(|&t| t > 0);
             let timeout_since = timeout.and(timeout_event).map(|e| e.created_at.as_secs() as i64);
 
-            // Nickname and profile: newest from the subject or a manager.
-            let profile_src = newest(events.iter().copied().filter(|e| is_self(e) || manager(e)))
+            // Nickname: newest from the subject or a manager that sets one.
+            // Profile: newest that carries one (a moderator's role or
+            // timeout event doesn't, and mustn't blank it).
+            let nickname = newest(events.iter().copied().filter(|e| (is_self(e) || manager(e)) && wire::member(e).nickname.is_some()))
+                .and_then(|e| wire::member(e).nickname);
+            let profile_src = newest(events.iter().copied().filter(|e| (is_self(e) || manager(e)) && wire::member(e).has_profile))
                 .map(wire::member)
                 .unwrap_or_default();
 
@@ -186,7 +190,7 @@ impl ServerState {
                 Member {
                     pubkey: target,
                     roles,
-                    nickname: profile_src.nickname.filter(|n| !n.is_empty()),
+                    nickname: nickname.filter(|n| !n.is_empty()),
                     joined_at: presence_data.joined_at.or(profile_src.joined_at),
                     profile: profile_src.profile,
                     timed_out_until: timeout,

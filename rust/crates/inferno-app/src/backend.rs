@@ -129,6 +129,23 @@ pub struct BanItem {
     pub reason: String,
 }
 
+/// A member as the Members page lists them (Rails' members list).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemberInfo {
+    pub pubkey: String,
+    pub name: String,
+    pub initial: String,
+    pub avatar: u32,
+    pub picture: Option<String>,
+    /// (name, colour) of each role, highest first.
+    pub roles: Vec<(String, u32)>,
+    pub role_ids: Vec<String>,
+    pub joined_at: Option<i64>,
+    pub timed_out_until: Option<i64>,
+    pub owner: bool,
+    pub me: bool,
+}
+
 /// An active invite, as Rails' invites page lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InviteItem {
@@ -164,6 +181,8 @@ pub struct ServerSettings {
     pub member_count: usize,
     /// Newest first.
     pub invites: Vec<InviteItem>,
+    /// Owner first, then by name.
+    pub members: Vec<MemberInfo>,
     /// Our highest role position (Flutter's hierarchy rule: we may edit,
     /// reorder and hand out only roles below it); `i64::MAX` for the owner.
     pub my_rank: i64,
@@ -1781,8 +1800,42 @@ impl Backend {
         let mut text: Vec<_> = state.structure.channels.iter().filter(|c| c.kind != "voice").collect();
         text.sort_by_key(|c| c.position);
         let text_channels = text.into_iter().map(|c| RoleItem { id: c.id.clone(), name: c.name.clone() }).collect();
+        let now = inferno_core::store::now_secs();
+        let mut sorted_roles: Vec<_> = state.roles.iter().filter(|r| !r.is_everyone()).collect();
+        sorted_roles.sort_by_key(|r| std::cmp::Reverse(r.position));
+        let mut pks: Vec<PublicKey> = state.members.keys().copied().collect();
+        if let Some(o) = state.owner.filter(|o| !state.members.contains_key(o)) {
+            pks.push(o);
+        }
+        let mut member_infos: Vec<MemberInfo> = pks
+            .iter()
+            .map(|pk| {
+                let d = display(&state, pk, &people);
+                let m = state.members.get(pk);
+                let held = m.map(|m| m.roles.clone()).unwrap_or_default();
+                MemberInfo {
+                    pubkey: pk.to_hex(),
+                    initial: first_initial(&d.name),
+                    name: d.name,
+                    avatar: d.avatar,
+                    picture: d.picture,
+                    roles: sorted_roles
+                        .iter()
+                        .filter(|r| held.contains(&r.id))
+                        .map(|r| (r.name.clone(), hex_color(&r.color).unwrap_or(0x99aab5)))
+                        .collect(),
+                    role_ids: held,
+                    joined_at: m.and_then(|m| m.joined_at),
+                    timed_out_until: state.timed_out_until(pk, now),
+                    owner: state.is_owner(pk),
+                    me: *pk == me,
+                }
+            })
+            .collect();
+        member_infos.sort_by(|a, b| b.owner.cmp(&a.owner).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         let m = &state.metadata;
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            members: member_infos,
             name: m.name.clone(),
             about: m.about.clone(),
             picture: m.picture.clone().unwrap_or_default(),
