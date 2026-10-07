@@ -2,6 +2,8 @@
 //! Each is a `PortalList` over rows the backend sends, so they redraw only
 //! what's visible and stay cheap however big a server gets.
 
+use std::collections::HashMap;
+
 use makepad_widgets::*;
 
 use crate::backend::{MemberRow, ServerItem, SidebarRow};
@@ -762,6 +764,9 @@ pub struct RolePicker {
     /// (role id, name, picked)
     #[rust]
     pub roles: Vec<(String, String, bool)>,
+    /// Role colours by id, for the dot (channels have none).
+    #[rust]
+    pub colors: HashMap<String, u32>,
 }
 
 impl RolePicker {
@@ -787,9 +792,22 @@ impl Widget for RolePicker {
             let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
             list.set_item_range(cx, 0, self.roles.len());
             while let Some(i) = list.next_visible_item(cx) {
-                let Some((_, name, picked)) = self.roles.get(i) else { continue };
+                let Some((id, name, picked)) = self.roles.get(i) else { continue };
                 let row = list.item(cx, i, id!(Role));
-                row.label(cx, ids!(mark)).set_text(cx, if *picked { "✓" } else { "·" });
+                let check = row.widget(cx, ids!(check));
+                set_check(cx, &check, *picked);
+                let mut card = row.clone();
+                let border = if *picked { crate::theme::tok("accent", 0.4) } else { crate::theme::tok("gray_700", 0.5) };
+                script_apply_eval!(cx, card, {draw_bg +: {border_color: #(border)}});
+                let mut dot = row.widget(cx, ids!(dot));
+                match self.colors.get(id) {
+                    Some(c) => {
+                        dot.set_visible(cx, true);
+                        let v = rgba(*c, 1.0);
+                        script_apply_eval!(cx, dot, {draw_bg +: {color: #(v)}});
+                    }
+                    None => dot.set_visible(cx, false),
+                }
                 row.label(cx, ids!(name)).set_text(cx, name);
                 row.draw_all(cx, &mut Scope::empty());
             }

@@ -705,17 +705,33 @@ script_mod! {
         label := Txt{text: "" draw_text.color: #xf87171 draw_text.text_style.font_size: 9.0}}
 
     mod.widgets.RolePickerBase = #(lists::RolePicker::register_widget(vm))
+    let CheckBox16 = RoundedView{width: 16 height: 16 align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_900 draw_bg.border_radius: 2.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+        mark := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff00
+            draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
+
+    // Rails' checkbox rows (onboarding, channel access): a gray-900 card
+    // per option with a checkbox, an optional colour dot and the name;
+    // picked ones get an accent border.
     mod.widgets.RolePicker = set_type_default() do mod.widgets.RolePickerBase{
         width: Fill height: 120
         list := PortalList{
             width: Fill height: Fill
             flow: Down
-            Role := View{
+            Role := RoundedView{
                 width: Fill height: Fit
-                padding: Inset{top: 4 bottom: 4}
-                flow: Right spacing: 8
+                margin: Inset{bottom: 6}
+                padding: Inset{left: 12 right: 12 top: 10 bottom: 10}
+                flow: Right spacing: 10
+                align: Align{y: 0.5}
                 cursor: MouseCursor.Hand
-                mark := Txt{width: 14 text: "·" draw_text.color: accent_light}
+                new_batch: true
+                draw_bg.color: gray_900
+                draw_bg.border_radius: 4.0
+                draw_bg.border_size: 1.0
+                draw_bg.border_color: gray_700_50
+                check := CheckBox16{}
+                dot := RoundedView{visible: false width: 10 height: 10 draw_bg.color: #x99aab5 draw_bg.border_radius: 5.0}
                 name := Txt{text: "" draw_text.color: gray_200}
             }
         }
@@ -1219,10 +1235,6 @@ script_mod! {
     }
 
     // Rails' checkbox: 16px, gray-900 well; accent with a check when on.
-    let CheckBox16 = RoundedView{width: 16 height: 16 align: Center cursor: MouseCursor.Hand new_batch: true
-        draw_bg.color: gray_900 draw_bg.border_radius: 2.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
-        mark := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff00
-            draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
 
     // Rails' role badge: gray-700 pill, coloured dot, name.
     let RoleBadge = RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 6 right: 8 top: 2 bottom: 2}
@@ -4065,9 +4077,15 @@ impl App {
             .iter()
             .map(|c| (c.id.clone(), format!("#{}", c.name), o.highlights.contains(&c.id)))
             .collect();
+        let colors: std::collections::HashMap<String, u32> = o
+            .roles
+            .iter()
+            .filter_map(|r| Some((r.id.clone(), u32::from_str_radix(r.color.trim_start_matches('#'), 16).ok()?)))
+            .collect();
         for (path, rows, list) in [(ids!(ob_roles), roles, ids!(ob_roles.list)), (ids!(ob_channels), channels, ids!(ob_channels.list))] {
             if let Some(mut p) = self.ui.widget(cx, path).borrow_mut::<lists::RolePicker>() {
                 p.roles = rows;
+                p.colors = if path == ids!(ob_roles) { colors.clone() } else { Default::default() };
             }
             lists::redraw_items(cx, &self.ui.portal_list(cx, list));
         }
@@ -4095,6 +4113,7 @@ impl App {
         self.ui.check_box(cx, ids!(wz_agree)).set_active(cx, false, Animate::No);
         if let Some(mut p) = self.ui.widget(cx, ids!(wz_roles)).borrow_mut::<lists::RolePicker>() {
             p.roles = o.roles.iter().map(|(id, name, _, mine)| (id.clone(), name.clone(), *mine)).collect();
+            p.colors = o.roles.iter().map(|(id, _, c, _)| (id.clone(), *c)).collect();
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(wz_roles.list)));
         let chans: Vec<String> = o.channels.iter().map(|c| format!("#  {c}")).collect();
