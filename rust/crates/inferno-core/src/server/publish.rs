@@ -84,6 +84,11 @@ pub fn metadata(keys: &Keys, state: &ServerState, m: &Metadata) -> Result<Event,
     if m.deleted {
         tags.push(t(&["deleted", "true"]));
     }
+    if m.onboarding {
+        tags.push(t(&["onboarding", "true"]));
+    }
+    tags.extend(m.rules.iter().map(|r| t(&["rule", r])));
+    tags.extend(m.highlights.iter().map(|c| t(&["highlight_channel", c])));
     sign(keys, kinds::SERVER_METADATA, tags)
 }
 
@@ -132,6 +137,7 @@ pub fn roles(keys: &Keys, state: &ServerState, roles: &[Role]) -> Result<Event, 
         let perms = serde_json::Value::Object(r.permissions.clone()).to_string();
         tags.push(t(&[
             "role", &r.id, &r.name, &r.color, &r.position.to_string(), b(r.hoist), b(r.mentionable), &perms, &r.role_type,
+            b(r.self_assignable),
         ]));
     }
     sign(keys, kinds::SERVER_ROLES, tags)
@@ -152,6 +158,7 @@ pub fn join(
     profile: &super::wire::MemberProfile,
     joined_at: i64,
     invite: Option<&str>,
+    self_roles: &[String],
 ) -> Result<Event, PublishError> {
     let mut tags = member_base(gid, &keys.public_key());
     tags.push(t(&["nickname", nickname]));
@@ -159,6 +166,12 @@ pub fn join(
     // Ours: which invite brought us in, so its uses can be counted.
     if let Some(code) = invite {
         tags.push(t(&["invite", code]));
+    }
+    // Ours: roles picked during onboarding.
+    if !self_roles.is_empty() {
+        let mut row = vec!["self_roles".to_owned()];
+        row.extend(self_roles.iter().cloned());
+        tags.push(Tag::parse(row).expect("tag"));
     }
     let opt = |v: &Option<String>| v.clone().unwrap_or_default();
     for (k, v) in [
@@ -313,6 +326,7 @@ pub fn create_server(keys: &Keys, name: &str) -> Result<(String, Vec<Event>), Pu
         .cloned()
         .unwrap_or_default(),
         role_type: String::new(),
+        self_assignable: false,
     };
     let channel_id = new_public_id();
     let general = Channel {
@@ -356,7 +370,7 @@ mod tests {
         let alice = Keys::generate();
         let (gid, mut events) = create_server(&owner, "x").unwrap();
         let profile = wire::MemberProfile { name: "alice".into(), ..Default::default() };
-        events.push(join(&alice, &gid, "", &profile, 0, None).unwrap());
+        events.push(join(&alice, &gid, "", &profile, 0, None, &[]).unwrap());
         let mut state = ServerState::resolve(&gid, owner.public_key(), &events);
         let role = state.roles[0].id.clone();
         let until = crate::store::now_secs() + 600;
@@ -410,7 +424,7 @@ mod tests {
         let alice = Keys::generate();
         let (gid, mut events) = create_server(&owner, "x").unwrap();
         let profile = crate::server::wire::MemberProfile { name: "alice".into(), ..Default::default() };
-        events.push(join(&alice, &gid, "", &profile, 0, None).unwrap());
+        events.push(join(&alice, &gid, "", &profile, 0, None, &[]).unwrap());
         let state = ServerState::resolve(&gid, owner.public_key(), &events);
         assert!(state.is_member(&alice.public_key()));
         assert_eq!(ban(&alice, &state, &owner.public_key(), "").unwrap_err(), PublishError::NotAllowed);

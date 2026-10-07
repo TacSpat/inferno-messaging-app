@@ -270,6 +270,7 @@ async fn roles_moderation_and_metadata_round_trip() {
         mentionable: false,
         permissions: serde_json::json!({"kick_members": true}).as_object().cloned().unwrap(),
         role_type: String::new(),
+        self_assignable: false,
     });
     owner.save_roles(&gid, roles).await.unwrap();
     owner.set_member_roles(&gid, &a, &["r-mod".into()]).await.unwrap();
@@ -469,9 +470,13 @@ async fn roles_given_while_offline_arrive_on_restart() {
         mentionable: true,
         permissions: Default::default(),
         role_type: String::new(),
+        self_assignable: false,
     });
     a.save_roles(&gid, roles).await.unwrap();
     a.set_member_roles(&gid, &bk.public_key(), &["mods".to_owned()]).await.unwrap();
+    // And renames the server and adds a channel.
+    a.update_metadata(&gid, |m| m.name = "Renamed".into()).await.unwrap();
+    a.create_channel(&gid, &ChannelSpec { name: "new-room".into(), ..Default::default() }).await.unwrap();
 
     // B comes back from that cache and catches up.
     let b = session(&bk, Store::open(&snapshot).unwrap(), &url).await;
@@ -479,6 +484,14 @@ async fn roles_given_while_offline_arrive_on_restart() {
     let has_role = |b: &Session| b.server(&gid).unwrap().unwrap().members.get(&bk.public_key()).is_some_and(|m| m.roles.contains(&"mods".to_owned()));
     if !has_role(&b) {
         wait_for(&mut brx, "catch-up", |_| has_role(&b)).await;
+    }
+    // Settings, channels and roles changed while away arrive too.
+    let caught_up = |b: &Session| {
+        let s = b.server(&gid).unwrap().unwrap();
+        s.metadata.name == "Renamed" && s.structure.channels.iter().any(|c| c.name == "new-room") && s.roles.iter().any(|r| r.id == "mods")
+    };
+    if !caught_up(&b) {
+        wait_for(&mut brx, "state catch-up", |_| caught_up(&b)).await;
     }
 }
 
@@ -653,4 +666,49 @@ async fn hearths_and_embers() {
     let s = owner.server(&gid).unwrap().unwrap().structure;
     assert!(s.channels.iter().any(|c| c.id == ember && c.parent.is_none()));
     assert!(s.channels.iter().any(|c| c.id == deeper && c.parent.is_none()));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn onboarding_rules_and_self_assignable_roles() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let alice_keys = Keys::generate();
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let mut rx = alice.updates();
+    let gid = owner.create_server("x").await.unwrap();
+    owner
+        .update_metadata(&gid, |m| {
+            m.onboarding = true;
+            m.rules = vec!["Be kind".into(), "No spam".into()];
+        })
+        .await
+        .unwrap();
+    let base = owner.server(&gid).unwrap().unwrap().roles[0].clone();
+    let role = |id: &str, pick: bool, admin: bool| {
+        let mut r = base.clone();
+        r.id = id.into();
+        r.name = id.into();
+        r.position = 1;
+        r.self_assignable = pick;
+        r.permissions = if admin { serde_json::json!({"administrator": true}).as_object().unwrap().clone() } else { Default::default() };
+        r
+    };
+    owner.save_roles(&gid, vec![base.clone(), role("gamer", true, false), role("mod", false, false), role("boss", true, true)]).await.unwrap();
+
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
+    let s = alice.server(&gid).unwrap().unwrap();
+    assert!(s.metadata.onboarding);
+    assert_eq!(s.metadata.rules, ["Be kind", "No spam"]);
+    assert!(!alice.onboarded(&gid));
+
+    // She may pick "gamer"; "mod" isn't offered and "boss" grants admin.
+    alice.set_self_roles(&gid, &["gamer".into(), "mod".into(), "boss".into()]).await.unwrap();
+    alice.mark_onboarded(&gid).unwrap();
+    assert!(alice.onboarded(&gid));
+    let s = alice.server(&gid).unwrap().unwrap();
+    assert_eq!(s.members[&alice_keys.public_key()].roles, ["gamer"]);
+    let _ = wait_for(&mut rx, "anything", |_| true).await;
+    // A forged self_roles tag can't reach admin either.
+    assert!(!s.has(&alice_keys.public_key(), inferno_core::server::Permission::Administrator));
 }

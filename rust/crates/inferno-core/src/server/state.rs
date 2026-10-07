@@ -35,6 +35,8 @@ pub struct Member {
     pub timed_out_since: Option<i64>,
     /// The invite they joined with, as they said so themselves.
     pub invite: Option<String>,
+    /// Self-assignable roles they picked (also in `roles`).
+    pub self_roles: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -164,10 +166,30 @@ impl ServerState {
                 continue;
             }
 
-            // Roles only from role managers, never from the subject alone.
-            let roles = newest(events.iter().copied().filter(|e| manager(e) && wire::member(e).roles.is_some()))
+            // Roles only from role managers, never from the subject alone,
+            // except self-assignable ones they picked (onboarding). A role
+            // that grants administrator never counts as self-assignable.
+            let mut roles = newest(events.iter().copied().filter(|e| manager(e) && wire::member(e).roles.is_some()))
                 .and_then(|e| wire::member(e).roles)
                 .unwrap_or_default();
+            let self_roles: Vec<String> = newest(events.iter().copied().filter(|e| is_self(e)))
+                .and_then(|e| wire::member(e).self_roles)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|id| {
+                    new_roles.iter().any(|r| {
+                        &r.id == id
+                            && r.self_assignable
+                            && !r.is_everyone()
+                            && r.permissions.get("administrator").and_then(|v| v.as_bool()) != Some(true)
+                    })
+                })
+                .collect();
+            for id in &self_roles {
+                if !roles.contains(id) {
+                    roles.push(id.clone());
+                }
+            }
 
             // Timeouts only from moderators; 0 or past = cleared.
             let timeout_event = newest(
@@ -197,6 +219,7 @@ impl ServerState {
                     timed_out_since: timeout_since,
                     invite: newest(events.iter().copied().filter(|e| is_self(e) && wire::member(e).invite.is_some()))
                         .and_then(|e| wire::member(e).invite),
+                    self_roles,
                 },
             );
         }

@@ -83,6 +83,11 @@ pub struct Metadata {
     pub voice_providers: Vec<PublicKey>,
     /// Rails marks a deleted server with a `deleted` tag on its metadata.
     pub deleted: bool,
+    /// Onboarding (ours; Rails kept it off Nostr): show new members the
+    /// wizard, with these rules (in order) and highlighted channels.
+    pub onboarding: bool,
+    pub rules: Vec<String>,
+    pub highlights: Vec<String>,
 }
 
 pub fn metadata(event: &Event) -> Metadata {
@@ -108,6 +113,9 @@ pub fn metadata(event: &Event) -> Metadata {
             .filter_map(|r| PublicKey::from_hex(r.get(1)?).ok())
             .collect(),
         deleted: flag(tag(event, "deleted")),
+        onboarding: flag(tag(event, "onboarding")),
+        rules: rows(event, "rule").filter_map(|r| r.get(1).cloned()).filter(|r| !r.trim().is_empty()).collect(),
+        highlights: rows(event, "highlight_channel").filter_map(|r| r.get(1).cloned()).collect(),
     }
 }
 
@@ -266,6 +274,9 @@ pub struct Role {
     pub mentionable: bool,
     pub permissions: Map<String, Value>,
     pub role_type: String,
+    /// Members may pick it themselves during onboarding. Ours: a tenth
+    /// element on the role tag, which Rails and Flutter don't read.
+    pub self_assignable: bool,
 }
 
 impl Role {
@@ -286,6 +297,7 @@ pub fn roles(event: &Event) -> Vec<Role> {
                 mentionable: flag(t.get(6).map(String::as_str)),
                 permissions: json_map(t.get(7)),
                 role_type: text(t.get(8)),
+                self_assignable: flag(t.get(9).map(String::as_str)),
             })
         })
         .collect()
@@ -320,6 +332,9 @@ pub struct MemberEvent {
     pub invite: Option<String>,
     /// Whether the event carries a profile at all (moderators' don't).
     pub has_profile: bool,
+    /// Roles the member picked themselves (ours; only self-assignable
+    /// roles count, see `ServerState`).
+    pub self_roles: Option<Vec<String>>,
     pub profile: MemberProfile,
 }
 
@@ -335,6 +350,7 @@ pub fn member(event: &Event) -> MemberEvent {
         timed_out_by: tag(event, "timed_out_by").and_then(|p| PublicKey::from_hex(p).ok()),
         invite: nonempty("invite"),
         has_profile: tag(event, "profile_name").is_some() || tag(event, "profile_display_name").is_some(),
+        self_roles: rows(event, "self_roles").next().map(|r| r[1..].to_vec()),
         profile: MemberProfile {
             name: one("profile_name").unwrap_or_default(),
             display_name: one("profile_display_name").unwrap_or_default(),

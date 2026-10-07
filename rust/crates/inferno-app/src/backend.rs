@@ -94,6 +94,8 @@ pub struct RoleForm {
     /// survive a save.
     pub raw_perms: serde_json::Map<String, serde_json::Value>,
     pub member_count: usize,
+    /// Members may pick it during onboarding.
+    pub self_assignable: bool,
 }
 
 /// The permissions map to publish for an edited role: what was published,
@@ -171,6 +173,22 @@ pub struct AuditItem {
     pub tone: u8,
 }
 
+/// What Rails' onboarding wizard shows a new member.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Onboarding {
+    pub gid: String,
+    pub name: String,
+    pub about: String,
+    pub picture: Option<String>,
+    pub rules: Vec<String>,
+    /// Self-assignable roles: (id, name, colour, already ours).
+    pub roles: Vec<(String, String, u32, bool)>,
+    /// Highlighted channels (or the first five text channels): names.
+    pub channels: Vec<String>,
+    /// A preview from settings: finishing changes nothing.
+    pub preview: bool,
+}
+
 /// A custom emoji or sticker, as the Expression pages list them.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomItem {
@@ -221,6 +239,10 @@ pub struct ServerSettings {
     pub stickers: Vec<CustomItem>,
     /// Newest first, at most 200.
     pub audit: Vec<AuditItem>,
+    /// Onboarding: on, rules one per line, highlighted channel ids.
+    pub onboarding: bool,
+    pub rules: Vec<String>,
+    pub highlights: Vec<String>,
     /// Rails' server relays (in the metadata), and ours they add to.
     pub server_relays: Vec<String>,
     pub global_relays: Vec<String>,
@@ -473,6 +495,7 @@ pub enum Update {
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
     Invite(String),
     Discovery(Vec<inferno_core::session::Listing>),
+    Onboarding(Onboarding),
     /// (pubkey hex, name, last activity we know of).
     PrunePreview(Vec<(String, String, Option<i64>)>),
     Error(String),
@@ -525,6 +548,10 @@ pub enum Command {
     NestChannel { id: String, hearth: Option<String>, index: Option<usize> },
     MoveCategory { id: String, index: usize },
     AddServerRelay(String),
+    SaveOnboarding { enabled: bool, rules: Vec<String>, highlights: Vec<String>, self_assignable: Vec<String> },
+    PreviewOnboarding,
+    /// Done with the wizard: the roles picked.
+    FinishOnboarding { gid: String, roles: Vec<String> },
     RemoveServerRelay(String),
     SaveVoice { enabled: bool, afk_channel: Option<String>, afk_timeout: u32, afk_action: String },
     /// Add or remove ourselves as a voice provider.
@@ -645,6 +672,7 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
         backed_up,
         previews: HashMap::new(),
         preview_tx,
+        wizard_shown: Default::default(),
     };
     if let Ok(Some(serde_json::Value::String(theme))) = session.synced_setting("theme") {
         Cx::post_action(Update::Theme(theme));
@@ -703,6 +731,8 @@ struct Backend {
     /// Invite cards by link, resolved once each (relays rate-limit).
     previews: HashMap<String, InviteCard>,
     preview_tx: mpsc::UnboundedSender<(String, InviteCard)>,
+    /// Servers whose onboarding wizard we've shown this session.
+    wizard_shown: std::collections::HashSet<String>,
 }
 
 fn initials(name: &str) -> String {
@@ -1192,6 +1222,43 @@ impl Backend {
                 self.session.nest_channel(&gid, &id, hearth.as_deref(), index).await.map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
+            Command::SaveOnboarding { enabled, rules, highlights, self_assignable } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session
+                    .update_metadata(&gid, move |m| {
+                        m.onboarding = enabled;
+                        m.rules = rules;
+                        m.highlights = highlights;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let state = self.session.server(&gid).ok().flatten().ok_or("Unknown server.")?;
+                let changed = state.roles.iter().any(|r| r.self_assignable != self_assignable.contains(&r.id));
+                if changed {
+                    let roles = state
+                        .roles
+                        .iter()
+                        .cloned()
+                        .map(|mut r| {
+                            r.self_assignable = self_assignable.contains(&r.id);
+                            r
+                        })
+                        .collect();
+                    self.session.save_roles(&gid, roles).await.map_err(|e| e.to_string())?;
+                }
+                Cx::post_action(Update::Notice("Onboarding saved.".into()));
+                self.publish_server_keep_channel();
+            }
+            Command::PreviewOnboarding => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                if let Some(o) = self.onboarding(&gid, true) {
+                    Cx::post_action(Update::Onboarding(o));
+                }
+            }
+            Command::FinishOnboarding { gid, roles } => {
+                self.session.set_self_roles(&gid, &roles).await.map_err(|e| e.to_string())?;
+                self.session.mark_onboarded(&gid).map_err(|e| e.to_string())?;
+            }
             Command::AddServerRelay(url) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 let url = inferno_core::relay::normalize_url(url.trim()).ok_or("That isn't a relay address (wss://…).")?;
@@ -1283,6 +1350,7 @@ impl Backend {
                         position: f.position,
                         hoist: f.hoist,
                         mentionable: f.mentionable,
+                        self_assignable: f.self_assignable,
                         role_type: f.role_type,
                     })
                     .collect();
@@ -1812,6 +1880,57 @@ impl Backend {
         self.publish_server_keep_channel();
     }
 
+    /// Rails' wizard for a server we haven't been through yet (on any
+    /// device); never for its owner. Checked whenever the server's state
+    /// comes in, since its settings may arrive after we open it.
+    fn maybe_onboard(&mut self) {
+        let Some(gid) = self.server.clone() else { return };
+        if self.wizard_shown.contains(&gid) {
+            return;
+        }
+        let me = self.session.keys().public_key();
+        let due = self.session.server(&gid).ok().flatten().is_some_and(|s| s.metadata.onboarding && !s.is_owner(&me) && s.is_member(&me));
+        if due && !self.session.onboarded(&gid) {
+            self.wizard_shown.insert(gid.clone());
+            if let Some(o) = self.onboarding(&gid, false) {
+                Cx::post_action(Update::Onboarding(o));
+            }
+        }
+    }
+
+    /// The wizard's contents for `gid`.
+    fn onboarding(&self, gid: &str, preview: bool) -> Option<Onboarding> {
+        let state = self.session.server(gid).ok().flatten()?;
+        let me = self.session.keys().public_key();
+        let mine = state.members.get(&me).map(|m| m.roles.clone()).unwrap_or_default();
+        let mut picks: Vec<_> = state
+            .roles
+            .iter()
+            .filter(|r| r.self_assignable && !r.is_everyone() && r.permissions.get("administrator").and_then(|v| v.as_bool()) != Some(true))
+            .collect();
+        picks.sort_by_key(|r| std::cmp::Reverse(r.position));
+        let roles = picks.into_iter().map(|r| (r.id.clone(), r.name.clone(), hex_color(&r.color).unwrap_or(0x99aab5), mine.contains(&r.id))).collect();
+        let named: Vec<String> = state.metadata.highlights.iter().filter_map(|id| state.channel(id)).map(|c| c.name.clone()).collect();
+        let channels = if named.is_empty() {
+            let mut text: Vec<_> = state.structure.channels.iter().filter(|c| c.kind != "voice" && state.can_read(&me, c)).collect();
+            text.sort_by_key(|c| c.position);
+            text.into_iter().take(5).map(|c| c.name.clone()).collect()
+        } else {
+            named
+        };
+        let m = &state.metadata;
+        Some(Onboarding {
+            gid: gid.to_owned(),
+            name: m.name.clone(),
+            about: m.about.clone(),
+            picture: m.picture.clone(),
+            rules: m.rules.clone(),
+            roles,
+            channels,
+            preview,
+        })
+    }
+
     fn publish_server_keep_channel(&mut self) {
         let people = People::new(&self.session);
         let Some(gid) = self.server.clone() else { return };
@@ -1955,6 +2074,7 @@ impl Backend {
                 },
                 everyone: r.is_everyone(),
                 role_type: r.role_type.clone(),
+                self_assignable: r.self_assignable,
                 raw_perms: r.permissions.clone(),
                 member_count: if r.is_everyone() {
                     state.members.len() + usize::from(state.owner.is_some_and(|o| !state.members.contains_key(&o)))
@@ -2080,6 +2200,9 @@ impl Backend {
             }
         }
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            onboarding: m.onboarding,
+            rules: m.rules.clone(),
+            highlights: m.highlights.clone(),
             server_relays: m.relays.clone(),
             global_relays: self.session.relays().unwrap_or_default().into_iter().map(|r| r.url).collect(),
             voice_enabled: m.voice_enabled,
@@ -2129,6 +2252,7 @@ impl Backend {
             channels,
         });
         self.publish_channel();
+        self.maybe_onboard();
     }
 
     fn publish_channel(&mut self) {

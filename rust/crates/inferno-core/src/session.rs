@@ -692,7 +692,7 @@ impl Session {
     /// Publishes our membership and brings the server in.
     async fn enter(&self, state: &ServerState, invite: Option<&str>) -> Result<()> {
         let me = profile::member_profile(&self.my_profile()?);
-        self.publish(&publish::join(&self.keys, &state.gid, "", &me, now_secs(), invite)?).await?;
+        self.publish(&publish::join(&self.keys, &state.gid, "", &me, now_secs(), invite, &[])?).await?;
         self.store.set_server_membership(&state.gid, true)?;
         self.push_config();
         self.backfill(state).await?;
@@ -1640,15 +1640,42 @@ impl Session {
             let Some(member) = state.members.get(&me).cloned() else {
                 // The owner of a server made here has no member event yet.
                 if state.is_owner(&me) {
-                    self.publish(&publish::join(&self.keys, &gid, "", &me_profile, now_secs(), None)?).await?;
+                    self.publish(&publish::join(&self.keys, &gid, "", &me_profile, now_secs(), None, &[])?).await?;
                 }
                 continue;
             };
             let nickname = member.nickname.clone().unwrap_or_default();
             let joined = member.joined_at.unwrap_or_else(now_secs);
-            self.publish(&publish::join(&self.keys, &gid, &nickname, &me_profile, joined, member.invite.as_deref())?).await?;
+            self.publish(&publish::join(&self.keys, &gid, &nickname, &me_profile, joined, member.invite.as_deref(), &member.self_roles)?).await?;
             let _ = self.updates.send(Update::Server(gid));
         }
+        Ok(())
+    }
+
+    /// Picks our own roles among the server's self-assignable ones
+    /// (onboarding). Others in `ids` are ignored by everyone resolving it.
+    pub async fn set_self_roles(&self, gid: &str, ids: &[String]) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let me = self.keys.public_key();
+        let member = state.members.get(&me).cloned();
+        let nickname = member.as_ref().and_then(|m| m.nickname.clone()).unwrap_or_default();
+        let joined = member.as_ref().and_then(|m| m.joined_at).unwrap_or_else(now_secs);
+        let invite = member.as_ref().and_then(|m| m.invite.clone());
+        let me_profile = profile::member_profile(&self.my_profile()?);
+        let ids: Vec<String> = ids.iter().filter(|id| state.roles.iter().any(|r| &r.id == *id && r.self_assignable)).cloned().collect();
+        self.publish(&publish::join(&self.keys, gid, &nickname, &me_profile, joined, invite.as_deref(), &ids)?).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    /// Whether we've been through `gid`'s onboarding (on any device).
+    pub fn onboarded(&self, gid: &str) -> bool {
+        self.store.synced_setting(&format!("onboarded:{gid}")).ok().flatten().is_some()
+    }
+
+    pub fn mark_onboarded(&self, gid: &str) -> Result<()> {
+        self.store.set_synced_setting(&format!("onboarded:{gid}"), serde_json::json!(now_secs()))?;
+        self.push_config();
         Ok(())
     }
 

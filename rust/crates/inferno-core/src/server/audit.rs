@@ -117,8 +117,8 @@ mod tests {
         let (gid, mut events) = publish::create_server(&owner, "x").unwrap();
         let profile = wire::MemberProfile::default();
         let now = crate::store::now_secs();
-        events.push(publish::join(&alice, &gid, "", &profile, now, None).unwrap());
-        events.push(publish::join(&mallory, &gid, "", &profile, now, None).unwrap());
+        events.push(publish::join(&alice, &gid, "", &profile, now, None, &[]).unwrap());
+        events.push(publish::join(&mallory, &gid, "", &profile, now, None, &[]).unwrap());
         let state = ServerState::resolve(&gid, owner.public_key(), &events);
         events.push(publish::ban(&owner, &state, &mallory.public_key(), "spam").unwrap());
         // Alice can't ban; her attempt isn't logged as a ban.

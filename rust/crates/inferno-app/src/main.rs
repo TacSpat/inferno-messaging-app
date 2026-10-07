@@ -2135,6 +2135,7 @@ script_mod! {
                             draw_bg.color: gray_800
                             srv_nav_title := NavHeader{text: "SERVER"}
                             snav_overview := NavItem{label.text: "Overview"}
+                            snav_onboarding := NavItem{label.text: "Onboarding"}
                             snav_voice := NavItem{label.text: "Voice"}
                             snav_relays := NavItem{label.text: "Relays"}
                             expression_hdr := NavHeader{text: "EXPRESSION"}
@@ -2496,6 +2497,39 @@ script_mod! {
                                     list +: {Empty +: {text: "All your relays are server relays too."}}}
                             }
 
+                            // Rails' onboarding page (Rails kept it in its own
+                            // database; here it rides in the server metadata).
+                            spage_onboarding := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Onboarding" margin: Inset{bottom: 2}}
+                                Hint{margin: Inset{bottom: 16} text: "Configure what new members see when they join your server."}
+                                Card{
+                                    ob_enabled := CheckBox{text: "Enable onboarding wizard"}
+                                    Hint{margin: Inset{left: 13} text: "New members will see a welcome wizard before entering the server."}
+                                }
+                                Card{
+                                    Txt{text: "SERVER RULES" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 8} text: "New members must accept these rules before continuing. One rule per line."}
+                                    ob_rules := TextInput{width: Fill height: Fit{min: 140} is_multiline: true
+                                        empty_text: "Be respectful to all members\nNo spam or self-promotion\nKeep discussions on-topic"}
+                                }
+                                Card{
+                                    Txt{text: "SELF-ASSIGNABLE ROLES" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 8} text: "Members can pick these roles during onboarding. Roles that grant Administrator can't be self-assigned."}
+                                    ob_roles := mod.widgets.RolePicker{height: 140}
+                                }
+                                Card{
+                                    Txt{text: "HIGHLIGHTED CHANNELS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 8} text: "Shown to new members so they know where to start. If none are selected, the first 5 channels are shown."}
+                                    ob_channels := mod.widgets.RolePicker{height: 160}
+                                }
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                    ob_save := Button{text: "Save Changes"}
+                                    ob_preview := Button{text: "Preview Wizard"}
+                                }
+                            }
+
                             spage_audit := View{
                                 visible: false
                                 width: 768 height: Fit flow: Down
@@ -2641,6 +2675,49 @@ script_mod! {
                                     crop_cancel := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
                                         Txt{text: "Cancel" draw_text.color: gray_400}}
                                     crop_apply := Button{text: "Apply"}
+                                }
+                            }
+                        }
+                    }
+
+                    // Rails' onboarding wizard (servers/onboarding).
+                    wizard := Modal{
+                        content +: {
+                            RoundedView{
+                                width: 520 height: Fit flow: Down padding: 32 new_batch: true
+                                draw_bg.color: gray_800 draw_bg.border_radius: 6.0
+                                View{width: Fill height: Fit flow: Down align: Align{x: 0.5} spacing: 6
+                                    wz_icon := RoundedView{width: 64 height: 64 flow: Overlay align: Center new_batch: true
+                                        draw_bg.color: gray_700 draw_bg.border_radius: 8.0
+                                        initial := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 18.0}}
+                                        pic := Image{visible: false width: 64 height: 64 fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}}
+                                    wz_title := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                                    wz_about := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+                                    wz_steps := Txt{margin: Inset{top: 8} text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                }
+                                wz_rules := View{width: Fill height: Fit flow: Down margin: Inset{top: 20}
+                                    Txt{text: "Server Rules" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 10} text: "Please read and agree to these rules before continuing."}
+                                    RoundedView{width: Fill height: Fit padding: 14 new_batch: true draw_bg.color: gray_900 draw_bg.border_radius: 4.0
+                                        wz_rules_text := Txt{width: Fill text: "" draw_text.color: gray_200 draw_text.text_style.line_spacing: 1.6}}
+                                    wz_agree := CheckBox{margin: Inset{top: 12} text: "I have read and agree to the server rules"}
+                                }
+                                wz_roles_step := View{visible: false width: Fill height: Fit flow: Down margin: Inset{top: 20}
+                                    Txt{text: "Pick Your Roles" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 10} text: "Choose any roles that interest you. You can change these later."}
+                                    wz_roles := mod.widgets.RolePicker{height: 160}
+                                }
+                                wz_channels := View{visible: false width: Fill height: Fit flow: Down margin: Inset{top: 20}
+                                    Txt{text: "Channels to Get Started" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 11.0}}
+                                    Hint{margin: Inset{top: 2 bottom: 10} text: "Here's where to start."}
+                                    RoundedView{width: Fill height: Fit padding: 14 new_batch: true draw_bg.color: gray_900 draw_bg.border_radius: 4.0
+                                        wz_channels_text := Txt{width: Fill text: "" draw_text.color: gray_200 draw_text.text_style.line_spacing: 1.6}}
+                                }
+                                View{width: Fill height: Fit margin: Inset{top: 20} flow: Right align: Align{y: 0.5}
+                                    wz_back := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                        Txt{text: "Back" draw_text.color: gray_400}}
+                                    View{width: Fill height: 1}
+                                    wz_next := Button{text: "Continue"}
                                 }
                             }
                         }
@@ -2856,6 +2933,10 @@ pub struct App {
     custom_pending: Option<(String, String)>,
     #[rust]
     custom_file_name: Option<String>,
+    /// The onboarding wizard: what it shows, its steps (0 rules, 1 roles,
+    /// 2 channels) and where we are.
+    #[rust]
+    wizard: Option<(backend::Onboarding, Vec<u8>, usize)>,
     /// Channel ids behind the Hearth dropdown's entries (after "None").
     #[rust]
     hearth_options: Vec<String>,
@@ -2936,7 +3017,7 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 10] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 11] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
@@ -2947,6 +3028,7 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 10] = [
     (ids!(snav_audit), ids!(spage_audit)),
     (ids!(snav_voice), ids!(spage_voice)),
     (ids!(snav_relays), ids!(spage_relays)),
+    (ids!(snav_onboarding), ids!(spage_onboarding)),
 ];
 
 /// Whether the role drafts differ from what's saved, in what the editor
@@ -3746,7 +3828,7 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 10] {
+    fn srv_page_allowed(&self) -> [bool; 11] {
         let p = &self.perms;
         [
             p.manage_server,
@@ -3759,6 +3841,7 @@ impl App {
             p.manage_server,
             // Rails shows Voice to every member; only admins change it.
             true,
+            p.manage_server,
             p.manage_server,
         ]
     }
@@ -3829,6 +3912,7 @@ impl App {
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_audit.list)));
         self.fill_voice(cx);
         self.fill_server_relays(cx);
+        self.fill_onboarding(cx);
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
@@ -3967,6 +4051,78 @@ impl App {
             l.rows = bans;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    fn fill_onboarding(&mut self, cx: &mut Cx) {
+        let o = self.srv.clone();
+        self.ui.check_box(cx, ids!(ob_enabled)).set_active(cx, o.onboarding, Animate::No);
+        self.ui.text_input(cx, ids!(ob_rules)).set_text(cx, &o.rules.join("\n"));
+        let admin = |r: &backend::RoleForm| r.perms.iter().any(|p| p == "administrator");
+        let roles: Vec<(String, String, bool)> =
+            o.roles.iter().filter(|r| !r.everyone && !admin(r)).map(|r| (r.id.clone(), r.name.clone(), r.self_assignable)).collect();
+        let channels: Vec<(String, String, bool)> = o
+            .text_channels
+            .iter()
+            .map(|c| (c.id.clone(), format!("#{}", c.name), o.highlights.contains(&c.id)))
+            .collect();
+        for (path, rows, list) in [(ids!(ob_roles), roles, ids!(ob_roles.list)), (ids!(ob_channels), channels, ids!(ob_channels.list))] {
+            if let Some(mut p) = self.ui.widget(cx, path).borrow_mut::<lists::RolePicker>() {
+                p.roles = rows;
+            }
+            lists::redraw_items(cx, &self.ui.portal_list(cx, list));
+        }
+    }
+
+    /// Rails' onboarding wizard: welcome, then rules (agree to go on),
+    /// roles to pick, channels to start in.
+    fn open_wizard(&mut self, cx: &mut Cx, o: backend::Onboarding) {
+        let mut steps = Vec::new();
+        if !o.rules.is_empty() {
+            steps.push(0u8);
+        }
+        if !o.roles.is_empty() {
+            steps.push(1);
+        }
+        steps.push(2);
+        self.ui.label(cx, ids!(wz_title)).set_text(cx, &format!("Welcome to {}", o.name));
+        self.ui.label(cx, ids!(wz_about)).set_text(cx, &o.about);
+        self.ui.widget(cx, ids!(wz_about)).set_visible(cx, !o.about.is_empty());
+        let initial = o.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+        self.ui.label(cx, ids!(wz_icon.initial)).set_text(cx, &initial);
+        images::show(cx, &self.ui.image(cx, ids!(wz_icon.pic)), o.picture.as_deref());
+        let rules: Vec<String> = o.rules.iter().enumerate().map(|(i, r)| format!("{}.  {}", i + 1, r.trim())).collect();
+        self.ui.label(cx, ids!(wz_rules_text)).set_text(cx, &rules.join("\n"));
+        self.ui.check_box(cx, ids!(wz_agree)).set_active(cx, false, Animate::No);
+        if let Some(mut p) = self.ui.widget(cx, ids!(wz_roles)).borrow_mut::<lists::RolePicker>() {
+            p.roles = o.roles.iter().map(|(id, name, _, mine)| (id.clone(), name.clone(), *mine)).collect();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(wz_roles.list)));
+        let chans: Vec<String> = o.channels.iter().map(|c| format!("#  {c}")).collect();
+        self.ui.label(cx, ids!(wz_channels_text)).set_text(cx, &chans.join("\n"));
+        self.wizard = Some((o, steps, 0));
+        self.show_wizard_step(cx);
+        self.ui.modal(cx, ids!(wizard)).open(cx);
+    }
+
+    fn show_wizard_step(&mut self, cx: &mut Cx) {
+        let Some((_, steps, at)) = self.wizard.clone() else { return };
+        let step = steps[at];
+        for (k, path) in [ids!(wz_rules), ids!(wz_roles_step), ids!(wz_channels)].into_iter().enumerate() {
+            self.ui.view(cx, path).set_visible(cx, step as usize == k);
+        }
+        // Rails' numbered dots, one per step, when there's more than one.
+        let names = ["Rules", "Roles", "Channels"];
+        let labels: Vec<String> = steps
+            .iter()
+            .enumerate()
+            .map(|(i, s)| if i == at { format!("● {}", names[*s as usize]) } else { format!("○ {}", names[*s as usize]) })
+            .collect();
+        self.ui.label(cx, ids!(wz_steps)).set_text(cx, &labels.join("   ——   "));
+        self.ui.widget(cx, ids!(wz_steps)).set_visible(cx, steps.len() > 1);
+        self.ui.view(cx, ids!(wz_back)).set_visible(cx, at > 0);
+        let last = at + 1 == steps.len();
+        self.ui.button(cx, ids!(wz_next)).set_text(cx, if last { "Enter Server" } else { "Continue" });
+        self.ui.redraw(cx);
     }
 
     fn fill_server_relays(&mut self, cx: &mut Cx) {
@@ -5154,6 +5310,7 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(pins.list)));
             }
+            Update::Onboarding(o) => self.open_wizard(cx, o.clone()),
             Update::PrunePreview(rows) => {
                 self.prune = rows.clone();
                 self.show_prune(cx, true);
@@ -6075,6 +6232,44 @@ impl MatchEvent for App {
             });
             self.toast(cx, "Voice settings saved.", Toast::Success);
         }
+        for path in [ids!(ob_roles), ids!(ob_channels), ids!(wz_roles)] {
+            if let Some(mut p) = self.ui.widget(cx, path).borrow_mut::<lists::RolePicker>() {
+                p.handle_list_actions(cx, actions);
+            }
+        }
+        if self.ui.button(cx, ids!(ob_save)).clicked(actions) {
+            let rules: Vec<String> = self.ui.text_input(cx, ids!(ob_rules)).text().lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_owned).collect();
+            let picked = |cx: &mut Cx, path: &[LiveId]| self.ui.widget(cx, path).borrow::<lists::RolePicker>().map(|p| p.picked()).unwrap_or_default();
+            let self_assignable = picked(cx, ids!(ob_roles));
+            let highlights = picked(cx, ids!(ob_channels));
+            self.send(backend::Command::SaveOnboarding { enabled: self.ui.check_box(cx, ids!(ob_enabled)).active(cx), rules, highlights, self_assignable });
+        }
+        if self.ui.button(cx, ids!(ob_preview)).clicked(actions) {
+            self.send(backend::Command::PreviewOnboarding);
+        }
+        if self.ui.button(cx, ids!(wz_next)).clicked(actions) {
+            if let Some((o, steps, at)) = self.wizard.clone() {
+                if steps[at] == 0 && !self.ui.check_box(cx, ids!(wz_agree)).active(cx) {
+                    self.toast(cx, "Agree to the server rules to continue.", Toast::Error);
+                } else if at + 1 < steps.len() {
+                    self.wizard = Some((o, steps, at + 1));
+                    self.show_wizard_step(cx);
+                } else {
+                    let roles = self.ui.widget(cx, ids!(wz_roles)).borrow::<lists::RolePicker>().map(|p| p.picked()).unwrap_or_default();
+                    if !o.preview {
+                        self.send(backend::Command::FinishOnboarding { gid: o.gid.clone(), roles });
+                    }
+                    self.wizard = None;
+                    self.ui.modal(cx, ids!(wizard)).close(cx);
+                }
+            }
+        }
+        if tap(&self.ui, cx, ids!(wz_back)) {
+            if let Some((o, steps, at)) = self.wizard.clone() {
+                self.wizard = Some((o, steps, at.saturating_sub(1)));
+                self.show_wizard_step(cx);
+            }
+        }
         if self.ui.button(cx, ids!(srl_add)).clicked(actions) || self.ui.text_input(cx, ids!(srl_input)).returned(actions).is_some() {
             let url = self.ui.text_input(cx, ids!(srl_input)).text();
             if !url.trim().is_empty() {
@@ -6385,6 +6580,9 @@ impl AppMain for App {
             }
             if self.ui.view(cx, ids!(srv_settings)).visible() {
                 self.paint_server_preview(cx);
+            }
+            if let Some(pic) = self.wizard.as_ref().map(|w| w.0.picture.clone()) {
+                images::show(cx, &self.ui.image(cx, ids!(wz_icon.pic)), pic.as_deref());
             }
             if let Some(card) = self.ui.view(cx, ids!(card_layer)).visible().then(|| self.card.clone()) {
                 let img = self.ui.image(cx, ids!(card.ring.avatar.pic));
