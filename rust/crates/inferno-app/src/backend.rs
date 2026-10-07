@@ -69,10 +69,58 @@ pub struct RoleForm {
     pub position: i64,
     pub hoist: bool,
     pub mentionable: bool,
-    /// Granted permission keys (Rails' names).
+    /// Permission keys that are on (Rails' names), counting the
+    /// on-by-default ones unless the role turns them off.
     pub perms: Vec<String>,
     pub everyone: bool,
+    /// Kept as published (Rails' `role_type`, e.g. voice providers).
+    pub role_type: String,
+    /// The permissions map as published, so keys this app doesn't edit
+    /// survive a save.
+    pub raw_perms: serde_json::Map<String, serde_json::Value>,
+    pub member_count: usize,
 }
+
+/// The permissions map to publish for an edited role: what was published,
+/// with every key the editor shows set from the form. On-by-default keys
+/// that are off are written as false (leaving them out would turn them back
+/// on); keys the editor doesn't know survive.
+pub fn role_permissions(f: &RoleForm) -> serde_json::Map<String, serde_json::Value> {
+    let mut map = f.raw_perms.clone();
+    for (_, perms) in crate::lists::PERMISSION_GROUPS {
+        for (k, _) in *perms {
+            if f.perms.iter().any(|p| p == k) {
+                map.insert((*k).to_owned(), serde_json::Value::Bool(true));
+            } else if DEFAULT_ON.contains(k) {
+                map.insert((*k).to_owned(), serde_json::Value::Bool(false));
+            } else {
+                map.remove(*k);
+            }
+        }
+    }
+    map
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn saving_keeps_off_defaults_and_unknown_keys() {
+        let raw = json!({"send_gifs": false, "voice_provider": true, "kick_members": true}).as_object().unwrap().clone();
+        let f = RoleForm { perms: vec!["send_messages".into()], raw_perms: raw, ..Default::default() };
+        let m = role_permissions(&f);
+        assert_eq!(m.get("send_messages"), Some(&Value::Bool(true)));
+        assert_eq!(m.get("send_gifs"), Some(&Value::Bool(false)), "off stays off");
+        assert_eq!(m.get("send_custom_emojis"), Some(&Value::Bool(false)));
+        assert_eq!(m.get("voice_provider"), Some(&Value::Bool(true)), "not ours to drop");
+        assert!(!m.contains_key("kick_members"), "turned off");
+    }
+}
+
+/// Rails' permissions that are on unless a role sets them to false.
+pub const DEFAULT_ON: [&str; 3] = ["send_gifs", "send_custom_emojis", "send_custom_stickers"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BanItem {
@@ -116,6 +164,9 @@ pub struct ServerSettings {
     pub member_count: usize,
     /// Newest first.
     pub invites: Vec<InviteItem>,
+    /// Our highest role position (Flutter's hierarchy rule: we may edit,
+    /// reorder and hand out only roles below it); `i64::MAX` for the owner.
+    pub my_rank: i64,
     /// Highest position first, as Rails lists them.
     pub roles: Vec<RoleForm>,
     pub bans: Vec<BanItem>,
@@ -1065,14 +1116,14 @@ impl Backend {
                 let roles = forms
                     .into_iter()
                     .map(|f| inferno_core::server::wire::Role {
+                        permissions: role_permissions(&f),
                         id: f.id,
                         name: f.name.trim().to_owned(),
                         color: f.color,
                         position: f.position,
                         hoist: f.hoist,
                         mentionable: f.mentionable,
-                        permissions: f.perms.into_iter().map(|k| (k, serde_json::Value::Bool(true))).collect(),
-                        role_type: String::new(),
+                        role_type: f.role_type,
                     })
                     .collect();
                 self.session.save_roles(&gid, roles).await.map_err(|e| e.to_string())?;
@@ -1684,8 +1735,24 @@ impl Backend {
                 position: r.position,
                 hoist: r.hoist,
                 mentionable: r.mentionable,
-                perms: r.permissions.iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect(),
+                perms: {
+                    let mut on: Vec<String> =
+                        r.permissions.iter().filter(|(_, v)| v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect();
+                    for k in DEFAULT_ON {
+                        if r.permissions.get(k).and_then(|v| v.as_bool()) != Some(false) && !on.iter().any(|o| o == k) {
+                            on.push(k.to_owned());
+                        }
+                    }
+                    on
+                },
                 everyone: r.is_everyone(),
+                role_type: r.role_type.clone(),
+                raw_perms: r.permissions.clone(),
+                member_count: if r.is_everyone() {
+                    state.members.len() + usize::from(state.owner.is_some_and(|o| !state.members.contains_key(&o)))
+                } else {
+                    state.members.values().filter(|m| m.roles.contains(&r.id)).count()
+                },
             })
             .collect();
         role_forms.sort_by_key(|r| std::cmp::Reverse(r.position));
@@ -1724,6 +1791,14 @@ impl Backend {
             welcome_channel: m.welcome_channel.clone(),
             text_channels,
             // The owner of a new server has no member event yet.
+            my_rank: if state.is_owner(&me) {
+                i64::MAX
+            } else {
+                let held = state.members.get(&me).map(|m| m.roles.clone()).unwrap_or_default();
+                let admin = state.has(&me, inferno_core::server::Permission::Administrator);
+                // Administrators rank just under the owner (Flutter).
+                if admin { i64::MAX - 1 } else { state.roles.iter().filter(|r| held.contains(&r.id)).map(|r| r.position).max().unwrap_or(0) }
+            },
             member_count: state.members.len() + usize::from(state.owner.is_some_and(|o| !state.members.contains_key(&o))),
             invites,
             discoverable: m.discoverable,

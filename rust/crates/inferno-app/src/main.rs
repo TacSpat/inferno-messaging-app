@@ -645,6 +645,7 @@ script_mod! {
         draw_text.text_style: theme.font_bold{font_size: 15.0}
     }
     let Hint = Txt{width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+    let Swatch = RoundedView{width: 28 height: 28 cursor: MouseCursor.Hand new_batch: true draw_bg.border_radius: 2.0}
     let Divider = SolidView{width: Fill height: 1 margin: Inset{top: 24} draw_bg.color: gray_700}
     // Rails' text button (Remove Icon): danger-light, no well.
     let LinkBtn = View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
@@ -692,55 +693,70 @@ script_mod! {
 
     // ─── Server settings widgets (lists.rs) ──────────────────────────
     mod.widgets.PermListBase = #(lists::PermList::register_widget(vm))
+    // Rails' toggle: w-11 h-6 track, white knob (lists::set_switch).
+    let Switch = RoundedView{width: 44 height: 24 padding: 2 align: Align{x: 0.0 y: 0.5} new_batch: true
+        draw_bg.color: gray_600 draw_bg.border_radius: 6.0
+        RoundedView{width: 20 height: 20 draw_bg.color: #xffffff draw_bg.border_radius: 5.0}}
+
     mod.widgets.PermList = set_type_default() do mod.widgets.PermListBase{
-        width: Fill height: 420
+        width: Fill height: 560
         list := PortalList{
             width: Fill height: Fill
             flow: Down
-            Group := Txt{margin: Inset{top: 14 bottom: 6} draw_text.color: gray_400
+            Group := Txt{margin: Inset{top: 18 bottom: 8} draw_text.color: gray_400
                 draw_text.text_style: theme.font_bold{font_size: 8.5}}
             Perm := View{
                 width: Fill height: Fit
-                padding: Inset{top: 5 bottom: 5}
-                flow: Right spacing: 10
+                padding: Inset{top: 8 bottom: 8}
+                flow: Right spacing: 16
+                align: Align{y: 0.5}
                 cursor: MouseCursor.Hand
-                mark := Txt{width: 14 text: "·" draw_text.color: accent_light}
-                label := Txt{width: Fill text: "" draw_text.color: gray_200}
+                text := View{width: Fill height: Fit flow: Down spacing: 2
+                    title := Txt{text: "" draw_text.color: #xffffff draw_text.text_style.font_size: 10.5}
+                    label := Txt{width: Fill text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}}
+                switch := Switch{}
             }
         }
     }
 
     mod.widgets.RoleListBase = #(lists::RoleList::register_widget(vm))
     mod.widgets.RoleList = set_type_default() do mod.widgets.RoleListBase{
-        width: 200 height: 480
+        width: Fill height: 480
+        flow: Overlay
         list := PortalList{
             width: Fill height: Fill
             flow: Down
+            // Rails: px-3 py-2 rounded, gray-800 (hover gray-700), dot, name, count.
             Role := RoundedView{
                 width: Fill height: Fit
-                padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
-                flow: Right spacing: 8
+                margin: Inset{bottom: 4}
+                padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+                flow: Right spacing: 12
                 align: Align{y: 0.5}
                 cursor: MouseCursor.Hand
                 new_batch: true
-                draw_bg.color: #0000
-                draw_bg.border_radius: 4.0
-                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
-                name := Txt{text: "" draw_text.color: gray_300}
+                draw_bg.color: gray_800
+                draw_bg.border_radius: 2.0
+                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 3.0}
+                name := Txt{width: Fill text: "" draw_text.color: #xffffff}
+                count := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
             }
             Selected := RoundedView{
                 width: Fill height: Fit
-                padding: Inset{left: 8 right: 8 top: 6 bottom: 6}
-                flow: Right spacing: 8
+                margin: Inset{bottom: 4}
+                padding: Inset{left: 12 right: 12 top: 8 bottom: 8}
+                flow: Right spacing: 12
                 align: Align{y: 0.5}
                 cursor: MouseCursor.Hand
                 new_batch: true
                 draw_bg.color: gray_600
-                draw_bg.border_radius: 4.0
-                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
-                name := Txt{text: "" draw_text.color: #xffffff}
+                draw_bg.border_radius: 2.0
+                dot := RoundedView{width: 12 height: 12 draw_bg.color: #x99aab5 draw_bg.border_radius: 3.0}
+                name := Txt{width: Fill text: "" draw_text.color: #xffffff}
+                count := Txt{text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
             }
         }
+        drop_line := SolidView{visible: false width: Fill height: 2 draw_bg.color: accent}
     }
 
     let SmallBtn = RoundedView{
@@ -2046,35 +2062,85 @@ script_mod! {
                                 }
                             }
 
+                            // Rails' role editor: list on the left; Display,
+                            // Permissions and Members tabs; a save bar while
+                            // anything is unsaved.
                             spage_roles := View{
                                 visible: false
-                                width: 768 height: Fit flow: Down
-                                PageTitle{text: "Roles"}
-                                View{width: Fill height: Fit flow: Right spacing: 24
-                                    View{width: 200 height: Fit flow: Down spacing: 8
+                                width: Fill height: Fit flow: Right spacing: 24
+                                View{width: 240 height: Fit flow: Down
+                                    View{width: Fill height: Fit flow: Right align: Align{y: 0.5} margin: Inset{bottom: 16}
+                                        PageTitle{width: Fill text: "Roles" margin: 0}
                                         role_create := Button{text: "Create Role"}
-                                        role_list := mod.widgets.RoleList{}
                                     }
-                                    View{width: Fill height: Fit flow: Down
-                                        View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
-                                            role_title := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 13.0}}
-                                            role_note := Hint{width: Fit text: ""}
-                                            role_save := Button{text: "Save Changes"}
-                                            role_delete := Button{text: "Delete Role" draw_text.color: #xf87171}
+                                    role_list := mod.widgets.RoleList{height: 360}
+                                    Hint{margin: Inset{top: 8} text: "Drag to reorder. Roles at or above your highest can't be edited."}
+                                }
+                                View{width: Fill height: Fit flow: Down
+                                    View{width: Fill height: Fit flow: Right align: Align{y: 0.5} margin: Inset{bottom: 16}
+                                        View{width: Fill height: Fit flow: Down spacing: 2
+                                            Txt{text: "EDIT ROLE" draw_text.color: gray_500 draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                            role_title := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
                                         }
+                                        role_delete := Button{text: "Delete Role"}
+                                    }
+                                    role_locked := Hint{visible: false margin: Inset{bottom: 12} text: "This role is at or above your highest role, so you can't change it."}
+                                    View{width: Fill height: Fit flow: Right spacing: 4 margin: Inset{bottom: 16}
+                                        role_tab_display := TabPill{draw_bg.color: gray_600 label.text: "Display"}
+                                        role_tab_perms := TabPill{label.text: "Permissions"}
+                                        role_tab_members := TabPill{label.text: "Members"}
+                                    }
+                                    role_display := Card{
                                         role_fields := View{width: Fill height: Fit flow: Down
-                                            FieldLabel{text: "ROLE NAME"}
-                                            role_name := Field{}
+                                            FieldLabel{text: "ROLE NAME" margin: Inset{bottom: 6}}
+                                            role_name := Field{empty_text: "Role name"}
                                             FieldLabel{text: "ROLE COLOR"}
-                                            View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
-                                                role_swatch := RoundedView{width: 36 height: 36 draw_bg.color: #x99aab5 draw_bg.border_radius: 6.0}
-                                                role_color := TextInput{width: 140 height: 36 empty_text: "#99aab5"}
+                                            View{width: Fit height: Fit flow: Right spacing: 4 sw0 := Swatch{draw_bg.color: #x1abc9c} sw1 := Swatch{draw_bg.color: #x2ecc71} sw2 := Swatch{draw_bg.color: #x3498db} sw3 := Swatch{draw_bg.color: #x9b59b6} sw4 := Swatch{draw_bg.color: #xe91e63} sw5 := Swatch{draw_bg.color: #xf1c40f} sw6 := Swatch{draw_bg.color: #xe67e22} sw7 := Swatch{draw_bg.color: #xe74c3c} sw8 := Swatch{draw_bg.color: #x95a5a6} sw9 := Swatch{draw_bg.color: #x607d8b}}
+                                            View{width: Fit height: Fit flow: Right spacing: 4 margin: Inset{top: 4 bottom: 12} sw10 := Swatch{draw_bg.color: #x11806a} sw11 := Swatch{draw_bg.color: #x1f8b4c} sw12 := Swatch{draw_bg.color: #x206694} sw13 := Swatch{draw_bg.color: #x71368a} sw14 := Swatch{draw_bg.color: #xad1457} sw15 := Swatch{draw_bg.color: #xc27c0e} sw16 := Swatch{draw_bg.color: #xa84300} sw17 := Swatch{draw_bg.color: #x992d22} sw18 := Swatch{draw_bg.color: #xffffff} sw19 := Swatch{draw_bg.color: #x99aab5}}
+                                            View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: 0.5}
+                                                role_swatch := RoundedView{width: 36 height: 36 draw_bg.color: #x99aab5 draw_bg.border_radius: 4.0}
+                                                role_color := TextInput{width: 120 height: 36 empty_text: "#99aab5"}
                                             }
-                                            role_hoist := CheckBox{margin: Inset{top: 10} text: "Display role members separately"}
-                                            role_mention := CheckBox{text: "Allow anyone to @mention this role"}
+                                            SolidView{width: Fill height: 1 margin: Inset{top: 16 bottom: 8} draw_bg.color: gray_700_50}
+                                            role_hoist := View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{top: 8 bottom: 8} cursor: MouseCursor.Hand
+                                                View{width: Fill height: Fit flow: Down spacing: 2
+                                                    Txt{text: "Display separately" draw_text.color: #xffffff}
+                                                    Hint{text: "Show members with this role in their own group in the member list"}}
+                                                switch := Switch{}
+                                            }
+                                            role_mention := View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{top: 8 bottom: 8} cursor: MouseCursor.Hand
+                                                View{width: Fill height: Fit flow: Down spacing: 2
+                                                    Txt{text: "Allow anyone to @mention this role" draw_text.color: #xffffff}
+                                                    Hint{text: "Members without Mention Everyone can still ping it"}}
+                                                switch := Switch{}
+                                            }
+                                            SolidView{width: Fill height: 1 margin: Inset{top: 8 bottom: 12} draw_bg.color: gray_700_50}
+                                            FieldLabel{text: "PREVIEW" margin: Inset{bottom: 8}}
+                                            RoundedView{width: Fill height: Fit flow: Down padding: 12 new_batch: true
+                                                draw_bg.color: gray_900 draw_bg.border_radius: 4.0
+                                                role_pv_group := Txt{text: "" draw_text.color: #x99aab5 draw_text.text_style: theme.font_bold{font_size: 7.5}}
+                                                SolidView{width: Fill height: 1 margin: Inset{top: 8 bottom: 8} draw_bg.color: gray_700_50}
+                                                role_pv_member := Txt{text: "" draw_text.color: #x99aab5 draw_text.text_style.font_size: 10.5}
+                                                SolidView{width: Fill height: 1 margin: Inset{top: 8 bottom: 8} draw_bg.color: gray_700_50}
+                                                View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                                                    role_pv_msg := Txt{text: "" draw_text.color: #x99aab5 draw_text.text_style.font_size: 10.5}
+                                                    Txt{text: "Today" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                                                }
+                                                Txt{margin: Inset{top: 2} text: "This is a preview of how the role color looks in chat." draw_text.color: gray_300}
+                                            }
                                         }
-                                        FieldLabel{text: "PERMISSIONS"}
+                                        role_everyone_note := Hint{visible: false text: "@everyone applies to every member. It has permissions only: no name, color or members of its own."}
+                                    }
+                                    role_perms_panel := Card{visible: false
                                         role_perms := mod.widgets.PermList{}
+                                    }
+                                    role_members_panel := Card{visible: false
+                                        View{width: Fill height: Fit flow: Right align: Align{y: 0.5} margin: Inset{bottom: 10}
+                                            Txt{width: Fill text: "MEMBERS" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+                                            role_member_count := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+                                        }
+                                        role_member_search := Field{empty_text: "Search members..."}
+                                        role_members := mod.widgets.PeopleList{margin: Inset{top: 10} height: 420}
                                     }
                                 }
                             }
@@ -2105,6 +2171,23 @@ script_mod! {
                                 Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}
                             }
                             Txt{text: "ESC" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+                        }
+                    }
+
+                    // Rails' sticky bar while a role has unsaved changes.
+                    role_save_bar := View{
+                        visible: false
+                        width: Fill height: Fill
+                        align: Align{x: 0.5 y: 1.0}
+                        RoundedView{width: 720 height: Fit margin: Inset{bottom: 20} padding: Inset{left: 20 right: 12 top: 10 bottom: 10}
+                            flow: Right spacing: 12 align: Align{y: 0.5} new_batch: true
+                            draw_bg.color: gray_950 draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_700
+                            role_note := Txt{width: Fill text: "Careful — you have unsaved changes!" draw_text.color: #xffffff}
+                            role_reset := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                Txt{text: "Reset" draw_text.color: gray_300}}
+                            role_save := RoundedView{width: Fit height: Fit padding: Inset{left: 16 right: 16 top: 7 bottom: 7}
+                                cursor: MouseCursor.Hand new_batch: true draw_bg.color: #x16a34a draw_bg.border_radius: 2.0
+                                Txt{text: "Save Changes" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}}
                         }
                     }
 
@@ -2354,6 +2437,9 @@ pub struct App {
     /// Roles as edited on the roles page (saved with Save Changes).
     #[rust]
     role_drafts: Vec<backend::RoleForm>,
+    /// Role editor tab: Display, Permissions, Members.
+    #[rust]
+    role_tab: usize,
     #[rust]
     role_sel: usize,
     /// A message to jump to once its channel's timeline arrives.
@@ -2488,6 +2574,21 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 5] = [
     (ids!(snav_invites), ids!(spage_invites)),
     (ids!(snav_bans), ids!(spage_bans)),
 ];
+
+/// Whether the role drafts differ from what's saved, in what the editor
+/// changes (not counts, or the order permissions happen to be listed in).
+fn roles_differ(drafts: &[backend::RoleForm], saved: &[backend::RoleForm]) -> bool {
+    let key = |r: &backend::RoleForm| {
+        let mut perms = r.perms.clone();
+        perms.sort();
+        (r.id.clone(), r.name.trim().to_owned(), r.color.to_lowercase(), r.position, r.hoist, r.mentionable, perms)
+    };
+    let mut a: Vec<_> = drafts.iter().map(key).collect();
+    let mut b: Vec<_> = saved.iter().map(key).collect();
+    a.sort();
+    b.sort();
+    a != b
+}
 
 /// Flutter's server types: (wire value, label), in the dropdown's order.
 const SERVER_TYPES: [(&str, &str); 5] = [
@@ -3170,6 +3271,7 @@ impl App {
             }
             Pending::DeleteServer => {
                 self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+        self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, false);
                 self.send(backend::Command::DeleteServer);
                 self.ui.redraw(cx);
             }
@@ -3216,6 +3318,8 @@ impl App {
 
     fn show_srv_page(&mut self, cx: &mut Cx, page: usize) {
         self.srv_page = page;
+        let dirty = roles_differ(&self.role_drafts, &self.srv.roles);
+        self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, dirty && page == 2);
         for (i, (nav, view)) in SRV_PAGES.iter().enumerate() {
             let active = i == page;
             self.ui.view(cx, view).set_visible(cx, active);
@@ -3402,57 +3506,167 @@ impl App {
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
     }
 
+    /// Whether we may change the selected role: manage_roles, and below our
+    /// own highest role (Flutter's hierarchy rule).
+    fn role_editable(&self) -> bool {
+        self.perms.manage_roles && self.role_drafts.get(self.role_sel).is_some_and(|r| r.everyone || r.position < self.srv.my_rank)
+    }
+
     /// Shows the selected role draft in the editor.
     fn show_role(&mut self, cx: &mut Cx) {
         let Some(r) = self.role_drafts.get(self.role_sel).cloned() else { return };
-        let can = self.perms.manage_roles;
-        self.ui.label(cx, ids!(role_title)).set_text(cx, &format!("Edit Role — {}", r.name));
+        let can = self.role_editable();
+        self.ui.label(cx, ids!(role_title)).set_text(cx, &r.name);
         // @everyone: permissions only, like Rails.
         self.ui.view(cx, ids!(role_fields)).set_visible(cx, !r.everyone);
+        self.ui.widget(cx, ids!(role_everyone_note)).set_visible(cx, r.everyone);
         self.ui.button(cx, ids!(role_delete)).set_visible(cx, can && !r.everyone);
-        self.ui.button(cx, ids!(role_save)).set_visible(cx, can);
+        self.ui.widget(cx, ids!(role_locked)).set_visible(cx, self.perms.manage_roles && !can);
+        self.ui.view(cx, ids!(role_tab_members)).set_visible(cx, !r.everyone);
+        if r.everyone && self.role_tab == 2 {
+            self.role_tab = 0;
+        }
         self.ui.text_input(cx, ids!(role_name)).set_text(cx, &r.name);
         self.ui.text_input(cx, ids!(role_color)).set_text(cx, &r.color);
-        self.set_swatch(cx, &r.color);
-        self.ui.check_box(cx, ids!(role_hoist)).set_active(cx, r.hoist, Animate::No);
-        self.ui.check_box(cx, ids!(role_mention)).set_active(cx, r.mentionable, Animate::No);
         if let Some(mut l) = self.ui.widget(cx, ids!(role_perms)).borrow_mut::<lists::PermList>() {
             l.granted = r.perms.clone();
             l.enabled = can;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(role_perms.list)));
+        self.paint_role(cx);
+        self.show_role_tab(cx);
+        self.fill_role_members(cx);
+    }
+
+    /// Everything that follows the draft as it's edited: swatch, switches,
+    /// preview, the list, and the save bar.
+    fn paint_role(&mut self, cx: &mut Cx) {
+        let Some(r) = self.role_drafts.get(self.role_sel).cloned() else { return };
+        let can = self.role_editable();
+        let color = u32::from_str_radix(r.color.trim_start_matches('#'), 16).ok().filter(|_| r.color.len() == 7).unwrap_or(0x99aab5);
+        let v = lists::rgba(color, 1.0);
+        let mut sw = self.ui.widget(cx, ids!(role_swatch));
+        script_apply_eval!(cx, sw, {draw_bg +: {color: #(v)}});
+        for path in [ids!(role_pv_group), ids!(role_pv_member), ids!(role_pv_msg)] {
+            let mut t = self.ui.widget(cx, path);
+            script_apply_eval!(cx, t, {draw_text +: {color: #(v)}});
+        }
+        let me = self.my_display_name();
+        self.ui.label(cx, ids!(role_pv_group)).set_text(cx, &format!("{} — 1", r.name.to_uppercase()));
+        self.ui.label(cx, ids!(role_pv_member)).set_text(cx, &me);
+        self.ui.label(cx, ids!(role_pv_msg)).set_text(cx, &me);
+        let sw = self.ui.widget(cx, ids!(role_hoist.switch));
+        lists::set_switch(cx, &sw, r.hoist, can);
+        let sw = self.ui.widget(cx, ids!(role_mention.switch));
+        lists::set_switch(cx, &sw, r.mentionable, can);
+        self.ui.label(cx, ids!(role_title)).set_text(cx, &r.name);
         if let Some(mut l) = self.ui.widget(cx, ids!(role_list)).borrow_mut::<lists::RoleList>() {
             l.roles = self.role_drafts.clone();
             l.selected = self.role_sel;
+            l.rank = if self.perms.manage_roles { self.srv.my_rank } else { i64::MIN };
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(role_list.list)));
+        let dirty = roles_differ(&self.role_drafts, &self.srv.roles);
+        self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, dirty && self.srv_page == 2);
         self.ui.redraw(cx);
     }
 
-    fn set_swatch(&self, cx: &mut Cx, color: &str) {
-        if let Ok(c) = u32::from_str_radix(color.trim_start_matches('#'), 16) {
-            let mut sw = self.ui.widget(cx, ids!(role_swatch));
-            let v = lists::rgba(c, 1.0);
-            script_apply_eval!(cx, sw, {draw_bg +: {color: #(v)}});
-        }
+    fn my_display_name(&self) -> String {
+        self.members
+            .iter()
+            .find_map(|m| match m {
+                backend::MemberRow::Member { name, me: true, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .unwrap_or_else(|| "You".into())
     }
 
-    /// Pulls the editor's fields into the selected draft.
+    fn show_role_tab(&mut self, cx: &mut Cx) {
+        let tabs: [(&[LiveId], &[LiveId]); 3] = [
+            (ids!(role_tab_display), ids!(role_display)),
+            (ids!(role_tab_perms), ids!(role_perms_panel)),
+            (ids!(role_tab_members), ids!(role_members_panel)),
+        ];
+        for (i, (tab, panel)) in tabs.into_iter().enumerate() {
+            self.ui.view(cx, panel).set_visible(cx, i == self.role_tab);
+            let mut pill = self.ui.widget(cx, tab);
+            let bg = if i == self.role_tab { theme::tok("gray_600", 1.0) } else { lists::rgba(0, 0.0) };
+            script_apply_eval!(cx, pill, {draw_bg +: {color: #(bg)}});
+        }
+        self.ui.redraw(cx);
+    }
+
+    /// Rails' Members tab: everyone, searchable, with Add/Remove for this role.
+    fn fill_role_members(&mut self, cx: &mut Cx) {
+        let Some(r) = self.role_drafts.get(self.role_sel).cloned() else { return };
+        let saved = self.srv.roles.iter().any(|s| s.id == r.id);
+        let can = self.role_editable() && saved && !r.everyone;
+        let q = self.ui.text_input(cx, ids!(role_member_search)).text().trim().to_lowercase();
+        let mut assigned = 0;
+        let rows: Vec<lists::PersonRow> = self
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                backend::MemberRow::Member { name, pubkey, roles, .. } => {
+                    let has = roles.contains(&r.id);
+                    assigned += usize::from(has);
+                    (q.is_empty() || name.to_lowercase().contains(&q)).then(|| lists::PersonRow {
+                        id: pubkey.clone(),
+                        name: name.clone(),
+                        detail: if has { "Has this role".into() } else { String::new() },
+                        a: can.then(|| if has { "Remove".to_owned() } else { "Add".to_owned() }),
+                        b: None,
+                    })
+                }
+                _ => None,
+            })
+            .collect();
+        let note = if saved { format!("{assigned} assigned") } else { "Save the role to assign it".into() };
+        self.ui.label(cx, ids!(role_member_count)).set_text(cx, &note);
+        if let Some(mut l) = self.ui.widget(cx, ids!(role_members)).borrow_mut::<lists::PeopleList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(role_members.list)));
+    }
+
+    /// Pulls the editor's text fields into the selected draft.
     fn read_role_editor(&mut self, cx: &mut Cx) {
+        if !self.role_editable() {
+            return;
+        }
         let name = self.ui.text_input(cx, ids!(role_name)).text();
         let color = self.ui.text_input(cx, ids!(role_color)).text();
-        let hoist = self.ui.check_box(cx, ids!(role_hoist)).active(cx);
-        let mention = self.ui.check_box(cx, ids!(role_mention)).active(cx);
         let perms = self.ui.widget(cx, ids!(role_perms)).borrow::<lists::PermList>().map(|l| l.granted.clone()).unwrap_or_default();
         if let Some(r) = self.role_drafts.get_mut(self.role_sel) {
             if !r.everyone {
                 r.name = name;
                 r.color = color;
-                r.hoist = hoist;
-                r.mentionable = mention;
             }
             r.perms = perms;
         }
+    }
+
+    /// Drag-reorder: the moved role takes its new place; positions are
+    /// reshuffled among the roles we may move only, so roles above us keep
+    /// theirs.
+    fn move_role(&mut self, cx: &mut Cx, from: usize, to: usize) {
+        self.read_role_editor(cx);
+        let rank = self.srv.my_rank;
+        let movable = |r: &backend::RoleForm| !r.everyone && r.position < rank;
+        let mut positions: Vec<i64> = self.role_drafts.iter().filter(|r| movable(r)).map(|r| r.position).collect();
+        positions.sort_by(|a, b| b.cmp(a));
+        let selected = self.role_drafts.get(self.role_sel).map(|r| r.id.clone());
+        let role = self.role_drafts.remove(from);
+        let to = if to > from { to - 1 } else { to };
+        self.role_drafts.insert(to.min(self.role_drafts.len()), role);
+        let mut next = positions.into_iter();
+        for r in self.role_drafts.iter_mut().filter(|r| movable(r)) {
+            if let Some(p) = next.next() {
+                r.position = p;
+            }
+        }
+        self.role_sel = selected.and_then(|id| self.role_drafts.iter().position(|r| r.id == id)).unwrap_or(0);
+        self.paint_role(cx);
     }
 
     fn show_card(&mut self, cx: &mut Cx, card: &backend::Card) {
@@ -4135,6 +4349,7 @@ impl App {
                 self.members = members.clone();
                 if self.ui.view(cx, ids!(srv_settings)).visible() {
                     self.fill_people(cx);
+                    self.fill_role_members(cx);
                 }
                 if let Some(mut list) = self.ui.widget(cx, ids!(members)).borrow_mut::<lists::MemberList>() {
                     list.rows = members.clone();
@@ -4312,7 +4527,7 @@ impl App {
                     let drafts = std::mem::take(&mut self.role_drafts);
                     let sel = self.role_sel;
                     self.fill_srv_pages(cx);
-                    if !drafts.is_empty() && drafts.iter().any(|d| !self.srv.roles.contains(d)) {
+                    if !drafts.is_empty() && roles_differ(&drafts, &self.srv.roles) {
                         self.role_drafts = drafts;
                         self.role_sel = sel.min(self.role_drafts.len().saturating_sub(1));
                         self.show_role(cx);
@@ -4816,6 +5031,7 @@ impl MatchEvent for App {
         }
         if tapped(&self.ui, cx, ids!(close_srv_settings)) {
             self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+        self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, false);
             self.ui.redraw(cx);
         }
         for (i, (nav, _)) in SRV_PAGES.iter().enumerate() {
@@ -4890,46 +5106,116 @@ impl MatchEvent for App {
             Some((code, _)) => self.confirm(cx, Pending::RevokeInvite(code), "Revoke Invite", "Revoke this invite? Its link stops working.", "Revoke", false),
             None => {}
         }
-        let role_click = self.ui.widget(cx, ids!(role_list)).borrow::<lists::RoleList>().and_then(|l| l.clicked(cx, actions));
-        if let Some(i) = role_click {
+        let role_act = self.ui.widget(cx, ids!(role_list)).borrow_mut::<lists::RoleList>().and_then(|mut l| l.handle_list_actions(cx, actions));
+        match role_act {
+            Some(lists::RoleListAction::Select(i)) => {
+                self.read_role_editor(cx);
+                self.role_sel = i;
+                self.show_role(cx);
+            }
+            Some(lists::RoleListAction::Move { from, to }) => self.move_role(cx, from, to),
+            None => {}
+        }
+        for (i, path) in [ids!(role_tab_display), ids!(role_tab_perms), ids!(role_tab_members)].into_iter().enumerate() {
+            if tap(&self.ui, cx, path) {
+                self.role_tab = i;
+                self.show_role_tab(cx);
+            }
+        }
+        let toggled = self.role_editable()
+            && self.ui.widget(cx, ids!(role_perms)).borrow_mut::<lists::PermList>().is_some_and(|mut l| l.handle_list_actions(cx, actions));
+        let typed = [ids!(role_name), ids!(role_color)].into_iter().any(|p| self.ui.text_input(cx, p).changed(actions).is_some());
+        if toggled || typed {
             self.read_role_editor(cx);
-            self.role_sel = i;
-            self.show_role(cx);
+            self.paint_role(cx);
         }
-        if let Some(mut l) = self.ui.widget(cx, ids!(role_perms)).borrow_mut::<lists::PermList>() {
-            l.handle_list_actions(cx, actions);
+        for (path, hoist) in [(ids!(role_hoist), true), (ids!(role_mention), false)] {
+            if tap(&self.ui, cx, path) && self.role_editable() {
+                if let Some(r) = self.role_drafts.get_mut(self.role_sel) {
+                    if hoist { r.hoist = !r.hoist } else { r.mentionable = !r.mentionable }
+                }
+                self.paint_role(cx);
+            }
         }
-        if let Some(c) = self.ui.text_input(cx, ids!(role_color)).changed(actions) {
-            self.set_swatch(cx, &c);
-            self.ui.redraw(cx);
+        const SWATCHES: [u32; 20] = [
+            0x1abc9c, 0x2ecc71, 0x3498db, 0x9b59b6, 0xe91e63, 0xf1c40f, 0xe67e22, 0xe74c3c, 0x95a5a6, 0x607d8b,
+            0x11806a, 0x1f8b4c, 0x206694, 0x71368a, 0xad1457, 0xc27c0e, 0xa84300, 0x992d22, 0xffffff, 0x99aab5,
+        ];
+        let swatch_ids: [&[LiveId]; 20] = [
+            ids!(sw0), ids!(sw1), ids!(sw2), ids!(sw3), ids!(sw4), ids!(sw5), ids!(sw6), ids!(sw7), ids!(sw8), ids!(sw9),
+            ids!(sw10), ids!(sw11), ids!(sw12), ids!(sw13), ids!(sw14), ids!(sw15), ids!(sw16), ids!(sw17), ids!(sw18), ids!(sw19),
+        ];
+        for (path, c) in swatch_ids.into_iter().zip(SWATCHES) {
+            if tap(&self.ui, cx, path) && self.role_editable() {
+                let hex = format!("#{c:06x}");
+                self.ui.text_input(cx, ids!(role_color)).set_text(cx, &hex);
+                self.read_role_editor(cx);
+                self.paint_role(cx);
+            }
+        }
+        if self.ui.text_input(cx, ids!(role_member_search)).changed(actions).is_some() {
+            self.fill_role_members(cx);
+        }
+        let member_toggle = self.ui.widget(cx, ids!(role_members)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        if let Some((pk, _)) = member_toggle {
+            let role = self.role_drafts.get(self.role_sel).map(|r| r.id.clone());
+            let current = self.members.iter().find_map(|m| match m {
+                backend::MemberRow::Member { pubkey, roles, .. } if *pubkey == pk => Some(roles.clone()),
+                _ => None,
+            });
+            if let (Some(role), Some(mut roles)) = (role, current) {
+                match roles.iter().position(|r| *r == role) {
+                    Some(i) => {
+                        roles.remove(i);
+                    }
+                    None => roles.push(role),
+                }
+                self.send(backend::Command::SetMemberRoles { pubkey: pk, roles });
+            }
         }
         if self.ui.button(cx, ids!(role_create)).clicked(actions) && self.perms.manage_roles {
             self.read_role_editor(cx);
-            let top = self.role_drafts.iter().filter(|r| !r.everyone).map(|r| r.position).max().unwrap_or(0);
-            let id = inferno_core::server::publish::new_public_id();
-            self.role_drafts.insert(0, backend::RoleForm {
-                id,
-                name: "new role".into(),
-                color: "#99aab5".into(),
-                position: top + 1,
-                ..Default::default()
-            });
-            self.role_sel = 0;
-            self.show_role(cx);
-            self.ui.label(cx, ids!(role_note)).set_text(cx, "Not saved yet");
+            // Rails' new role: "new role", #99aab5, at the top of what we may
+            // manage (just under our own highest role).
+            let rank = self.srv.my_rank;
+            let top = self.role_drafts.iter().filter(|r| !r.everyone && r.position < rank).map(|r| r.position).max().unwrap_or(0);
+            if top + 1 >= rank {
+                self.toast(cx, "There's no room under your highest role. Move a role down first.", Toast::Error);
+            } else {
+                let id = inferno_core::server::publish::new_public_id();
+                let at = self.role_drafts.iter().position(|r| r.everyone || r.position < rank).unwrap_or(0);
+                self.role_drafts.insert(at, backend::RoleForm {
+                    id,
+                    name: "new role".into(),
+                    color: "#99aab5".into(),
+                    position: top + 1,
+                    perms: backend::DEFAULT_ON.iter().map(|k| k.to_string()).collect(),
+                    ..Default::default()
+                });
+                self.role_sel = at;
+                self.role_tab = 0;
+                self.show_role(cx);
+            }
         }
-        if self.ui.button(cx, ids!(role_save)).clicked(actions) {
+        if tap(&self.ui, cx, ids!(role_reset)) {
+            self.role_drafts = self.srv.roles.clone();
+            self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
+            self.show_role(cx);
+        }
+        if tap(&self.ui, cx, ids!(role_save)) {
             self.read_role_editor(cx);
             let is_color = |c: &str| c.len() == 7 && c.starts_with('#') && u32::from_str_radix(&c[1..], 16).is_ok();
             let bad = self.role_drafts.iter().find(|r| !r.everyone && !is_color(&r.color));
+            let empty = self.role_drafts.iter().any(|r| !r.everyone && r.name.trim().is_empty());
             match bad {
                 Some(r) => {
-                    let msg = format!("⚠ \"{}\" isn't a #rrggbb color.", r.color);
-                    self.ui.label(cx, ids!(role_note)).set_text(cx, &msg);
+                    let msg = format!("\"{}\" isn't a #rrggbb color.", r.color);
+                    self.toast(cx, &msg, Toast::Error);
                 }
+                None if empty => self.toast(cx, "Every role needs a name.", Toast::Error),
                 None => {
                     self.send(backend::Command::SaveRoles(self.role_drafts.clone()));
-                    self.ui.label(cx, ids!(role_note)).set_text(cx, "Saved ✓");
+                    self.toast(cx, "Roles saved.", Toast::Success);
                 }
             }
         }
@@ -5222,6 +5508,7 @@ impl AppMain for App {
                     self.set_server_menu(cx, false);
                 } else if self.ui.view(cx, ids!(srv_settings)).visible() {
                     self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+        self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, false);
                     self.ui.redraw(cx);
                 } else if self.ui.view(cx, ids!(settings)).visible() {
                     self.set_settings_open(cx, false);

@@ -650,8 +650,19 @@ impl Widget for PermList {
                     Some(PermRow::Perm { key, label }) => {
                         let row = list.item(cx, i, id!(Perm));
                         let on = self.granted.iter().any(|k| k == key);
-                        row.label(cx, ids!(mark)).set_text(cx, if on { "✓" } else { "·" });
-                        row.label(cx, ids!(label)).set_text(cx, label);
+                        // Rails: the key, title-cased, over its description.
+                        let title: String = key
+                            .split('_')
+                            .map(|w| {
+                                let mut c = w.chars();
+                                c.next().map(|f| f.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" ");
+                        row.label(cx, ids!(text.title)).set_text(cx, &title);
+                        row.label(cx, ids!(text.label)).set_text(cx, label);
+                        let switch = row.widget(cx, ids!(switch));
+                        set_switch(cx, &switch, on, self.enabled);
                         row.draw_all(cx, &mut Scope::empty());
                     }
                     None => {}
@@ -666,7 +677,25 @@ impl Widget for PermList {
     }
 }
 
-/// Roles, highest first; one is selected for editing.
+/// Rails' toggle switch (w-11 h-6, white knob; green when on), drawn on
+/// a `Switch` view: track colour and knob side.
+pub fn set_switch(cx: &mut Cx, switch: &WidgetRef, on: bool, enabled: bool) {
+    let mut track = switch.clone();
+    let alpha = if enabled { 1.0 } else { 0.5 };
+    let color = if on { rgba(0x16a34a, alpha) } else { crate::theme::tok("gray_600", alpha) };
+    let x = if on { 1.0 } else { 0.0 };
+    script_apply_eval!(cx, track, {draw_bg +: {color: #(color)} align: mod.prelude.widgets.Align{x: #(x) y: 0.5}});
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RoleListAction {
+    Select(usize),
+    /// Drop row `from` before row `to` (row indices).
+    Move { from: usize, to: usize },
+}
+
+/// Roles, highest first; one is selected for editing. Rows below `rank`
+/// drag to reorder (Flutter's hierarchy rule); @everyone stays last.
 #[derive(Script, ScriptHook, Widget)]
 pub struct RoleList {
     #[deref]
@@ -675,12 +704,86 @@ pub struct RoleList {
     pub roles: Vec<crate::backend::RoleForm>,
     #[rust]
     pub selected: usize,
+    #[rust]
+    pub rank: i64,
+    #[rust]
+    drag: Option<Drag>,
 }
 
 impl RoleList {
-    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<usize> {
+    fn movable(&self, i: usize) -> bool {
+        self.roles.get(i).is_some_and(|r| !r.everyone && r.position < self.rank)
+    }
+
+    /// The row slot under `y` and the y of its drop line.
+    fn slot_at(&self, cx: &Cx, y: f64) -> Option<(usize, f64)> {
         let list = self.view.portal_list(cx, ids!(list));
-        list.items_with_actions(actions).into_iter().find(|(_, item)| clicked(item, actions)).map(|(i, _)| i)
+        let list_ref = list.borrow()?;
+        let mut rects: Vec<(usize, Rect)> =
+            list_ref.items().iter().map(|(i, item)| (*i, item.widget.area().rect(cx))).filter(|(_, r)| r.size.y > 0.0).collect();
+        rects.sort_by_key(|(i, _)| *i);
+        for (i, r) in &rects {
+            if y < r.pos.y + r.size.y / 2.0 {
+                return Some((*i, r.pos.y));
+            }
+        }
+        let last = rects.last()?;
+        Some((last.0 + 1, last.1.pos.y + last.1.size.y))
+    }
+
+    fn show_drop_line(&mut self, cx: &mut Cx, y: Option<f64>) {
+        let top = self.view.area().rect(cx).pos.y;
+        let mut line = self.view.widget(cx, ids!(drop_line));
+        match y {
+            Some(y) => {
+                let off = (y - top - 1.0).max(0.0);
+                script_apply_eval!(cx, line, {margin: mod.prelude.widgets.Inset{top: #(off)}});
+                line.set_visible(cx, true);
+            }
+            None => line.set_visible(cx, false),
+        }
+        self.view.redraw(cx);
+    }
+
+    pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> Option<RoleListAction> {
+        let list = self.view.portal_list(cx, ids!(list));
+        let mut out = None;
+        for (i, item) in list.items_with_actions(actions) {
+            let view = item.as_view();
+            if let Some(e) = view.finger_down(actions) {
+                if e.device.is_primary_hit() {
+                    self.drag = Some(Drag { row: i, start_y: e.abs.y, moving: false, slot: None });
+                }
+            }
+            if let Some(e) = view.finger_move(actions) {
+                if let Some(mut d) = self.drag.clone().filter(|d| d.row == i) {
+                    if self.movable(i) && (e.abs.y - d.start_y).abs() > DRAG_THRESHOLD {
+                        d.moving = true;
+                    }
+                    if d.moving {
+                        // Only between rows we may move things among.
+                        let slot = self.slot_at(cx, e.abs.y).filter(|(s, _)| *s == 0 || self.movable(*s) || self.movable(s - 1));
+                        d.slot = slot.map(|(s, _)| s);
+                        self.show_drop_line(cx, slot.map(|(_, y)| y));
+                    }
+                    self.drag = Some(d);
+                }
+            }
+            if let Some(e) = view.finger_up(actions) {
+                let drag = self.drag.take();
+                self.show_drop_line(cx, None);
+                match drag {
+                    Some(d) if d.moving && d.row == i => {
+                        if let Some(to) = d.slot.filter(|s| *s != d.row && *s != d.row + 1) {
+                            out = Some(RoleListAction::Move { from: d.row, to });
+                        }
+                    }
+                    _ if !e.cancelled => out = Some(RoleListAction::Select(i)),
+                    _ => {}
+                }
+            }
+        }
+        out
     }
 }
 
@@ -696,6 +799,7 @@ impl Widget for RoleList {
                 let c = rgba(u32::from_str_radix(r.color.trim_start_matches('#'), 16).unwrap_or(0x99aab5), 1.0);
                 script_apply_eval!(cx, dot, {draw_bg +: {color: #(c)}});
                 row.label(cx, ids!(name)).set_text(cx, &r.name);
+                row.label(cx, ids!(count)).set_text(cx, &r.member_count.to_string());
                 row.draw_all(cx, &mut Scope::empty());
             }
         }
