@@ -566,3 +566,27 @@ async fn discover_and_join_a_public_server() {
     assert!(state.is_member(&bob_keys.public_key()));
     assert!(bob.discover().await.unwrap()[0].joined);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn custom_emoji_and_stickers_reach_members() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let alice = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let mut alice_rx = alice.updates();
+    let gid = owner.create_server("x").await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
+
+    owner.add_emoji(&gid, "blaze", "http://127.0.0.1:7778/abc").await.unwrap();
+    owner.add_sticker(&gid, "Wave", "says hi", "https://blossom.example/w.png").await.unwrap();
+    assert!(owner.add_emoji(&gid, "blaze", "https://blossom.example/b.png").await.is_err(), "names are unique");
+    assert!(owner.add_emoji(&gid, "Bad Name", "https://blossom.example/b.png").await.is_err());
+    wait_for(&mut alice_rx, "the sticker list", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let s = alice.server(&gid).unwrap().unwrap();
+    assert_eq!(s.emojis.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["blaze"]);
+    assert_eq!(s.stickers[0].description, "says hi");
+
+    owner.remove_emoji(&gid, "blaze").await.unwrap();
+    assert!(owner.server(&gid).unwrap().unwrap().emojis.is_empty());
+}

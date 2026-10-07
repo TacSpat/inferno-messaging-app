@@ -44,8 +44,10 @@ pub fn valid_emoji_name(name: &str) -> bool {
         && name.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
 }
 
+/// https, or plain http to this machine (a local Blossom in development).
 fn check_url(url: &str) -> Result<(), CustomError> {
-    if url.starts_with("https://") && url.len() > "https://".len() { Ok(()) } else { Err(CustomError::BadUrl) }
+    let local = ["http://127.0.0.1", "http://localhost"].iter().any(|p| url.starts_with(p));
+    if (url.starts_with("https://") && url.len() > "https://".len()) || local { Ok(()) } else { Err(CustomError::BadUrl) }
 }
 
 fn sign(keys: &Keys, kind: u16, d: String, gid: &str, rows: Vec<Vec<String>>) -> Result<Event, CustomError> {

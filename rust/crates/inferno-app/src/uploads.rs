@@ -12,6 +12,9 @@ pub enum Purpose {
     Banner,
     ServerIcon,
     ServerBanner,
+    /// Uploaded as picked, not cropped.
+    Emoji,
+    Sticker,
 }
 
 impl Purpose {
@@ -21,13 +24,18 @@ impl Purpose {
         match self {
             Purpose::Avatar => Target::Avatar,
             Purpose::Banner | Purpose::ServerBanner => Target::Banner,
-            Purpose::ServerIcon => Target::Icon,
+            Purpose::ServerIcon | Purpose::Emoji | Purpose::Sticker => Target::Icon,
         }
     }
 
     /// For the server's pictures (notes go to the overview page).
     pub fn server(self) -> bool {
         matches!(self, Purpose::ServerIcon | Purpose::ServerBanner)
+    }
+
+    /// Custom emoji and stickers go up as they are.
+    pub fn custom(self) -> bool {
+        matches!(self, Purpose::Emoji | Purpose::Sticker)
     }
 }
 

@@ -451,6 +451,35 @@ impl Session {
         invite_link::encode(gid, code, &invite.created_by, &hints)
     }
 
+    /// Publishes a changed emoji or sticker list (`custom` builds it).
+    async fn publish_custom(&self, gid: &str, build: impl FnOnce(&ServerState) -> std::result::Result<Event, crate::server::custom::CustomError>) -> Result<()> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let event = build(&state).map_err(|e| SessionError::Other(e.to_string()))?;
+        self.publish(&event).await?;
+        let _ = self.updates.send(Update::Server(gid.into()));
+        Ok(())
+    }
+
+    pub async fn add_emoji(&self, gid: &str, name: &str, url: &str) -> Result<()> {
+        use crate::server::custom;
+        self.publish_custom(gid, |s| custom::add_emoji(&self.keys, s, name, url)).await
+    }
+
+    pub async fn remove_emoji(&self, gid: &str, name: &str) -> Result<()> {
+        use crate::server::custom;
+        self.publish_custom(gid, |s| custom::remove_emoji(&self.keys, s, name)).await
+    }
+
+    pub async fn add_sticker(&self, gid: &str, name: &str, description: &str, url: &str) -> Result<()> {
+        use crate::server::custom;
+        self.publish_custom(gid, |s| custom::add_sticker(&self.keys, s, name, description, url)).await
+    }
+
+    pub async fn remove_sticker(&self, gid: &str, name: &str) -> Result<()> {
+        use crate::server::custom;
+        self.publish_custom(gid, |s| custom::remove_sticker(&self.keys, s, name)).await
+    }
+
     pub async fn revoke_invite(&self, gid: &str, code: &str) -> Result<()> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         self.publish(&publish::revoke_invite(&self.keys, &state, code)?).await?;

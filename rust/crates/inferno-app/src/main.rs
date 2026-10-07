@@ -1223,6 +1223,48 @@ script_mod! {
         }
     }
 
+    // Rails' emoji row: 32px image, :name:, uploaded by; delete on the right.
+    let EmojiCell = RoundedView{width: 380 height: Fit padding: Inset{left: 12 right: 8 top: 8 bottom: 8}
+        flow: Right spacing: 12 align: Align{y: 0.5} new_batch: true
+        draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+        img := Image{visible: false width: 32 height: 32 fit: ImageFit.Smallest}
+        View{width: Fill height: Fit flow: Down spacing: 2
+            name := Txt{text: "" draw_text.color: gray_200 draw_text.text_style: theme.font_code{font_size: 9.5}}
+            by := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}}
+        delete := SmallBtn{t.text: "Delete" t.draw_text.color: #xf87171}}
+    // Rails' sticker card: 96px image box, name, description, creator.
+    let StickerCell = RoundedView{width: 183 height: Fit padding: 12 flow: Down spacing: 4 align: Align{x: 0.5} new_batch: true
+        draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+        View{width: Fill height: 96 align: Center
+            img := Image{visible: false width: 96 height: 96 fit: ImageFit.Smallest}}
+        name := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
+        desc := Txt{width: Fit text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+        by := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+        delete := SmallBtn{t.text: "Delete" t.draw_text.color: #xf87171}}
+
+    mod.widgets.CustomListBase = #(lists::CustomList::register_widget(vm))
+    mod.widgets.CustomList = set_type_default() do mod.widgets.CustomListBase{
+        width: Fill height: 420
+        stickers: false
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Row := View{width: Fill height: Fit flow: Right spacing: 8 margin: Inset{bottom: 8}
+                i0 := EmojiCell{} i1 := EmojiCell{} i2 := View{visible: false} i3 := View{visible: false}}
+            Empty := View{width: Fill height: Fit padding: Inset{top: 32 bottom: 32} align: Align{x: 0.5}
+                Txt{text: "No custom emojis yet" draw_text.color: gray_500}}
+        }
+    }
+    mod.widgets.StickerList = mod.widgets.CustomList{
+        stickers: true
+        list +: {
+            Row := View{width: Fill height: Fit flow: Right spacing: 12 margin: Inset{bottom: 12}
+                i0 := StickerCell{} i1 := StickerCell{} i2 := StickerCell{} i3 := StickerCell{}}
+            Empty := View{width: Fill height: Fit padding: Inset{top: 32 bottom: 32} align: Align{x: 0.5}
+                Txt{text: "No stickers yet" draw_text.color: gray_500}}
+        }
+    }
+
     mod.widgets.DiscoverListBase = #(lists::DiscoverList::register_widget(vm))
     mod.widgets.DiscoverList = set_type_default() do mod.widgets.DiscoverListBase{
         width: Fill height: 380
@@ -1998,6 +2040,9 @@ script_mod! {
                             draw_bg.color: gray_800
                             srv_nav_title := NavHeader{text: "SERVER"}
                             snav_overview := NavItem{label.text: "Overview"}
+                            expression_hdr := NavHeader{text: "EXPRESSION"}
+                            snav_emoji := NavItem{label.text: "Emoji"}
+                            snav_stickers := NavItem{label.text: "Stickers"}
                             people_hdr := NavHeader{text: "PEOPLE"}
                             snav_members := NavItem{label.text: "Members"}
                             snav_roles := NavItem{label.text: "Roles"}
@@ -2227,6 +2272,48 @@ script_mod! {
                                     Txt{text: "Select all" draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
                                 }
                                 srv_members := mod.widgets.MemberAdminList{}
+                            }
+
+                            // Rails' emoji page: an upload row over the list.
+                            spage_emoji := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Emoji" margin: Inset{bottom: 2}}
+                                Hint{margin: Inset{bottom: 16} text: "Manage custom emojis for your server. Members can use them in messages with :name: syntax."}
+                                em_upload := Card{flow: Right spacing: 12 align: Align{y: 0.5}
+                                    em_preview := RoundedView{width: 56 height: 56 flow: Overlay align: Center cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: gray_900 draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+                                        plus := Txt{text: "+" draw_text.color: gray_500 draw_text.text_style.font_size: 16.0}
+                                        img := Image{visible: false width: 40 height: 40 fit: ImageFit.Smallest}}
+                                    View{width: Fill height: Fit flow: Down spacing: 4
+                                        em_name := Field{empty_text: "emoji_name"}
+                                        Hint{text: "PNG, GIF, WebP. Max 256KB. Lowercase letters, digits and _."}}
+                                    em_submit := Button{text: "Upload"}
+                                }
+                                em_title := Txt{margin: Inset{top: 8 bottom: 10} text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                em_list := mod.widgets.CustomList{}
+                            }
+
+                            spage_stickers := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Stickers" margin: Inset{bottom: 2}}
+                                Hint{margin: Inset{bottom: 16} text: "Custom stickers that members can send in messages."}
+                                st_upload := Card{flow: Right spacing: 12 align: Align{y: 0.0}
+                                    st_preview := RoundedView{width: 96 height: 96 flow: Overlay align: Center cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: gray_900 draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+                                        plus := Txt{text: "+" draw_text.color: gray_500 draw_text.text_style.font_size: 18.0}
+                                        img := Image{visible: false width: 80 height: 80 fit: ImageFit.Smallest}}
+                                    View{width: Fill height: Fit flow: Down spacing: 6
+                                        st_name := Field{empty_text: "Sticker name"}
+                                        st_desc := Field{empty_text: "Description (optional)"}
+                                        View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                                            Hint{width: Fill text: "PNG, GIF, WebP. Max 512KB."}
+                                            st_submit := Button{text: "Upload"}}
+                                    }
+                                }
+                                st_title := Txt{margin: Inset{top: 8 bottom: 10} text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                st_list := mod.widgets.StickerList{}
                             }
 
                             spage_bans := View{
@@ -2574,6 +2661,14 @@ pub struct App {
     srv_icon: String,
     #[rust]
     srv_banner: String,
+    /// An emoji or sticker picked but not uploaded: (sticker, bytes, mime).
+    #[rust]
+    custom_staged: Option<(bool, Vec<u8>, &'static str)>,
+    /// Name and description of the emoji or sticker being uploaded.
+    #[rust]
+    custom_pending: Option<(String, String)>,
+    #[rust]
+    custom_file_name: Option<String>,
     /// The status emoji being edited (picked from the emoji dropdown).
     #[rust]
     status_emoji: String,
@@ -2621,6 +2716,8 @@ pub enum Pending {
     RevokeInvite(String),
     JoinInvite(String),
     BatchKick(Vec<String>),
+    RemoveEmoji(String),
+    RemoveSticker(String),
     BatchBan(Vec<String>),
     /// (gid, owner hex) from discovery.
     JoinPublic(String, String),
@@ -2646,12 +2743,14 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 5] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 7] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
     (ids!(snav_invites), ids!(spage_invites)),
     (ids!(snav_bans), ids!(spage_bans)),
+    (ids!(snav_emoji), ids!(spage_emoji)),
+    (ids!(snav_stickers), ids!(spage_stickers)),
 ];
 
 /// Whether the role drafts differ from what's saved, in what the editor
@@ -3375,6 +3474,8 @@ impl App {
             }
             Pending::RevokeInvite(code) => self.send(backend::Command::RevokeInvite(code)),
             Pending::JoinInvite(link) => self.join_invite(cx, link),
+            Pending::RemoveEmoji(name) => self.send(backend::Command::RemoveEmoji(name)),
+            Pending::RemoveSticker(name) => self.send(backend::Command::RemoveSticker(name)),
             Pending::BatchKick(pks) => {
                 for pk in pks {
                     self.send(backend::Command::Kick(pk));
@@ -3398,7 +3499,7 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 5] {
+    fn srv_page_allowed(&self) -> [bool; 7] {
         let p = &self.perms;
         [
             p.manage_server,
@@ -3406,6 +3507,8 @@ impl App {
             p.manage_server || p.manage_roles,
             p.create_invite || p.manage_invites,
             p.manage_server || p.ban_members,
+            p.create_emojis || p.manage_emojis || p.manage_server,
+            p.create_stickers || p.manage_emojis || p.manage_server,
         ]
     }
 
@@ -3416,6 +3519,7 @@ impl App {
         }
         self.ui.view(cx, ids!(snav_delete)).set_visible(cx, self.perms.owner);
         self.ui.widget(cx, ids!(people_hdr)).set_visible(cx, allowed[1] || allowed[2] || allowed[3]);
+        self.ui.widget(cx, ids!(expression_hdr)).set_visible(cx, allowed[5] || allowed[6]);
         self.ui.widget(cx, ids!(moderation_hdr)).set_visible(cx, allowed[4]);
         self.ui.label(cx, ids!(srv_nav_title)).set_text(cx, &self.server_name.to_uppercase());
         self.fill_srv_pages(cx);
@@ -3467,6 +3571,7 @@ impl App {
         self.srv_banner = o.banner.clone();
         self.paint_server_preview(cx);
         self.fill_invites(cx);
+        self.fill_custom(cx);
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
@@ -3605,6 +3710,24 @@ impl App {
             l.rows = bans;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    /// The Expression pages: counts against Rails' limits, and the lists.
+    fn fill_custom(&mut self, cx: &mut Cx) {
+        use inferno_core::server::custom::{MAX_EMOJIS, MAX_STICKERS};
+        let p = self.perms.clone();
+        let (emojis, stickers) = (self.srv.emojis.clone(), self.srv.stickers.clone());
+        self.ui.label(cx, ids!(em_title)).set_text(cx, &format!("CUSTOM EMOJIS ({}/{MAX_EMOJIS})", emojis.len()));
+        self.ui.label(cx, ids!(st_title)).set_text(cx, &format!("STICKERS ({}/{MAX_STICKERS})", stickers.len()));
+        self.ui.view(cx, ids!(em_upload)).set_visible(cx, p.create_emojis || p.manage_emojis);
+        self.ui.view(cx, ids!(st_upload)).set_visible(cx, p.create_stickers || p.manage_emojis);
+        for (path, items, list) in [(ids!(em_list), emojis, ids!(em_list.list)), (ids!(st_list), stickers, ids!(st_list.list))] {
+            if let Some(mut l) = self.ui.widget(cx, path).borrow_mut::<lists::CustomList>() {
+                l.items = items;
+                l.can_delete = p.manage_emojis;
+            }
+            lists::redraw_items(cx, &self.ui.portal_list(cx, list));
+        }
     }
 
     /// Rails' batch bar: shown while members are selected.
@@ -4069,8 +4192,125 @@ impl App {
 
     /// Where notes about `purpose`'s picture go.
     fn picture_note(&mut self, cx: &mut Cx, purpose: uploads::Purpose, text: &str) {
+        if purpose.custom() {
+            let kind = if text.starts_with('⚠') { Toast::Error } else { Toast::Info };
+            self.toast(cx, text.trim_start_matches("⚠ "), kind);
+            return;
+        }
         let path: &[LiveId] = if purpose.server() { ids!(so_note) } else { ids!(profile_note) };
         self.ui.label(cx, path).set_text(cx, text);
+    }
+
+    /// A picked file: pictures go to the crop editor, emoji and stickers
+    /// are staged for upload.
+    fn picked_file(&mut self, cx: &mut Cx, purpose: uploads::Purpose, bytes: &[u8]) {
+        if purpose.custom() {
+            self.stage_custom(cx, purpose == uploads::Purpose::Sticker, bytes.to_vec());
+        } else {
+            self.open_crop(cx, purpose, bytes);
+        }
+    }
+
+    /// Rails' upload row: check type and size, preview it, and name it from
+    /// the file if there's no name yet.
+    fn stage_custom(&mut self, cx: &mut Cx, sticker: bool, bytes: Vec<u8>) {
+        let mime = if bytes.starts_with(b"\x89PNG") {
+            "image/png"
+        } else if bytes.starts_with(b"GIF8") {
+            "image/gif"
+        } else if bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+            "image/webp"
+        } else {
+            self.toast(cx, "Use a PNG, GIF or WebP image.", Toast::Error);
+            return;
+        };
+        let max = if sticker { 512 * 1024 } else { 256 * 1024 };
+        if bytes.len() > max {
+            self.toast(cx, &format!("That file is over {} KB.", max / 1024), Toast::Error);
+            return;
+        }
+        let (img, placeholder): (&[LiveId], &[LiveId]) =
+            if sticker { (ids!(st_preview.img), ids!(st_preview.plus)) } else { (ids!(em_preview.img), ids!(em_preview.plus)) };
+        let image = self.ui.image(cx, img);
+        match decode_image_from_data(&bytes) {
+            Ok(decoded) => {
+                let texture = decoded.into_new_texture(cx);
+                image.set_texture(cx, Some(texture));
+                image.set_visible(cx, true);
+                self.ui.widget(cx, placeholder).set_visible(cx, false);
+            }
+            // WebP may not decode here; it still uploads.
+            Err(_) => {
+                image.set_visible(cx, false);
+                self.ui.label(cx, placeholder).set_text(cx, "✓");
+            }
+        }
+        if let Some(name) = self.custom_file_name.take() {
+            let field: &[LiveId] = if sticker { ids!(st_name) } else { ids!(em_name) };
+            if self.ui.text_input(cx, field).text().trim().is_empty() {
+                let stem = name.rsplit_once('.').map_or(name.as_str(), |(s, _)| s).to_owned();
+                let auto = if sticker {
+                    stem.replace(['-', '_'], " ").split_whitespace().map(|w| {
+                        let mut c = w.chars();
+                        c.next().map(|f| f.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+                    }).collect::<Vec<_>>().join(" ")
+                } else {
+                    let mut out = String::new();
+                    for ch in stem.to_lowercase().chars() {
+                        let ch = if ch.is_ascii_alphanumeric() { ch } else { '_' };
+                        if !(ch == '_' && out.ends_with('_')) {
+                            out.push(ch);
+                        }
+                    }
+                    out.trim_matches('_').chars().take(32).collect()
+                };
+                self.ui.text_input(cx, field).set_text(cx, &auto);
+            }
+        }
+        self.custom_staged = Some((sticker, bytes, mime));
+        self.ui.redraw(cx);
+    }
+
+    /// Upload: the staged file goes to Blossom, then into the list.
+    fn upload_custom(&mut self, cx: &mut Cx, sticker: bool) {
+        let staged = self.custom_staged.take_if(|(s, _, _)| *s == sticker);
+        let Some((_, bytes, mime)) = staged else {
+            self.toast(cx, "Pick an image first.", Toast::Error);
+            return;
+        };
+        let name = self.ui.text_input(cx, if sticker { ids!(st_name) } else { ids!(em_name) }).text().trim().to_owned();
+        let ok = if sticker {
+            !name.is_empty() && name.chars().count() <= 50
+        } else {
+            inferno_core::server::custom::valid_emoji_name(&name)
+        };
+        if !ok {
+            let msg = if sticker { "Sticker names are 1-50 characters." } else { "Emoji names are lowercase letters, digits and _ (up to 32)." };
+            self.toast(cx, msg, Toast::Error);
+            self.custom_staged = Some((sticker, bytes, mime));
+            return;
+        }
+        let description = if sticker { self.ui.text_input(cx, ids!(st_desc)).text() } else { String::new() };
+        self.custom_pending = Some((name, description));
+        let purpose = if sticker { uploads::Purpose::Sticker } else { uploads::Purpose::Emoji };
+        let (id, sha256) = self.uploads.start(purpose, bytes, mime);
+        self.send(backend::Command::UploadAuth { id, sha256 });
+        self.toast(cx, "Uploading…", Toast::Info);
+    }
+
+    fn clear_custom_form(&mut self, cx: &mut Cx, sticker: bool) {
+        let (img, plus, fields): (&[LiveId], &[LiveId], &[&[LiveId]]) = if sticker {
+            (ids!(st_preview.img), ids!(st_preview.plus), &[ids!(st_name), ids!(st_desc)])
+        } else {
+            (ids!(em_preview.img), ids!(em_preview.plus), &[ids!(em_name)])
+        };
+        self.ui.image(cx, img).set_visible(cx, false);
+        self.ui.widget(cx, plus).set_visible(cx, true);
+        self.ui.label(cx, plus).set_text(cx, "+");
+        for f in fields {
+            self.ui.text_input(cx, f).set_text(cx, "");
+        }
+        self.ui.redraw(cx);
     }
 
     /// Opens the system picker for a picture.
@@ -4080,12 +4320,17 @@ impl App {
             uploads::Purpose::Banner => (live_id!(pick_banner), "Choose a banner"),
             uploads::Purpose::ServerIcon => (live_id!(pick_srv_icon), "Choose a server icon"),
             uploads::Purpose::ServerBanner => (live_id!(pick_srv_banner), "Choose a server banner"),
+            uploads::Purpose::Emoji => (live_id!(pick_emoji), "Choose an emoji image"),
+            uploads::Purpose::Sticker => (live_id!(pick_sticker), "Choose a sticker image"),
         };
         // UI tests can't drive the system dialog: INFERNO_TEST_PICK=<file>
         // stands in for the user's choice.
         if let Ok(path) = std::env::var("INFERNO_TEST_PICK") {
             match std::fs::read(&path) {
-                Ok(bytes) => self.open_crop(cx, purpose, &bytes),
+                Ok(bytes) => {
+                    self.custom_file_name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().into_owned());
+                    self.picked_file(cx, purpose, &bytes)
+                }
                 Err(e) => self.picture_note(cx, purpose, &format!("⚠ {path}: {e}")),
             }
             return;
@@ -4093,7 +4338,10 @@ impl App {
         let dialog = FileDialog::new()
             .set_id(id)
             .set_title(title.into())
-            .add_filter("Images".into(), ["png", "jpg", "jpeg", "gif", "webp", "bmp"].map(String::from).to_vec())
+            .add_filter(
+                "Images".into(),
+                if purpose.custom() { vec!["png".into(), "gif".into(), "webp".into()] } else { ["png", "jpg", "jpeg", "gif", "webp", "bmp"].map(String::from).to_vec() },
+            )
             .want_bytes(true);
         cx.open_select_file_dialog(dialog);
     }
@@ -4132,6 +4380,7 @@ impl App {
             uploads::Purpose::Banner => "Edit Banner",
             uploads::Purpose::ServerIcon => "Edit Server Icon",
             uploads::Purpose::ServerBanner => "Edit Server Banner",
+            uploads::Purpose::Emoji | uploads::Purpose::Sticker => "Edit Image",
         };
         self.ui.label(cx, ids!(crop_title)).set_text(cx, title);
         self.ui.slider(cx, ids!(crop_zoom)).set_value(cx, 1.0);
@@ -4157,6 +4406,8 @@ impl App {
             uploads::Purpose::Banner => ids!(ed_banner_img),
             uploads::Purpose::ServerIcon => ids!(sp_icon.pic),
             uploads::Purpose::ServerBanner => ids!(sp_banner),
+            uploads::Purpose::Emoji => ids!(em_preview.img),
+            uploads::Purpose::Sticker => ids!(st_preview.img),
         }
     }
 
@@ -4192,6 +4443,18 @@ impl App {
                     uploads::Purpose::Banner => self.draft_banner = url,
                     uploads::Purpose::ServerIcon => self.srv_icon = url,
                     uploads::Purpose::ServerBanner => self.srv_banner = url,
+                    uploads::Purpose::Emoji | uploads::Purpose::Sticker => {
+                        let sticker = purpose == uploads::Purpose::Sticker;
+                        if let Some((name, description)) = self.custom_pending.take() {
+                            self.send(if sticker {
+                                backend::Command::AddSticker { name, description, url }
+                            } else {
+                                backend::Command::AddEmoji { name, url }
+                            });
+                        }
+                        self.clear_custom_form(cx, sticker);
+                        return;
+                    }
                 }
                 if purpose.server() {
                     self.paint_server_preview(cx);
@@ -4819,10 +5082,19 @@ impl MatchEvent for App {
                 id if id == live_id!(pick_banner) => uploads::Purpose::Banner,
                 id if id == live_id!(pick_srv_icon) => uploads::Purpose::ServerIcon,
                 id if id == live_id!(pick_srv_banner) => uploads::Purpose::ServerBanner,
+                id if id == live_id!(pick_emoji) => uploads::Purpose::Emoji,
+                id if id == live_id!(pick_sticker) => uploads::Purpose::Sticker,
                 _ => continue,
             };
+            self.custom_file_name = match fa {
+                FileDialogAction::FileLoaded { files, .. } => files.first().map(|f| f.name.clone()),
+                FileDialogAction::FileSelected { paths, .. } => {
+                    paths.first().and_then(|p| std::path::Path::new(p).file_name()).map(|n| n.to_string_lossy().into_owned())
+                }
+                _ => None,
+            };
             match bytes {
-                Some(b) => self.open_crop(cx, purpose, &b),
+                Some(b) => self.picked_file(cx, purpose, &b),
                 None => self.picture_note(cx, purpose, "⚠ Couldn't read that file."),
             }
         }
@@ -5354,6 +5626,28 @@ impl MatchEvent for App {
                 let body = format!("Delete the {} role? Members who have it lose it.", r.name);
                 self.confirm(cx, Pending::DeleteRole(r.id), "Delete Role", &body, "Delete Role", false);
             }
+        }
+        if tap(&self.ui, cx, ids!(em_preview)) {
+            self.pick_picture(cx, uploads::Purpose::Emoji);
+        }
+        if tap(&self.ui, cx, ids!(st_preview)) {
+            self.pick_picture(cx, uploads::Purpose::Sticker);
+        }
+        if self.ui.button(cx, ids!(em_submit)).clicked(actions) {
+            self.upload_custom(cx, false);
+        }
+        if self.ui.button(cx, ids!(st_submit)).clicked(actions) {
+            self.upload_custom(cx, true);
+        }
+        let em_del = self.ui.widget(cx, ids!(em_list)).borrow::<lists::CustomList>().and_then(|l| l.deleted(cx, actions));
+        if let Some(name) = em_del {
+            let body = format!("Delete :{name}:?");
+            self.confirm(cx, Pending::RemoveEmoji(name), "Delete Emoji", &body, "Delete", false);
+        }
+        let st_del = self.ui.widget(cx, ids!(st_list)).borrow::<lists::CustomList>().and_then(|l| l.deleted(cx, actions));
+        if let Some(name) = st_del {
+            let body = format!("Delete sticker '{name}'?");
+            self.confirm(cx, Pending::RemoveSticker(name), "Delete Sticker", &body, "Delete", false);
         }
         let member_act = self.ui.widget(cx, ids!(srv_members)).borrow_mut::<lists::MemberAdminList>().and_then(|mut l| l.handle_list_actions(cx, actions));
         if let Some(act) = member_act {

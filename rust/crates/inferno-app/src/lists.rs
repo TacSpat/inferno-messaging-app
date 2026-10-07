@@ -1073,6 +1073,89 @@ impl Widget for MemberAdminList {
     }
 }
 
+// ─── Expression pages ────────────────────────────────────────────────────
+
+use crate::backend::CustomItem;
+
+/// Rails' emoji list (two to a row) or sticker grid (four to a row), with
+/// delete for `manage_emojis`.
+#[derive(Script, ScriptHook, Widget)]
+pub struct CustomList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub items: Vec<CustomItem>,
+    #[rust]
+    pub can_delete: bool,
+    #[live]
+    stickers: bool,
+}
+
+impl CustomList {
+    fn per_row(&self) -> usize {
+        if self.stickers { 4 } else { 2 }
+    }
+
+    /// The name of the item whose delete button was clicked.
+    pub fn deleted(&self, cx: &mut Cx, actions: &Actions) -> Option<String> {
+        let list = self.view.portal_list(cx, ids!(list));
+        for (row, item) in list.items_with_actions(actions) {
+            for col in 0..self.per_row() {
+                let cell = [id!(i0), id!(i1), id!(i2), id!(i3)][col];
+                if item.view(cx, &[cell, id!(delete)]).finger_up(actions).is_some_and(|e| !e.cancelled) {
+                    return self.items.get(row * self.per_row() + col).map(|i| i.name.clone());
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Widget for CustomList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        let per = self.per_row();
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            list.set_item_range(cx, 0, self.items.len().div_ceil(per).max(1));
+            while let Some(i) = list.next_visible_item(cx) {
+                if self.items.is_empty() {
+                    if i == 0 {
+                        list.item(cx, i, id!(Empty)).draw_all(cx, &mut Scope::empty());
+                    }
+                    continue;
+                }
+                let row = list.item(cx, i, id!(Row));
+                for col in 0..per {
+                    let cell_id = [id!(i0), id!(i1), id!(i2), id!(i3)][col];
+                    let cell = row.view(cx, &[cell_id]);
+                    let Some(it) = self.items.get(i * per + col) else {
+                        cell.set_visible(cx, false);
+                        continue;
+                    };
+                    cell.set_visible(cx, true);
+                    let img = cell.image(cx, ids!(img));
+                    crate::images::show(cx, &img, Some(it.url.as_str()));
+                    let name = if self.stickers { it.name.clone() } else { format!(":{}:", it.name) };
+                    cell.label(cx, ids!(name)).set_text(cx, &name);
+                    let by = if it.by.is_empty() { String::new() } else if self.stickers { format!("by {}", it.by) } else { format!("uploaded by {}", it.by) };
+                    cell.label(cx, ids!(by)).set_text(cx, &by);
+                    if self.stickers {
+                        cell.label(cx, ids!(desc)).set_text(cx, &it.description);
+                        cell.widget(cx, ids!(desc)).set_visible(cx, !it.description.is_empty());
+                    }
+                    cell.view(cx, ids!(delete)).set_visible(cx, self.can_delete);
+                }
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
 // ─── Discovery ───────────────────────────────────────────────────────────
 
 /// Flutter's server catalog: cards three to a row.

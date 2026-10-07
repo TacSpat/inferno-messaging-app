@@ -48,6 +48,9 @@ pub struct ServerPerms {
     pub ban_members: bool,
     pub create_invite: bool,
     pub manage_invites: bool,
+    pub create_emojis: bool,
+    pub create_stickers: bool,
+    pub manage_emojis: bool,
     pub owner: bool,
     pub send_custom_emojis: bool,
     pub send_custom_stickers: bool,
@@ -146,6 +149,15 @@ pub struct MemberInfo {
     pub me: bool,
 }
 
+/// A custom emoji or sticker, as the Expression pages list them.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CustomItem {
+    pub name: String,
+    pub description: String,
+    pub url: String,
+    pub by: String,
+}
+
 /// An active invite, as Rails' invites page lists it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InviteItem {
@@ -183,6 +195,8 @@ pub struct ServerSettings {
     pub invites: Vec<InviteItem>,
     /// Owner first, then by name.
     pub members: Vec<MemberInfo>,
+    pub emojis: Vec<CustomItem>,
+    pub stickers: Vec<CustomItem>,
     /// Our highest role position (Flutter's hierarchy rule: we may edit,
     /// reorder and hand out only roles below it); `i64::MAX` for the owner.
     pub my_rank: i64,
@@ -443,6 +457,10 @@ pub enum Command {
     /// `max_uses` 0 = unlimited, `expires_in` seconds, 0 = never.
     CreateInvite { max_uses: u32, expires_in: i64 },
     RevokeInvite(String),
+    AddEmoji { name: String, url: String },
+    RemoveEmoji(String),
+    AddSticker { name: String, description: String, url: String },
+    RemoveSticker(String),
     SaveProfile(ProfileForm),
     Backup(String),
     AddRelay(String),
@@ -1251,6 +1269,24 @@ impl Backend {
                 let link = self.session.create_invite(&gid, max_uses, expires_at).await.map_err(|e| e.to_string())?;
                 Cx::post_action(Update::Invite(link));
             }
+            Command::AddEmoji { name, url } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.add_emoji(&gid, &name, &url).await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Notice(format!(":{name}: added.")));
+            }
+            Command::RemoveEmoji(name) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.remove_emoji(&gid, &name).await.map_err(|e| e.to_string())?;
+            }
+            Command::AddSticker { name, description, url } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.add_sticker(&gid, &name, &description, &url).await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Notice(format!("Sticker \"{name}\" added.")));
+            }
+            Command::RemoveSticker(name) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session.remove_sticker(&gid, &name).await.map_err(|e| e.to_string())?;
+            }
             Command::RevokeInvite(code) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 self.session.revoke_invite(&gid, &code).await.map_err(|e| e.to_string())?;
@@ -1719,6 +1755,9 @@ impl Backend {
             ban_members: state.has(&me, inferno_core::server::Permission::BanMembers),
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
             manage_invites: state.has(&me, inferno_core::server::Permission::ManageInvites),
+            create_emojis: state.has(&me, inferno_core::server::Permission::CreateEmojis),
+            create_stickers: state.has(&me, inferno_core::server::Permission::CreateStickers),
+            manage_emojis: state.has(&me, inferno_core::server::Permission::ManageEmojis),
             owner: state.is_owner(&me),
             send_custom_emojis: state.has(&me, inferno_core::server::Permission::SendCustomEmojis),
             send_custom_stickers: state.has(&me, inferno_core::server::Permission::SendCustomStickers),
@@ -1834,7 +1873,16 @@ impl Backend {
             .collect();
         member_infos.sort_by(|a, b| b.owner.cmp(&a.owner).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
         let m = &state.metadata;
+        let by = |pk: &Option<PublicKey>| pk.map(|p| display(&state, &p, &people).name).unwrap_or_default();
+        let emojis = state.emojis.iter().map(|e| CustomItem { name: e.name.clone(), description: String::new(), url: e.url.clone(), by: by(&e.creator) }).collect();
+        let stickers = state
+            .stickers
+            .iter()
+            .map(|s| CustomItem { name: s.name.clone(), description: s.description.clone(), url: s.url.clone(), by: by(&s.creator) })
+            .collect();
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            emojis,
+            stickers,
             members: member_infos,
             name: m.name.clone(),
             about: m.about.clone(),
