@@ -2132,6 +2132,7 @@ script_mod! {
                             draw_bg.color: gray_800
                             srv_nav_title := NavHeader{text: "SERVER"}
                             snav_overview := NavItem{label.text: "Overview"}
+                            snav_voice := NavItem{label.text: "Voice"}
                             expression_hdr := NavHeader{text: "EXPRESSION"}
                             snav_emoji := NavItem{label.text: "Emoji"}
                             snav_stickers := NavItem{label.text: "Stickers"}
@@ -2426,6 +2427,51 @@ script_mod! {
                                 }
                                 st_title := Txt{margin: Inset{top: 8 bottom: 10} text: "" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
                                 st_list := mod.widgets.StickerList{}
+                            }
+
+                            // Rails' voice page. Per-channel bitrate, limit and
+                            // video live on each channel's own page; this lists
+                            // them with Edit rather than repeating the form.
+                            spage_voice := View{
+                                visible: false
+                                width: 768 height: Fit flow: Down
+                                PageTitle{text: "Voice" margin: Inset{bottom: 2}}
+                                vo_sub := Hint{margin: Inset{bottom: 16} text: ""}
+                                vo_admin := Card{
+                                    vo_enabled := CheckBox{text: "Enable Voice Channels"}
+                                    Hint{margin: Inset{left: 13} text: "Allow members to use voice channels on this server"}
+                                }
+                                Card{
+                                    Txt{text: "VOICE PROVIDERS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    vo_not_ready := RoundedView{visible: false width: Fill height: Fit margin: Inset{top: 10} padding: 12 flow: Down spacing: 2
+                                        new_batch: true draw_bg.color: #xf59e0b1a draw_bg.border_radius: 4.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xf59e0b40
+                                        Txt{text: "Voice is not ready" draw_text.color: #xfbbf24 draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                                        vo_not_ready_why := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}}
+                                    Hint{margin: Inset{top: 10} text: "Members who share their LiveKit accounts power voice channels for this server. Multiple providers enable load balancing and automatic failover."}
+                                    vo_providers := Txt{width: Fill margin: Inset{top: 8} text: "" draw_text.color: gray_200}
+                                    vo_volunteer := Button{margin: Inset{top: 10} text: "Volunteer as Voice Provider"}
+                                    vo_note := Hint{margin: Inset{top: 6} text: ""}
+                                }
+                                vo_afk := Card{
+                                    Txt{text: "AFK SETTINGS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                    FieldLabel{text: "AFK CHANNEL"}
+                                    vo_afk_channel := DropDown{width: Fill labels: ["None"]}
+                                    Hint{margin: Inset{top: 4} text: "Users in the AFK channel are force-muted with no sidechat"}
+                                    View{width: Fill height: Fit flow: Right spacing: 12
+                                        View{width: Fill height: Fit flow: Down
+                                            FieldLabel{text: "AFK TIMEOUT"}
+                                            vo_afk_timeout := DropDown{width: Fill labels: ["Disabled", "1 minute", "5 minutes", "10 minutes", "15 minutes", "30 minutes", "1 hour"]}}
+                                        View{width: Fill height: Fit flow: Down
+                                            FieldLabel{text: "AFK ACTION"}
+                                            vo_afk_action := DropDown{width: Fill labels: ["Move to AFK channel", "Disconnect from voice"]}}
+                                    }
+                                    View{width: Fill height: Fit margin: Inset{top: 16} flow: Right
+                                        View{width: Fill height: 1}
+                                        vo_save := Button{text: "Save Changes"}}
+                                }
+                                Txt{margin: Inset{top: 8 bottom: 8} text: "CHANNEL SETTINGS" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.0}}
+                                vo_channels := mod.widgets.PeopleList{height: 320
+                                    list +: {Empty +: {text: "No voice channels yet. Create a voice channel to configure its settings."}}}
                             }
 
                             spage_audit := View{
@@ -2868,7 +2914,7 @@ const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
-const SRV_PAGES: [(&[LiveId], &[LiveId]); 8] = [
+const SRV_PAGES: [(&[LiveId], &[LiveId]); 9] = [
     (ids!(snav_overview), ids!(spage_overview)),
     (ids!(snav_members), ids!(spage_members)),
     (ids!(snav_roles), ids!(spage_roles)),
@@ -2877,6 +2923,7 @@ const SRV_PAGES: [(&[LiveId], &[LiveId]); 8] = [
     (ids!(snav_emoji), ids!(spage_emoji)),
     (ids!(snav_stickers), ids!(spage_stickers)),
     (ids!(snav_audit), ids!(spage_audit)),
+    (ids!(snav_voice), ids!(spage_voice)),
 ];
 
 /// Whether the role drafts differ from what's saved, in what the editor
@@ -2902,6 +2949,9 @@ const SERVER_TYPES: [(&str, &str); 5] = [
     ("work_team", "Work & Team"),
     ("adult", "18+"),
 ];
+
+/// Rails' AFK timeouts in minutes, in the dropdown's order (0 = off).
+const AFK_MINUTES: [u32; 7] = [0, 1, 5, 10, 15, 30, 60];
 
 /// Rails' voice bitrates (bits per second), in the dropdown's order.
 const BITRATES: [u32; 5] = [32_000, 64_000, 96_000, 128_000, 256_000];
@@ -3673,7 +3723,7 @@ impl App {
     // ─── Server settings ─────────────────────────────────────────────────
 
     /// Which server settings pages we may open (Rails' gates).
-    fn srv_page_allowed(&self) -> [bool; 8] {
+    fn srv_page_allowed(&self) -> [bool; 9] {
         let p = &self.perms;
         [
             p.manage_server,
@@ -3684,6 +3734,8 @@ impl App {
             p.create_emojis || p.manage_emojis || p.manage_server,
             p.create_stickers || p.manage_emojis || p.manage_server,
             p.manage_server,
+            // Rails shows Voice to every member; only admins change it.
+            true,
         ]
     }
 
@@ -3751,6 +3803,7 @@ impl App {
             l.rows = o.audit.clone();
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_audit.list)));
+        self.fill_voice(cx);
         self.role_drafts = o.roles.clone();
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
@@ -3889,6 +3942,62 @@ impl App {
             l.rows = bans;
         }
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
+    }
+
+    /// Rails' voice page from the settings snapshot.
+    fn fill_voice(&mut self, cx: &mut Cx) {
+        let o = self.srv.clone();
+        let admin = self.perms.manage_server;
+        self.ui.label(cx, ids!(vo_sub)).set_text(cx, &format!("Voice settings for {}", o.name));
+        self.ui.view(cx, ids!(vo_admin)).set_visible(cx, admin);
+        self.ui.view(cx, ids!(vo_afk)).set_visible(cx, admin);
+        self.ui.check_box(cx, ids!(vo_enabled)).set_active(cx, o.voice_enabled, Animate::No);
+        let ready = o.voice_enabled && !o.voice_providers.is_empty();
+        self.ui.view(cx, ids!(vo_not_ready)).set_visible(cx, !ready);
+        let why = if !o.voice_enabled && admin {
+            "Enable voice channels above, then have a member volunteer as a voice provider."
+        } else if !o.voice_enabled {
+            "Voice channels are disabled on this server. An admin needs to enable them."
+        } else {
+            "A server member needs to volunteer their LiveKit credentials as a voice provider."
+        };
+        self.ui.label(cx, ids!(vo_not_ready_why)).set_text(cx, why);
+        let list = if o.voice_providers.is_empty() { "No providers yet.".to_owned() } else { o.voice_providers.join(", ") };
+        self.ui.label(cx, ids!(vo_providers)).set_text(cx, &list);
+        // Providers are listed in the server's metadata, which only admins
+        // publish; LiveKit credentials come with voice calling itself.
+        self.ui.button(cx, ids!(vo_volunteer)).set_visible(cx, admin);
+        self.ui.button(cx, ids!(vo_volunteer)).set_text(cx, if o.me_provider { "Stop Providing Voice" } else { "Volunteer as Voice Provider" });
+        let note = if admin {
+            "Voice calling isn't in this app yet: volunteering lists you, and LiveKit setup arrives with calls."
+        } else {
+            "Ask an admin to list you as a provider. LiveKit setup arrives with voice calling."
+        };
+        self.ui.label(cx, ids!(vo_note)).set_text(cx, note);
+        let mut labels = vec!["None".to_owned()];
+        labels.extend(o.voice_channels.iter().map(|(_, n, _)| n.clone()));
+        let pick = o.afk_channel.as_ref().and_then(|a| o.voice_channels.iter().position(|(i, _, _)| i == a)).map_or(0, |i| i + 1);
+        let dd = self.ui.drop_down(cx, ids!(vo_afk_channel));
+        dd.set_labels(cx, labels);
+        dd.set_selected_item(cx, pick);
+        let t = AFK_MINUTES.iter().position(|m| *m == o.afk_timeout).unwrap_or(0);
+        self.ui.drop_down(cx, ids!(vo_afk_timeout)).set_selected_item(cx, t);
+        self.ui.drop_down(cx, ids!(vo_afk_action)).set_selected_item(cx, usize::from(o.afk_action == "kick"));
+        let rows: Vec<lists::PersonRow> = o
+            .voice_channels
+            .iter()
+            .map(|(id, name, summary)| lists::PersonRow {
+                id: id.clone(),
+                name: name.clone(),
+                detail: summary.clone(),
+                a: self.perms.manage_channels.then(|| "Edit".to_owned()),
+                b: None,
+            })
+            .collect();
+        if let Some(mut l) = self.ui.widget(cx, ids!(vo_channels)).borrow_mut::<lists::PeopleList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(vo_channels.list)));
     }
 
     /// The prune preview list, and its footer once there's something to prune.
@@ -5900,6 +6009,27 @@ impl MatchEvent for App {
                 M::Kick(pk) => self.run_menu_action(cx, ctxmenu::Action::Kick(pk)),
                 M::Ban(pk) => self.run_menu_action(cx, ctxmenu::Action::Ban(pk)),
             }
+        }
+        if self.ui.button(cx, ids!(vo_save)).clicked(actions) || self.ui.check_box(cx, ids!(vo_enabled)).changed(actions).is_some() {
+            let ch = self.ui.drop_down(cx, ids!(vo_afk_channel)).selected_item();
+            let t = self.ui.drop_down(cx, ids!(vo_afk_timeout)).selected_item();
+            let kick = self.ui.drop_down(cx, ids!(vo_afk_action)).selected_item() == 1;
+            self.send(backend::Command::SaveVoice {
+                enabled: self.ui.check_box(cx, ids!(vo_enabled)).active(cx),
+                afk_channel: ch.checked_sub(1).and_then(|i| self.srv.voice_channels.get(i)).map(|(id, _, _)| id.clone()),
+                afk_timeout: AFK_MINUTES.get(t).copied().unwrap_or(0),
+                afk_action: if kick { "kick".into() } else { "move".into() },
+            });
+            self.toast(cx, "Voice settings saved.", Toast::Success);
+        }
+        if self.ui.button(cx, ids!(vo_volunteer)).clicked(actions) {
+            self.send(backend::Command::VoiceProvider(!self.srv.me_provider));
+        }
+        let vo_edit = self.ui.widget(cx, ids!(vo_channels)).borrow::<lists::PeopleList>().and_then(|l| l.pressed(cx, actions));
+        if let Some((id, _)) = vo_edit {
+            self.ui.view(cx, ids!(srv_settings)).set_visible(cx, false);
+            self.ui.view(cx, ids!(role_save_bar)).set_visible(cx, false);
+            self.open_channel_page(cx, Some(id), None);
         }
         if tap(&self.ui, cx, ids!(mem_prune)) {
             let open = !self.ui.view(cx, ids!(prune_panel)).visible();

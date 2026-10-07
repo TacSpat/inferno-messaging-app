@@ -221,6 +221,17 @@ pub struct ServerSettings {
     pub stickers: Vec<CustomItem>,
     /// Newest first, at most 200.
     pub audit: Vec<AuditItem>,
+    pub voice_enabled: bool,
+    /// Names of the members whose LiveKit accounts power voice (Rails).
+    pub voice_providers: Vec<String>,
+    pub me_provider: bool,
+    pub afk_channel: Option<String>,
+    /// Minutes; 0 = off.
+    pub afk_timeout: u32,
+    /// "move" or "kick".
+    pub afk_action: String,
+    /// Voice channels by sidebar order: (id, name, summary).
+    pub voice_channels: Vec<(String, String, String)>,
     /// Our highest role position (Flutter's hierarchy rule: we may edit,
     /// reorder and hand out only roles below it); `i64::MAX` for the owner.
     pub my_rank: i64,
@@ -510,6 +521,9 @@ pub enum Command {
     /// Nest a voice channel under a hearth (or out of one with `None`).
     NestChannel { id: String, hearth: Option<String>, index: Option<usize> },
     MoveCategory { id: String, index: usize },
+    SaveVoice { enabled: bool, afk_channel: Option<String>, afk_timeout: u32, afk_action: String },
+    /// Add or remove ourselves as a voice provider.
+    VoiceProvider(bool),
     LeaveServer,
     MarkRead(String),
     DeleteMessage(String),
@@ -1171,6 +1185,33 @@ impl Backend {
             Command::NestChannel { id, hearth, index } => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 self.session.nest_channel(&gid, &id, hearth.as_deref(), index).await.map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::SaveVoice { enabled, afk_channel, afk_timeout, afk_action } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                self.session
+                    .update_metadata(&gid, move |m| {
+                        m.voice_enabled = enabled;
+                        m.afk_channel = afk_channel;
+                        m.afk_timeout_mins = afk_timeout;
+                        m.afk_action = afk_action;
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
+                self.publish_server_keep_channel();
+            }
+            Command::VoiceProvider(on) => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let me = self.session.keys().public_key();
+                self.session
+                    .update_metadata(&gid, move |m| {
+                        m.voice_providers.retain(|p| *p != me);
+                        if on {
+                            m.voice_providers.push(me);
+                        }
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?;
                 self.publish_server_keep_channel();
             }
             Command::MoveCategory { id, index } => {
@@ -1997,7 +2038,31 @@ impl Backend {
                 AuditItem { actor: name(&e.actor), text, at: e.at, tone }
             })
             .collect();
+        let mut voice_channels = Vec::new();
+        for item in inferno_core::server::order::root_items(&state.structure) {
+            let ids = match item {
+                inferno_core::server::order::RootItem::Channel(id) => vec![id],
+                inferno_core::server::order::RootItem::Category(id) => inferno_core::server::order::in_category(&state.structure, &id),
+            };
+            for id in ids {
+                for n in inferno_core::server::order::with_embers(&state.structure, &id) {
+                    let Some(c) = state.channel(&n.id).filter(|c| c.kind == "voice") else { continue };
+                    let limit = if c.voice_user_limit == 0 { "no user limit".to_owned() } else { format!("up to {} people", c.voice_user_limit) };
+                    let video = if c.video_enabled { " · video on" } else { "" };
+                    let nested = state.structure.hearth_of(&c.id).and_then(|h| state.channel(h)).map(|h| format!(" · ember of {}", h.name)).unwrap_or_default();
+                    let summary = format!("{} kbps · {limit}{video}{nested}", c.voice_bitrate / 1000);
+                    voice_channels.push((c.id.clone(), format!("{}{}", "\u{a0}\u{a0}".repeat(n.depth), c.name), summary));
+                }
+            }
+        }
         Cx::post_action(Update::ServerSettings(ServerSettings {
+            voice_enabled: m.voice_enabled,
+            voice_providers: m.voice_providers.iter().map(|pk| display(&state, pk, &people).name).collect(),
+            me_provider: m.voice_providers.contains(&me),
+            afk_channel: m.afk_channel.clone(),
+            afk_timeout: m.afk_timeout_mins,
+            afk_action: m.afk_action.clone(),
+            voice_channels,
             audit,
             emojis,
             stickers,
