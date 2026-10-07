@@ -115,8 +115,14 @@ const MAX_LEVELS: u8 = 3;
 pub struct ChannelList {
     #[deref]
     view: View,
+    /// The rows shown: `all` less collapsed categories' channels.
     #[rust]
     pub rows: Vec<SidebarRow>,
+    #[rust]
+    all: Vec<SidebarRow>,
+    /// Collapsed category ids (Rails' category-collapse, remembered).
+    #[rust]
+    collapsed: Option<HashSet<String>>,
     #[rust]
     pub selected: Option<String>,
     /// manage_channels: gears and drag-to-reorder.
@@ -138,7 +144,62 @@ pub struct ChannelList {
     scroll_dir: f64,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct SidebarPrefs {
+    #[serde(default)]
+    collapsed: Vec<String>,
+}
+
 impl ChannelList {
+    fn collapsed(&mut self) -> &mut HashSet<String> {
+        self.collapsed.get_or_insert_with(|| {
+            crate::picker::file("sidebar")
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|b| serde_json::from_slice::<SidebarPrefs>(&b).ok())
+                .map(|p| p.collapsed.into_iter().collect())
+                .unwrap_or_default()
+        })
+    }
+
+    /// New sidebar rows from the server.
+    pub fn set_rows(&mut self, rows: Vec<SidebarRow>) {
+        self.all = rows;
+        self.refilter();
+    }
+
+    /// Hides collapsed categories' channels, except the one we're in
+    /// (Discord's touch; Rails hid it too).
+    pub fn refilter(&mut self) {
+        let collapsed = self.collapsed().clone();
+        let selected = self.selected.clone();
+        self.rows = self
+            .all
+            .iter()
+            .filter(|r| match r {
+                SidebarRow::Channel { id, category: Some(c), .. } => !collapsed.contains(c) || selected.as_deref() == Some(id.as_str()),
+                _ => true,
+            })
+            .cloned()
+            .collect();
+    }
+
+    fn toggle_category(&mut self, cx: &mut Cx, id: &str) {
+        let set = self.collapsed();
+        if !set.remove(id) {
+            set.insert(id.to_owned());
+        }
+        let prefs = SidebarPrefs { collapsed: set.iter().cloned().collect() };
+        if let (Some(p), Ok(json)) = (crate::picker::file("sidebar"), serde_json::to_vec(&prefs)) {
+            if let Some(dir) = p.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(p, json);
+        }
+        self.refilter();
+        self.hovered = None;
+        redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
+    }
+
     fn depth(&self, i: usize) -> Option<u8> {
         match self.rows.get(i) {
             Some(SidebarRow::Channel { depth, .. }) => Some(*depth),
@@ -413,6 +474,10 @@ impl ChannelList {
                     (Some(d), Some(SidebarRow::Category { .. })) if d.moving && d.row == i => {
                         out = d.slot.filter(|s| *s != d.row).and_then(|s| self.category_drop(d.row, s));
                     }
+                    // Rails: clicking a category header collapses it.
+                    (_, Some(SidebarRow::Category { id, .. })) if !e.cancelled && e.device.is_primary_hit() => {
+                        self.toggle_category(cx, &id);
+                    }
                     (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled && e.device.is_primary_hit() => {
                         out = Some(ChannelListAction::Select(id));
                     }
@@ -459,9 +524,16 @@ impl Widget for ChannelList {
                 let Some(r) = self.rows.get(i) else { continue };
                 let hovered = self.hovered == Some(i);
                 match r {
-                    SidebarRow::Category { name, .. } => {
+                    SidebarRow::Category { id, name } => {
                         let row = list.item(cx, i, id!(Category));
                         row.label(cx, ids!(label)).set_text(cx, name);
+                        // Rails' arrow turns -90° when collapsed.
+                        let shut = self.collapsed.as_ref().is_some_and(|c| c.contains(id));
+                        for (path, on) in [(ids!(open), !shut), (ids!(shut), shut)] {
+                            let mut ico = row.widget(cx, path);
+                            let c = crate::theme::tok("gray_400", if on { 1.0 } else { 0.0 });
+                            script_apply_eval!(cx, ico, {draw_icon +: {color: #(c)}});
+                        }
                         row.view(cx, ids!(add)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }

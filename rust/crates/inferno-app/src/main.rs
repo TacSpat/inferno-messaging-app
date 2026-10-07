@@ -168,7 +168,10 @@ script_mod! {
         padding: Inset{left: 8 right: 8 top: 16 bottom: 4}
         flow: Right spacing: 2
         align: Align{y: 0.5}
-        Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}
+        cursor: MouseCursor.Hand
+        View{width: 12 height: 12 flow: Overlay
+            open := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}
+            shut := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #0000 draw_icon.svg: crate_resource("self:resources/icons/chevron_right.svg")}}
         label := Txt{width: Fill text: "CATEGORY" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
         // Rails: a hover "+" titled "Create Channel" (manage_channels).
         add := View{visible: false width: Fit height: Fit cursor: MouseCursor.Hand
@@ -5049,7 +5052,7 @@ impl App {
                     self.notice(cx, "");
                 }
                 if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
-                    list.rows = sidebar.clone();
+                    list.set_rows(sidebar.clone());
                     list.can_manage = perms.manage_channels;
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
@@ -5066,6 +5069,7 @@ impl App {
             Update::Channel { gid, channel_id, name, topic, encrypted } => {
                 if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
                     list.selected = Some(channel_id.clone());
+                    list.refilter();
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
                 self.ui.label(cx, ids!(channel_hash)).set_text(cx, if *encrypted { "🔒" } else { "#" });
