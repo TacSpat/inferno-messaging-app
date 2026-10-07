@@ -33,6 +33,8 @@ pub struct Outgoing<'a> {
     pub mentions: Vec<PublicKey>,
     /// NIP-30 `(shortcode, url)` for custom emoji used in `content`.
     pub emoji: Vec<(String, String)>,
+    /// Attached files (their URLs are also in `content`, as Rails does).
+    pub files: Vec<crate::media::FileMeta>,
 }
 
 fn group(channel: &Channel) -> Result<&str, SendError> {
@@ -92,6 +94,7 @@ pub fn message(
     for (code, url) in &msg.emoji {
         tags.push(Tag::parse(["emoji", code, url]).expect("tag"));
     }
+    tags.extend(msg.files.iter().map(|f| f.tag()));
     let content = seal_content(keys, channel, msg.content, &mut tags)?;
     sign(keys, kinds::CHANNEL_MESSAGE, content, tags)
 }

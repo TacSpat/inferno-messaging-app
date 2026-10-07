@@ -22,6 +22,8 @@ pub struct ChannelMessage {
     pub spoiler: bool,
     pub mentions: Vec<PublicKey>,
     pub emoji: HashMap<String, String>,
+    /// NIP-92 file descriptions.
+    pub files: Vec<crate::media::FileMeta>,
     pub pinned: bool,
     /// Emoji → who reacted with it.
     pub reactions: BTreeMap<String, BTreeSet<PublicKey>>,
@@ -113,6 +115,7 @@ impl Timeline {
                                 .filter(|s| s.first().map(String::as_str) == Some("emoji"))
                                 .filter_map(|s| Some((s.get(1)?.clone(), s.get(2)?.clone())))
                                 .collect(),
+                            files: crate::media::files(e),
                             pinned: false,
                             reactions: BTreeMap::new(),
                         },
