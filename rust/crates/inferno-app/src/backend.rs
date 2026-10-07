@@ -440,6 +440,8 @@ pub enum Update {
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
     Invite(String),
     Discovery(Vec<inferno_core::session::Listing>),
+    /// (pubkey hex, name, last activity we know of).
+    PrunePreview(Vec<(String, String, Option<i64>)>),
     Error(String),
     /// Something worked (a green notification).
     Notice(String),
@@ -469,6 +471,8 @@ pub enum Command {
     /// `max_uses` 0 = unlimited, `expires_in` seconds, 0 = never.
     CreateInvite { max_uses: u32, expires_in: i64 },
     RevokeInvite(String),
+    /// Members inactive for `days` (answers with `PrunePreview`).
+    PrunePreview { days: i64, include_roles: bool },
     AddEmoji { name: String, url: String },
     RemoveEmoji(String),
     AddSticker { name: String, description: String, url: String },
@@ -1298,6 +1302,25 @@ impl Backend {
             Command::RemoveSticker(name) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;
                 self.session.remove_sticker(&gid, &name).await.map_err(|e| e.to_string())?;
+            }
+            Command::PrunePreview { days, include_roles } => {
+                let gid = self.server.clone().ok_or("Pick a server first.")?;
+                let found = self.session.prune_candidates(&gid, days, include_roles).await.map_err(|e| e.to_string())?;
+                let state = self.session.server(&gid).ok().flatten().ok_or("Unknown server.")?;
+                let me = self.session.keys().public_key();
+                // Flutter's hierarchy rule: nobody at or above our own rank.
+                let rank_of = |pk: &PublicKey| {
+                    let held = state.members.get(pk).map(|m| m.roles.clone()).unwrap_or_default();
+                    state.roles.iter().filter(|r| held.contains(&r.id)).map(|r| r.position).max().unwrap_or(0)
+                };
+                let mine = if state.is_owner(&me) { i64::MAX } else { rank_of(&me) };
+                let people = People::new(&self.session);
+                let rows = found
+                    .into_iter()
+                    .filter(|(pk, _)| rank_of(pk) < mine)
+                    .map(|(pk, at)| (pk.to_hex(), display(&state, &pk, &people).name, at))
+                    .collect();
+                Cx::post_action(Update::PrunePreview(rows));
             }
             Command::RevokeInvite(code) => {
                 let gid = self.server.clone().ok_or("Pick a server first.")?;

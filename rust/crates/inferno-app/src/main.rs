@@ -2281,6 +2281,25 @@ script_mod! {
                                 View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5} margin: Inset{bottom: 16}
                                     srv_members_title := PageTitle{width: Fill text: "Members" margin: 0}
                                     mem_search := TextInput{width: 220 height: 32 empty_text: "Search members..."}
+                                    mem_prune := SmallBtn{t.text: "Prune"}
+                                }
+                                // Rails' prune panel: pick a window, preview, confirm.
+                                prune_panel := Card{visible: false
+                                    Txt{text: "Prune Inactive Members" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                    Hint{margin: Inset{top: 2 bottom: 10} text: "Members with nothing published since then, on this device or your relays. Members who joined within the window are kept."}
+                                    View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                        Txt{text: "Inactive for" draw_text.color: gray_400}
+                                        prune_days := DropDown{width: 120 labels: ["7 days", "14 days", "30 days", "60 days", "90 days"]}
+                                        prune_roles := CheckBox{text: "Include members with roles"}
+                                        View{width: Fill height: 1}
+                                        prune_preview := SmallBtn{t.text: "Preview" t.draw_text.color: accent_light}
+                                    }
+                                    prune_list := mod.widgets.PeopleList{height: 200 margin: Inset{top: 10}
+                                        list +: {Empty +: {text: "Nobody would be pruned."}}}
+                                    prune_footer := View{visible: false width: Fill height: Fit margin: Inset{top: 10} flow: Right align: Align{y: 0.5}
+                                        prune_count := Txt{width: Fill text: "" draw_text.color: gray_400}
+                                        prune_confirm := SmallBtn{draw_bg.color: #xdc2626 t.text: "Confirm Prune" t.draw_text.color: #xffffff}
+                                    }
                                 }
                                 mem_batch := RoundedView{visible: false width: Fill height: Fit margin: Inset{bottom: 12}
                                     padding: Inset{left: 16 right: 12 top: 8 bottom: 8} flow: Right spacing: 8 align: Align{y: 0.5}
@@ -2701,6 +2720,9 @@ pub struct App {
     custom_pending: Option<(String, String)>,
     #[rust]
     custom_file_name: Option<String>,
+    /// Prune preview: (pubkey, name, last activity).
+    #[rust]
+    prune: Vec<(String, String, Option<i64>)>,
     /// The status emoji being edited (picked from the emoji dropdown).
     #[rust]
     status_emoji: String,
@@ -3514,6 +3536,10 @@ impl App {
                     self.send(backend::Command::Kick(pk));
                 }
                 self.clear_member_selection(cx);
+                if !self.prune.is_empty() {
+                    self.prune.clear();
+                    self.ui.view(cx, ids!(prune_panel)).set_visible(cx, false);
+                }
             }
             Pending::BatchBan(pks) => {
                 for pk in pks {
@@ -3750,6 +3776,31 @@ impl App {
         lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(srv_bans.list)));
     }
 
+    /// The prune preview list, and its footer once there's something to prune.
+    fn show_prune(&mut self, cx: &mut Cx, previewed: bool) {
+        let now = chrono::Utc::now().timestamp();
+        let rows: Vec<lists::PersonRow> = self
+            .prune
+            .iter()
+            .map(|(pk, name, at)| lists::PersonRow {
+                id: pk.clone(),
+                name: name.clone(),
+                detail: at.map_or("No activity seen".into(), |t| format!("Last active {} ago", time_fmt::in_words(now - t))),
+                a: None,
+                b: None,
+            })
+            .collect();
+        let n = rows.len();
+        if let Some(mut l) = self.ui.widget(cx, ids!(prune_list)).borrow_mut::<lists::PeopleList>() {
+            l.rows = rows;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(prune_list.list)));
+        self.ui.view(cx, ids!(prune_list)).set_visible(cx, previewed);
+        self.ui.view(cx, ids!(prune_footer)).set_visible(cx, previewed && n > 0);
+        self.ui.label(cx, ids!(prune_count)).set_text(cx, &format!("{n} member{} will be removed", if n == 1 { "" } else { "s" }));
+        self.ui.redraw(cx);
+    }
+
     /// The Expression pages: counts against Rails' limits, and the lists.
     fn fill_custom(&mut self, cx: &mut Cx) {
         use inferno_core::server::custom::{MAX_EMOJIS, MAX_STICKERS};
@@ -3773,6 +3824,7 @@ impl App {
         let p = &self.perms;
         let any = p.kick_members || p.ban_members;
         self.ui.view(cx, ids!(mem_select_all)).set_visible(cx, any);
+        self.ui.view(cx, ids!(mem_prune)).set_visible(cx, p.kick_members);
         self.ui.view(cx, ids!(mem_batch)).set_visible(cx, selected > 0);
         self.ui.label(cx, ids!(mem_selected)).set_text(cx, &format!("{selected} selected"));
         self.ui.view(cx, ids!(mem_batch_timeout)).set_visible(cx, p.kick_members);
@@ -4825,6 +4877,10 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(pins.list)));
             }
+            Update::PrunePreview(rows) => {
+                self.prune = rows.clone();
+                self.show_prune(cx, true);
+            }
             Update::Discovery(listings) => {
                 if let Some(mut l) = self.ui.widget(cx, ids!(discover_list)).borrow_mut::<lists::DiscoverList>() {
                     l.searching = false;
@@ -5707,6 +5763,27 @@ impl MatchEvent for App {
                 M::Kick(pk) => self.run_menu_action(cx, ctxmenu::Action::Kick(pk)),
                 M::Ban(pk) => self.run_menu_action(cx, ctxmenu::Action::Ban(pk)),
             }
+        }
+        if tap(&self.ui, cx, ids!(mem_prune)) {
+            let open = !self.ui.view(cx, ids!(prune_panel)).visible();
+            self.ui.view(cx, ids!(prune_panel)).set_visible(cx, open);
+            if open {
+                self.ui.drop_down(cx, ids!(prune_days)).set_selected_item(cx, 2);
+                self.prune = Vec::new();
+                self.show_prune(cx, false);
+            }
+            self.ui.redraw(cx);
+        }
+        if tap(&self.ui, cx, ids!(prune_preview)) {
+            let days = [7, 14, 30, 60, 90][self.ui.drop_down(cx, ids!(prune_days)).selected_item().min(4)];
+            let include_roles = self.ui.check_box(cx, ids!(prune_roles)).active(cx);
+            self.send(backend::Command::PrunePreview { days, include_roles });
+            self.toast(cx, "Checking activity on your relays…", Toast::Info);
+        }
+        if tap(&self.ui, cx, ids!(prune_confirm)) && !self.prune.is_empty() {
+            let pks: Vec<String> = self.prune.iter().map(|(pk, _, _)| pk.clone()).collect();
+            let body = format!("Kick {} inactive member{} from {}? They can rejoin with an invite.", pks.len(), if pks.len() == 1 { "" } else { "s" }, self.server_name);
+            self.confirm(cx, Pending::BatchKick(pks), "Prune Members", &body, "Prune", false);
         }
         if self.ui.text_input(cx, ids!(mem_search)).changed(actions).is_some() {
             self.fill_people(cx);

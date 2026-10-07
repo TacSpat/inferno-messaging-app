@@ -1366,6 +1366,60 @@ impl Session {
         Ok(())
     }
 
+    /// Members to prune: nothing from them since `days` ago, on this device
+    /// or on our relays (Rails used "last online", which Nostr doesn't
+    /// have; any event they publish is the sign of life here). Never the
+    /// owner, us, or anyone who joined within the window; members with
+    /// roles only if `include_roles` (Discord's default spares them).
+    /// Returns each with the last activity we know of.
+    pub async fn prune_candidates(&self, gid: &str, days: i64, include_roles: bool) -> Result<Vec<(PublicKey, Option<i64>)>> {
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        let me = self.keys.public_key();
+        let cutoff = now_secs() - days * 86_400;
+        let everyone: std::collections::HashSet<&str> = state.roles.iter().filter(|r| r.is_everyone()).map(|r| r.id.as_str()).collect();
+        let candidates: Vec<&crate::server::Member> = state
+            .members
+            .values()
+            .filter(|m| !state.is_owner(&m.pubkey) && m.pubkey != me)
+            .filter(|m| m.joined_at.is_none_or(|j| j < cutoff))
+            .filter(|m| include_roles || m.roles.iter().all(|r| everyone.contains(r.as_str())))
+            .collect();
+        let hexes: Vec<String> = candidates.iter().map(|m| m.pubkey.to_hex()).collect();
+        let mut seen = self.store.last_seen(&hexes)?;
+        // Ask relays about the rest: anything since the cutoff will do.
+        let quiet: Vec<PublicKey> =
+            candidates.iter().map(|m| m.pubkey).filter(|pk| seen.get(&pk.to_hex()).is_none_or(|&at| at < cutoff)).collect();
+        for chunk in quiet.chunks(PEOPLE_PER_FILTER) {
+            let mut left: Vec<PublicKey> = chunk.to_vec();
+            // A chatty few can fill the limit; ask again for whoever's left.
+            for _ in 0..3 {
+                if left.is_empty() {
+                    break;
+                }
+                const LIMIT: usize = 1000;
+                let filter = Filter::new().authors(left.clone()).since(Timestamp::from(cutoff.max(0) as u64)).limit(LIMIT);
+                let events = self.pool.fetch(vec![filter]).await?;
+                let full = events.len() >= LIMIT;
+                for e in &events {
+                    let at = e.created_at.as_secs() as i64;
+                    let slot = seen.entry(e.pubkey.to_hex()).or_insert(at);
+                    *slot = (*slot).max(at);
+                }
+                left.retain(|pk| seen.get(&pk.to_hex()).is_none_or(|&at| at < cutoff));
+                if !full {
+                    break;
+                }
+            }
+        }
+        let mut out: Vec<(PublicKey, Option<i64>)> = candidates
+            .iter()
+            .map(|m| (m.pubkey, seen.get(&m.pubkey.to_hex()).copied()))
+            .filter(|(_, at)| at.is_none_or(|at| at < cutoff))
+            .collect();
+        out.sort_by_key(|(_, at)| at.unwrap_or(0));
+        Ok(out)
+    }
+
     pub async fn kick(&self, gid: &str, member: &PublicKey) -> Result<()> {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         self.publish(&publish::kick(&self.keys, &state, member)?).await?;

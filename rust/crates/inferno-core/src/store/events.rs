@@ -256,6 +256,19 @@ impl Store {
         Ok((have, newest))
     }
 
+    /// Each author's newest stored event of any kind.
+    pub fn last_seen(&self, authors: &[String]) -> Result<std::collections::HashMap<String, i64>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached("SELECT max(created_at) FROM events WHERE pubkey = ?1")?;
+        let mut out = std::collections::HashMap::new();
+        for a in authors {
+            if let Some(at) = stmt.query_row(params![a], |r| r.get::<_, Option<i64>>(0))? {
+                out.insert(a.clone(), at);
+            }
+        }
+        Ok(out)
+    }
+
     /// The newest stored event of any of `kinds`.
     pub fn newest_of_kinds(&self, kinds: &[u16]) -> Result<Option<i64>> {
         let conn = self.conn();

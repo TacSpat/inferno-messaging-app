@@ -590,3 +590,39 @@ async fn custom_emoji_and_stickers_reach_members() {
     owner.remove_emoji(&gid, "blaze").await.unwrap();
     assert!(owner.server(&gid).unwrap().unwrap().emojis.is_empty());
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn prune_spares_the_owner_us_and_role_holders() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let alice_keys = Keys::generate();
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let bob_keys = Keys::generate();
+    let bob = session(&bob_keys, Store::open_in_memory().unwrap(), &url).await;
+    let mut rx = owner.updates();
+    let gid = owner.create_server("x").await.unwrap();
+    alice.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
+    bob.join(&owner.create_invite(&gid, 0, 0).await.unwrap()).await.unwrap();
+    for _ in 0..2 {
+        wait_for(&mut rx, "joins", |u| matches!(u, Update::Server(g) if *g == gid)).await;
+    }
+    let mut roles = owner.server(&gid).unwrap().unwrap().roles.into_iter().map(|r| inferno_core::server::wire::Role { ..r }).collect::<Vec<_>>();
+    let mut helper = roles[0].clone();
+    helper.id = "helper".into();
+    helper.name = "Helper".into();
+    helper.position = 1;
+    helper.permissions = Default::default();
+    roles.push(helper);
+    owner.save_roles(&gid, roles).await.unwrap();
+    owner.set_member_roles(&gid, &bob_keys.public_key(), &["helper".to_string()]).await.unwrap();
+
+    // A cutoff in the future: everyone is "inactive" since then.
+    let found: Vec<PublicKey> = owner.prune_candidates(&gid, -1, false).await.unwrap().into_iter().map(|(pk, _)| pk).collect();
+    assert_eq!(found, vec![alice_keys.public_key()], "not the owner, and not Bob, who has a role");
+    let with_roles = owner.prune_candidates(&gid, -1, true).await.unwrap();
+    assert_eq!(with_roles.len(), 2);
+    // A 30-day window: they joined just now, so nobody.
+    assert!(owner.prune_candidates(&gid, 30, true).await.unwrap().is_empty());
+}
