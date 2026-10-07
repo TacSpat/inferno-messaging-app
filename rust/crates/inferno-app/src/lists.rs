@@ -796,9 +796,6 @@ impl Widget for RolePicker {
                 let row = list.item(cx, i, id!(Role));
                 let check = row.widget(cx, ids!(check));
                 set_check(cx, &check, *picked);
-                let mut card = row.clone();
-                let border = if *picked { crate::theme::tok("accent", 0.4) } else { crate::theme::tok("gray_700", 0.5) };
-                script_apply_eval!(cx, card, {draw_bg +: {border_color: #(border)}});
                 let mut dot = row.widget(cx, ids!(dot));
                 match self.colors.get(id) {
                     Some(c) => {
@@ -1226,15 +1223,12 @@ impl Widget for ResultList {
 use crate::backend::MemberInfo;
 use std::collections::HashSet;
 
-/// Draws a `CheckBox16` on or off (visibility doesn't stick on icons in
-/// list rows, so the mark is coloured in or out).
+/// Draws a `CheckBox16` on (filled with the accent) or off.
 pub fn set_check(cx: &mut Cx, check: &WidgetRef, on: bool) {
     let mut c = check.clone();
     let bg = if on { crate::theme::tok("accent", 1.0) } else { crate::theme::tok("gray_900", 1.0) };
-    script_apply_eval!(cx, c, {draw_bg +: {color: #(bg)}});
-    let mut mark = check.widget(cx, ids!(mark));
-    let fg = rgba(0xffffff, if on { 1.0 } else { 0.0 });
-    script_apply_eval!(cx, mark, {draw_icon +: {color: #(fg)}});
+    let border = if on { crate::theme::tok("accent", 1.0) } else { crate::theme::tok("gray_600", 1.0) };
+    script_apply_eval!(cx, c, {draw_bg +: {color: #(bg) border_color: #(border)}});
 }
 
 #[derive(Debug, Clone, PartialEq)]

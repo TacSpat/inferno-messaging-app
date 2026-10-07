@@ -705,10 +705,9 @@ script_mod! {
         label := Txt{text: "" draw_text.color: #xf87171 draw_text.text_style.font_size: 9.0}}
 
     mod.widgets.RolePickerBase = #(lists::RolePicker::register_widget(vm))
-    let CheckBox16 = RoundedView{width: 16 height: 16 align: Center cursor: MouseCursor.Hand new_batch: true
-        draw_bg.color: gray_900 draw_bg.border_radius: 2.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
-        mark := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff00
-            draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}
+    // A checkbox that fills with the accent when on (no tick mark).
+    let CheckBox16 = RoundedView{width: 16 height: 16 cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_900 draw_bg.border_radius: 2.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_600}
 
     // Rails' checkbox rows (onboarding, channel access): a gray-900 card
     // per option with a checkbox, an optional colour dot and the name;
