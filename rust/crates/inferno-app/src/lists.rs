@@ -830,6 +830,95 @@ impl Widget for ResultList {
 }
 
 
+// ─── Discovery ───────────────────────────────────────────────────────────
+
+/// Flutter's server catalog: cards three to a row.
+#[derive(Script, ScriptHook, Widget)]
+pub struct DiscoverList {
+    #[deref]
+    view: View,
+    #[rust]
+    pub servers: Vec<inferno_core::session::Listing>,
+    #[rust]
+    pub searching: bool,
+}
+
+const PER_ROW: usize = 3;
+
+impl DiscoverList {
+    /// The listing whose card was clicked.
+    pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> Option<inferno_core::session::Listing> {
+        let list = self.view.portal_list(cx, ids!(list));
+        for (row, item) in list.items_with_actions(actions) {
+            for (col, path) in [ids!(c0), ids!(c1), ids!(c2)].into_iter().enumerate() {
+                if item.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+                    return self.servers.get(row * PER_ROW + col).cloned();
+                }
+            }
+        }
+        None
+    }
+}
+
+impl Widget for DiscoverList {
+    fn draw_walk(&mut self, cx: &mut Cx2d, scope: &mut Scope, walk: Walk) -> DrawStep {
+        while let Some(item) = self.view.draw_walk(cx, scope, walk).step() {
+            let Some(mut list) = item.borrow_mut::<PortalList>() else { continue };
+            let rows = self.servers.len().div_ceil(PER_ROW).max(1);
+            list.set_item_range(cx, 0, rows);
+            while let Some(i) = list.next_visible_item(cx) {
+                if self.servers.is_empty() {
+                    if i == 0 {
+                        let empty = list.item(cx, i, id!(Empty));
+                        let text = if self.searching { "Searching relays…" } else { "No public servers found on your relays" };
+                        empty.label(cx, ids!(text)).set_text(cx, text);
+                        empty.draw_all(cx, &mut Scope::empty());
+                    }
+                    continue;
+                }
+                let row = list.item(cx, i, id!(Row));
+                for (col, path) in [ids!(c0), ids!(c1), ids!(c2)].into_iter().enumerate() {
+                    let card = row.view(cx, path);
+                    let Some(s) = self.servers.get(i * PER_ROW + col) else {
+                        card.set_visible(cx, false);
+                        continue;
+                    };
+                    card.set_visible(cx, true);
+                    let initial = s.name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default();
+                    card.label(cx, ids!(banner.initial)).set_text(cx, &initial);
+                    card.widget(cx, ids!(banner.initial)).set_visible(cx, s.banner.is_none());
+                    let img = card.image(cx, ids!(banner.img));
+                    crate::images::show(cx, &img, s.banner.as_deref());
+                    card.view(cx, ids!(banner.joined)).set_visible(cx, s.joined);
+                    card.label(cx, ids!(head.icon.initial)).set_text(cx, &initial);
+                    let img = card.image(cx, ids!(head.icon.pic));
+                    crate::images::show(cx, &img, s.picture.as_deref());
+                    card.label(cx, ids!(head.name)).set_text(cx, &s.name);
+                    let about: String = s.about.chars().take(90).collect();
+                    let about = if s.about.chars().count() > 90 { format!("{about}…") } else { about };
+                    card.label(cx, ids!(about)).set_text(cx, &about);
+                    card.widget(cx, ids!(about)).set_visible(cx, !about.is_empty());
+                    let ty = match s.server_type.as_str() {
+                        "friends_family" => "Friends & Family",
+                        "gaming" => "Gaming",
+                        "work_team" => "Work & Team",
+                        "adult" => "18+",
+                        _ => "Community",
+                    };
+                    card.label(cx, ids!(tags.ty.label)).set_text(cx, ty);
+                    card.view(cx, ids!(tags.age)).set_visible(cx, s.age_restricted && s.server_type != "adult");
+                }
+                row.draw_all(cx, &mut Scope::empty());
+            }
+        }
+        DrawStep::done()
+    }
+
+    fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        self.view.handle_event(cx, event, scope);
+    }
+}
+
 // ─── DM sidebar ──────────────────────────────────────────────────────────
 
 /// Rails' `_dm_sidebar`: 32px avatar, name, unread badge (99+ cap).

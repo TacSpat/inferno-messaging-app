@@ -109,6 +109,20 @@ pub enum Update {
     Profile(PublicKey),
 }
 
+/// A public server, as discovery lists it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Listing {
+    pub gid: String,
+    pub owner: PublicKey,
+    pub name: String,
+    pub about: String,
+    pub picture: Option<String>,
+    pub banner: Option<String>,
+    pub server_type: String,
+    pub age_restricted: bool,
+    pub joined: bool,
+}
+
 /// Rails' invite states, plus being banned from the server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InviteStatus {
@@ -524,14 +538,78 @@ impl Session {
             return Err(SessionError::BadInvite);
         }
 
-        let me = profile::member_profile(&self.my_profile()?);
-        self.publish(&publish::join(&self.keys, &link.gid, "", &me, now_secs(), Some(&link.code))?).await?;
-        self.store.set_server_membership(&link.gid, true)?;
-        self.push_config();
-        self.backfill(&state).await?;
-        self.resubscribe().await?;
-        let _ = self.updates.send(Update::Server(link.gid.clone()));
+        self.enter(&state, Some(&link.code)).await?;
         Ok(link.gid)
+    }
+
+    /// Public servers on our relays (Rails' and Flutter's discovery): the
+    /// newest metadata each owner published with `discoverable`. Only an
+    /// owner's own metadata lists a server, so nobody can list or dress up
+    /// someone else's.
+    pub async fn discover(&self) -> Result<Vec<Listing>> {
+        let events = self.pool.fetch(vec![Filter::new().kind(Kind::Custom(kinds::SERVER_METADATA)).limit(500)]).await?;
+        let me = self.keys.public_key();
+        let mut newest: HashMap<(String, PublicKey), Event> = HashMap::new();
+        for e in events {
+            let Some(gid) = wire::server_gid(&e) else { continue };
+            let m = wire::metadata(&e);
+            if m.owner.is_some_and(|o| o != e.pubkey) {
+                continue;
+            }
+            let key = (gid, e.pubkey);
+            if newest.get(&key).is_none_or(|old| e.created_at > old.created_at) {
+                newest.insert(key, e);
+            }
+        }
+        let mut out: Vec<Listing> = newest
+            .into_iter()
+            .filter_map(|((gid, owner), e)| {
+                let m = wire::metadata(&e);
+                (m.discoverable && !m.deleted && !m.name.is_empty()).then(|| {
+                    let joined = self.server(&gid).ok().flatten().is_some_and(|s| s.is_member(&me) || s.is_owner(&me));
+                    Listing {
+                        gid,
+                        owner,
+                        name: m.name,
+                        about: m.about,
+                        picture: m.picture,
+                        banner: m.banner,
+                        server_type: m.server_type,
+                        age_restricted: m.age_restricted,
+                        joined,
+                    }
+                })
+            })
+            .collect();
+        // Not yet joined first, then by name (Flutter).
+        out.sort_by(|a, b| a.joined.cmp(&b.joined).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+        Ok(out)
+    }
+
+    /// Joins a public server from discovery, no invite needed. The owner is
+    /// the listing's (it signed the metadata), and the server must still be
+    /// public once its full state is in.
+    pub async fn join_public(&self, gid: &str, owner: &PublicKey) -> Result<String> {
+        self.fetch_server(gid).await?;
+        self.store.pin_server_owner(gid, owner)?;
+        let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
+        if !state.metadata.discoverable || state.metadata.deleted || state.is_banned(&self.keys.public_key()) {
+            return Err(SessionError::BadInvite);
+        }
+        self.enter(&state, None).await?;
+        Ok(gid.to_owned())
+    }
+
+    /// Publishes our membership and brings the server in.
+    async fn enter(&self, state: &ServerState, invite: Option<&str>) -> Result<()> {
+        let me = profile::member_profile(&self.my_profile()?);
+        self.publish(&publish::join(&self.keys, &state.gid, "", &me, now_secs(), invite)?).await?;
+        self.store.set_server_membership(&state.gid, true)?;
+        self.push_config();
+        self.backfill(state).await?;
+        self.resubscribe().await?;
+        let _ = self.updates.send(Update::Server(state.gid.clone()));
+        Ok(())
     }
 
     pub async fn leave(&self, gid: &str) -> Result<()> {

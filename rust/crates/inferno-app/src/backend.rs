@@ -343,6 +343,7 @@ pub enum Update {
     /// message_format), for the names that resolve here.
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
     Invite(String),
+    Discovery(Vec<inferno_core::session::Listing>),
     Error(String),
     /// Something worked (a green notification).
     Notice(String),
@@ -364,7 +365,10 @@ pub enum Command {
     DeleteGifCollection(String),
     Edit { id: String, text: String },
     Pin { id: String, pinned: bool },
-    CreateServer(String),
+    CreateServer { name: String, server_type: String },
+    /// Public servers on our relays (answers with `Discovery`).
+    Discover,
+    JoinPublic { gid: String, owner: String },
     Join(String),
     /// `max_uses` 0 = unlimited, `expires_in` seconds, 0 = never.
     CreateInvite { max_uses: u32, expires_in: i64 },
@@ -883,8 +887,31 @@ impl Backend {
                 self.session.pin(&gid, &ch, id, pinned).await.map_err(|e| e.to_string())?;
                 self.publish_timeline();
             }
-            Command::CreateServer(name) => {
+            Command::CreateServer { name, server_type } => {
                 let gid = self.session.create_server(name.trim()).await.map_err(|e| e.to_string())?;
+                if server_type != "community" {
+                    self.session
+                        .update_metadata(&gid, move |m| {
+                            m.age_restricted |= server_type == "adult";
+                            m.server_type = server_type;
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?;
+                }
+                self.server = Some(gid);
+                self.channel = None;
+                self.publish_servers();
+                self.publish_server();
+            }
+            Command::Discover => {
+                let listings = self.session.discover().await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Discovery(listings));
+            }
+            Command::JoinPublic { gid, owner } => {
+                let owner = PublicKey::from_hex(&owner).map_err(|e| e.to_string())?;
+                let gid = self.session.join_public(&gid, &owner).await.map_err(|_| "That server isn't open to join any more.".to_owned())?;
+                self.forget_previews(&gid);
+                self.home = false;
                 self.server = Some(gid);
                 self.channel = None;
                 self.publish_servers();

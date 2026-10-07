@@ -533,3 +533,36 @@ async fn invite_uses_limits_and_revocation() {
     let state = alice.server(&gid).unwrap().unwrap();
     assert_eq!(state.members[&alice_keys.public_key()].invite.as_deref(), Some(code.as_str()));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn discover_and_join_a_public_server() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let bob_keys = Keys::generate();
+    let bob = session(&bob_keys, Store::open_in_memory().unwrap(), &url).await;
+
+    let public = owner.create_server("Open Hearth").await.unwrap();
+    let private = owner.create_server("Back Room").await.unwrap();
+    owner
+        .update_metadata(&public, |m| {
+            m.discoverable = true;
+            m.server_type = "gaming".into();
+        })
+        .await
+        .unwrap();
+
+    let found = bob.discover().await.unwrap();
+    assert_eq!(found.len(), 1, "{found:?}");
+    let l = &found[0];
+    assert_eq!((l.gid.as_str(), l.name.as_str(), l.server_type.as_str(), l.joined), (public.as_str(), "Open Hearth", "gaming", false));
+    assert_eq!(l.owner, owner_keys.public_key());
+
+    // Private servers can't be joined without an invite.
+    assert!(bob.join_public(&private, &owner_keys.public_key()).await.is_err());
+    assert_eq!(bob.join_public(&public, &l.owner).await.unwrap(), public);
+    let state = bob.server(&public).unwrap().unwrap();
+    assert!(state.is_member(&bob_keys.public_key()));
+    assert!(bob.discover().await.unwrap()[0].joined);
+}

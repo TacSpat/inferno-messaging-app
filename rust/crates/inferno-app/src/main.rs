@@ -1110,6 +1110,58 @@ script_mod! {
         }
     }
 
+    // Flutter's catalog card: banner (or the initial), icon and name, two
+    // lines of description, type and 18+ tags; Joined in green.
+    let DiscoverCard = RoundedView{
+        width: 216 height: Fit flow: Down
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: gray_900 draw_bg.border_radius: 5.0
+        draw_bg.border_size: 1.0 draw_bg.border_color: gray_700_50
+        banner := View{width: Fill height: 100 flow: Overlay align: Center
+            RoundedView{width: Fill height: 100 draw_bg.color: gray_700 draw_bg.border_radius: 5.0}
+            initial := Txt{text: "" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 24.0}}
+            img := Image{visible: false width: Fill height: 100 fit: ImageFit.CropToFill draw_bg.border_radius: 5.0}
+            View{width: Fill height: Fill align: Align{x: 1.0 y: 0.0} padding: 8
+                joined := RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+                    flow: Right spacing: 4 align: Align{y: 0.5}
+                    new_batch: true draw_bg.color: #x16a34ae6 draw_bg.border_radius: 2.0
+                    Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/check.svg")}
+                    Txt{text: "Joined" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.0}}}
+            }
+        }
+        View{width: Fill height: Fit flow: Down spacing: 8 padding: 12
+            head := View{width: Fill height: Fit flow: Right spacing: 10 align: Align{y: 0.5}
+                icon := RoundedView{width: 32 height: 32 flow: Overlay align: Center new_batch: true
+                    draw_bg.color: gray_700 draw_bg.border_radius: 4.0
+                    initial := Txt{text: "" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 10.0}}
+                    pic := Image{visible: false width: 32 height: 32 fit: ImageFit.CropToFill draw_bg.border_radius: 4.0}}
+                name := Txt{width: Fill text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+            }
+            about := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+            tags := View{width: Fill height: Fit flow: Right spacing: 4
+                ty := RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true
+                    draw_bg.color: gray_700 draw_bg.border_radius: 2.0
+                    label := Txt{text: "" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 7.5}}}
+                age := RoundedView{visible: false width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true
+                    draw_bg.color: accent_20 draw_bg.border_radius: 2.0
+                    Txt{text: "18+" draw_text.color: accent draw_text.text_style: theme.font_bold{font_size: 7.5}}}
+            }
+        }
+    }
+
+    mod.widgets.DiscoverListBase = #(lists::DiscoverList::register_widget(vm))
+    mod.widgets.DiscoverList = set_type_default() do mod.widgets.DiscoverListBase{
+        width: Fill height: 380
+        list := PortalList{
+            width: Fill height: Fill
+            flow: Down
+            Row := View{width: Fill height: Fit flow: Right spacing: 12 margin: Inset{bottom: 12}
+                c0 := DiscoverCard{} c1 := DiscoverCard{} c2 := DiscoverCard{}}
+            Empty := View{width: Fill height: Fit padding: Inset{top: 48 bottom: 48} align: Align{x: 0.5}
+                text := Txt{text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 10.5}}
+        }
+    }
+
     mod.widgets.ResultListBase = #(lists::ResultList::register_widget(vm))
     mod.widgets.ResultList = set_type_default() do mod.widgets.ResultListBase{
         width: Fill height: Fill
@@ -2184,24 +2236,55 @@ script_mod! {
                     }
 
                     // Create or join (opened by the rail's +).
+                    // Add a Server: Flutter's Browse/Create dialog. Browse is
+                    // Rails' invite field over Flutter's discovery grid.
                     dialog := Modal{
                         content +: {
                             RoundedView{
-                                width: 448 height: Fit
-                                flow: Down spacing: 10
-                                padding: 24
+                                width: 720 height: Fit
+                                flow: Down
                                 new_batch: true
                                 draw_bg.color: gray_800
-                                draw_bg.border_radius: 12.0
-                                Txt{text: "Create a server" draw_text.color: #xffffff
-                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
-                                new_server_name := TextInput{width: Fill height: 36 empty_text: "Server name"}
-                                create_server := Button{text: "Create"}
-                                SolidView{width: Fill height: 1 margin: Inset{top: 6 bottom: 6} draw_bg.color: gray_700}
-                                Txt{text: "Join with an invite" draw_text.color: #xffffff
-                                    draw_text.text_style: theme.font_bold{font_size: 13.0}}
-                                invite_link := TextInput{width: Fill height: 36 empty_text: "nostr:naddr1…"}
-                                join_server := Button{text: "Join"}
+                                draw_bg.border_radius: 6.0
+                                draw_bg.border_size: 1.0
+                                draw_bg.border_color: gray_700_50
+                                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 20 right: 16 top: 16}
+                                    Txt{width: Fill text: "Add a Server" draw_text.color: #xffffff
+                                        draw_text.text_style: theme.font_bold{font_size: 14.0}}
+                                    add_close := RoundedView{width: 32 height: 32 align: Center cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: gray_700 draw_bg.border_radius: 16.0
+                                        Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                                }
+                                View{width: Fill height: Fit flow: Right spacing: 8 padding: Inset{left: 20 top: 12 bottom: 12}
+                                    add_tab_browse := TabPill{draw_bg.color: gray_600 label.text: "Browse"}
+                                    add_tab_create := TabPill{label.text: "Create"}
+                                }
+                                SolidView{width: Fill height: 1 draw_bg.color: gray_700_50}
+                                add_browse := View{width: Fill height: Fit flow: Down padding: 20
+                                    Txt{text: "Have an invite?" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 10.5}}
+                                    View{width: Fill height: Fit margin: Inset{top: 8} flow: Right spacing: 8 align: Align{y: 0.5}
+                                        invite_link := TextInput{width: Fill height: 36 empty_text: "Paste invite link…"}
+                                        join_server := Button{text: "Join"}
+                                    }
+                                    View{width: Fill height: Fit margin: Inset{top: 20 bottom: 12} flow: Right spacing: 6 align: Align{y: 0.5}
+                                        Txt{width: Fill text: "DISCOVER SERVERS" draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+                                        discover_refresh := View{width: Fit height: Fit padding: 4 cursor: MouseCursor.Hand
+                                            Txt{text: "Refresh" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}}
+                                    }
+                                    discover_list := mod.widgets.DiscoverList{}
+                                }
+                                add_create := View{visible: false width: Fill height: Fit flow: Down padding: 20
+                                    Txt{text: "Customize your server" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 12.0}}
+                                    Hint{margin: Inset{top: 4} text: "Give it a name and a type. You can change everything later in Server Settings."}
+                                    FieldLabel{text: "SERVER NAME"}
+                                    new_server_name := TextInput{width: Fill height: 36 empty_text: "Server name"}
+                                    FieldLabel{text: "SERVER TYPE"}
+                                    new_server_type := DropDown{width: 240 labels: ["Community", "Friends & Family", "Gaming", "Work & Team", "18+"]}
+                                    View{width: Fill height: Fit margin: Inset{top: 20} flow: Right
+                                        View{width: Fill height: 1}
+                                        create_server := Button{text: "Create Server"}
+                                    }
+                                }
                             }
                         }
                     }
@@ -2374,6 +2457,8 @@ pub enum Pending {
     DeleteServer,
     RevokeInvite(String),
     JoinInvite(String),
+    /// (gid, owner hex) from discovery.
+    JoinPublic(String, String),
 }
 
 /// One filled context-menu slot (separator above, action, label, danger).
@@ -3090,6 +3175,10 @@ impl App {
             }
             Pending::RevokeInvite(code) => self.send(backend::Command::RevokeInvite(code)),
             Pending::JoinInvite(link) => self.join_invite(cx, link),
+            Pending::JoinPublic(gid, owner) => {
+                self.send(backend::Command::JoinPublic { gid, owner });
+                self.toast(cx, "Joining…", Toast::Info);
+            }
             Pending::Menu(_) => {}
         }
     }
@@ -3168,6 +3257,28 @@ impl App {
         self.role_sel = self.role_sel.min(self.role_drafts.len().saturating_sub(1));
         self.show_role(cx);
         self.fill_people(cx);
+    }
+
+    /// Add a Server's tabs (Flutter): Browse or Create.
+    fn add_server_tab(&mut self, cx: &mut Cx, create: bool) {
+        self.ui.view(cx, ids!(add_browse)).set_visible(cx, !create);
+        self.ui.view(cx, ids!(add_create)).set_visible(cx, create);
+        for (path, on) in [(ids!(add_tab_browse), !create), (ids!(add_tab_create), create)] {
+            let mut pill = self.ui.widget(cx, path);
+            let bg = if on { theme::tok("gray_600", 1.0) } else { lists::rgba(0, 0.0) };
+            script_apply_eval!(cx, pill, {draw_bg +: {color: #(bg)}});
+        }
+        self.ui.redraw(cx);
+    }
+
+    /// Asks the relays for public servers; the grid shows "Searching…".
+    fn discover(&mut self, cx: &mut Cx) {
+        if let Some(mut l) = self.ui.widget(cx, ids!(discover_list)).borrow_mut::<lists::DiscoverList>() {
+            l.searching = true;
+            l.servers.clear();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(discover_list.list)));
+        self.send(backend::Command::Discover);
     }
 
     /// Joins from an invite card and goes there.
@@ -4068,6 +4179,13 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(pins.list)));
             }
+            Update::Discovery(listings) => {
+                if let Some(mut l) = self.ui.widget(cx, ids!(discover_list)).borrow_mut::<lists::DiscoverList>() {
+                    l.searching = false;
+                    l.servers = listings.clone();
+                }
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(discover_list.list)));
+            }
             Update::Invite(link) => {
                 cx.copy_to_clipboard(link);
                 self.toast(cx, "Invite link copied.", Toast::Success);
@@ -4905,7 +5023,35 @@ impl MatchEvent for App {
         }
 
         if self.ui.view(cx, ids!(add_server)).finger_up(actions).is_some_and(|e| !e.cancelled) {
+            self.add_server_tab(cx, false);
             self.ui.modal(cx, ids!(dialog)).open(cx);
+            self.discover(cx);
+        }
+        if tap(&self.ui, cx, ids!(add_close)) {
+            self.ui.modal(cx, ids!(dialog)).close(cx);
+        }
+        if tap(&self.ui, cx, ids!(add_tab_browse)) {
+            self.add_server_tab(cx, false);
+        }
+        if tap(&self.ui, cx, ids!(add_tab_create)) {
+            self.add_server_tab(cx, true);
+        }
+        if tap(&self.ui, cx, ids!(discover_refresh)) {
+            self.discover(cx);
+        }
+        let picked = self.ui.widget(cx, ids!(discover_list)).borrow::<lists::DiscoverList>().and_then(|l| l.clicked(cx, actions));
+        if let Some(l) = picked {
+            self.ui.modal(cx, ids!(dialog)).close(cx);
+            self.set_home(cx, false);
+            if l.joined {
+                self.send(backend::Command::SelectServer(l.gid));
+            } else if l.age_restricted || l.server_type == "adult" {
+                let body = format!("{} is age-restricted (18+). By joining, you confirm you are 18 years of age or older.", l.name);
+                self.confirm(cx, Pending::JoinPublic(l.gid, l.owner.to_hex()), "Age-restricted server", &body, "I am 18 or older — Join", false);
+            } else {
+                self.send(backend::Command::JoinPublic { gid: l.gid, owner: l.owner.to_hex() });
+                self.toast(cx, &format!("Joining {}…", l.name), Toast::Info);
+            }
         }
         if self.ui.view(cx, ids!(profile_btn)).finger_up(actions).is_some_and(|e| !e.cancelled) && !self.npub.is_empty() {
             cx.copy_to_clipboard(&self.npub);
@@ -4917,7 +5063,8 @@ impl MatchEvent for App {
         if self.ui.button(cx, ids!(create_server)).clicked(actions) {
             let name = self.ui.text_input(cx, ids!(new_server_name)).text();
             if !name.trim().is_empty() {
-                self.send(backend::Command::CreateServer(name));
+                let ty = self.ui.drop_down(cx, ids!(new_server_type)).selected_item().min(SERVER_TYPES.len() - 1);
+                self.send(backend::Command::CreateServer { name, server_type: SERVER_TYPES[ty].0.to_owned() });
                 self.ui.text_input(cx, ids!(new_server_name)).set_text(cx, "");
                 self.ui.modal(cx, ids!(dialog)).close(cx);
             }
@@ -5020,8 +5167,9 @@ impl AppMain for App {
         }
         if images::handle_event(cx, event) {
             // A picture arrived: rows recorded before it need redrawing.
-            let lists: [&[LiveId]; 7] = [
+            let lists: [&[LiveId]; 8] = [
                 ids!(rail.list),
+                ids!(discover_list.list),
                 ids!(members.list),
                 ids!(messages.list),
                 ids!(dms.list),
