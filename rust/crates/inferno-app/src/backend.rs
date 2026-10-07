@@ -328,6 +328,9 @@ pub struct MessageRow {
     pub system: bool,
     /// The first invite link in the body and its card (Rails' embed).
     pub invite: Option<(String, InviteCard)>,
+    /// Custom emoji it may use: name → image (its NIP-30 tags first, then
+    /// the server's own).
+    pub emojis: HashMap<String, String>,
 }
 
 /// An invite link's card, as it resolves.
@@ -1047,8 +1050,16 @@ impl Backend {
             Command::Send { text, reply_to, spoiler } => {
                 let (gid, ch) = self.selected()?;
                 let reply_to = reply_to.and_then(|id| EventId::from_hex(&id).ok());
+                // NIP-30 tags, so other clients can draw our server's emoji.
+                let emoji = self
+                    .session
+                    .server(&gid)
+                    .ok()
+                    .flatten()
+                    .map(|st| inferno_core::server::custom::emoji_tags(&st, &text))
+                    .unwrap_or_default();
                 self.session
-                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, spoiler, ..Default::default() })
+                    .send(&gid, &ch, &Outgoing { content: &text, reply_to, spoiler, emoji, ..Default::default() })
                     .await
                     .map_err(|e| e.to_string())?;
                 self.publish_timeline();
@@ -1635,6 +1646,15 @@ impl Backend {
             .into_iter()
             .find(|c| c.with == with && c.request)
             .map(|_| messages.len());
+        // DMs carry no emoji tags: any server's emoji we know.
+        let mut all_emojis: HashMap<String, String> = HashMap::new();
+        for gid in self.session.servers().unwrap_or_default() {
+            if let Ok(Some(st)) = self.session.server(&gid) {
+                for e in &st.emojis {
+                    all_emojis.entry(e.name.clone()).or_insert_with(|| e.url.clone());
+                }
+            }
+        }
         let mut rows = Vec::with_capacity(messages.len());
         for (i, m) in messages.iter().enumerate() {
             let prev = i.checked_sub(1).map(|p| &messages[p]);
@@ -1668,6 +1688,7 @@ impl Backend {
                 grouped,
                 system: false,
                 invite,
+                emojis: all_emojis.clone(),
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -2281,6 +2302,7 @@ impl Backend {
         let Ok(Some(state)) = self.session.server(&gid) else { return };
         let Ok(timeline) = self.session.timeline(&gid, &ch) else { return };
         let mut invites: Vec<_> = timeline.iter().map(|m| m.content.as_deref().and_then(|c| self.invite_card(c))).collect();
+        let server_emojis: HashMap<String, String> = state.emojis.iter().map(|e| (e.name.clone(), e.url.clone())).collect();
         let people = People::new(&self.session);
         let by_id: HashMap<EventId, usize> = timeline.iter().enumerate().map(|(i, m)| (m.id, i)).collect();
         let mut rows = Vec::with_capacity(timeline.len());
@@ -2312,6 +2334,11 @@ impl Backend {
                 grouped,
                 system: false,
                 invite,
+                emojis: {
+                    let mut e = server_emojis.clone();
+                    e.extend(m.emoji.clone());
+                    e
+                },
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);

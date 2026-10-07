@@ -126,6 +126,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 edited: m.edited,
                 pinned: false,
                 invite: None,
+                emojis: Default::default(),
                 grouped: demo::grouped(i.checked_sub(1).map(|p| &history[p]), m),
                 system: m.system,
             }
@@ -330,8 +331,14 @@ impl Widget for MessageList {
                 };
                 let mentions = &self.mentions;
                 let resolve = |word: &str| mentions.get(&word.to_lowercase()).cloned();
-                let md = crate::message_format::to_markdown(body.trim(), &resolve);
-                let w = item.widget(cx, ids!(line.content.body));
+                let emojis = &msg.emojis;
+                let emoji = |name: &str| emojis.get(name).cloned();
+                let md = crate::message_format::to_markdown_with(body.trim(), &resolve, &emoji);
+                // Rails' emoji-only messages: big Unicode emoji too.
+                let big = crate::message_format::emoji_only(body.trim(), &emoji);
+                let mut w = item.widget(cx, ids!(line.content.body));
+                let size = if big { 30.0 } else { 10.5 };
+                script_apply_eval!(cx, w, {font_size: #(size)});
                 if w.text() != md {
                     w.set_text(cx, &md);
                 }

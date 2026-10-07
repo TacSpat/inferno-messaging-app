@@ -334,15 +334,24 @@ script_mod! {
             table_header_bg_color: gray_800
             table_border_color: gray_600
         }
+        // Rails' custom emoji: 1.375em inline, 3.5rem when the message is
+        // only emoji.
+        emoji := RoundedView{width: 20 height: 20 margin: Inset{left: 1 right: 1 top: -3} new_batch: true draw_bg.color: #0000
+            img := Image{visible: false width: 20 height: 20 fit: ImageFit.CropToFill
+}}
+        emoji_big := RoundedView{width: 56 height: 56 margin: Inset{right: 4} new_batch: true draw_bg.color: #0000
+            img := Image{visible: false width: 56 height: 56 fit: ImageFit.CropToFill}}
         // Rails' inline images: max-w-sm max-h-72 rounded-lg; GIFs get the fire button.
         media := View{
-            width: Fit height: Fit flow: Overlay align: Align{x: 1.0 y: 0.0}
+            width: Fit height: Fit flow: Overlay align: Align{x: 0.0 y: 0.0}
             margin: Inset{top: 4 bottom: 4}
             cursor: MouseCursor.Hand
             img := Image{visible: false width: 384 height: 288 fit: ImageFit.Smallest draw_bg.border_radius: 8.0}
-            fire := RoundedView{visible: false width: 28 height: 28 margin: 6 align: Center cursor: MouseCursor.Hand
-                new_batch: true draw_bg.color: #x00000099 draw_bg.border_radius: 14.0
-                Txt{text: "🔥" draw_text.text_style.font_size: 11.0}}
+            // Flutter's save button: 32px black/60 circle, top-left.
+            fire := RoundedView{visible: false width: 32 height: 32 margin: 8 align: Center cursor: MouseCursor.Hand
+                new_batch: true draw_bg.color: #x00000099 draw_bg.border_radius: 16.0
+                icon := Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xffffffcc
+                    draw_icon.svg: crate_resource("self:resources/icons/inferno.svg")}}
         }
         link_color: accent_light
         mention_color: accent
@@ -1108,13 +1117,14 @@ script_mod! {
         }
     }
     let GifCell = RoundedView{
-        width: 181 height: 120 flow: Overlay align: Align{x: 1.0 y: 0.0}
+        width: 181 height: 120 flow: Overlay align: Align{x: 0.0 y: 0.0}
         cursor: MouseCursor.Hand new_batch: true
         draw_bg.color: gray_900 draw_bg.border_radius: 6.0
         img := Image{visible: false width: 181 height: 120 fit: ImageFit.CropToFill draw_bg.border_radius: 6.0}
-        fire := RoundedView{width: 28 height: 28 margin: 4 align: Center cursor: MouseCursor.Hand new_batch: true
-            draw_bg.color: #x00000099 draw_bg.border_radius: 14.0
-            glyph := Txt{text: "🔥" draw_text.text_style.font_size: 11.0}}
+        fire := RoundedView{width: 32 height: 32 margin: 6 align: Center cursor: MouseCursor.Hand new_batch: true
+            draw_bg.color: #x00000099 draw_bg.border_radius: 16.0
+            icon := Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xffffffcc
+                draw_icon.svg: crate_resource("self:resources/icons/inferno.svg")}}
     }
     mod.widgets.PickerListBase = #(lists::PickerList::register_widget(vm))
     mod.widgets.PickerList = set_type_default() do mod.widgets.PickerListBase{
@@ -1955,7 +1965,8 @@ script_mod! {
                                                     new_batch: true draw_bg.color: #x00000040 draw_bg.border_radius: 6.0
                                                     flow: Overlay
                                                     label := Txt{text: "🙂" draw_text.text_style.font_size: 12.0}
-                                                    img := Image{visible: false width: 20 height: 20 fit: ImageFit.Smallest}}
+                                                    img := Image{visible: false width: 20 height: 20 fit: ImageFit.CropToFill
+}}
                                                 p_status := CardInput{empty_text: "What are you up to?"
                                                     draw_text +: {color: #xffffffb3 text_style +: {font_size: 9.5}}}
                                             }
@@ -5424,6 +5435,8 @@ impl App {
             Update::Card(card) => self.show_card(cx, card),
             Update::GifLibrary { favorites, collections } => {
                 self.gif_favorites = favorites.clone();
+                message_text::set_favorite_gifs(favorites.iter().map(|g| g.url.clone()));
+                lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(messages.list)));
                 self.gif_collections = collections.clone();
                 if let GifView::Collection(id) = &self.gif_view {
                     if !collections.iter().any(|c| c.id == *id) {

@@ -49,6 +49,53 @@ pub fn is_media(url: &str) -> bool {
 }
 
 pub fn to_markdown(body: &str, resolve: Resolve) -> String {
+    to_markdown_with(body, resolve, &|_| None)
+}
+
+/// Custom emoji in messages: `:name:` with a known image becomes an
+/// inline image link the renderer draws (Rails' 1.375em, or 3.5rem when
+/// the message is only emoji).
+pub const EMOJI_SCHEME: &str = "emoji:";
+pub const BIG_EMOJI_SCHEME: &str = "emoji-big:";
+
+/// Rails' `enlarge_emoji_only`: nothing but emoji (custom or Unicode),
+/// at most ten of them.
+pub fn emoji_only(body: &str, emoji: Resolve) -> bool {
+    let mut count = 0;
+    let mut rest = body.trim();
+    if rest.is_empty() {
+        return false;
+    }
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix(':') {
+            if let Some(end) = after.find(':') {
+                if emoji(&after[..end]).is_some() {
+                    count += 1;
+                    rest = after[end + 1..].trim_start();
+                    continue;
+                }
+            }
+            return false;
+        }
+        let c = rest.chars().next().unwrap_or(' ');
+        if c.is_whitespace() || c == '\u{200d}' || ('\u{fe00}'..='\u{fe0f}').contains(&c) || ('\u{1f3fb}'..='\u{1f3ff}').contains(&c) {
+            // Joiners, variation selectors and skin tones belong to the emoji before.
+        } else if emojis::get(&c.to_string()).is_some() || is_pictographic(c) {
+            count += 1;
+        } else {
+            return false;
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    (1..=10).contains(&count)
+}
+
+fn is_pictographic(c: char) -> bool {
+    matches!(c as u32, 0x1F300..=0x1FAFF | 0x2600..=0x27BF | 0x1F1E6..=0x1F1FF | 0x2B00..=0x2BFF)
+}
+
+pub fn to_markdown_with(body: &str, resolve: Resolve, emoji: Resolve) -> String {
+    let big = emoji_only(body, emoji);
     let mut out = String::with_capacity(body.len() + 16);
     let mut in_fence = false;
     let lines: Vec<&str> = body.split('\n').collect();
@@ -60,7 +107,7 @@ pub fn to_markdown(body: &str, resolve: Resolve) -> String {
         } else if in_fence {
             out.push_str(line);
         } else {
-            out.push_str(&inline(line, resolve));
+            out.push_str(&inline(line, resolve, emoji, big));
         }
         if i + 1 < lines.len() {
             // Redcarpet's hard_wrap: a single newline is a line break.
@@ -74,7 +121,7 @@ pub fn to_markdown(body: &str, resolve: Resolve) -> String {
 }
 
 /// Autolinks and mentions, outside inline code spans.
-fn inline(line: &str, resolve: Resolve) -> String {
+fn inline(line: &str, resolve: Resolve, emoji: Resolve, big: bool) -> String {
     let mut out = String::with_capacity(line.len());
     for (k, part) in line.split('`').enumerate() {
         if k > 0 {
@@ -111,7 +158,7 @@ fn inline(line: &str, resolve: Resolve) -> String {
                     None => out.push_str(w),
                 }
             } else {
-                out.push_str(w);
+                out.push_str(&emojify(w, emoji, big));
             }
             if words.peek().is_some() {
                 out.push(' ');
@@ -121,9 +168,47 @@ fn inline(line: &str, resolve: Resolve) -> String {
     out
 }
 
+/// `:name:` → an emoji link, for names with an image.
+fn emojify(word: &str, emoji: Resolve, big: bool) -> String {
+    let mut out = String::with_capacity(word.len());
+    let mut rest = word;
+    while let Some(start) = rest.find(':') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find(':') else { break };
+        let name = &after[..end];
+        match emoji(name).filter(|_| inferno_core::server::custom::valid_emoji_name(name)) {
+            Some(url) => {
+                out.push_str(&rest[..start]);
+                let scheme = if big { BIG_EMOJI_SCHEME } else { EMOJI_SCHEME };
+                out.push_str(&format!("[:{name}:]({scheme}{url})"));
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push_str(&rest[..start + 1]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::{plain, to_markdown as md};
+
+    #[test]
+    fn custom_emoji_inline_and_enlarged() {
+        let known = |n: &str| (n == "fire_ball").then(|| "https://b.example/f.png".to_owned());
+        let none = |_: &str| None;
+        assert_eq!(super::to_markdown_with(":fire_ball: hot take", &none, &known), "[:fire_ball:](emoji:https://b.example/f.png) hot take");
+        assert_eq!(super::to_markdown_with(":fire_ball: :fire_ball:", &none, &known), "[:fire_ball:](emoji-big:https://b.example/f.png) [:fire_ball:](emoji-big:https://b.example/f.png)");
+        assert_eq!(super::to_markdown_with("a :nope: b `:fire_ball:`", &none, &known), "a :nope: b `:fire_ball:`");
+        assert!(super::emoji_only("😀 🔥", &none));
+        assert!(super::emoji_only("👍🏽", &none));
+        assert!(!super::emoji_only("hi 😀", &none));
+        assert!(!super::emoji_only("😀😀😀😀😀😀😀😀😀😀😀", &none), "more than ten");
+    }
 
     fn to_markdown(s: &str) -> String {
         md(s, &|w: &str| (w == "tac").then(|| "abc".to_owned()))

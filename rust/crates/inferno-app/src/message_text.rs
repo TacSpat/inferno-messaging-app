@@ -166,6 +166,9 @@ pub struct MessageText {
     /// Images and GIFs drawn this pass: (item id, url).
     #[rust]
     media: Vec<(LiveId, String)>,
+    /// The GIF under the pointer: its flame shows (Flutter).
+    #[rust]
+    hover_media: Option<String>,
     /// Links and mentions drawn this pass: the range of TextFlow's tracked
     /// areas each one covers (one per row it wraps over), and its target.
     #[rust]
@@ -192,6 +195,22 @@ pub struct MessageText {
     heading_base_scale: f64,
 }
 
+static FAVORITE_GIFS: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
+
+/// The favorites, for lighting the flame on GIFs in messages.
+pub fn set_favorite_gifs(urls: impl IntoIterator<Item = String>) {
+    *FAVORITE_GIFS.lock().unwrap_or_else(|e| e.into_inner()) = Some(urls.into_iter().collect());
+}
+
+fn is_favorite_gif(url: &str) -> bool {
+    FAVORITE_GIFS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().is_some_and(|f| f.contains(url))
+}
+
+/// Flutter: accent when saved, white at 80% when not.
+pub fn flame_color(saved: bool) -> Vec4 {
+    if saved { crate::theme::tok("accent", 1.0) } else { vec4(1.0, 1.0, 1.0, 0.8) }
+}
+
 impl Widget for MessageText {
     fn is_interactive(&self) -> bool {
         false
@@ -201,6 +220,14 @@ impl Widget for MessageText {
         let actions = cx.capture_actions(|cx| self.text_flow.handle_event(cx, event, scope));
         for (id, url) in self.media.clone() {
             let item = self.text_flow.existing_item(id);
+            if item.as_view().finger_hover_in(&actions).is_some() && self.hover_media.as_deref() != Some(url.as_str()) {
+                self.hover_media = Some(url.clone());
+                self.redraw(cx);
+            }
+            if item.as_view().finger_hover_out(&actions).is_some() && self.hover_media.as_deref() == Some(url.as_str()) {
+                self.hover_media = None;
+                self.redraw(cx);
+            }
             let tapped = |path: &[LiveId]| item.view(cx, path).finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap());
             if tapped(&[live_id!(fire)]) {
                 cx.widget_action(self.widget_uid(), MessageTextAction::FavoriteGif(url.clone()));
@@ -381,6 +408,20 @@ impl MessageText {
                     // they sit on the baseline; their rects are tracked for
                     // hover and clicks.
                     let Some((target, text)) = self.open_link.take() else { continue };
+                    // Custom emoji: inline, Rails' 1.375em (3.5rem alone).
+                    let emoji_url = target
+                        .strip_prefix(crate::message_format::BIG_EMOJI_SCHEME)
+                        .map(|u| (u, true))
+                        .or_else(|| target.strip_prefix(crate::message_format::EMOJI_SCHEME).map(|u| (u, false)));
+                    if let Some((url, big)) = emoji_url {
+                        self.auto_id += 1;
+                        let id = LiveId(0x454d_4f4a_0000 + self.auto_id);
+                        let item = tf.item(cx, id, if big { live_id!(emoji_big) } else { live_id!(emoji) });
+                        let img = item.image(cx, ids!(img));
+                        crate::images::show(cx, &img, Some(url));
+                        item.draw_all_unscoped(cx);
+                        continue;
+                    }
                     // Rails' unfurl_images: an image link becomes the image
                     // (max 384×288, rounded), on its own line.
                     if crate::message_format::is_media(&target) {
@@ -390,7 +431,16 @@ impl MessageText {
                         let item = tf.item(cx, id, live_id!(media));
                         let img = item.image(cx, ids!(img));
                         crate::images::show(cx, &img, Some(&target));
-                        item.view(cx, ids!(fire)).set_visible(cx, inferno_core::gifs::looks_like_gif(&target));
+                        // Flutter's save button: the Inferno flame on hover,
+                        // in the accent once it's a favorite.
+                        let gif = inferno_core::gifs::looks_like_gif(&target);
+                        let hovered = self.hover_media.as_deref() == Some(target.as_str());
+                        item.view(cx, ids!(fire)).set_visible(cx, gif && hovered);
+                        if gif && hovered {
+                            let mut icon = item.widget(cx, ids!(fire.icon));
+                            let c = flame_color(is_favorite_gif(&target));
+                            script_apply_eval!(cx, icon, {draw_icon +: {color: #(c)}});
+                        }
                         item.draw_all_unscoped(cx);
                         tf.new_line_collapsed(cx);
                         self.media.push((id, target));

@@ -1949,10 +1949,10 @@ impl Widget for PickerList {
                             let img = row.image(cx, &[slot[0], id!(img)]);
                             let preview = if gif.preview.is_empty() { &gif.url } else { &gif.preview };
                             crate::images::show(cx, &img, Some(preview));
-                            // Rails' fire button: lit when it's a favorite.
-                            let mut fire = row.widget(cx, &[slot[0], id!(fire), id!(glyph)]);
-                            let a = if *fav { 1.0 } else { 0.35 };
-                            script_apply_eval!(cx, fire, {draw_text +: {color: #(vec4(1.0, 1.0, 1.0, a))}});
+                            // Flutter's flame: accent when it's a favorite.
+                            let mut fire = row.widget(cx, &[slot[0], id!(fire), id!(icon)]);
+                            let c = crate::message_text::flame_color(*fav);
+                            script_apply_eval!(cx, fire, {draw_icon +: {color: #(c)}});
                         }
                         row.draw_all(cx, &mut Scope::empty());
                     }
