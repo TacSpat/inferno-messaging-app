@@ -5,6 +5,8 @@
 //! faces, and `get_color` keeping per-glyph colours. Keep the rest identical so it can be re-copied when Makepad moves.
 #![allow(dead_code, clippy::all)]
 
+use std::collections::HashMap;
+
 use {
     makepad_widgets::{
         animator::{Animate, Animator, AnimatorAction, AnimatorImpl, Play},
@@ -25,6 +27,7 @@ use {
         },
         makepad_script::{ScriptFnRef, ScriptRefOptionExt},
         scroll_bar::{ScrollAxis, ScrollBar},
+        image::DrawImage,
         text_input::{
             mark_band_rect, DrawTextMark, ReplaceRangeError, TextInputAction, TextMark, TextMarkKind,
             TextMarkSet, UndoGroup,
@@ -57,6 +60,7 @@ script_mod! {
         text_style_bold: theme.font_bold{}
         text_style_italic: theme.font_italic{}
         text_style_bold_italic: theme.font_bold_italic{}
+        draw_emoji +: {}
         draw_span_bg +: {
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
@@ -553,6 +557,9 @@ pub struct RichInput {
     /// (gray-700/50).
     #[live]
     draw_span_bg: DrawColor,
+    /// Custom emoji the composer shows as images: name → image URL.
+    #[rust]
+    pub emojis: HashMap<String, String>,
     #[live]
     is_password: bool,
     #[live]
@@ -672,6 +679,9 @@ pub struct RichInput {
     on_change: Option<ScriptFnRef>,
     #[live]
     on_return: Option<ScriptFnRef>,
+    /// Custom emoji drawn over their `:name:` while typing.
+    #[live]
+    draw_emoji: DrawImage,
 }
 
 impl ScriptHook for RichInput {
@@ -692,7 +702,8 @@ impl RichInput {
     fn restyle(&mut self, cx: &mut Cx2d, laidout: Rc<LaidoutText>) -> Rc<LaidoutText> {
         use crate::composer_lint::{spans, Kind};
         let spans = spans(laidout.text.as_str());
-        if spans.is_empty() {
+        let emojis = self.emoji_ranges(laidout.text.as_str());
+        if spans.is_empty() && emojis.is_empty() {
             return laidout;
         }
         let rgb = |kind: Kind| {
@@ -701,6 +712,13 @@ impl RichInput {
                 Err(token) => crate::theme::current().token(token).0,
             };
             makepad_widgets::makepad_draw::text::color::Color { r: (hex >> 16) as u8, g: (hex >> 8) as u8, b: hex as u8, a: 255 }
+        };
+        // A glyph without a colour takes the last one set, so once any glyph
+        // is coloured, the plain ones must say theirs.
+        let base = {
+            let c = self.draw_text.color;
+            let u = |v: f32| (v.clamp(0.0, 1.0) * 255.0).round() as u8;
+            makepad_widgets::makepad_draw::text::color::Color { r: u(c.x), g: u(c.y), b: u(c.z), a: u(c.w) }
         };
         let mut copy = (*laidout).clone();
         for row in &mut copy.rows {
@@ -712,6 +730,27 @@ impl RichInput {
             let mut i = 0;
             while i < old.len() {
                 let at = row_start + old[i].cluster;
+                // A known `:name:`: its letters squeeze into one emoji-wide
+                // slot, invisible; the image is drawn over it.
+                if let Some((range, _)) = emojis.iter().find(|(r, _)| r.contains(&at)) {
+                    let mut j = i;
+                    while j < old.len() && range.contains(&(row_start + old[j].cluster)) {
+                        j += 1;
+                    }
+                    let x0 = old[i].origin_in_lpxs.x;
+                    let x1 = old.get(j).map_or(row.width_in_lpxs, |g| g.origin_in_lpxs.x);
+                    let slot = (row.ascender_in_lpxs - row.descender_in_lpxs) * 1.1;
+                    let n = (j - i) as f32;
+                    for (k, g) in old[i..j].iter().enumerate() {
+                        let mut g = g.clone();
+                        g.origin_in_lpxs.x = x0 + shift + slot * k as f32 / n;
+                        g.color = Some(makepad_widgets::makepad_draw::text::color::Color { r: 0, g: 0, b: 0, a: 0 });
+                        glyphs.push(g);
+                    }
+                    shift += slot - (x1 - x0);
+                    i = j;
+                    continue;
+                }
                 let span = spans.iter().find(|(r, _)| r.contains(&at));
                 let face = match span.map(|(_, k)| *k) {
                     Some(Kind::Bold) => Some(self.text_style_bold.clone()),
@@ -722,9 +761,10 @@ impl RichInput {
                 let (Some((range, kind)), Some(face)) = (span, face) else {
                     let mut g = old[i].clone();
                     g.origin_in_lpxs.x += shift;
-                    if let Some((_, kind)) = span {
-                        g.color = Some(rgb(*kind));
-                    }
+                    g.color = Some(match span {
+                        Some((_, kind)) => rgb(*kind),
+                        None => g.color.unwrap_or(base),
+                    });
                     glyphs.push(g);
                     i += 1;
                     continue;
@@ -1267,6 +1307,60 @@ impl RichInput {
             pos: text_rect.pos - area_rect.pos + cursor_rect.pos
                 - dvec2(self.scroll_x, self.scroll_y),
             size: cursor_rect.size,
+        }
+    }
+
+    /// `:name:` ranges with a known image.
+    fn emoji_ranges(&self, text: &str) -> Vec<(std::ops::Range<usize>, String)> {
+        let mut out = Vec::new();
+        if self.emojis.is_empty() {
+            return out;
+        }
+        let mut from = 0;
+        while let Some(start) = text[from..].find(':').map(|i| i + from) {
+            let after = start + 1;
+            let Some(end) = text[after..].find(':').map(|i| i + after) else { break };
+            match self.emojis.get(&text[after..end]) {
+                Some(url) if !text[after..end].is_empty() => {
+                    out.push((start..end + 1, url.clone()));
+                    from = end + 1;
+                }
+                _ => from = after,
+            }
+        }
+        out
+    }
+
+    /// The custom emoji images over their slots (see `restyle`).
+    fn draw_emojis(&mut self, cx: &mut Cx2d, text_rect: Rect) {
+        let Some(laidout_text) = self.laidout_text.clone() else { return };
+        for (range, url) in self.emoji_ranges(&self.text.clone()) {
+            if !crate::images::ensure(cx, &url) {
+                continue;
+            }
+            let Some(texture) = load_image_from_cache(cx, std::path::Path::new(&url)) else { continue };
+            self.draw_emoji.draw_vars.set_texture(0, &texture);
+            // An animated GIF is a sheet of frames: show the first.
+            let frame = texture.animation(cx).as_ref().map(|a| (a.width, a.height));
+            self.draw_emoji.image_scale = match frame {
+                Some((fw, fh)) => {
+                    let (w, h) = texture.get_format(cx).vec_width_height().unwrap_or((fw, fh));
+                    vec2(fw as f32 / w.max(1) as f32, fh as f32 / h.max(1) as f32)
+                }
+                None => vec2(1.0, 1.0),
+            };
+            let sel = Selection {
+                anchor: Cursor { index: range.start, prefer_next_row: false },
+                cursor: Cursor { index: range.end, prefer_next_row: false },
+            };
+            for SelectionRect { rect_in_lpxs, .. } in laidout_text.selection_rects(sel) {
+                let s = self.draw_text.font_scale as f64;
+                let (w, h) = (rect_in_lpxs.size.width as f64 * s, rect_in_lpxs.size.height as f64 * s);
+                let side = w.min(h) * 0.95;
+                let x = text_rect.pos.x + rect_in_lpxs.origin.x as f64 * s + (w - side) / 2.0;
+                let y = text_rect.pos.y + rect_in_lpxs.origin.y as f64 * s + (h - side) / 2.0;
+                self.draw_emoji.draw_abs(cx, rect(x, y, side, side));
+            }
         }
     }
 
@@ -2635,6 +2729,7 @@ impl Widget for RichInput {
         self.draw_selection(cx, text_rect);
         if self.highlight && !self.is_password {
             self.draw_span_bgs(cx, text_rect);
+            self.draw_emojis(cx, text_rect);
         }
         self.draw_composition_underline(cx, text_rect);
         self.draw_marks(cx, text_rect);

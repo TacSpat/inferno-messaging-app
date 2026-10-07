@@ -62,28 +62,37 @@ pub fn show(cx: &mut Cx, img: &ImageRef, url: Option<&str>) {
         img.set_visible(cx, false);
         return;
     };
-    let loaded = load_image_from_cache(cx, Path::new(url)).is_some();
+    let loaded = ensure(cx, url);
     img.set_visible(cx, loaded);
     if loaded {
         let _ = img.load_image_http_by_url_async(cx, url);
-        return;
+    }
+}
+
+/// Starts fetching `url` if it isn't loaded or on its way; true once it's
+/// in the image cache (for drawing it without an Image widget).
+pub fn ensure(cx: &mut Cx, url: &str) -> bool {
+    if !allowed(url) {
+        return false;
+    }
+    if load_image_from_cache(cx, Path::new(url)).is_some() {
+        return true;
     }
     let loading = pending_has(url) || (cx.has_global::<ImageCache>() && cx.get_global::<ImageCache>().map.contains_key(Path::new(url)));
-    if !loaded && !loading {
+    if !loading {
         let mut tried = TRIED.lock().unwrap_or_else(|e| e.into_inner());
         let tried = tried.get_or_insert_with(HashMap::new);
         match tried.get(url) {
             // Asked before, not in the cache now: it failed. Wait a while.
-            Some(at) if at.elapsed() < RETRY_AFTER => return,
+            Some(at) if at.elapsed() < RETRY_AFTER => return false,
             _ => {
                 tried.insert(url.to_owned(), Instant::now());
             }
         }
-    }
-    if !loading {
         // Starts the download; the shared cache keeps it once decoded.
         fetch(cx, url);
     }
+    false
 }
 
 /// Downloads and decodes finish through whichever image widget sees the

@@ -2964,6 +2964,9 @@ pub struct App {
     /// 2 channels) and where we are.
     #[rust]
     wizard: Option<(backend::Onboarding, Vec<u8>, usize)>,
+    /// The open server (for its custom emoji in the composer).
+    #[rust]
+    server_gid: String,
     /// Channel ids behind the Hearth dropdown's entries (after "None").
     #[rust]
     hearth_options: Vec<String>,
@@ -4553,8 +4556,26 @@ impl App {
     }
 
     /// Switches between a server and Home (DM sidebar, friends, DMs).
+    /// Custom emoji the composer draws as images while typing: this
+    /// server's, or any server's in DMs (as messages resolve them).
+    fn sync_composer_emojis(&mut self, cx: &mut Cx) {
+        let mut map = std::collections::HashMap::new();
+        for set in &self.emoji_sets {
+            if self.home || set.gid == self.server_gid {
+                for (name, url) in &set.emojis {
+                    map.entry(name.clone()).or_insert_with(|| url.clone());
+                }
+            }
+        }
+        if let Some(mut input) = self.ui.widget(cx, ids!(composer)).borrow_mut::<rich_input::RichInput>() {
+            input.emojis = map;
+        }
+        self.ui.widget(cx, ids!(composer)).redraw(cx);
+    }
+
     fn set_home(&mut self, cx: &mut Cx, home: bool) {
         self.home = home;
+        self.sync_composer_emojis(cx);
         self.ui.view(cx, ids!(server_side)).set_visible(cx, !home);
         self.ui.view(cx, ids!(dm_side)).set_visible(cx, home);
         self.ui.view(cx, ids!(server_menu)).set_visible(cx, false);
@@ -5305,6 +5326,8 @@ impl App {
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
             }
             Update::Server { gid, name, sidebar, members, perms, roles, categories, channels } => {
+                self.server_gid = gid.clone();
+                self.sync_composer_emojis(cx);
                 self.perms = perms.clone();
                 self.categories = categories.clone();
                 self.server_name = name.clone();
@@ -5449,6 +5472,7 @@ impl App {
             }
             Update::EmojiSets(sets) => {
                 self.emoji_sets = sets.clone();
+                self.sync_composer_emojis(cx);
                 self.show_status_emoji(cx);
             }
             Update::UploadAuth { id, header, servers } => {
@@ -6686,6 +6710,7 @@ impl AppMain for App {
             if self.picker_tab == PICKER_GIFS && !self.gif_results.gifs.is_empty() {
                 self.refresh_picker(cx, false);
             }
+            self.ui.widget(cx, ids!(composer)).redraw(cx);
             if let Some(pic) = self.wizard.as_ref().map(|w| w.0.picture.clone()) {
                 images::show(cx, &self.ui.image(cx, ids!(wz_icon.pic)), pic.as_deref());
             }
