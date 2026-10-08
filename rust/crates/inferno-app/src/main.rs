@@ -14,6 +14,10 @@ mod images;
 mod lists;
 mod message_format;
 mod message_text;
+mod clipboard_image;
+mod inline_video;
+mod media_cache;
+use inline_video::Inline;
 mod message_list;
 mod media_probe;
 mod media_view;
@@ -79,6 +83,7 @@ script_mod! {
     let gray_700_50 = #(theme::tok("gray_700", 0.5))
     let gray_100_60 = #(theme::tok("gray_100", 0.6))
     let gray_400_60 = #(theme::tok("gray_400", 0.6))
+    let gray_500_40 = #(theme::tok("gray_500", 0.4))
     let gray_800_60 = #(theme::tok("gray_800", 0.6))
 
     let Txt = Label{
@@ -90,6 +95,49 @@ script_mod! {
         icon_walk: Walk{width: 20 height: 20}
         draw_icon.color: gray_400
     }
+
+    // A picture that can be a spoiler: `blur: 1.0` draws it as Rails'
+    // blur(60px) saturate(0), a grey smear of its colours (33 reads in
+    // four rings around the point).
+    let BlurImage = Image{
+        draw_bg +: {
+            blur: instance(0.0)
+            tap: fn(uv: vec2) -> vec4 {
+                return self.image_texture.sample_as_bgra(clamp(uv, vec2(0.0, 0.0), vec2(1.0, 1.0)))
+            }
+            // Eight reads on an ellipse of radii `a` around `uv`, summed, the
+            // directions turned by (cs, sn).
+            ring: fn(uv: vec2, a: vec2, cs: float, sn: float) -> vec4 {
+                let p = vec2(cs, sn) * a
+                let q = vec2(-sn, cs) * a
+                let m = (p + q) * 0.7071
+                let n = (q - p) * 0.7071
+                return self.tap(uv + p) + self.tap(uv - p) + self.tap(uv + q) + self.tap(uv - q)
+                    + self.tap(uv + m) + self.tap(uv - m) + self.tap(uv + n) + self.tap(uv - n)
+            }
+            get_color: fn() {
+                let scale = self.fit_scale * self.image_scale
+                let pan = self.fit_pan * self.image_scale + self.image_pan
+                if self.blur < 0.5 {
+                    return self.get_color_scale_pan(scale, pan)
+                }
+                let uv = self.pos * scale + pan
+                // Each point turns its rings its own way: the bands a few
+                // fixed reads leave become a fine grain.
+                let turn = fract(sin(dot(self.pos * self.rect_size, vec2(12.9898, 78.233))) * 43758.5453) * 6.2832
+                let cs = cos(turn)
+                let sn = sin(turn)
+                let c = (self.tap(uv) + self.ring(uv, scale * 0.08, cs, sn) + self.ring(uv, scale * 0.17, sn, cs)
+                    + self.ring(uv, scale * 0.27, cs, sn) + self.ring(uv, scale * 0.38, sn, cs)) / 33.0
+                let g = dot(c.xyz, vec3(0.299, 0.587, 0.114)) * 0.7
+                return vec4(g, g, g, c.w)
+            }
+        }
+    }
+    // Rails' .spoiler-label: a black/70 pill, white semibold text.
+    let SpoilerTag = RoundedView{width: Fit height: Fit padding: Inset{left: 12 right: 12 top: 4 bottom: 4}
+        draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0
+        Txt{text: "SPOILER" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.5}}}
 
     // ─── Server rail ─────────────────────────────────────────────────
     // 72px, gray-950, 12px vertical padding, 8px gaps, 48px icons with a
@@ -326,33 +374,118 @@ script_mod! {
     }
     // Rails' .vp-btn: 20px icons in gray-200.
     let VpBtn = View{width: Fit height: Fit flow: Overlay padding: 2 cursor: MouseCursor.Hand}
-    let VpIco = Icon{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xe5e7eb}
-    // Rails' seek and volume bars: 4px white/20 tracks, the played part in
-    // the accent; the volume has a 12px white knob.
+    // Rails' .vp-btn: gray-200 (the theme's).
+    let VpIco = Icon{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_200}
+    // Rails' seek and volume bars: 4px white/20 tracks (the seek bar 6px
+    // under the pointer), the played part (the volume's level) in the
+    // theme's accent; the volume has a 12px white knob.
     let VpBar = View{
         width: Fill height: 14 cursor: MouseCursor.Hand
         show_bg: true
         draw_bg +: {
             fill: instance(0.0)
             knob: instance(0.0)
+            grow: instance(0.0)
+            alpha: instance(1.0)
+            // Rails' .vp-progress is blue-500; here the theme's accent.
             color: uniform(accent)
             pixel: fn() {
                 let sdf = Sdf2d.viewport(self.pos * self.rect_size)
                 let w = self.rect_size.x
                 let cy = self.rect_size.y * 0.5
-                sdf.box(0.0, cy - 2.0, w, 4.0, 2.0)
+                let h = 4.0 + 2.0 * self.grow
+                sdf.box(0.0, cy - h * 0.5, w, h, h * 0.5)
                 sdf.fill(vec4(1.0, 1.0, 1.0, 0.2))
-                sdf.box(0.0, cy - 2.0, max(w * self.fill, 0.01), 4.0, 2.0)
-                sdf.fill(mix(self.color, vec4(1.0, 1.0, 1.0, 1.0), self.knob))
+                sdf.box(0.0, cy - h * 0.5, max(w * self.fill, 0.01), h, h * 0.5)
+                sdf.fill(self.color)
                 if self.knob > 0.5 {
                     sdf.circle(clamp(w * self.fill, 6.0, w - 6.0), cy, 6.0)
                     sdf.fill(vec4(1.0, 1.0, 1.0, 1.0))
                 }
+                return sdf.result * self.alpha
+            }
+        }
+    }
+    // Rails' .vp-vol-popup-slider: an 80px vertical track with a 14px white
+    // knob, filled from the bottom in the theme's accent.
+    let VpVBar = View{
+        width: 14 height: 80 cursor: MouseCursor.Hand
+        show_bg: true
+        draw_bg +: {
+            fill: instance(1.0)
+            color: uniform(accent)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let h = self.rect_size.y
+                let cx = self.rect_size.x * 0.5
+                sdf.box(cx - 2.0, 0.0, 4.0, h, 2.0)
+                sdf.fill(vec4(1.0, 1.0, 1.0, 0.2))
+                let top = h * (1.0 - self.fill)
+                sdf.box(cx - 2.0, top, 4.0, max(h - top, 0.01), 2.0)
+                sdf.fill(self.color)
+                sdf.circle(cx, clamp(top, 7.0, h - 7.0), 7.0)
+                sdf.fill(vec4(1.0, 1.0, 1.0, 1.0))
                 return sdf.result
             }
         }
     }
+    // Rails' big play button: a 64px white triangle with drop-shadow-lg.
+    let BigPlay = View{width: 66 height: 68 flow: Overlay
+        shadow := Ico{margin: Inset{left: 2 top: 4} icon_walk: Walk{width: 64 height: 64} draw_icon.color: #x00000040
+            draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
+        tri := Ico{icon_walk: Walk{width: 64 height: 64} draw_icon.color: #xffffff
+            draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
+    }
+    // Rails' .vp-controls: play, time, seek, volume and fullscreen on a
+    // black/80-to-clear gradient, 8px 10px padding, 8px gaps. A portrait
+    // video puts the seek bar on its own row above (Rails' .vp-vertical).
+    let VideoBar = View{width: Fill height: Fit flow: Down spacing: 4
+        padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
+        show_bg: true
+        draw_bg +: {
+            alpha: instance(1.0)
+            // Its bottom corners round with the player's (0 in fullscreen).
+            radius: instance(8.0)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0.0, -2.0 * self.radius, self.rect_size.x, self.rect_size.y + 2.0 * self.radius, self.radius)
+                sdf.fill(vec4(0.0, 0.0, 0.0, 0.8 * self.pos.y * self.alpha))
+                return sdf.result
+            }
+        }
+        seek_top := VpBar{visible: false width: Fill}
+        View{width: Fill height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+            play_btn := VpBtn{
+                play := VpIco{draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
+                pause := VpIco{draw_icon.color: #xe5e7eb00 draw_icon.svg: crate_resource("self:resources/icons/pause.svg")}}
+            time := Label{text: "0:00 / 0:00" draw_text.color: gray_400 draw_text.text_style.font_size: 9}
+            // Portrait: the time takes the room the seek bar left (Rails' flex: 1).
+            push := View{visible: false width: Fill height: 1}
+            seek := VpBar{width: Fill}
+            vol := VpBtn{
+                on := VpIco{draw_icon.svg: crate_resource("self:resources/icons/volume.svg")}
+                off := VpIco{draw_icon.color: #xe5e7eb00 draw_icon.svg: crate_resource("self:resources/icons/volume_off.svg")}}
+            vol_bar := VpBar{width: 60 draw_bg.knob: 1.0 draw_bg.fill: 1.0}
+            fs := VpBtn{
+                icon := VpIco{draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
+        }
+    }
 
+    // A video in a message: rounded like its card (Rails' rounded-lg).
+    let RoundVideo = Video{show_controls: false
+        draw_bg +: {
+            radius: instance(8.0)
+            pixel: fn() {
+                let color = self.get_color_scale_pan()
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, self.radius)
+                sdf.fill(Pal.premul(vec4(color.xyz, color.w * self.opacity)))
+                return sdf.result
+            }
+        }
+    }
+    // A video card's first frame (inline_video.rs); defined before the cards.
+    mod.widgets.PosterSlot = #(inline_video::PosterSlot::register_widget(vm))
     // A message body, rendered as Rails does (message_format.rs).
     let MsgBody = mod.widgets.MessageText{
         width: Fill height: Fit
@@ -394,24 +527,32 @@ script_mod! {
             width: Fit height: Fit flow: Overlay align: Align{x: 0.0 y: 0.0}
             margin: Inset{top: 4 bottom: 4}
             cursor: MouseCursor.Hand
-            img := Image{visible: false width: 384 height: 288 fit: ImageFit.Smallest draw_bg.border_radius: 8.0}
+            img := BlurImage{visible: false width: 384 height: 288 fit: ImageFit.Smallest draw_bg.border_radius: 8.0}
+            // A spoiler: blurred under Rails' label until clicked.
+            hidden := View{visible: false width: Fill height: Fill align: Center SpoilerTag{}}
             // Flutter's save button: 32px black/60 circle, top-left.
             fire := RoundedView{visible: false width: 32 height: 32 margin: 8 align: Center cursor: MouseCursor.Hand
                 new_batch: true draw_bg.color: #x00000099 draw_bg.border_radius: 16.0
                 icon := Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xffffffcc
                     draw_icon.svg: crate_resource("self:resources/icons/inferno.svg")}}
         }
-        // Rails' video attachment: max-w-lg max-h-96, the big play button
-        // over it; it plays in the viewer.
+        // Rails' video attachment (max-w-lg max-h-96, rounded-lg) with the big
+        // play button; its controls only come once it plays. Clicking it
+        // plays it right here (inline_video.rs).
         video := RoundedView{
-            width: 400 height: 225 flow: Overlay align: Center
+            width: 400 height: 225 flow: Overlay
             margin: Inset{top: 4 bottom: 4}
             cursor: MouseCursor.Hand new_batch: true
-            draw_bg.color: #x000000 draw_bg.border_radius: 4.0
-            play := Ico{icon_walk: Walk{width: 64 height: 64} draw_icon.color: #xffffff
-                draw_icon.svg: crate_resource("self:resources/icons/play.svg")}
-            name := View{width: Fill height: Fill align: Align{x: 0.0 y: 1.0} padding: Inset{left: 10 right: 10 top: 8 bottom: 8}
-                label := Label{draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}}
+            draw_bg.color: #x000000 draw_bg.border_radius: 8.0
+            poster := mod.widgets.PosterSlot{width: Fill height: Fill}
+            big := View{width: Fill height: Fill align: Center BigPlay{}}
+            // Rails' spoiler card: the eye, "Spoiler", how to see it.
+            hidden := RoundedView{visible: false width: Fill height: Fill flow: Down align: Center spacing: 4
+                draw_bg.color: gray_900 draw_bg.border_radius: 8.0
+                Ico{icon_walk: Walk{width: 32 height: 32} draw_icon.color: gray_400
+                    draw_icon.svg: crate_resource("self:resources/icons/eye_off.svg")}
+                Txt{text: "Spoiler" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 10}}
+                Txt{text: "Video — click to reveal" draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}}
         }
         // Rails' file attachment: gray-800, rounded-lg, the file icon and
         // its name in accent-light (Flutter adds the size).
@@ -474,6 +615,11 @@ script_mod! {
         padding: Inset{right: 8}
         toolbar := Toolbar{}
     }
+
+    mod.widgets.InlineVideoHost = #(inline_video::InlineVideoHost::register_widget(vm))
+    mod.widgets.InlineFullHost = #(inline_video::InlineFullHost::register_widget(vm))
+    // A video card's first frame (Rails' preload="metadata"): prepared, never played.
+    let PosterVideo = RoundVideo{width: Fill height: Fill draw_bg.opacity: 0.0}
 
     mod.widgets.MessageListBase = #(message_list::MessageList::register_widget(vm))
     mod.widgets.MessageList = set_type_default() do mod.widgets.MessageListBase{
@@ -692,22 +838,43 @@ script_mod! {
             draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
     }
 
-    // Rails' file preview: a gray-700 strip over the input, a chip per
-    // file (a 64px picture, or the name), a danger × at its corner.
-    let AttachChip = View{visible: false width: Fit height: Fit flow: Overlay padding: Inset{top: 6 right: 6}
-        margin: Inset{right: 2 bottom: 2}
-        RoundedView{width: Fit height: Fit flow: Down padding: 8 spacing: 2 new_batch: true
-            draw_bg.color: gray_800 draw_bg.border_radius: 4.0
-            thumb := Image{visible: false width: 64 height: 64 fit: ImageFit.CropToFill draw_bg.border_radius: 4.0}
-            name := Txt{width: 100 text: "" draw_text.color: gray_200 draw_text.text_style.font_size: 8.5
-                flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
-            state := Txt{text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8}
+    // Rails' file preview: a gray-700 strip over the input, a tile per file
+    // with a danger × at its corner. Flutter's tiles: all 80px square, a
+    // picture filling it, any other file its kind's icon, name and size.
+    // While a file is on its way up (or failed), a veil says so.
+    let AttachIcon = View{visible: false width: Fit height: Fit
+        ico := Ico{icon_walk: Walk{width: 22 height: 22} draw_icon.color: gray_400}}
+    let AttachChip = View{visible: false width: 90 height: 92 flow: Overlay margin: Inset{right: 2}
+        tile := RoundedView{width: 80 height: 80 margin: Inset{left: 4 top: 6} flow: Overlay new_batch: true
+            draw_bg.color: gray_800 draw_bg.border_radius: 8.0
+            draw_bg.border_size: 1.0 draw_bg.border_color: gray_600
+            thumb := BlurImage{visible: false width: Fill height: Fill fit: ImageFit.CropToFill draw_bg.border_radius: 8.0}
+            info := View{width: Fill height: Fill flow: Down align: Center spacing: 3 padding: Inset{left: 6 right: 6}
+                i_file := AttachIcon{ico.draw_icon.svg: crate_resource("self:resources/icons/file.svg")}
+                i_video := AttachIcon{ico.draw_icon.svg: crate_resource("self:resources/icons/video.svg")}
+                i_audio := AttachIcon{ico.draw_icon.svg: crate_resource("self:resources/icons/music.svg")}
+                name := Txt{width: Fill align: Align{x: 0.5} text: "" draw_text.color: gray_200
+                    draw_text.text_style.font_size: 8 flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+                size := Txt{width: Fill align: Align{x: 0.5} text: "" draw_text.color: gray_400
+                    draw_text.text_style.font_size: 7.5}
+            }
+            hidden := View{visible: false width: Fill height: Fill align: Center SpoilerTag{padding: Inset{left: 8 right: 8 top: 3 bottom: 3}}}
+            veil := RoundedView{visible: false width: Fill height: Fill align: Center padding: 4
+                draw_bg.color: #x000000a6 draw_bg.border_radius: 8.0
+                state := Txt{width: Fill align: Align{x: 0.5} text: "" draw_text.color: #xffffff
+                    draw_text.text_style.font_size: 8}}
         }
         View{width: Fill height: Fit align: Align{x: 1.0}
-            x := RoundedView{width: 20 height: 20 margin: Inset{top: -6 right: -6} align: Center cursor: MouseCursor.Hand new_batch: true
-                draw_bg.color: danger draw_bg.border_radius: 5.0
-                Ico{icon_walk: Walk{width: 10 height: 10} draw_icon.color: #xffffff
+            x := RoundedView{width: 20 height: 20 align: Center cursor: MouseCursor.Hand new_batch: true
+                draw_bg.color: danger draw_bg.border_radius: 10.0
+                Ico{icon_walk: Walk{width: 9 height: 9} draw_icon.color: #xffffff
                     draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}}
+        // Flutter's spoiler toggle, at the tile's bottom left.
+        View{width: Fill height: Fill align: Align{x: 0.0 y: 1.0}
+            eye := RoundedView{width: 20 height: 20 align: Center cursor: MouseCursor.Hand new_batch: true
+                draw_bg.color: #x000000b3 draw_bg.border_radius: 10.0
+                icon := Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffffcc
+                    draw_icon.svg: crate_resource("self:resources/icons/eye_off.svg")}}}
     }
 
     // Composer icon: gray-400, accent on hover (Rails' ember buttons).
@@ -1783,6 +1950,34 @@ script_mod! {
                                 width: Fill height: Fill
                                 flow: Overlay
                                 messages := mod.widgets.MessageList{}
+                                // Rails' inline video player (inline_video.rs):
+                                // drawn by the playing message, in its card's place.
+                                ip_host := mod.widgets.InlineVideoHost{
+                                    width: 0 height: 0
+                                    // Lent to the cards on screen for their first frames.
+                                    posters := View{
+                                        p0 := PosterVideo{} p1 := PosterVideo{} p2 := PosterVideo{} p3 := PosterVideo{}
+                                        p4 := PosterVideo{} p5 := PosterVideo{} p6 := PosterVideo{} p7 := PosterVideo{}
+                                    }
+                                    ip_box := RoundedView{width: 400 height: 225 flow: Overlay new_batch: true
+                                        draw_bg.color: #x000000 draw_bg.border_radius: 8.0
+                                        // Sized to the video's shape in fullscreen (Video stretches).
+                                        ip_frame := View{width: Fill height: Fill
+                                            // Square in fullscreen (inline_fullscreen sets `radius`).
+                                            ip_video := RoundVideo{width: Fill height: Fill}}
+                                        ip_big := View{width: Fill height: Fill align: Center new_batch: true play := BigPlay{}}
+                                        View{width: Fill height: Fill flow: Down align: Align{y: 1.0} new_batch: true
+                                            ip_bar := VideoBar{visible: false}
+                                        }
+                                        // Rails' .vp-vol-popup: a portrait video's volume,
+                                        // above the volume button while the pointer is on it.
+                                        ip_vol_pop := RoundedView{visible: false width: Fit height: Fit new_batch: true
+                                            padding: Inset{left: 6 right: 6 top: 10 bottom: 10}
+                                            draw_bg.color: #x000000d9 draw_bg.border_radius: 6.0
+                                            ip_vol_vbar := VpVBar{}
+                                        }
+                                    }
+                                }
                                 // Search filter hints (Rails: right-aligned, w-72, gray-900).
                                 suggest_slot := View{
                                     width: Fill height: Fit
@@ -1879,30 +2074,13 @@ script_mod! {
                                         who.text: "Editing message"}
                                     spoiler_bar := ComposerBar{lead.text: "This message will be sent as a spoiler"
                                         lead.draw_text.color: gray_300}
-                                    attach_bar := View{visible: false width: Fill height: Fit flow: Flow.Right{wrap: true}
-                                        padding: Inset{left: 16 right: 10 top: 4 bottom: 8}
-                                        show_bg: true new_batch: true
-                                        draw_bg +: {
-                                            fill: uniform(gray_700)
-                                            rule: uniform(gray_600)
-                                            pixel: fn() {
-                                                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
-                                                sdf.box(0. 0. self.rect_size.x self.rect_size.y + 8.0 8.0)
-                                                sdf.fill(self.fill)
-                                                sdf.rect(0. self.rect_size.y - 1.0 self.rect_size.x 1.0)
-                                                sdf.fill(self.rule)
-                                                return sdf.result
-                                            }
-                                        }
-                                        a0 := AttachChip{} a1 := AttachChip{} a2 := AttachChip{} a3 := AttachChip{} a4 := AttachChip{}
-                                        a5 := AttachChip{} a6 := AttachChip{} a7 := AttachChip{} a8 := AttachChip{} a9 := AttachChip{}
-                                    }
                                 }
                                 // Rails' input bar: gray-600, radius 8, 1px accent/.2
                                 // border; focused, the border goes to accent/.5 with a
                                 // 2px accent/.12 ring and a 20px accent/.1 glow, 0.25s.
                                 composer_shell := View{
                                     width: Fill height: Fit
+                                    flow: Down
                                     padding: 8
                                     show_bg: true
                                     new_batch: true
@@ -1934,6 +2112,17 @@ script_mod! {
                                             off: AnimatorState{from: {all: Forward {duration: 0.25}} apply: {draw_bg: {focus: 0.0}}}
                                             on: AnimatorState{from: {all: Forward {duration: 0.25}} apply: {draw_bg: {focus: 1.0}}}
                                         }
+                                    }
+                                    // The files for the next message, inside the bar
+                                    // over the text (Discord's; Rails puts them in a
+                                    // strip above it), a rule between.
+                                    attach_bar := View{visible: false width: Fill height: Fit flow: Down
+                                        padding: Inset{left: 8 right: 12 top: 4}
+                                        View{width: Fill height: Fit flow: Flow.Right{wrap: true} padding: Inset{bottom: 6}
+                                            a0 := AttachChip{} a1 := AttachChip{} a2 := AttachChip{} a3 := AttachChip{} a4 := AttachChip{}
+                                            a5 := AttachChip{} a6 := AttachChip{} a7 := AttachChip{} a8 := AttachChip{} a9 := AttachChip{}
+                                        }
+                                        SolidView{width: Fill height: 1 draw_bg.color: gray_500_40}
                                     }
                                     View{
                                         width: Fill height: Fit
@@ -2773,6 +2962,12 @@ script_mod! {
                             s10 := CtxSlot{} s11 := CtxSlot{} s12 := CtxSlot{} s13 := CtxSlot{}
                         }
                     }
+                    // Rails' fullscreen video: the playing message's player
+                    // filling the window on black (inline_video.rs).
+                    ip_full := mod.widgets.InlineFullHost{
+                        width: Fill height: Fill
+                        SolidView{width: Fill height: Fill draw_bg.color: #x000000}
+                    }
                     }
 
                     // Styled confirmation (Flutter's improvement over Rails'
@@ -3060,12 +3255,29 @@ pub struct App {
     /// The image lightbox or the video player, when open.
     #[rust]
     viewer: Viewer,
+    #[rust]
+    inline: Inline,
     /// Files picked for the next message (Rails' pendingFiles).
     #[rust]
     attachments: Vec<Attachment>,
     /// A message waiting on its files to finish uploading.
     #[rust]
     queued_send: Option<(String, Option<String>, bool)>,
+    /// A message waiting on its expiring links to download (attachments.rs).
+    #[rust]
+    preserving: Option<attachments::Preserving>,
+    /// Copy Image's download in flight.
+    #[rust]
+    copy_image_req: Option<LiveId>,
+    /// Files were pasted: drop the text paste that follows (until then).
+    #[rust]
+    drop_paste_until: Option<std::time::Instant>,
+    /// The frame after a menu opens: placed again by its real size (tries
+    /// left, until it has been drawn).
+    #[rust]
+    ctx_place: NextFrame,
+    #[rust]
+    ctx_place_tries: u8,
     /// Where we asked the window to be, to learn the decoration offset.
     #[rust]
     requested_pos: Option<DVec2>,
@@ -3410,7 +3622,7 @@ impl App {
                     MessageAction::Reply(i)
                     | MessageAction::Edit(i)
                     | MessageAction::Pin(i)
-                    | MessageAction::Context(i, _)
+                    | MessageAction::Context(i, ..)
                     | MessageAction::Author(i, _)
                     | MessageAction::Invite(i) => i,
                 };
@@ -3456,8 +3668,17 @@ impl App {
                 self.focus_composer(cx);
             }
             MessageAction::Pin(_) => self.send(backend::Command::Pin { id: row.id.clone(), pinned: !row.pinned }),
-            MessageAction::Context(i, at) => {
-                let items = self.message_menu(i, &row);
+            MessageAction::Context(i, at, target) => {
+                let items = match target {
+                    // Rails: a video has its own small menu.
+                    Some(t @ (message_text::MediaTarget::Video { .. } | message_text::MediaTarget::Audio { .. })) => media_menu(&t),
+                    Some(t) => {
+                        let mut items = media_menu(&t);
+                        items.extend(self.message_menu(i, &row));
+                        items
+                    }
+                    None => self.message_menu(i, &row),
+                };
                 self.open_menu(cx, items, at);
                 return;
             }
@@ -3675,6 +3896,29 @@ impl App {
         self.ctx_at = at;
         self.ui.view(cx, ids!(ctx_layer)).set_visible(cx, true);
         self.ui.redraw(cx);
+        self.ctx_place = cx.new_next_frame();
+        self.ctx_place_tries = 5;
+    }
+
+    /// Keeps an open menu inside the window by the size it was drawn at
+    /// (the estimate it opened with can be short).
+    fn place_menu(&mut self, cx: &mut Cx) {
+        let size = self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).size;
+        let win = self.ui.view(cx, ids!(ctx_layer)).area().rect(cx).size;
+        if size.y <= 0.0 || win.y <= 0.0 {
+            // Not drawn yet.
+            if self.ctx_place_tries > 0 {
+                self.ctx_place_tries -= 1;
+                self.ctx_place = cx.new_next_frame();
+            }
+            return;
+        }
+        let at = self.ctx_at;
+        let (x, y) = ctxmenu::place((at.x, at.y), (size.x, size.y), (win.x, win.y));
+
+        let mut menu = self.ui.widget(cx, ids!(ctx_menu));
+        script_apply_eval!(cx, menu, {margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ui.redraw(cx);
     }
 
     /// Replaces the open menu with a submenu, remembering where it was.
@@ -3749,6 +3993,9 @@ impl App {
             A::EditChannel(id) => self.open_channel_page(cx, Some(id), None),
             A::EditCategory(id) => self.open_category_page(cx, Some(id)),
             A::Copy(text) => cx.copy_to_clipboard(&text),
+            A::OpenUrl(url) => cx.open_url(&url, OpenUrlInPlace::No),
+            A::SaveMedia { url, name } => self.save_media(cx, &url, &name),
+            A::CopyImage(url) => self.copy_image(cx, &url),
             A::DeleteChannel(_) => self.confirm(
                 cx,
                 Pending::Menu(action),
@@ -5610,6 +5857,7 @@ impl App {
                 if new_channel {
                     self.clear_bars(cx);
                     self.ui.view(cx, ids!(pins_panel)).set_visible(cx, false);
+                    self.stop_inline(cx);
                     // Files belong to the channel they were picked in (Rails
                     // drops them with the page); a message waiting on them
                     // would otherwise go to this one.
@@ -5835,6 +6083,8 @@ impl MatchEvent for App {
 
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         self.viewer_handle_actions(cx, actions);
+        self.inline_handle_actions(cx, actions);
+        self.copy_image_handle_actions(cx, actions);
         self.attachments_handle_actions(cx, actions);
         if self.ui.view(cx, ids!(attach_btn)).finger_up(actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
             self.pick_attachments(cx);
@@ -5861,7 +6111,12 @@ impl MatchEvent for App {
                     cx.open_url(&url, OpenUrlInPlace::No);
                 }
                 message_text::MessageTextAction::View { url, name } => self.open_image(cx, &url, &name),
-                message_text::MessageTextAction::Play { url, name, audio, dims } => self.open_player(cx, &url, &name, audio, dims),
+                // Rails plays videos in the message; sounds and videos
+                // outside the list open in the viewer.
+                message_text::MessageTextAction::Play { url, audio: false, key, .. } if !key.is_empty() => {
+                    self.play_inline(cx, key, url)
+                }
+                message_text::MessageTextAction::Play { url, name, audio, dims, .. } => self.open_player(cx, &url, &name, audio, dims),
                 message_text::MessageTextAction::FavoriteGif(url) => {
                     self.send(backend::Command::ToggleGifFavorite(Gif { url, preview: String::new() }));
                 }
@@ -6860,7 +7115,10 @@ impl MatchEvent for App {
                         let reply_to = self.reply_to.take();
                         let spoiler = std::mem::take(&mut self.spoiler);
                         self.ui.view(cx, ids!(spoiler_bar)).set_visible(cx, false);
-                        if files {
+                        let links = attachments::expiring_links(text);
+                        if !links.is_empty() {
+                            self.preserve_and_send(cx, links, text.to_owned(), reply_to, spoiler);
+                        } else if files {
                             self.send_with_attachments(cx, text.to_owned(), reply_to, spoiler);
                         } else {
                             self.send(backend::Command::Send { text: text.to_owned(), reply_to, spoiler, files: vec![] });
@@ -6899,6 +7157,22 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        media_cache::handle_event(event);
+        self.preserve_handle_event(cx, event);
+        // Pasting pictures and copied files into the composer (clipboard_image.rs).
+        if let Event::KeyDown(k) = event {
+            let paste = (k.key_code == KeyCode::KeyV && (k.modifiers.control || k.modifiers.logo))
+                || (k.key_code == KeyCode::Insert && k.modifiers.shift);
+            if paste && cx.has_key_focus(self.ui.widget(cx, ids!(composer)).area()) && self.paste_into_composer() {
+                self.drop_paste_until = Some(std::time::Instant::now() + std::time::Duration::from_secs(1));
+            }
+        }
+        // Files were pasted: the paths that come as text don't go in.
+        if let Event::TextInput(t) = event {
+            if t.was_paste && self.drop_paste_until.take().is_some_and(|until| std::time::Instant::now() < until) {
+                return;
+            }
+        }
         if self.toast_timer.is_event(event).is_some() {
             let now = std::time::Instant::now();
             let before = self.toasts.len();
@@ -6916,6 +7190,11 @@ impl AppMain for App {
         }
         media_probe::send(cx);
         self.viewer_handle_event(cx, event);
+        self.inline_handle_event(cx, event);
+        self.copy_image_handle_event(cx, event);
+        if self.ctx_place.is_event(event).is_some() {
+            self.place_menu(cx);
+        }
         if media_probe::handle_event(event) {
             self.ui.widget(cx, ids!(messages)).redraw(cx);
         }
@@ -7002,6 +7281,8 @@ impl AppMain for App {
         // A theme switch reapplies the DSL, which resets styling set at
         // runtime; put it back.
         if let Event::LiveEdit = event {
+            // The players' bars are painted at runtime (which icons show).
+            self.repaint_players(cx);
             if self.ui.view(cx, ids!(settings)).visible() {
                 self.show_settings_page(cx, self.settings_page);
             }
@@ -7012,7 +7293,9 @@ impl AppMain for App {
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {
-                if self.ui.view(cx, ids!(composer_picker)).visible() || self.ui.view(cx, ids!(status_layer)).visible() {
+                if self.inline_is_fullscreen() {
+                    self.inline_fullscreen(cx, false);
+                } else if self.ui.view(cx, ids!(composer_picker)).visible() || self.ui.view(cx, ids!(status_layer)).visible() {
                     self.close_pickers(cx);
                 } else if self.ui.view(cx, ids!(card_layer)).visible() {
                     self.close_card(cx);
@@ -7091,5 +7374,36 @@ impl AppMain for App {
         }
         self.match_event(cx, event);
         self.ui.handle_event(cx, event, &mut Scope::empty());
+    }
+}
+
+/// Rails' right-click items for a message's media and links: a link gets
+/// Copy Link and Open Link, a picture Copy Image, Save Image and Copy Image
+/// Link, all above the message's own items; a video its own menu (Copy
+/// Media Link, Save Video, Open in New Tab; here, in the browser), and a
+/// sound the same.
+fn media_menu(target: &message_text::MediaTarget) -> Vec<ctxmenu::Item> {
+    use ctxmenu::{Action as A, Item};
+    use message_text::MediaTarget as T;
+    match target {
+        T::Link(url) | T::File(url) => vec![
+            Item::new("Copy Link", A::Copy(url.clone())),
+            Item::new("Open Link", A::OpenUrl(url.clone())),
+            Item::Separator,
+        ],
+        T::Image { url, name } => vec![
+            Item::new("Copy Image", A::CopyImage(url.clone())),
+            Item::new("Save Image", A::SaveMedia { url: url.clone(), name: name.clone() }),
+            Item::new("Copy Image Link", A::Copy(url.clone())),
+            Item::Separator,
+        ],
+        T::Video { url, name } | T::Audio { url, name } => {
+            let save = if matches!(target, T::Video { .. }) { "Save Video" } else { "Save Audio" };
+            vec![
+                Item::new("Copy Media Link", A::Copy(url.clone())),
+                Item::new(save, A::SaveMedia { url: url.clone(), name: name.clone() }),
+                Item::new("Open in Browser", A::OpenUrl(url.clone())),
+            ]
+        }
     }
 }

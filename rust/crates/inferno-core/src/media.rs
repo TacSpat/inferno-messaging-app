@@ -1,7 +1,8 @@
 //! Files in messages. Rails appends each file's Blossom URL to the message
 //! text; we do too, and also describe it in a NIP-92 `imeta` tag (type,
 //! name, size, dimensions), since a Blossom URL often has no extension to
-//! tell a video from an image.
+//! tell a video from an image. A file can be a spoiler on its own: its
+//! imeta carries `content-warning spoiler` (NIP-36's tag, as an imeta field).
 
 use nostr::prelude::*;
 
@@ -13,6 +14,8 @@ pub struct FileMeta {
     pub name: String,
     pub size: Option<u64>,
     pub dim: Option<(u32, u32)>,
+    /// Hidden until clicked.
+    pub spoiler: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +46,9 @@ impl FileMeta {
         if let Some((w, h)) = self.dim {
             row.push(format!("dim {w}x{h}"));
         }
+        if self.spoiler {
+            row.push("content-warning spoiler".to_owned());
+        }
         Tag::parse(row).expect("imeta tag")
     }
 }
@@ -63,6 +69,7 @@ pub fn files(event: &Event) -> Vec<FileMeta> {
                     "m" => f.mime = v.to_owned(),
                     "alt" | "name" if f.name.is_empty() => f.name = v.to_owned(),
                     "size" => f.size = v.parse().ok(),
+                    "content-warning" => f.spoiler = true,
                     "dim" => f.dim = v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))),
                     _ => {}
                 }
@@ -142,6 +149,7 @@ mod tests {
             name: "clip.mp4".into(),
             size: Some(2_500_000),
             dim: Some((1280, 720)),
+            spoiler: true,
         };
         let keys = Keys::generate();
         let e = EventBuilder::new(Kind::Custom(9), "x").tags([f.tag()]).finalize(&keys).unwrap();

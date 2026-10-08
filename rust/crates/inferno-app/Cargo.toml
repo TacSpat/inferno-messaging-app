@@ -24,3 +24,6 @@ serde_json = "1"
 emojis = "0.6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+# Copy Image: Makepad's clipboard takes text only. arboard serves image data
+# on X11 (large ones too), Windows and macOS.
+arboard = "3.6"

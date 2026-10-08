@@ -33,8 +33,8 @@ pub struct Viewer {
     duration_ms: u128,
     playing: bool,
     ended: bool,
-    volume: f64,
-    muted: bool,
+    pub(crate) volume: f64,
+    pub(crate) muted: bool,
     seeking: bool,
     tick: Timer,
     hide: Timer,
@@ -207,7 +207,8 @@ impl App {
         if audio {
             self.start_sound(cx);
         } else if video.is_unprepared() {
-            video.set_source(VideoDataSource::Network { url: url.to_owned() });
+            video.set_source(crate::media_cache::source(url));
+            crate::media_cache::keep(cx, url);
             video.begin_playback(cx);
             video.set_volume(cx, if self.viewer.muted { 0.0 } else { self.viewer.volume });
         } else {
@@ -317,6 +318,13 @@ impl App {
         self.viewer.hide = cx.start_timeout(2.0);
     }
 
+    /// After a theme switch: the open player's bar as it was.
+    pub(crate) fn repaint_viewer(&mut self, cx: &mut Cx) {
+        if matches!(self.viewer.mode, Mode::Video | Mode::Audio) {
+            self.refresh_controls(cx);
+        }
+    }
+
     fn refresh_controls(&mut self, cx: &mut Cx) {
         let at = self.position(cx);
         let v = &mut self.viewer;
@@ -333,12 +341,12 @@ impl App {
         script_apply_eval!(cx, vol, {draw_bg +: {fill: #(volume)}});
         for (path, on) in [(ids!(pl_play.pause), playing), (ids!(pl_play.play), !playing)] {
             let mut ico = self.ui.widget(cx, path);
-            let c = vec4(0.898, 0.906, 0.922, if on { 1.0 } else { 0.0 });
+            let c = crate::theme::tok("gray_200", if on { 1.0 } else { 0.0 });
             script_apply_eval!(cx, ico, {draw_icon +: {color: #(c)}});
         }
         for (path, on) in [(ids!(pl_vol.on), volume > 0.0), (ids!(pl_vol.off), volume <= 0.0)] {
             let mut ico = self.ui.widget(cx, path);
-            let c = vec4(0.898, 0.906, 0.922, if on { 1.0 } else { 0.0 });
+            let c = crate::theme::tok("gray_200", if on { 1.0 } else { 0.0 });
             script_apply_eval!(cx, ico, {draw_icon +: {color: #(c)}});
         }
         // A sound's card has its own picture; the big button is for video.
@@ -436,6 +444,17 @@ impl App {
         }
     }
 
+    /// Save from a menu (a message's picture, video, sound or file): the
+    /// viewer's download, for this file.
+    pub(crate) fn save_media(&mut self, cx: &mut Cx, url: &str, name: &str) {
+        if self.viewer.mode != Mode::Closed {
+            return;
+        }
+        self.viewer.url = url.to_owned();
+        self.viewer.name = if name.is_empty() { crate::message_format::file_name(None, url) } else { name.to_owned() };
+        self.start_save(cx);
+    }
+
     fn start_save(&mut self, cx: &mut Cx) {
         let mime = inferno_core::media::mime_for(&self.viewer.name);
         let mime = (mime != "application/octet-stream").then_some(mime).map(str::to_owned).or_else(|| {
@@ -511,11 +530,16 @@ impl App {
                     window.fullscreen(cx);
                 }
             }
+            let uid = self.ui.widget(cx, ids!(pl_video)).widget_uid();
             for action in actions {
                 let Some(wa) = action.as_widget_action() else { continue };
+                // The message's player says the same things.
+                if wa.widget_uid != uid {
+                    continue;
+                }
                 if let (VideoAction::PlayerReset, Some(_)) = (wa.cast::<VideoAction>(), self.viewer.restart_at) {
                     let video = self.ui.video(cx, ids!(pl_video));
-                    video.set_source(VideoDataSource::Network { url: self.viewer.url.clone() });
+                    video.set_source(crate::media_cache::source(&self.viewer.url));
                     video.begin_playback(cx);
                     video.set_volume(cx, if self.viewer.muted { 0.0 } else { self.viewer.volume });
                 }

@@ -63,6 +63,8 @@ pub const IMAGE_SCHEME: &str = "image:";
 pub const VIDEO_SCHEME: &str = "video:";
 pub const AUDIO_SCHEME: &str = "audio:";
 pub const FILE_SCHEME: &str = "attach:";
+/// Before any of those (or an image link): hidden until clicked.
+pub const SPOILER_SCHEME: &str = "spoiler:";
 
 /// What's known about a link's file: its imeta tag, or what the server
 /// said its type is. `None` means nothing is known.
@@ -102,28 +104,32 @@ fn escape(text: &str) -> String {
 }
 
 /// The markdown for a link to a file, or `None` to leave it a plain link
-/// (or Rails' unfurled image).
-fn file_link(url: &str, files: Files) -> Option<String> {
+/// (or Rails' unfurled image). A spoiler's target starts `spoiler:`.
+fn file_link(url: &str, files: Files, spoiler: bool) -> Option<String> {
     let meta = files(url);
+    let spoiler = spoiler || meta.as_ref().is_some_and(|m| m.spoiler);
     let kind = match &meta {
         Some(m) => m.kind(),
         // Without a description only the extension says, and only a video's
         // or a sound's changes how it looks; a web page stays a link.
         None => match kind_of(url, "") {
             k @ (MediaKind::Video | MediaKind::Audio) => k,
+            // A spoiler can't unfurl: it's drawn as a hidden picture.
+            MediaKind::Image | MediaKind::File if spoiler && is_media(url) && !url.contains("](") => MediaKind::Image,
             MediaKind::File if is_blob(url) && url.contains('.') && url.rsplit('/').next().is_some_and(|f| f.contains('.')) => MediaKind::File,
             _ => return None,
         },
     };
     let (scheme, info) = match kind {
         // Unfurled as Rails does; a named one keeps its name for the viewer.
-        MediaKind::Image if is_media(url) && meta.as_ref().is_none_or(|m| m.name.is_empty()) => return None,
+        MediaKind::Image if !spoiler && is_media(url) && meta.as_ref().is_none_or(|m| m.name.is_empty()) => return None,
         MediaKind::Image => (IMAGE_SCHEME, String::new()),
         MediaKind::Video => (VIDEO_SCHEME, meta.as_ref().and_then(|m| m.dim).map(|(w, h)| format!("{w}x{h}")).unwrap_or_default()),
         MediaKind::Audio => (AUDIO_SCHEME, meta.as_ref().and_then(|m| m.size).map(|s| s.to_string()).unwrap_or_default()),
         MediaKind::File => (FILE_SCHEME, meta.as_ref().and_then(|m| m.size).map(|s| s.to_string()).unwrap_or_default()),
     };
-    Some(format!("[{}](<{scheme}{info}|{url}>)", escape(&file_name(meta.as_ref(), url))))
+    let hide = if spoiler { SPOILER_SCHEME } else { "" };
+    Some(format!("[{}](<{hide}{scheme}{info}|{url}>)", escape(&file_name(meta.as_ref(), url))))
 }
 
 /// Custom emoji in messages: `:name:` with a known image becomes an
@@ -170,10 +176,11 @@ fn is_pictographic(c: char) -> bool {
 
 #[cfg(test)]
 pub fn to_markdown_with(body: &str, resolve: Resolve, emoji: Resolve) -> String {
-    to_markdown_full(body, resolve, emoji, &|_| None)
+    to_markdown_full(body, resolve, emoji, &|_| None, false)
 }
 
-pub fn to_markdown_full(body: &str, resolve: Resolve, emoji: Resolve, files: Files) -> String {
+/// `spoiler`: the message is one, so its pictures and files are too.
+pub fn to_markdown_full(body: &str, resolve: Resolve, emoji: Resolve, files: Files, spoiler: bool) -> String {
     let big = emoji_only(body, emoji);
     let mut out = String::with_capacity(body.len() + 16);
     let mut in_fence = false;
@@ -186,7 +193,7 @@ pub fn to_markdown_full(body: &str, resolve: Resolve, emoji: Resolve, files: Fil
         } else if in_fence {
             out.push_str(line);
         } else {
-            out.push_str(&inline(line, resolve, emoji, files, big));
+            out.push_str(&inline(line, resolve, emoji, files, big, spoiler));
         }
         if i + 1 < lines.len() {
             // Redcarpet's hard_wrap: a single newline is a line break.
@@ -200,7 +207,7 @@ pub fn to_markdown_full(body: &str, resolve: Resolve, emoji: Resolve, files: Fil
 }
 
 /// Autolinks and mentions, outside inline code spans.
-fn inline(line: &str, resolve: Resolve, emoji: Resolve, files: Files, big: bool) -> String {
+fn inline(line: &str, resolve: Resolve, emoji: Resolve, files: Files, big: bool, spoiler: bool) -> String {
     let mut out = String::with_capacity(line.len());
     for (k, part) in line.split('`').enumerate() {
         if k > 0 {
@@ -213,10 +220,15 @@ fn inline(line: &str, resolve: Resolve, emoji: Resolve, files: Files, big: bool)
         }
         let mut words = part.split(' ').peekable();
         while let Some(w) = words.next() {
+            // Flutter marks a spoiler file's link `spoiler:<url>`.
+            let (w, flagged) = match w.strip_prefix(SPOILER_SCHEME) {
+                Some(rest) if rest.starts_with("https://") || rest.starts_with("http://") => (rest, true),
+                _ => (w, false),
+            };
             if (w.starts_with("https://") || w.starts_with("http://")) && !w.contains("](") {
                 // Trailing punctuation stays outside the link.
                 let trimmed = w.trim_end_matches(['.', ',', ')', '!', '?', ';', ':']);
-                match file_link(trimmed, files) {
+                match file_link(trimmed, files, spoiler || flagged) {
                     Some(link) => out.push_str(&link),
                     None => {
                         out.push('<');
@@ -317,17 +329,26 @@ mod tests {
         let nof = |_: &str| None::<FileMeta>;
         let blob = format!("https://b.example/{}", "a".repeat(64));
         let meta = |u: &str| {
-            (u.ends_with('a')).then(|| FileMeta { url: u.into(), mime: "video/mp4".into(), name: "my clip.mp4".into(), size: None, dim: Some((640, 360)) })
+            (u.ends_with('a')).then(|| FileMeta { url: u.into(), mime: "video/mp4".into(), name: "my clip.mp4".into(), size: None, dim: Some((640, 360)), spoiler: false })
         };
-        assert_eq!(super::to_markdown_full(&blob, &none, &none, &meta), format!("[my clip\\.mp4](<video:640x360|{blob}>)"));
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &meta, false), format!("[my clip\\.mp4](<video:640x360|{blob}>)"));
         assert_eq!(
-            super::to_markdown_full("see https://x.example/a.webm", &none, &none, &nof),
+            super::to_markdown_full("see https://x.example/a.webm", &none, &none, &nof, false),
             "see [a\\.webm](<video:|https://x.example/a.webm>)"
         );
         let pdf = format!("{blob}.pdf");
-        assert_eq!(super::to_markdown_full(&pdf, &none, &none, &nof), format!("[{}\\.pdf](<attach:|{pdf}>)", "a".repeat(64)));
-        assert_eq!(super::to_markdown_full("https://x.example/doc.pdf", &none, &none, &nof), "<https://x.example/doc.pdf>", "a web page's file stays a link");
-        assert_eq!(super::to_markdown_full(&blob, &none, &none, &nof), format!("<{blob}>"), "an unknown blob unfurls as an image");
+        assert_eq!(super::to_markdown_full(&pdf, &none, &none, &nof, false), format!("[{}\\.pdf](<attach:|{pdf}>)", "a".repeat(64)));
+        assert_eq!(super::to_markdown_full("https://x.example/doc.pdf", &none, &none, &nof, false), "<https://x.example/doc.pdf>", "a web page's file stays a link");
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &nof, false), format!("<{blob}>"), "an unknown blob unfurls as an image");
+        // Spoilers: the file's own flag, the message's, or Flutter's prefix.
+        let hidden = |u: &str| meta(u).map(|m| FileMeta { spoiler: true, ..m });
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &hidden, false), format!("[my clip\\.mp4](<spoiler:video:640x360|{blob}>)"));
+        assert_eq!(super::to_markdown_full(&blob, &none, &none, &nof, true), format!("[{}](<spoiler:image:|{blob}>)", "a".repeat(64)));
+        assert_eq!(
+            super::to_markdown_full("spoiler:https://x.example/p.png", &none, &none, &nof, false),
+            "[p\\.png](<spoiler:image:|https://x.example/p.png>)"
+        );
+        assert_eq!(super::to_markdown_full("https://x.example/doc", &none, &none, &nof, true), "<https://x.example/doc>", "a page stays a link");
         assert_eq!(super::split_file_target("640x360|https://u"), ("640x360", "https://u"));
     }
 

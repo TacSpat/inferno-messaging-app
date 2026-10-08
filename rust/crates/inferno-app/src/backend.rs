@@ -333,6 +333,8 @@ pub struct MessageRow {
     pub emojis: HashMap<String, String>,
     /// Its files' descriptions (NIP-92), for the players and cards.
     pub files: Vec<inferno_core::media::FileMeta>,
+    /// Sent as a spoiler: its pictures and files stay hidden until clicked.
+    pub spoiler: bool,
 }
 
 /// An invite link's card, as it resolves.
@@ -929,7 +931,9 @@ impl Backend {
             }
             Command::Send { text, spoiler, files, .. } if self.dm.is_some() => {
                 let to = self.dm.expect("checked");
-                let files = files.into_iter().map(|f| f.url).collect();
+                // A DM lists its files' links: a spoiler's goes as
+                // `spoiler:<url>`, as Flutter sends it.
+                let files = files.into_iter().map(|f| if f.spoiler { format!("spoiler:{}", f.url) } else { f.url }).collect();
                 self.session
                     .send_dm(&to, &Payload::Message { content: text, files, spoiler })
                     .await
@@ -1702,6 +1706,7 @@ impl Backend {
                 invite,
                 emojis: all_emojis.clone(),
                 files: Vec::new(),
+                spoiler: m.spoiler,
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -2353,6 +2358,7 @@ impl Backend {
                     e
                 },
                 files: m.files.clone(),
+                spoiler: m.spoiler,
             });
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);

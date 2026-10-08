@@ -44,6 +44,12 @@ pub enum Action {
     GifFavorite(inferno_core::gifs::Gif),
     GifCollection { id: String, gif: inferno_core::gifs::Gif },
     DeleteGifCollection(String),
+    /// Opens a link in the browser.
+    OpenUrl(String),
+    /// Downloads a picture, video, sound or file (the save dialog first).
+    SaveMedia { url: String, name: String },
+    /// The picture itself on the clipboard.
+    CopyImage(String),
     /// Returns to the menu this submenu came from.
     Back,
 }

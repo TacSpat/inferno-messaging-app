@@ -169,6 +169,12 @@ pub struct MessageText {
     /// Videos, sounds and files drawn this pass: (item id, what a click does).
     #[rust]
     files: Vec<(LiveId, MessageTextAction)>,
+    /// Spoilers drawn hidden this pass: (item id, what revealing it records).
+    #[rust]
+    spoilers: Vec<(LiveId, String)>,
+    /// The playing video's player, drawn in its card's place: (player, url, name).
+    #[rust]
+    playing: Option<(WidgetRef, String, String)>,
     /// The GIF under the pointer: its flame shows (Flutter).
     #[rust]
     hover_media: Option<String>,
@@ -198,6 +204,21 @@ pub struct MessageText {
     heading_base_scale: f64,
 }
 
+thread_local! {
+    /// Spoilers clicked open (`message id|url`), for as long as the app runs.
+    static REVEALED: std::cell::RefCell<std::collections::HashSet<String>> = Default::default();
+}
+
+/// What revealing the spoiler `url` in the message being drawn records.
+fn spoiler_key(url: &str) -> String {
+    let k = crate::inline_video::key(url);
+    if k.is_empty() { url.to_owned() } else { k }
+}
+
+fn revealed(key: &str) -> bool {
+    REVEALED.with(|r| r.borrow().contains(key))
+}
+
 static FAVORITE_GIFS: std::sync::Mutex<Option<std::collections::HashSet<String>>> = std::sync::Mutex::new(None);
 
 /// The favorites, for lighting the flame on GIFs in messages.
@@ -221,6 +242,15 @@ impl Widget for MessageText {
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         let actions = cx.capture_actions(|cx| self.text_flow.handle_event(cx, event, scope));
+        // A hidden spoiler's first click shows it (Rails).
+        for (id, key) in self.spoilers.clone() {
+            let item = self.text_flow.existing_item(id);
+            if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap() && e.device.is_primary_hit()) {
+                REVEALED.with(|r| r.borrow_mut().insert(key));
+                item.redraw(cx);
+                self.redraw(cx);
+            }
+        }
         for (id, url, name) in self.media.clone() {
             let item = self.text_flow.existing_item(id);
             if item.as_view().finger_hover_in(&actions).is_some() && self.hover_media.as_deref() != Some(url.as_str()) {
@@ -231,16 +261,20 @@ impl Widget for MessageText {
                 self.hover_media = None;
                 self.redraw(cx);
             }
-            let tapped = |path: &[LiveId]| item.view(cx, path).finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap());
+            // Left clicks only: a right-click opens the message's menu.
+            let tapped = |path: &[LiveId]| {
+                item.view(cx, path).finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap() && e.device.is_primary_hit())
+            };
             if tapped(&[live_id!(fire)]) {
                 cx.widget_action(self.widget_uid(), MessageTextAction::FavoriteGif(url.clone()));
-            } else if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+            } else if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap() && e.device.is_primary_hit()) {
                 cx.widget_action(self.widget_uid(), MessageTextAction::View { url: url.clone(), name: name.clone() });
             }
         }
         for (id, action) in self.files.clone() {
             let item = self.text_flow.existing_item(id);
-            if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
+            // A click, however long it's held (not a drag off it).
+            if item.as_view().finger_up(&actions).is_some_and(|e| !e.cancelled && e.is_over && e.device.is_primary_hit()) {
                 cx.widget_action(self.widget_uid(), action);
             }
         }
@@ -259,7 +293,7 @@ impl Widget for MessageText {
                         self.hovered = None;
                         self.redraw(cx);
                     }
-                    Hit::FingerUp(e) if e.is_over && e.was_tap() => {
+                    Hit::FingerUp(e) if e.is_over && e.was_tap() && e.device.is_primary_hit() => {
                         let action = match target.strip_prefix(crate::message_format::MENTION_SCHEME) {
                             Some(who) => MessageTextAction::Mention(who.to_owned()),
                             None => MessageTextAction::Link(target.clone()),
@@ -277,6 +311,8 @@ impl Widget for MessageText {
         self.targets.clear();
         self.media.clear();
         self.files.clear();
+        self.spoilers.clear();
+        self.playing = None;
         self.open_link = None;
 
         self.begin(cx, walk);
@@ -299,6 +335,49 @@ impl Widget for MessageText {
 }
 
 impl MessageText {
+    /// What is at `abs` (a right-click there gets its own menu items, as in
+    /// Rails): a link, a picture, a video (its card or its player), a sound
+    /// or a file.
+    pub fn target_at(&mut self, cx: &mut Cx, abs: DVec2) -> Option<MediaTarget> {
+        let inside = |area: Area, cx: &mut Cx| area.is_valid(cx) && area.clipped_rect(cx).contains(abs);
+        if let Some((player, url, name)) = self.playing.clone() {
+            if inside(player.area(), cx) {
+                return Some(MediaTarget::Video { url, name });
+            }
+        }
+        for (id, action) in self.files.clone() {
+            if !inside(self.text_flow.existing_item(id).area(), cx) {
+                continue;
+            }
+            return match action {
+                MessageTextAction::Play { url, name, audio: false, .. } => Some(MediaTarget::Video { url, name }),
+                MessageTextAction::Play { url, name, audio: true, .. } => Some(MediaTarget::Audio { url, name }),
+                MessageTextAction::Link(url) => Some(MediaTarget::File(url)),
+                _ => None,
+            };
+        }
+        for (id, url, name) in self.media.clone() {
+            if inside(self.text_flow.existing_item(id).area(), cx) {
+                return Some(MediaTarget::Image { url, name });
+            }
+        }
+        for (range, target) in self.targets.clone() {
+            if target.starts_with(crate::message_format::MENTION_SCHEME) {
+                continue;
+            }
+            let hit = range.into_iter().any(|k| {
+                self.text_flow.areas_tracker.areas.get(k).copied().is_some_and(|a| a.clipped_rect(cx).contains(abs))
+            });
+            if hit {
+                return Some(MediaTarget::Link(target));
+            }
+        }
+        None
+    }
+
+    /// Rails' video cards: moving over one slides its bar in, leaving slides
+    /// it out (0.25s). By position: the bar's sliders would take a hover
+    /// from the card, which reads as leaving it.
     fn process_markdown_doc(&mut self, cx: &mut Cx2d) {
         let tf = &mut self.text_flow;
         // Track state for nested formatting
@@ -432,29 +511,53 @@ impl MessageText {
                         item.draw_all_unscoped(cx);
                         continue;
                     }
-                    use crate::message_format::{split_file_target, AUDIO_SCHEME, FILE_SCHEME, IMAGE_SCHEME, VIDEO_SCHEME};
+                    use crate::message_format::{split_file_target, AUDIO_SCHEME, FILE_SCHEME, IMAGE_SCHEME, SPOILER_SCHEME, VIDEO_SCHEME};
+                    let (target, spoiler) = match target.strip_prefix(SPOILER_SCHEME) {
+                        Some(rest) => (rest.to_owned(), true),
+                        None => (target, false),
+                    };
+                    // A spoiler not yet clicked open: drawn hidden.
+                    let hidden = |url: &str| spoiler.then(|| spoiler_key(url)).filter(|k| !revealed(k));
                     if let Some(rest) = target.strip_prefix(VIDEO_SCHEME) {
                         let (dim, url) = split_file_target(rest);
-                        // Its own shape, inside Rails' max-w-lg max-h-96.
-                        let (w, h) = dim
+                        let dims = dim
                             .split_once('x')
                             .and_then(|(w, h)| Some((w.parse::<f64>().ok()?, h.parse::<f64>().ok()?)))
                             .filter(|(w, h)| *w > 0.0 && *h > 0.0)
-                            .map(|(w, h)| {
-                                let k = (480.0 / w).min(320.0 / h).min(1.0);
-                                ((w * k).max(160.0), (h * k).max(90.0))
-                            })
-                            .unwrap_or((400.0, 225.0));
+                            .or_else(|| crate::inline_video::dims_of(url));
+                        let (w, h) = crate::inline_video::card_size(dims);
+                        let key = crate::inline_video::key(url);
+                        let hide = hidden(url);
+                        tf.new_line_collapsed(cx);
+                        // Playing: the player in the card's place (Rails plays
+                        // it in the message).
+                        if let Some(player) = crate::inline_video::player_for(&key) {
+                            let walk = Walk { margin: Inset { top: 4.0, bottom: 4.0, left: 0.0, right: 0.0 }, ..Walk::fixed(w, h) };
+                            while player.draw_walk(cx, &mut Scope::empty(), walk).is_step() {}
+                            self.playing = Some((player, url.to_owned(), text.clone()));
+                            tf.new_line_collapsed(cx);
+                            continue;
+                        }
                         self.auto_id += 1;
                         let id = LiveId(0x5649_4445_0000 + self.auto_id);
-                        tf.new_line_collapsed(cx);
                         let mut item = tf.item(cx, id, live_id!(video));
                         script_apply_eval!(cx, item, {width: #(w) height: #(h)});
-                        item.label(cx, ids!(name.label)).set_text(cx, &text);
+                        // Hidden: no frame, no play button, Rails' label.
+                        item.widget(cx, ids!(poster)).set_visible(cx, hide.is_none());
+                        item.view(cx, ids!(big)).set_visible(cx, hide.is_none());
+                        item.view(cx, ids!(hidden)).set_visible(cx, hide.is_some());
+                        if let Some(k) = hide {
+                            item.draw_all_unscoped(cx);
+                            tf.new_line_collapsed(cx);
+                            self.spoilers.push((id, k));
+                            continue;
+                        }
+                        if let Some(mut poster) = item.widget(cx, ids!(poster)).borrow_mut::<crate::inline_video::PosterSlot>() {
+                            poster.url = url.to_owned();
+                        }
                         item.draw_all_unscoped(cx);
                         tf.new_line_collapsed(cx);
-                        let dims = dim.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)));
-                        self.files.push((id, MessageTextAction::Play { url: url.to_owned(), name: text, audio: false, dims }));
+                        self.files.push((id, MessageTextAction::Play { url: url.to_owned(), name: text, audio: false, dims, key }));
                         continue;
                     }
                     let attach = target.strip_prefix(FILE_SCHEME).map(|r| (r, false)).or_else(|| target.strip_prefix(AUDIO_SCHEME).map(|r| (r, true)));
@@ -464,15 +567,27 @@ impl MessageText {
                         let id = LiveId(0x4649_4c45_0000 + self.auto_id);
                         tf.new_line_collapsed(cx);
                         let item = tf.item(cx, id, if audio { live_id!(audio) } else { live_id!(attach) });
-                        item.label(cx, ids!(info.name)).set_text(cx, &text);
-                        let size = size.parse::<u64>().ok().map(inferno_core::media::human_size);
+                        let hide = hidden(url);
+                        let size = match hide {
+                            // Rails' spoiler card: what it is stays hidden.
+                            Some(_) => Some("Click to reveal".to_owned()),
+                            None => size.parse::<u64>().ok().map(inferno_core::media::human_size),
+                        };
+                        item.label(cx, ids!(info.name)).set_text(cx, if hide.is_some() { "Spoiler" } else { &text });
                         let size_label = item.label(cx, ids!(info.size));
                         size_label.set_visible(cx, size.is_some());
                         size_label.set_text(cx, size.as_deref().unwrap_or(""));
+                        if audio {
+                            item.view(cx, ids!(play)).set_visible(cx, hide.is_none());
+                        }
                         item.draw_all_unscoped(cx);
                         tf.new_line_collapsed(cx);
+                        if let Some(k) = hide {
+                            self.spoilers.push((id, k));
+                            continue;
+                        }
                         let action = if audio {
-                            MessageTextAction::Play { url: url.to_owned(), name: text, audio: true, dims: None }
+                            MessageTextAction::Play { url: url.to_owned(), name: text, audio: true, dims: None, key: String::new() }
                         } else {
                             MessageTextAction::Link(url.to_owned())
                         };
@@ -492,6 +607,18 @@ impl MessageText {
                         let item = tf.item(cx, id, live_id!(media));
                         let img = item.image(cx, ids!(img));
                         crate::images::show(cx, &img, Some(&target));
+                        let hide = hidden(&target);
+                        let mut blur_img = img.clone();
+                        let blur = if hide.is_some() { 1.0 } else { 0.0 };
+                        script_apply_eval!(cx, blur_img, {draw_bg +: {blur: #(blur)}});
+                        item.view(cx, ids!(hidden)).set_visible(cx, hide.is_some());
+                        if let Some(k) = hide {
+                            item.view(cx, ids!(fire)).set_visible(cx, false);
+                            item.draw_all_unscoped(cx);
+                            tf.new_line_collapsed(cx);
+                            self.spoilers.push((id, k));
+                            continue;
+                        }
                         // Flutter's save button: the Inferno flame on hover,
                         // in the accent once it's a favorite.
                         let gif = inferno_core::gifs::looks_like_gif(&target);
@@ -847,6 +974,16 @@ impl MessageTextRef {
 }
 
 
+/// What a right-click in a message body landed on.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MediaTarget {
+    Link(String),
+    Image { url: String, name: String },
+    Video { url: String, name: String },
+    Audio { url: String, name: String },
+    File(String),
+}
+
 /// What a click in a message body asks for.
 #[derive(Clone, Debug, Default)]
 pub enum MessageTextAction {
@@ -860,6 +997,7 @@ pub enum MessageTextAction {
     FavoriteGif(String),
     /// An image to open in the viewer.
     View { url: String, name: String },
-    /// A video or sound to play.
-    Play { url: String, name: String, audio: bool, dims: Option<(f64, f64)> },
+    /// A video or sound to play; `key` places a video's player in its
+    /// message (empty outside the message list).
+    Play { url: String, name: String, audio: bool, dims: Option<(f64, f64)>, key: String },
 }

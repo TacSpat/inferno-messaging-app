@@ -40,6 +40,9 @@ pub struct MessageList {
     /// Row flashing after a jump, and when the flash started.
     #[rust]
     flash: Option<(usize, std::time::Instant)>,
+    /// A right-click waiting for the app: row, where, what it landed on.
+    #[rust]
+    context: Option<(usize, DVec2, Option<crate::message_text::MediaTarget>)>,
 }
 
 /// What a click in the list asks the app to do.
@@ -48,8 +51,9 @@ pub enum MessageAction {
     Reply(usize),
     Edit(usize),
     Pin(usize),
-    /// Right-click on a row at a window position.
-    Context(usize, DVec2),
+    /// Right-click on a row at a window position, and what it landed on
+    /// (a link, picture, video...) for that thing's own menu items.
+    Context(usize, DVec2, Option<crate::message_text::MediaTarget>),
     /// Click on the author's avatar or name, at a window position.
     Author(usize, DVec2),
     /// Join (or open, once joined) the server of the row's invite card.
@@ -128,6 +132,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 invite: None,
                 emojis: Default::default(),
                 files: Vec::new(),
+                spoiler: false,
                 grouped: demo::grouped(i.checked_sub(1).map(|p| &history[p]), m),
                 system: m.system,
             }
@@ -164,8 +169,31 @@ impl MessageList {
         true
     }
 
+    /// The row under `abs` and what in it is there.
+    fn context_at(&mut self, cx: &mut Cx, abs: DVec2) -> Option<(usize, DVec2, Option<crate::message_text::MediaTarget>)> {
+        let list = self.view.portal_list(cx, ids!(list));
+        let list = list.borrow()?;
+        let (index, item) = list
+            .items()
+            .iter()
+            .map(|(i, item)| (*i, item.widget.clone()))
+            .find(|(_, w)| w.area().is_valid(cx) && w.area().clipped_rect(cx).contains(abs))?;
+        drop(list);
+        if self.rows.get(index).is_none_or(|r| r.id.is_empty()) {
+            return None;
+        }
+        let target = item
+            .widget(cx, ids!(line.content.body))
+            .borrow_mut::<crate::message_text::MessageText>()
+            .and_then(|mut body| body.target_at(cx, abs));
+        Some((index, abs, target))
+    }
+
     /// Handles hover and clicks inside the rows.
     pub fn handle_list_actions(&mut self, cx: &mut Cx, actions: &Actions) -> Option<MessageAction> {
+        if let Some((index, at, target)) = self.context.take() {
+            return Some(MessageAction::Context(index, at, target));
+        }
         let list = self.view.portal_list(cx, ids!(list));
         let mut out = None;
         for (index, item) in list.items_with_actions(actions) {
@@ -176,12 +204,6 @@ impl MessageList {
             if item.as_view().finger_hover_out(actions).is_some() && self.hovered == Some(index) {
                 self.hovered = None;
                 crate::lists::redraw_items(cx, &list);
-            }
-            if let Some(e) = item.as_view().finger_down(actions) {
-                if !e.device.is_primary_hit() && self.rows.get(index).is_some_and(|r| !r.id.is_empty()) {
-                    out = Some(MessageAction::Context(index, e.abs));
-                    continue;
-                }
             }
             let author_paths: [&[LiveId]; 2] = [ids!(line.avatar), ids!(line.content.head.who)];
             for path in author_paths {
@@ -301,9 +323,12 @@ impl Widget for MessageList {
                     _ => 0.0,
                 }
             };
+            crate::inline_video::begin_pass();
             while let Some(index) = list.next_visible_item(cx) {
                 let Some(msg) = self.rows.get(index) else { continue };
                 drawn += 1;
+                crate::inline_video::see_row(&msg.id);
+                crate::inline_video::set_row(&msg.id);
                 let hovered = self.hovered == Some(index);
                 let flash = flash_alpha(index);
                 let body = msg.body.as_deref().unwrap_or("🔒 Encrypted — you don't have this channel's key yet");
@@ -341,7 +366,7 @@ impl Widget for MessageList {
                             .flatten()
                     })
                 };
-                let md = crate::message_format::to_markdown_full(body.trim(), &resolve, &emoji, &files);
+                let md = crate::message_format::to_markdown_full(body.trim(), &resolve, &emoji, &files, msg.spoiler);
                 // Rails' emoji-only messages: big Unicode emoji too.
                 let big = crate::message_format::emoji_only(body.trim(), &emoji);
                 let mut w = item.widget(cx, ids!(line.content.body));
@@ -376,6 +401,8 @@ impl Widget for MessageList {
                 row.label(cx, ids!(content.reply.text)).set_text(cx, msg.reply.as_deref().unwrap_or(""));
                 item.draw_all(cx, &mut Scope::empty());
             }
+            crate::inline_video::set_row("");
+            crate::inline_video::end_pass();
         }
         self.perf.record(started.elapsed(), drawn);
         let flashing = self.flash.is_some_and(|(_, at)| at.elapsed().as_secs_f32() < FLASH_SECS);
@@ -390,6 +417,16 @@ impl Widget for MessageList {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
+        // Right-clicks from the raw press: pictures, cards and the video
+        // player take presses for themselves, and the row would never hear.
+        if let Event::MouseDown(m) = event {
+            if !m.button.is_primary() && self.view.area().clipped_rect(cx).contains(m.abs) {
+                self.context = self.context_at(cx, m.abs);
+                if self.context.is_some() {
+                    cx.widget_action(self.widget_uid(), MessageAction::Context(0, m.abs, None));
+                }
+            }
+        }
         self.view.handle_event(cx, event, scope);
     }
 }

@@ -9,8 +9,10 @@ edition = "2021"
 [workspace.dependencies]
 inferno-core = { path = "crates/inferno-core" }
 # Makepad 2.0 is unreleased and moves fast: pinned to one dev commit, updated on purpose.
-# dev @ 44a01c5 (2026-10-05)
-makepad-widgets = { git = "https://github.com/makepad/makepad.git", rev = "44a01c5381ab9f26526bd7ad18d30b7d35245599", default-features = false, features = ["rich_text"] }
+# Our fork, branch `inferno-fixes`: makepad dev @ 44a01c5 (2026-10-05) plus our
+# fixes (Linux video volume stays inside the app; a PortalList scroll-bar
+# drag keeps following the mouse). Moving the pin = rebasing that branch.
+makepad-widgets = { git = "https://github.com/TacSpat/makepad.git", rev = "28207791a22b95de2a420eca730005bc2516907a", default-features = false, features = ["rich_text"] }
 
 # scrypt (NIP-49 key backups) takes ~11s per call unoptimized; keep the
 # hashing crates fast in dev builds too.
