@@ -32,3 +32,12 @@ arboard = "3.6"
 log = "0.4"
 futures-util = { version = "0.3", default-features = false }
 livekit = { version = "0.9.4", features = ["rustls-tls-webpki-roots"] }
+# Webcams that send JPEG frames (MJPEG), decoded for sending.
+zune-jpeg = "0.5"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+# Stream audio: one app's sound, or every app's but ours, recorded per
+# playback stream (PulseAudio, or PipeWire's PulseAudio layer).
+libpulse-binding = "2.30"
+# A shared window's process (_NET_WM_PID), to find its app's sound.
+x11rb = "0.13"

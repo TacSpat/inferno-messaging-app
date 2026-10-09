@@ -161,11 +161,14 @@ pub struct VoicePrefs {
 pub struct PersonAudio {
     pub volume: u32,
     pub muted: bool,
+    /// Their stream's sound, apart from their voice.
+    pub stream_volume: u32,
+    pub stream_muted: bool,
 }
 
 impl Default for PersonAudio {
     fn default() -> Self {
-        Self { volume: 100, muted: false }
+        Self { volume: 100, muted: false, stream_volume: 100, stream_muted: false }
     }
 }
 
@@ -196,8 +199,11 @@ impl VoicePrefs {
     pub fn call_people(&self) -> crate::calls::People {
         self.people
             .iter()
-            .filter(|(_, p)| p.muted || p.volume != 100)
-            .map(|(pk, p)| (pk.chars().take(12).collect(), (p.volume as f32 / 100.0, p.muted)))
+            .filter(|(_, p)| **p != PersonAudio::default())
+            .map(|(pk, p)| {
+                let hearing = crate::calls::Hearing { volume: p.volume as f32 / 100.0, muted: p.muted, stream_volume: p.stream_volume as f32 / 100.0, stream_muted: p.stream_muted };
+                (pk.chars().take(12).collect(), hearing)
+            })
             .collect()
     }
 

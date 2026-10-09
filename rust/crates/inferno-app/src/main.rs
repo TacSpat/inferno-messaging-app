@@ -30,6 +30,9 @@ mod time_fmt;
 mod uploads;
 mod calls;
 mod share;
+mod camera;
+#[cfg(target_os = "linux")]
+mod stream_audio;
 mod voice_audio;
 mod voice_view;
 mod gif_service;
@@ -60,6 +63,7 @@ type VoiceSprings = std::collections::HashMap<String, (f32, f32)>;
 type VideoTextures = std::collections::HashMap<(String, calls::VideoKind), (voice_view::VideoTex, u64)>;
 type PubkeySet = std::collections::HashSet<String>;
 type SharePicker = share::Picker;
+type CameraDevice = camera::Camera;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
@@ -308,6 +312,13 @@ script_mod! {
                 Ico{icon_walk: Walk{width: 7 height: 7} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/megaphone.svg")}}
         }
         name := Txt{width: Fill margin: Inset{left: 6} text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
+        // Camera on: Rails' camera icon.
+        cam := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/video.svg")}}
+        // Sharing their screen: the stream tile's LIVE badge, small.
+        live := RoundedView{visible: false width: Fit height: Fit margin: Inset{left: 4} padding: Inset{left: 4 right: 4 top: 1 bottom: 1} new_batch: true
+            draw_bg.color: accent draw_bg.border_radius: 3.0
+            Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 6.5}}}
         muted := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
             Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/deafened.svg")}}
         deaf := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
@@ -1033,6 +1044,34 @@ script_mod! {
         }
         label := Txt{text: "" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 8.5}}
     }
+    // One app in the Choose Apps dropdown: a check when ticked, its name;
+    // gray-700 on hover.
+    let SsAppRow = RoundedView{visible: false width: Fill height: 30 padding: Inset{left: 8 right: 8} flow: Right spacing: 8 align: Align{y: 0.5}
+        cursor: MouseCursor.Hand new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            c_hover: uniform(gray_700)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
+                sdf.fill(vec4(self.c_hover.rgb * self.hover, self.hover))
+                return sdf.result
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.08}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.08}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+        View{width: 14 height: 14 align: Center
+            tick := View{visible: false width: 14 height: 14
+                Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: accent_light draw_icon.svg: crate_resource("self:resources/icons/check.svg")}}}
+        name := Txt{width: Fill text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 9.0
+            flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+    }
+
     // A screen or window to share: its picture (gray-900 behind it) and
     // name; an accent ring when picked.
     let SsSource = RoundedView{visible: false width: 164 height: Fit flow: Down spacing: 6 padding: 6 cursor: MouseCursor.Hand new_batch: true
@@ -1065,6 +1104,37 @@ script_mod! {
     let StreamBtn = RoundedView{width: 28 height: 28 align: Center cursor: MouseCursor.Hand new_batch: true
         draw_bg.color: #x000000b3 draw_bg.border_radius: 14.0}
 
+    // A watched stream's controls, the video player's way (.vp-controls):
+    // a black/80-to-clear gradient that shows while the pointer is over
+    // the stream; its sound on the left (mute, volume), then focus,
+    // fullscreen and stop. `radius` follows the picture's corners.
+    let StreamBar = View{visible: false width: Fill height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+        padding: Inset{left: 8 right: 8 top: 18 bottom: 6}
+        show_bg: true
+        draw_bg +: {
+            radius: uniform(12.0)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0.0, -2.0 * self.radius, self.rect_size.x, self.rect_size.y + 2.0 * self.radius, self.radius)
+                sdf.fill(vec4(0.0, 0.0, 0.0, 0.8 * self.pos.y))
+                return sdf.result
+            }
+        }
+        sound := View{width: Fit height: Fit flow: Right spacing: 6 align: Align{y: 0.5}
+            sb_mute := VpBtn{
+                on := View{width: Fit height: Fit VpIco{icon_walk: Walk{width: 18 height: 18} draw_icon.svg: crate_resource("self:resources/icons/volume.svg")}}
+                off := View{visible: false width: Fit height: Fit VpIco{icon_walk: Walk{width: 18 height: 18} draw_icon.svg: crate_resource("self:resources/icons/volume_off.svg")}}}
+            sb_vol := Slider{width: 110 text: "" min: 0.0 max: 200.0 default: 100.0 precision: 0
+                label_walk: Walk{width: Fill height: 0 margin: 0}
+                text_input +: {width: 0 height: 0 draw_text +: {color: #0000 color_hover: #0000 color_focus: #0000 color_empty: #0000}}}
+            sb_pct := Label{text: "100%" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+        }
+        View{width: Fill height: 1}
+        sb_focus := VpBtn{VpIco{icon_walk: Walk{width: 18 height: 18} draw_icon.svg: crate_resource("self:resources/icons/theater.svg")}}
+        sb_full := VpBtn{VpIco{icon_walk: Walk{width: 18 height: 18} draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
+        sb_stop := VpBtn{VpIco{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+    }
+
     // Someone sharing their screen (Rails' .voice-screen-placeholder, then
     // .voice-screen-preview once watched): sized and inset like a card.
     let StreamCard = View{
@@ -1085,18 +1155,16 @@ script_mod! {
         live := View{visible: false width: Fill height: Fill margin: 14 flow: Overlay cursor: MouseCursor.Hand
             sv_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
             sv_yuv := YuvVideo{draw_bg +: {contain: 1.0}}
-            View{width: Fill height: Fill padding: 8 align: Align{x: 0.0 y: 0.0}
-                // .voice-live-badge.
+            // .voice-live-badge, and whose screen it is.
+            View{width: Fill height: Fill padding: 8 flow: Right spacing: 6 align: Align{x: 0.0 y: 0.0}
                 RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: accent draw_bg.border_radius: 4.0
-                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 7.5}}}}
-            View{width: Fill height: Fill padding: 8 align: Align{x: 0.0 y: 1.0}
-                RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0
-                    st_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}}
-            View{width: Fill height: Fill padding: 8 align: Align{x: 1.0 y: 0.0} flow: Right spacing: 4
-                st_focus := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/theater.svg")}}
-                st_full := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
-                st_stop := StreamBtn{Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
-            }
+                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 7.5}}}
+                RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 4.0
+                    st_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 7.5}
+                        flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}}}
+            // Small: a shorter volume, no percent.
+            View{width: Fill height: Fill align: Align{y: 1.0}
+                st_bar := StreamBar{spacing: 4 sound +: {spacing: 4 sb_vol +: {width: 52} sb_pct +: {visible: false}}}}
         }
     }
     // Rails' .voice-card: 12px radius, 4:3, a 1px accent/.15 border (.4 on
@@ -1213,21 +1281,18 @@ script_mod! {
         }
         // Rails' theater mode: the stream large, the cards below it.
         focus_area := View{visible: false width: Fill height: Fill padding: Inset{left: 12 right: 12 top: 12 bottom: 4} flow: Overlay
+            // Takes clicks (a right-click opens the stream's menu).
+            cursor: MouseCursor.Default
             RoundedView{width: Fill height: Fill new_batch: true draw_bg.color: #x000000 draw_bg.border_radius: 12.0}
             fv_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
             fv_yuv := YuvVideo{draw_bg +: {contain: 1.0}}
-            View{width: Fill height: Fill padding: 10 align: Align{x: 0.0 y: 0.0}
-                RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: accent draw_bg.border_radius: 4.0
-                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.0}}}}
-            View{width: Fill height: Fill padding: 10 align: Align{x: 0.0 y: 1.0}
-                RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0
-                    fv_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}}
-            // Left of the page's chat button, which sits in that corner.
-            View{width: Fill height: Fill padding: Inset{top: 10 right: 52} align: Align{x: 1.0 y: 0.0} flow: Right spacing: 6
-                fv_unfocus := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/theater.svg")}}
-                fv_full := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
-                fv_stop := StreamBtn{Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
-            }
+            View{width: Fill height: Fill padding: 10 flow: Right spacing: 8 align: Align{x: 0.0 y: 0.0}
+                fv_live := RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: accent draw_bg.border_radius: 4.0
+                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.0}}}
+                RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 2 bottom: 2} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 4.0
+                    fv_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}}
+            View{width: Fill height: Fill align: Align{y: 1.0}
+                fv_bar := StreamBar{padding: Inset{left: 12 right: 12 top: 24 bottom: 8} spacing: 10}}
         }
         grid := ScrollYView{visible: false width: Fill height: Fill padding: 6 flow: Down align: Align{x: 0.5}
             cards := View{width: 400 height: Fit flow: Flow.Right{wrap: true}
@@ -1491,7 +1556,7 @@ script_mod! {
         // 0..200 slider.
         vol := View{visible: false width: Fill height: Fit flow: Down padding: Inset{left: 10 right: 10 top: 4 bottom: 6}
             View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
-                Txt{width: Fill text: "User Volume" draw_text.color: gray_300 draw_text.text_style.font_size: 9.5}
+                vol_label := Txt{width: Fill text: "User Volume" draw_text.color: gray_300 draw_text.text_style.font_size: 9.5}
                 vol_pct := Txt{text: "100%" draw_text.color: gray_500 draw_text.text_style.font_size: 7.5}
             }
             // The percent above says the value; the slider's own number
@@ -2441,6 +2506,11 @@ script_mod! {
                                     voice_deafen := VoiceBtn{
                                         on := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/deafen.svg")}}
                                         off := View{visible: false width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/deafened.svg")}}
+                                    }
+                                    // Rails' camera button: gray-300, green-400 while on.
+                                    voice_camera := VoiceBtn{
+                                        on := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/video.svg")}}
+                                        off := View{visible: false width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #x4ade80 draw_icon.svg: crate_resource("self:resources/icons/video.svg")}}
                                     }
                                     // Rails' Share Screen: gray-300, green-400 while live.
                                     voice_share := VoiceBtn{
@@ -3706,9 +3776,9 @@ script_mod! {
                         SolidView{width: Fill height: Fill draw_bg.color: #x000000}
                         sf_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
                         sf_yuv := YuvVideo{draw_bg +: {contain: 1.0 radius: 0.0}}
-                        View{width: Fill height: Fill padding: 16 align: Align{x: 1.0 y: 0.0}
-                            sf_exit := StreamBtn{width: 36 height: 36 draw_bg.border_radius: 18.0
-                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}}
+                        View{width: Fill height: Fill align: Align{y: 1.0}
+                            sf_bar := StreamBar{draw_bg.radius: 0.0 padding: Inset{left: 16 right: 16 top: 32 bottom: 12} spacing: 12
+                                sb_focus +: {visible: false} sound +: {sb_vol +: {width: 160}}}}
                     }
                     }
 
@@ -3915,8 +3985,11 @@ script_mod! {
                     // Rails; here it's picked above the settings.
                     share_dialog := Modal{
                         content +: {
-                            RoundedView{
-                                width: 560 height: Fit flow: Down new_batch: true
+                            // Its height fits the window (share_dialog_height);
+                            // the settings scroll between the title and the
+                            // buttons, so Go Live is always in view.
+                            ss_box := RoundedView{
+                                width: 560 height: 720 flow: Down new_batch: true
                                 draw_bg.color: #x1a1918 draw_bg.border_radius: 12.0
                                 draw_bg.border_size: 1.0 draw_bg.border_color: gray_700_50
                                 View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 20 right: 16 top: 20 bottom: 12}
@@ -3925,7 +3998,7 @@ script_mod! {
                                         draw_bg.color: #0000 draw_bg.border_radius: 16.0
                                         Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
                                 }
-                                View{width: Fill height: Fit flow: Down spacing: 16 padding: Inset{left: 20 right: 20 bottom: 20}
+                                ss_body := ScrollYView{width: Fill height: Fill flow: Down spacing: 16 padding: Inset{left: 20 right: 20 bottom: 20}
                                     View{width: Fill height: Fit flow: Down
                                         View{width: Fill height: Fit flow: Right spacing: 8 margin: Inset{bottom: 8}
                                             ss_tab_screens := TabPill{draw_bg.color: gray_600 label.text: "Screens"}
@@ -3984,6 +4057,48 @@ script_mod! {
                                             ss_clear := SsPill{width: Fill label.text: "Prefer Clarity"}
                                         }
                                         Txt{margin: Inset{top: 6} text: "Choosing 'Prefer Clarity' will result in a lower framerate for a sharper image." draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+                                    }
+                                    // Rails' Include Audio, and whose sound: the
+                                    // window's app, or every app but Inferno (so
+                                    // the call never echoes back).
+                                    View{width: Fill height: Fit flow: Down
+                                        Txt{text: "AUDIO" margin: Inset{bottom: 8} draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                            ss_aud_off := SsPill{label.text: "No Sound"}
+                                            ss_aud_app := SsPill{label.text: "This App"}
+                                            ss_aud_pc := SsPill{label.text: "Whole PC"}
+                                            ss_aud_apps := SsPill{label.text: "Choose Apps"}
+                                        }
+                                        // The apps playing now (and any ticked before),
+                                        // to tick one by one.
+                                        // Choose Apps: a dropdown; each app in it toggles,
+                                        // ticked ones marked.
+                                        ss_apps := View{visible: false width: Fill height: Fit flow: Down margin: Inset{top: 8}
+                                            ss_apps_btn := RoundedView{width: Fill height: 34 padding: Inset{left: 12 right: 10} flow: Right align: Align{y: 0.5}
+                                                cursor: MouseCursor.Hand new_batch: true
+                                                draw_bg.color: gray_900 draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_700
+                                                ss_apps_sum := Txt{width: Fill text: "Choose apps…" draw_text.color: gray_200 draw_text.text_style.font_size: 9.0
+                                                    flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+                                                Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/chevron_down.svg")}
+                                            }
+                                            ss_apps_list := RoundedView{visible: false width: Fill height: Fit flow: Down padding: 4 margin: Inset{top: 4} new_batch: true
+                                                draw_bg.color: gray_900 draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: gray_700
+                                                ss_app0 := SsAppRow{}
+                                                ss_app1 := SsAppRow{}
+                                                ss_app2 := SsAppRow{}
+                                                ss_app3 := SsAppRow{}
+                                                ss_app4 := SsAppRow{}
+                                                ss_app5 := SsAppRow{}
+                                                ss_app6 := SsAppRow{}
+                                                ss_app7 := SsAppRow{}
+                                                ss_app8 := SsAppRow{}
+                                                ss_app9 := SsAppRow{}
+                                                ss_app10 := SsAppRow{}
+                                                ss_app11 := SsAppRow{}
+                                                ss_apps_none := Txt{visible: false margin: 8 text: "Nothing is playing sound right now." draw_text.color: gray_500 draw_text.text_style.font_size: 8.5}
+                                            }
+                                        }
+                                        ss_aud_note := Txt{margin: Inset{top: 6} text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
                                     }
                                 }
                                 SolidView{width: Fill height: Fit flow: Right spacing: 12 align: Align{x: 1.0 y: 0.5} padding: Inset{left: 20 right: 20 top: 12 bottom: 12}
@@ -4155,6 +4270,9 @@ pub struct App {
     /// We're sharing our screen.
     #[rust]
     sharing: bool,
+    /// Our camera is on in the call.
+    #[rust]
+    camera_on: bool,
     #[rust]
     categories: Vec<backend::RoleItem>,
     #[rust]
@@ -4295,6 +4413,9 @@ pub struct App {
     /// Our microphone while in voice, and its level (voice_audio.rs).
     #[rust]
     mic: Mic,
+    /// Our camera, open only while it's on in a call.
+    #[rust]
+    camera: CameraDevice,
     /// Samples the levels each frame while in voice.
     #[rust]
     voice_timer: Timer,
@@ -4315,6 +4436,11 @@ pub struct App {
     /// The stream filling the window (pubkey hex).
     #[rust]
     stream_full: Option<String>,
+    /// The fullscreen stream's bar shows (the pointer moved lately).
+    #[rust]
+    sf_bar: bool,
+    #[rust]
+    sf_bar_timer: Timer,
     /// Channel ids behind the Hearth dropdown's entries (after "None").
     #[rust]
     hearth_options: Vec<String>,
@@ -4472,6 +4598,8 @@ pub enum Toast {
 const TOAST_SLOTS: [&[LiveId]; 3] = [ids!(t0), ids!(t1), ids!(t2)];
 /// The share picker's source slots (ss_src0..).
 const SHARE_SLOTS: usize = 24;
+/// The share picker's app checklist (ss_app0..).
+const SHARE_APP_SLOTS: usize = 12;
 const SHARE_HEIGHTS: [(&[LiveId], u32); 5] = [(ids!(ss_res_480), 480), (ids!(ss_res_720), 720), (ids!(ss_res_1080), 1080), (ids!(ss_res_1440), 1440), (ids!(ss_res_2160), 2160)];
 const SHARE_FPS: [(&[LiveId], u32); 3] = [(ids!(ss_fps_15), 15), (ids!(ss_fps_30), 30), (ids!(ss_fps_60), 60)];
 
@@ -4838,6 +4966,7 @@ impl App {
             if let Some(percent) = volume {
                 self.ui.slider(cx, &[panel, *slot_id, id!(vol), id!(vol_slider)]).set_value(cx, percent as f64);
                 self.ui.label(cx, &[panel, *slot_id, id!(vol), id!(vol_pct)]).set_text(cx, &format!("{percent}%"));
+                self.ui.label(cx, &[panel, *slot_id, id!(vol), id!(vol_label)]).set_text(cx, &d.label);
             }
             let toggle = match d.kind {
                 Kind::Toggle(_, on) => Some(on),
@@ -5199,6 +5328,11 @@ impl App {
             v.push(Item::Separator);
             v.push(Item::volume(pubkey, mine.volume));
             v.push(Item::toggle("Mute for Me", mine.muted, A::LocalMute { target: pubkey.into(), on: !mine.muted }));
+            // Their stream, while we watch it: its sound apart from their voice.
+            if self.watching.contains(pubkey) {
+                v.push(Item::Separator);
+                v.extend(self.stream_menu(pubkey));
+            }
             // Someone in a channel below ours: let them be heard here.
             if person.below_us && self.perms.elevate_voice {
                 v.push(Item::Separator);
@@ -5233,6 +5367,13 @@ impl App {
             .unwrap_or_else(|| pubkey.to_owned());
         v.push(Item::new("Copy User ID", A::Copy(npub)));
         v
+    }
+
+    /// Someone's stream: its volume and a mute, for us only; remembered.
+    fn stream_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        let mine = voice_audio::VoicePrefs::load().person(pubkey);
+        vec![Item::stream_volume(pubkey, mine.stream_volume), Item::toggle("Mute Stream", mine.stream_muted, A::StreamMute { target: pubkey.into(), on: !mine.stream_muted })]
     }
 
     /// Rails' "Move to" flyout: the other voice channels.
@@ -5271,21 +5412,58 @@ impl App {
 
     /// Someone's volume or mute-for-me changed: saved, and applied to the
     /// call now.
-    fn set_person_audio(&mut self, cx: &mut Cx, pubkey: &str, volume: Option<u32>, muted: Option<bool>) {
+    fn set_person_audio(&mut self, cx: &mut Cx, pubkey: &str, edit: impl FnOnce(&mut voice_audio::PersonAudio)) {
         let mut prefs = voice_audio::VoicePrefs::load();
         let entry = prefs.people.entry(pubkey.to_owned()).or_default();
-        if let Some(v) = volume {
-            entry.volume = v;
-        }
-        if let Some(m) = muted {
-            entry.muted = m;
-        }
+        edit(entry);
         if *entry == voice_audio::PersonAudio::default() {
             prefs.people.remove(pubkey);
         }
         prefs.save();
         self.send(backend::Command::PeopleAudio);
         self.push_local_mutes(cx, &prefs);
+        self.push_stream_sound(cx, &prefs);
+    }
+
+    /// A view bar's volume or mute: a camera's sets the person's voice, a
+    /// stream's its own sound.
+    fn set_pane_sound(&mut self, cx: &mut Cx, key: &str, volume: Option<u32>, muted: Option<bool>) {
+        let (pk, camera) = voice_view::pane(key);
+        self.set_person_audio(cx, pk, |p| {
+            let (v, m) = if camera { (&mut p.volume, &mut p.muted) } else { (&mut p.stream_volume, &mut p.stream_muted) };
+            if let Some(x) = volume {
+                *v = x;
+            }
+            if let Some(x) = muted {
+                *m = x;
+            }
+        });
+    }
+
+    /// Each stream's volume and mute, for the stream bars.
+    fn push_stream_sound(&mut self, cx: &mut Cx, prefs: &voice_audio::VoicePrefs) {
+        let sound: std::collections::HashMap<String, (u32, bool)> = prefs.people.iter().map(|(k, p)| (k.clone(), (p.stream_volume, p.stream_muted))).collect();
+        let voice: std::collections::HashMap<String, (u32, bool)> = prefs.people.iter().map(|(k, p)| (k.clone(), (p.volume, p.muted))).collect();
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            v.stream_sound = sound;
+            v.voice_sound = voice;
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+        self.fill_sf_bar(cx);
+    }
+
+    /// The fullscreen stream's bar.
+    fn fill_sf_bar(&mut self, cx: &mut Cx) {
+        let Some(full) = self.stream_full.clone() else { return };
+        let (pk, camera) = voice_view::pane(&full);
+        let mine = self.voice_people.values().flatten().any(|p| p.me && p.pubkey == pk);
+        let sound = (!mine).then(|| {
+            let p = voice_audio::VoicePrefs::load().person(pk);
+            if camera { (p.volume, p.muted) } else { (p.stream_volume, p.stream_muted) }
+        });
+        let bar = self.ui.view(cx, ids!(sf_bar));
+        voice_view::fill_stream_bar(cx, &bar, self.sf_bar, sound, !camera);
+        self.ui.view(cx, ids!(stream_full)).redraw(cx);
     }
 
     /// The sidebar's "muted for me" icons.
@@ -5393,7 +5571,8 @@ impl App {
             }
             A::VoiceProfile(pk) => self.send(backend::Command::Card(pk)),
             A::Showcase { target, on } => self.send(backend::Command::Showcase { target, on }),
-            A::LocalMute { target, on } => self.set_person_audio(cx, &target, None, Some(on)),
+            A::LocalMute { target, on } => self.set_person_audio(cx, &target, |p| p.muted = on),
+            A::StreamMute { target, on } => self.set_person_audio(cx, &target, |p| p.stream_muted = on),
             A::VoiceSelfMute => self.toggle_voice(cx, false),
             A::VoiceSelfDeafen => self.toggle_voice(cx, true),
             A::Moderate { target, action } => self.send(backend::Command::Moderate { target, action }),
@@ -6324,6 +6503,9 @@ impl App {
             let share = self.ui.view(cx, ids!(voice_share));
             share.view(cx, ids!(on)).set_visible(cx, !self.sharing);
             share.view(cx, ids!(off)).set_visible(cx, self.sharing);
+            let cam = self.ui.view(cx, ids!(voice_camera));
+            cam.view(cx, ids!(on)).set_visible(cx, !self.camera_on);
+            cam.view(cx, ids!(off)).set_visible(cx, self.camera_on);
             let (text, color) = match self.call_state {
                 CallState::Connected => ("Voice Connected", 0x22c55e),
                 CallState::Reconnecting => ("Reconnecting...", 0xfacc15),
@@ -6546,14 +6728,18 @@ impl App {
                 .collect()
         };
         let (videos, screens) = (by_kind(calls::VideoKind::Camera), by_kind(calls::VideoKind::Screen));
-        // A stream that ended can't stay large.
-        if self.stream_full.as_ref().is_some_and(|f| !streams.iter().any(|s| &s.pubkey == f)) {
+        // A stream that ended (a camera turned off) can't stay large.
+        let gone = |f: &String| match voice_view::pane(f) {
+            (pk, true) => !videos.contains_key(pk),
+            (pk, false) => !streams.iter().any(|s| s.pubkey == pk),
+        };
+        if self.stream_full.as_ref().is_some_and(gone) {
             self.set_stream_full(cx, None);
         }
         if let Some(full) = self.stream_full.clone() {
             let img = self.ui.image(cx, ids!(stream_full.sf_img));
             let yuv = self.ui.widget(cx, ids!(stream_full.sf_yuv));
-            voice_view::show_video(cx, &img, &yuv, screens.get(&full));
+            voice_view::show_video(cx, &img, &yuv, voice_view::pane_tex(&full, &videos, &screens));
             self.ui.view(cx, ids!(stream_full)).redraw(cx);
         }
         if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
@@ -6638,11 +6824,68 @@ impl App {
         }
         mark(&self.ui, cx, ids!(ss_smooth), !st.clarity);
         mark(&self.ui, cx, ids!(ss_clear), st.clarity);
+        // A screen has no one app: its "app" sound is the whole PC's.
+        use stream_audio::StreamAudio;
+        let window = self.share_picker.pick.is_some_and(|(w, _)| w);
+        let audio = if !window && st.audio == StreamAudio::App { StreamAudio::Pc } else { st.audio };
+        self.ui.view(cx, ids!(ss_aud_app)).set_visible(cx, window);
+        mark(&self.ui, cx, ids!(ss_aud_off), audio == StreamAudio::Off);
+        mark(&self.ui, cx, ids!(ss_aud_app), audio == StreamAudio::App);
+        mark(&self.ui, cx, ids!(ss_aud_pc), audio == StreamAudio::Pc);
+        mark(&self.ui, cx, ids!(ss_aud_apps), audio == StreamAudio::Apps);
+        let apps = self.share_apps();
+        let note = match audio {
+            StreamAudio::Off => "",
+            StreamAudio::App => "Only that window's app is heard.",
+            StreamAudio::Pc => "Everything playing on your PC is heard, except this call.",
+            StreamAudio::Apps if apps.is_empty() => "Nothing is playing sound right now.",
+            StreamAudio::Apps => "Only the apps ticked are heard (also when they start playing later).",
+        };
+        self.ui.label(cx, ids!(ss_aud_note)).set_text(cx, note);
+        self.ui.view(cx, ids!(ss_apps)).set_visible(cx, audio == StreamAudio::Apps);
+        let summary = if st.apps.is_empty() { "Choose apps…".to_owned() } else { st.apps.join(", ") };
+        self.ui.label(cx, ids!(ss_apps_sum)).set_text(cx, &summary);
+        let open = self.share_picker.apps_open;
+        self.ui.view(cx, ids!(ss_apps_list)).set_visible(cx, open);
+        self.ui.view(cx, ids!(ss_apps_none)).set_visible(cx, apps.is_empty());
+        for i in 0..SHARE_APP_SLOTS {
+            let path = [id!(ss_apps_list), LiveId::from_str(&format!("ss_app{i}"))];
+            let row = self.ui.view(cx, &path);
+            match apps.get(i) {
+                Some(name) => {
+                    row.set_visible(cx, true);
+                    let on = st.apps.contains(name);
+                    row.label(cx, ids!(name)).set_text(cx, name);
+                    row.view(cx, ids!(tick)).set_visible(cx, on);
+                    let mut label = row.widget(cx, ids!(name));
+                    let c = if on { lists::rgba(0xffffff, 1.0) } else { theme::tok("gray_300", 1.0) };
+                    script_apply_eval!(cx, label, {draw_text +: {color: #(c)}});
+                }
+                None => row.set_visible(cx, false),
+            }
+        }
+        // The window's height less a margin, at most what it needs.
+        let window_h = self.ui.view(cx, ids!(body)).area().rect(cx).size.y;
+        let h = if window_h > 0.0 { (window_h - 48.0).clamp(360.0, 760.0) } else { 720.0 };
+        let mut dialog = self.ui.widget(cx, ids!(ss_box));
+        script_apply_eval!(cx, dialog, {height: #(h)});
         // Go Live once something is picked.
         let mut go = self.ui.widget(cx, ids!(ss_go));
         let ready = if self.share_picker.pick.is_some() { 1.0 } else { 0.0 };
         script_apply_eval!(cx, go, {draw_bg +: {on: #(ready)}});
         self.ui.redraw(cx);
+    }
+
+    /// The "Choose Apps" list: what plays now, and what was ticked before.
+    fn share_apps(&self) -> Vec<String> {
+        let mut apps = self.share_picker.playing.clone();
+        for a in &self.share_picker.settings.apps {
+            if !apps.contains(a) {
+                apps.push(a.clone());
+            }
+        }
+        apps.truncate(SHARE_APP_SLOTS);
+        apps
     }
 
     /// The picker's clicks.
@@ -6686,6 +6929,33 @@ impl App {
                 changed = true;
             }
         }
+        for (path, audio) in [
+            (ids!(ss_aud_off), stream_audio::StreamAudio::Off),
+            (ids!(ss_aud_app), stream_audio::StreamAudio::App),
+            (ids!(ss_aud_pc), stream_audio::StreamAudio::Pc),
+            (ids!(ss_aud_apps), stream_audio::StreamAudio::Apps),
+        ] {
+            if tapped(&self.ui, cx, path) {
+                self.share_picker.settings.audio = audio;
+                changed = true;
+            }
+        }
+        if tapped(&self.ui, cx, ids!(ss_apps_btn)) {
+            self.share_picker.apps_open = !self.share_picker.apps_open;
+            changed = true;
+        }
+        let apps = self.share_apps();
+        for (i, name) in apps.iter().enumerate() {
+            if tapped(&self.ui, cx, &[id!(ss_apps_list), LiveId::from_str(&format!("ss_app{i}"))]) {
+                let ticked = &mut self.share_picker.settings.apps;
+                if ticked.contains(name) {
+                    ticked.retain(|a| a != name);
+                } else {
+                    ticked.push(name.clone());
+                }
+                changed = true;
+            }
+        }
         if tapped(&self.ui, cx, ids!(ss_go)) {
             if let Some((window, id)) = self.share_picker.pick {
                 let settings = self.share_picker.settings.clone();
@@ -6720,6 +6990,10 @@ impl App {
             }
         }
         self.send(backend::Command::WatchStream { pubkey: pubkey.to_owned(), on });
+        if on {
+            let prefs = voice_audio::VoicePrefs::load();
+            self.push_stream_sound(cx, &prefs);
+        }
         // The tile updates on the next frame.
         if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
             for s in v.streams.iter_mut().filter(|s| s.pubkey == pubkey) {
@@ -6745,7 +7019,7 @@ impl App {
             }
         }
         if let Some(full) = self.stream_full.clone() {
-            let tex = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().and_then(|v| v.stream_videos.get(&full).cloned());
+            let tex = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().and_then(|v| voice_view::pane_tex(&full, &v.videos, &v.stream_videos).cloned());
             let img = self.ui.image(cx, ids!(stream_full.sf_img));
             let yuv = self.ui.widget(cx, ids!(stream_full.sf_yuv));
             voice_view::show_video(cx, &img, &yuv, tex.as_ref());
@@ -7647,8 +7921,19 @@ impl App {
                     self.fill_share_picker(cx);
                 }
             }
+            Update::SharePlaying(apps) => {
+                if self.ui.modal(cx, ids!(share_dialog)).is_open() {
+                    self.share_picker.playing = apps.clone();
+                    self.fill_share_picker(cx);
+                }
+            }
             Update::Sharing(on) => {
                 self.sharing = *on;
+                self.fill_voice_bar(cx);
+            }
+            Update::CameraOn(on) => {
+                self.camera_on = *on;
+                self.camera.set_on(cx, *on);
                 self.fill_voice_bar(cx);
             }
             Update::ShareEnded => {
@@ -7658,6 +7943,8 @@ impl App {
             Update::CallState(state) => {
                 if *state == calls::CallState::Idle {
                     self.sharing = false;
+                    self.camera_on = false;
+                    self.camera.set_on(cx, false);
                 }
                 let was = std::mem::replace(&mut self.call_state, *state);
                 if *state != calls::CallState::Connecting {
@@ -8371,7 +8658,10 @@ impl MatchEvent for App {
                     let percent = v.round().clamp(0.0, 200.0) as u32;
                     self.ui.label(cx, &[id!(ctx_menu), *slot, id!(vol), id!(vol_pct)]).set_text(cx, &format!("{percent}%"));
                     self.ctx[i].kind = ctxmenu::Kind::Volume(pubkey.clone(), percent);
-                    self.set_person_audio(cx, &pubkey, Some(percent), None);
+                    match pubkey.strip_prefix(ctxmenu::STREAM) {
+                        Some(pk) => self.set_person_audio(cx, pk, |p| p.stream_volume = percent),
+                        None => self.set_person_audio(cx, &pubkey, |p| p.volume = percent),
+                    }
                 }
             }
             for (i, slot) in SUB_SLOTS.iter().enumerate().take(self.ctx_sub.len()) {
@@ -8883,9 +9173,17 @@ impl MatchEvent for App {
 
         // Voice page.
         let card_menu = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().and_then(|v| v.context(cx, actions));
-        if let Some((pubkey, at)) = card_menu {
-            let items = self.voice_menu(&pubkey);
-            self.open_menu(cx, items, at);
+        if let Some((key, at, stream)) = card_menu {
+            // A watched stream (not our own): its sound; a card or a
+            // camera: the person.
+            let (pk, camera) = voice_view::pane(&key);
+            let pubkey = pk.to_owned();
+            let stream = stream && !camera;
+            let mine = self.voice_people.values().flatten().any(|p| p.me && p.pubkey == pubkey);
+            let items = if stream && !mine { self.stream_menu(&pubkey) } else { self.voice_menu(&pubkey) };
+            if !items.is_empty() {
+                self.open_menu(cx, items, at);
+            }
         }
         let voice_click = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().map(|v| v.clicked(cx, actions));
         match voice_click {
@@ -8922,11 +9220,28 @@ impl MatchEvent for App {
                 self.open_srv_settings(cx);
                 self.show_srv_page(cx, 8);
             }
+            Some(voice_view::VoiceViewAction::StreamVolume(key, percent)) => self.set_pane_sound(cx, &key, Some(percent), None),
+            Some(voice_view::VoiceViewAction::StreamMute(key, on)) => self.set_pane_sound(cx, &key, None, Some(on)),
             _ => {}
         }
 
-        if tapped(&self.ui, cx, ids!(sf_exit)) {
-            self.set_stream_full(cx, None);
+        // The fullscreen stream's bar: its fullscreen button leaves.
+        if let Some(full) = self.stream_full.clone() {
+            let bar = self.ui.view(cx, ids!(sf_bar));
+            match voice_view::stream_bar_action(cx, &bar, actions, &full, false) {
+                Some(voice_view::VoiceViewAction::Fullscreen(_)) => self.set_stream_full(cx, None),
+                Some(voice_view::VoiceViewAction::StopWatching(pk)) => {
+                    self.set_stream_full(cx, None);
+                    if self.voice_people.values().flatten().any(|p| p.me && p.pubkey == pk) {
+                        self.send(backend::Command::StopShare);
+                    } else {
+                        self.watch_stream(cx, &pk, false);
+                    }
+                }
+                Some(voice_view::VoiceViewAction::StreamVolume(key, percent)) => self.set_pane_sound(cx, &key, Some(percent), None),
+                Some(voice_view::VoiceViewAction::StreamMute(key, on)) => self.set_pane_sound(cx, &key, None, Some(on)),
+                _ => {}
+            }
         }
         if tapped(&self.ui, cx, ids!(sidechat_close)) {
             self.set_sidechat(cx, false);
@@ -8964,6 +9279,15 @@ impl MatchEvent for App {
             self.toggle_voice(cx, true);
         } else if tapped(&self.ui, cx, ids!(voice_share)) {
             self.toggle_share(cx);
+        } else if tapped(&self.ui, cx, ids!(voice_camera)) {
+            // Off at once (the camera closes now); on once its track is up.
+            let on = !self.camera_on;
+            if !on {
+                self.camera_on = false;
+                self.camera.set_on(cx, false);
+                self.fill_voice_bar(cx);
+            }
+            self.send(backend::Command::Camera(on));
         }
         self.share_picker_actions(cx, actions);
 
@@ -9225,6 +9549,7 @@ impl AppMain for App {
             self.last_active = Some(std::time::Instant::now());
         }
         self.mic.handle_event(cx, event);
+        self.camera.handle_event(cx, event);
         if self.mic.devices_changed && self.settings_page == VOICE_PAGE && self.ui.view(cx, ids!(settings)).visible() {
             self.fill_voice_settings(cx);
         }
@@ -9233,6 +9558,24 @@ impl AppMain for App {
         }
         if self.video_timer.is_event(event).is_some() {
             self.sample_video(cx);
+        }
+        // The fullscreen stream's bar: shown while the pointer moves.
+        if self.stream_full.is_some() {
+            let show = match event {
+                Event::MouseMove(_) => Some(true),
+                _ if self.sf_bar_timer.is_event(event).is_some() => Some(false),
+                _ => None,
+            };
+            if let Some(show) = show {
+                if show {
+                    cx.stop_timer(self.sf_bar_timer);
+                    self.sf_bar_timer = cx.start_timeout(2.5);
+                }
+                if show != self.sf_bar {
+                    self.sf_bar = show;
+                    self.fill_sf_bar(cx);
+                }
+            }
         }
         if let Event::Shutdown = event {
             // Others stop seeing us in voice (briefly waited for).

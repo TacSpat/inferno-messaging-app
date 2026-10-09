@@ -67,6 +67,10 @@ pub struct VoicePerson {
     pub broadcasting: bool,
     /// Let up from an ember (heard above).
     pub showcased: bool,
+    /// Sharing their screen (the sidebar's LIVE).
+    pub streaming: bool,
+    /// Their camera is on (the sidebar's camera icon).
+    pub camera: bool,
     /// In an ember below the channel we're in (we may let them up).
     pub below_us: bool,
     /// Us.
@@ -599,10 +603,14 @@ pub enum Update {
     CallState(crate::calls::CallState),
     /// What there is to share (for the picker).
     ShareSources(Vec<crate::share::Source>),
+    /// The apps playing sound now (the picker's "Choose Apps").
+    SharePlaying(Vec<String>),
     /// Whether we're sharing our screen now.
     Sharing(bool),
     /// The shared window closed (the capture ended on its own).
     ShareEnded,
+    /// Our camera's track is up (open the camera) or down.
+    CameraOn(bool),
     /// Someone below asks to speak in our channel (Allow / dismiss).
     SpeakRequest { pubkey: String, name: String, channel: String },
     /// Our LiveKit credentials as saved (the secret only as whether it's set).
@@ -636,6 +644,8 @@ pub enum Command {
     /// Rails' Go Live: share a screen or window.
     StartShare { window: bool, id: u64, settings: crate::share::ShareSettings },
     StopShare,
+    /// Rails' camera button.
+    Camera(bool),
     /// Rails' hearth Broadcast on or off.
     VoiceBroadcast(bool),
     /// Rails' Ask to Speak (from an ember).
@@ -1097,15 +1107,37 @@ impl Backend {
             Command::WatchStream { pubkey, on } => self.calls.watch(&pubkey.chars().take(12).collect::<String>(), on),
             Command::ShareSources => {
                 tokio::task::spawn_blocking(|| Cx::post_action(Update::ShareSources(crate::share::sources())));
+                #[cfg(target_os = "linux")]
+                tokio::task::spawn_blocking(|| Cx::post_action(Update::SharePlaying(crate::stream_audio::playing())));
             }
             Command::StartShare { window, id, settings } => {
                 let r = self.calls.start_share(window, id, settings).await;
-                Cx::post_action(Update::Sharing(self.calls.sharing()));
+                let sharing = self.calls.sharing();
+                Cx::post_action(Update::Sharing(sharing));
+                // Everyone's sidebar shows us LIVE, in the call or not.
+                if let Err(e) = self.session.set_voice_streaming(sharing).await {
+                    makepad_widgets::log!("voice state: {e}");
+                }
+                r?;
+            }
+            Command::Camera(on) => {
+                let r = if on {
+                    self.calls.start_camera().await
+                } else {
+                    self.calls.stop_camera().await;
+                    Ok(())
+                };
+                let camera = self.calls.camera_on();
+                Cx::post_action(Update::CameraOn(camera));
+                if let Err(e) = self.session.set_voice_camera(camera).await {
+                    makepad_widgets::log!("voice state: {e}");
+                }
                 r?;
             }
             Command::StopShare => {
                 self.calls.stop_share().await;
                 Cx::post_action(Update::Sharing(false));
+                self.session.set_voice_streaming(false).await.map_err(|e| e.to_string())?;
             }
             Command::PeopleAudio => self.calls.set_people(crate::voice_audio::VoicePrefs::load().call_people()),
             Command::VoiceBroadcast(on) => self.session.set_voice_broadcast(on).await.map_err(|e| e.to_string())?,
@@ -2753,6 +2785,8 @@ impl Backend {
                 server_deaf: v.server_deaf,
                 broadcasting: v.broadcasting,
                 showcased: v.showcased,
+                streaming: v.streaming,
+                camera: v.camera,
                 below_us: mine_channel.as_ref().is_some_and(|m| state.structure.ancestors(&v.channel_id).contains(m)),
                 me: v.pubkey == self.session.keys().public_key(),
                 owner: state.is_owner(&v.pubkey),

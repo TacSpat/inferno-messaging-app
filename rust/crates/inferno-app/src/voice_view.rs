@@ -84,9 +84,35 @@ pub enum VoiceViewAction {
     Focus(String),
     Unfocus,
     Fullscreen(String),
+    /// A stream's own volume (percent) or mute, from its bar.
+    StreamVolume(String, u32),
+    StreamMute(String, bool),
     OpenSettings,
     None,
 }
+
+/// A camera shown large (focused or fullscreen) is keyed `cam:` and the
+/// person's pubkey; a stream by the pubkey alone.
+pub const CAM: &str = "cam:";
+
+/// Whose view `key` is, and whether it's their camera.
+pub fn pane(key: &str) -> (&str, bool) {
+    match key.strip_prefix(CAM) {
+        Some(pk) => (pk, true),
+        None => (key, false),
+    }
+}
+
+/// The picture for a view key: their camera or their screen.
+pub fn pane_tex<'a>(key: &str, videos: &'a HashMap<String, VideoTex>, screens: &'a HashMap<String, VideoTex>) -> Option<&'a VideoTex> {
+    match pane(key) {
+        (pk, true) => videos.get(pk),
+        (pk, false) => screens.get(pk),
+    }
+}
+
+/// How long a stream's bar stays after the pointer stops moving.
+const BAR_LINGER: f64 = 2.5;
 
 #[derive(Script, ScriptHook, Widget)]
 pub struct VoiceView {
@@ -121,6 +147,19 @@ pub struct VoiceView {
     /// The stream shown large (Rails' theater mode).
     #[rust]
     pub focus: Option<String>,
+    /// Each watched stream's sound for us (volume percent, muted), by
+    /// pubkey hex.
+    #[rust]
+    pub stream_sound: HashMap<String, (u32, bool)>,
+    /// Each person's voice for us (volume percent, muted): a camera's bar
+    /// sets it.
+    #[rust]
+    pub voice_sound: HashMap<String, (u32, bool)>,
+    /// The stream whose bar shows (the pointer is over it).
+    #[rust]
+    hover: Option<String>,
+    #[rust]
+    bar_timer: Timer,
     /// The channel has a chat to open (not the AFK channel).
     #[rust]
     pub chat_available: bool,
@@ -161,7 +200,81 @@ fn mix(a: u32, b: u32, t: f32) -> Vec4 {
     vec4(x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t, x.z + (y.z - x.z) * t, 1.0)
 }
 
+/// Fills a stream's bar: shown while hovered; its sound (none for our
+/// own stream: we don't hear ourselves); focus as `focused` says.
+/// `stop`: it has a stop button (streams; cameras show on their own).
+pub fn fill_stream_bar(cx: &mut Cx, bar: &ViewRef, shown: bool, sound: Option<(u32, bool)>, stop: bool) {
+    bar.set_visible(cx, shown);
+    if !shown {
+        return;
+    }
+    bar.view(cx, ids!(sb_stop)).set_visible(cx, stop);
+    bar.view(cx, ids!(sound)).set_visible(cx, sound.is_some());
+    if let Some((percent, muted)) = sound {
+        bar.view(cx, ids!(sb_mute.on)).set_visible(cx, !muted && percent > 0);
+        bar.view(cx, ids!(sb_mute.off)).set_visible(cx, muted || percent == 0);
+        let slider = bar.slider(cx, ids!(sb_vol));
+        if (slider.value().unwrap_or(0.0) - percent as f64).abs() > 0.5 {
+            slider.set_value(cx, percent as f64);
+        }
+        bar.label(cx, ids!(sb_pct)).set_text(cx, &format!("{percent}%"));
+    }
+}
+
+/// What a stream bar's clicks and drags ask for (`pubkey` its stream);
+/// `focused`: its focus button unfocuses; `full`: its fullscreen button
+/// leaves fullscreen.
+pub fn stream_bar_action(cx: &Cx, bar: &ViewRef, actions: &Actions, pubkey: &str, focused: bool) -> Option<VoiceViewAction> {
+    let up = |path: &[LiveId]| bar.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+    let slider = bar.slider(cx, ids!(sb_vol));
+    if let Some(v) = slider.slided(actions).or(slider.end_slide(actions)) {
+        return Some(VoiceViewAction::StreamVolume(pubkey.to_owned(), v.round().clamp(0.0, 200.0) as u32));
+    }
+    if up(ids!(sb_mute)) {
+        let muted = bar.view(cx, ids!(sb_mute.off)).visible();
+        return Some(VoiceViewAction::StreamMute(pubkey.to_owned(), !muted));
+    }
+    if up(ids!(sb_focus)) {
+        return Some(if focused { VoiceViewAction::Unfocus } else { VoiceViewAction::Focus(pubkey.to_owned()) });
+    }
+    if up(ids!(sb_full)) {
+        return Some(VoiceViewAction::Fullscreen(pubkey.to_owned()));
+    }
+    if up(ids!(sb_stop)) {
+        return Some(VoiceViewAction::StopWatching(pubkey.to_owned()));
+    }
+    None
+}
+
 impl VoiceView {
+    /// A view's sound for its bar: a stream's own, a camera's voice;
+    /// `None` for our own.
+    fn sound_of(&self, key: &str) -> Option<(u32, bool)> {
+        let (pubkey, camera) = pane(key);
+        let mine = self.people.iter().any(|p| p.me && p.pubkey == pubkey);
+        let sounds = if camera { &self.voice_sound } else { &self.stream_sound };
+        (!mine).then(|| sounds.get(pubkey).copied().unwrap_or((100, false)))
+    }
+
+    fn fill_bar(&self, cx: &mut Cx, path: &[LiveId], key: &str) {
+        let bar = self.view.view(cx, path);
+        fill_stream_bar(cx, &bar, self.hover.as_deref() == Some(key), self.sound_of(key), !pane(key).1);
+    }
+
+    /// The watched stream under `at`, if any.
+    fn stream_at(&self, cx: &Cx, at: DVec2) -> Option<String> {
+        if let Some(f) = &self.focus {
+            if self.view.view(cx, ids!(focus_area)).area().rect(cx).contains(at) {
+                return Some(f.clone());
+            }
+        }
+        let tiles: Vec<&StreamTile> = self.streams.iter().filter(|s| Some(&s.pubkey) != self.focus.as_ref()).take(STREAM_SLOTS).collect();
+        tiles.iter().enumerate().filter(|(_, t)| t.watching).find_map(|(i, t)| {
+            let live = self.view.view(cx, &[id!(grid), id!(cards), LiveId::from_str(&format!("st{i}")), id!(live)]);
+            live.area().rect(cx).contains(at).then(|| t.pubkey.clone())
+        })
+    }
+
     fn apply(&mut self, cx: &mut Cx) {
         let view = &self.view;
         let some = !self.people.is_empty();
@@ -178,17 +291,24 @@ impl VoiceView {
         view.view(cx, ids!(status.connecting)).set_visible(cx, self.status == Status::Connecting);
         view.view(cx, ids!(status.connected)).set_visible(cx, self.status == Status::Connected);
         // Theater: the focused stream large, the cards in a strip below.
-        let focus = self.focus.clone().filter(|f| self.streams.iter().any(|s| &s.pubkey == f && s.watching));
+        let focus = self.focus.clone().filter(|f| match pane(f) {
+            (pk, true) => self.videos.contains_key(pk),
+            (pk, false) => self.streams.iter().any(|s| s.pubkey == pk && s.watching),
+        });
         view.view(cx, ids!(focus_area)).set_visible(cx, focus.is_some());
         if let Some(mut grid) = view.widget(cx, ids!(grid)).borrow_mut::<View>() {
             grid.walk.height = if focus.is_some() { Size::Fixed(190.0) } else { Size::fill() };
         }
         if let Some(f) = &focus {
-            let name = self.streams.iter().find(|s| &s.pubkey == f).map(|s| s.name.clone()).unwrap_or_default();
-            view.label(cx, ids!(focus_area.fv_label)).set_text(cx, &format!("{name}'s screen"));
+            let (pk, camera) = pane(f);
+            let name = self.people.iter().find(|p| p.pubkey == pk).map(|p| p.name.clone()).unwrap_or_default();
+            let label = if camera { name } else { format!("{name}'s screen") };
+            view.label(cx, ids!(focus_area.fv_label)).set_text(cx, &label);
+            view.view(cx, ids!(focus_area.fv_live)).set_visible(cx, !camera);
+            self.fill_bar(cx, ids!(focus_area.fv_bar), f);
             let img = view.image(cx, ids!(focus_area.fv_img));
             let yuv = view.widget(cx, ids!(focus_area.fv_yuv));
-            show_video(cx, &img, &yuv, self.stream_videos.get(f));
+            show_video(cx, &img, &yuv, pane_tex(f, &self.videos, &self.stream_videos));
         }
         if !(self.ready && (some || streaming)) {
             return;
@@ -232,6 +352,7 @@ impl VoiceView {
             tile.label(cx, ids!(st_text)).set_text(cx, &format!("{} is streaming", t.name));
             tile.label(cx, ids!(st_label)).set_text(cx, &format!("{}'s screen", t.name));
             if t.watching {
+                self.fill_bar(cx, &[id!(grid), id!(cards), LiveId::from_str(&format!("st{i}")), id!(st_bar)], &t.pubkey);
                 let img = tile.image(cx, ids!(sv_img));
                 let yuv = tile.widget(cx, ids!(sv_yuv));
                 show_video(cx, &img, &yuv, self.stream_videos.get(&t.pubkey));
@@ -321,25 +442,29 @@ impl VoiceView {
     }
 
     /// Right-click on a card: whose, and where.
-    pub fn context(&self, cx: &mut Cx, actions: &Actions) -> Option<(String, DVec2)> {
-        (0..SLOTS.min(self.people.len())).find_map(|i| {
-            let card = self.view.view(cx, &[id!(grid), id!(cards), LiveId::from_str(&format!("c{i}"))]);
-            card.finger_down(actions).filter(|e| !e.device.is_primary_hit()).map(|e| (self.people[i].pubkey.clone(), e.abs))
-        })
+    /// A right-click: whose card or stream (true), and where.
+    pub fn context(&self, cx: &mut Cx, actions: &Actions) -> Option<(String, DVec2, bool)> {
+        let right = |path: &[LiveId]| self.view.view(cx, path).finger_down(actions).filter(|e| !e.device.is_primary_hit()).map(|e| e.abs);
+        if let Some(f) = &self.focus {
+            if let Some(at) = right(ids!(focus_area)) {
+                return Some((f.clone(), at, true));
+            }
+        }
+        let tiles: Vec<&StreamTile> = self.streams.iter().filter(|s| Some(&s.pubkey) != self.focus.as_ref()).take(STREAM_SLOTS).collect();
+        for (i, t) in tiles.iter().enumerate().filter(|(_, t)| t.watching) {
+            if let Some(at) = right(&[id!(grid), id!(cards), LiveId::from_str(&format!("st{i}")), id!(live)]) {
+                return Some((t.pubkey.clone(), at, true));
+            }
+        }
+        (0..SLOTS.min(self.people.len())).find_map(|i| right(&[id!(grid), id!(cards), LiveId::from_str(&format!("c{i}"))]).map(|at| (self.people[i].pubkey.clone(), at, false)))
     }
 
     /// What was clicked.
     pub fn clicked(&self, cx: &mut Cx, actions: &Actions) -> VoiceViewAction {
         let up = |path: &[LiveId]| self.view.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
         if let Some(f) = self.focus.clone() {
-            if up(ids!(focus_area.fv_unfocus)) {
-                return VoiceViewAction::Unfocus;
-            }
-            if up(ids!(focus_area.fv_full)) {
-                return VoiceViewAction::Fullscreen(f);
-            }
-            if up(ids!(focus_area.fv_stop)) {
-                return VoiceViewAction::StopWatching(f);
+            if let Some(a) = stream_bar_action(cx, &self.view.view(cx, ids!(focus_area.fv_bar)), actions, &f, true) {
+                return a;
             }
         }
         let tiles: Vec<&StreamTile> = self.streams.iter().filter(|s| Some(&s.pubkey) != self.focus.as_ref()).take(STREAM_SLOTS).collect();
@@ -348,14 +473,23 @@ impl VoiceView {
             if up(&tile(id!(watch_btn))) {
                 return VoiceViewAction::Watch(t.pubkey.clone());
             }
-            if up(&tile(id!(st_stop))) {
-                return VoiceViewAction::StopWatching(t.pubkey.clone());
+            if let Some(a) = stream_bar_action(cx, &self.view.view(cx, &tile(id!(st_bar))), actions, &t.pubkey, false) {
+                return a;
             }
-            if up(&tile(id!(st_full))) {
-                return VoiceViewAction::Fullscreen(t.pubkey.clone());
-            }
-            if up(&tile(id!(st_focus))) || up(&tile(id!(live))) {
+            // The picture: a left click focuses (a right one opens its menu).
+            let left = self.view.view(cx, &tile(id!(live))).finger_up(actions).is_some_and(|e| !e.cancelled && e.device.is_primary_hit());
+            if left {
                 return VoiceViewAction::Focus(t.pubkey.clone());
+            }
+        }
+        // A card showing a camera: opens it large.
+        for (i, p) in self.people.iter().enumerate().take(SLOTS) {
+            if !self.videos.contains_key(&p.pubkey) {
+                continue;
+            }
+            let card = self.view.view(cx, &[id!(grid), id!(cards), LiveId::from_str(&format!("c{i}"))]);
+            if card.finger_up(actions).is_some_and(|e| !e.cancelled && e.device.is_primary_hit()) {
+                return VoiceViewAction::Focus(format!("{CAM}{}", p.pubkey));
             }
         }
         if up(ids!(status.join_btn)) {
@@ -386,6 +520,27 @@ impl Widget for VoiceView {
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         self.view.handle_event(cx, event, scope);
+        // A stream's bar shows while the pointer moves over it, and a
+        // little after it stops.
+        let hover = match event {
+            Event::MouseMove(e) => Some(self.stream_at(cx, e.abs)),
+            Event::MouseLeave(_) => Some(None),
+            _ if self.bar_timer.is_event(event).is_some() => {
+                self.bar_timer = Timer::empty();
+                Some(None)
+            }
+            _ => None,
+        };
+        if let Some(h) = hover {
+            if h.is_some() {
+                cx.stop_timer(self.bar_timer);
+                self.bar_timer = cx.start_timeout(BAR_LINGER);
+            }
+            if h != self.hover {
+                self.hover = h;
+                self.view.redraw(cx);
+            }
+        }
     }
 }
 

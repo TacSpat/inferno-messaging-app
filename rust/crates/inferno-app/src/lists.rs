@@ -658,6 +658,8 @@ fn draw_people(cx: &mut Cx2d, row: &WidgetRef, people: &[VoicePerson], levels: &
         slot.view(cx, ids!(lmute)).set_visible(cx, local_muted.contains(&p.pubkey));
         slot.view(cx, ids!(sdeaf)).set_visible(cx, p.server_deaf);
         slot.view(cx, ids!(bcast)).set_visible(cx, p.broadcasting);
+        slot.view(cx, ids!(live)).set_visible(cx, p.streaming);
+        slot.view(cx, ids!(cam)).set_visible(cx, p.camera);
         slot.view(cx, ids!(lifted)).set_visible(cx, p.showcased && !p.broadcasting);
     }
     let more = area.label(cx, ids!(more));

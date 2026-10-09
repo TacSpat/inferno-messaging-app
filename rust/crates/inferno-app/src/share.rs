@@ -24,11 +24,16 @@ pub struct ShareSettings {
     pub fps: u32,
     /// Rails' "Prefer Clarity": a sharper picture at no more than 15 fps.
     pub clarity: bool,
+    /// Rails' Include Audio, and whose: the window's app, the whole PC,
+    /// or the apps ticked.
+    pub audio: crate::stream_audio::StreamAudio,
+    /// The apps ticked (by name), remembered for next time.
+    pub apps: Vec<String>,
 }
 
 impl Default for ShareSettings {
     fn default() -> Self {
-        Self { height: 1080, fps: 30, clarity: false }
+        Self { height: 1080, fps: 30, clarity: false, audio: Default::default(), apps: Vec::new() }
     }
 }
 
@@ -68,6 +73,10 @@ pub struct Picker {
     pub settings: ShareSettings,
     /// Each source's picture, by its slot in `shown()`.
     pub thumbs: Vec<Option<makepad_widgets::Texture>>,
+    /// The apps playing sound now (for "Choose Apps").
+    pub playing: Vec<String>,
+    /// The Choose Apps dropdown is open.
+    pub apps_open: bool,
 }
 
 impl Picker {
@@ -232,7 +241,7 @@ pub fn start(window: bool, id: u64, settings: ShareSettings, out: NativeVideoSou
                 if last_preview.elapsed() >= std::time::Duration::from_millis(66) {
                     last_preview = std::time::Instant::now();
                     seq += 1;
-                    preview(&me, &buffer, seq);
+                    preview(&me, VideoKind::Screen, &buffer, seq);
                 }
                 // What we send.
                 // When it was captured: WebRTC paces the encoder by these.
@@ -280,8 +289,8 @@ fn to_i420(frame: &DesktopFrame, height: u32) -> Option<I420Buffer> {
     Some(if (tw, th) == (w, h) { full } else { full.scale(tw as i32, th as i32) })
 }
 
-/// Our own stream, for us to see.
-fn preview(me: &str, buffer: &I420Buffer, seq: u64) {
+/// Our own stream or camera, for us to see.
+pub(crate) fn preview(me: &str, kind: VideoKind, buffer: &I420Buffer, seq: u64) {
     let (w, h) = (buffer.width() as usize, buffer.height() as usize);
     let (y, u, v) = buffer.data();
     let (sy, su, sv) = buffer.strides();
@@ -298,7 +307,7 @@ fn preview(me: &str, buffer: &I420Buffer, seq: u64) {
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .get_or_insert_with(Default::default)
-        .insert((me.to_owned(), VideoKind::Screen), Frame { width: w, height: h, pixels: Some(pixels), seq, at: std::time::Instant::now() });
+        .insert((me.to_owned(), kind), Frame { width: w, height: h, pixels: Some(pixels), seq, at: std::time::Instant::now() });
 }
 
 #[cfg(test)]
@@ -317,7 +326,7 @@ mod tests {
 
     #[test]
     fn clarity_caps_the_frame_rate() {
-        let s = ShareSettings { height: 1080, fps: 60, clarity: true };
+        let s = ShareSettings { height: 1080, fps: 60, clarity: true, ..Default::default() };
         assert_eq!(s.frame_rate(), 15);
         assert!(s.bitrate() < ShareSettings { clarity: false, ..s.clone() }.bitrate());
     }

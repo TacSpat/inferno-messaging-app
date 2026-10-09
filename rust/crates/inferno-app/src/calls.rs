@@ -57,8 +57,11 @@ struct Live {
     /// Other rooms heard listen-only, by channel: the hearths above (their
     /// broadcasters), and embers below with someone let up.
     relays: HashMap<String, (Arc<Room>, tokio::task::JoinHandle<()>)>,
-    /// Our screen share: the capture and its published track.
-    share: Option<(crate::share::Capture, livekit::id::TrackSid)>,
+    /// Our camera's published track (and the test pattern feeding it).
+    camera: Option<(livekit::id::TrackSid, Option<tokio::task::JoinHandle<()>>)>,
+    /// Our screen share: the capture and its published track, and its
+    /// sound (recording and track) when it has one.
+    share: Option<(crate::share::Capture, livekit::id::TrackSid, Option<(crate::stream_audio::Capture, livekit::id::TrackSid)>)>,
 }
 
 #[derive(Default)]
@@ -153,6 +156,29 @@ fn set_streaming(identity: &str, on: bool) {
 
 fn is_stream(source: TrackSource) -> bool {
     matches!(source, TrackSource::Screenshare | TrackSource::ScreenshareAudio)
+}
+
+/// A stream's sound, published (none when `audio` is off): the app of
+/// `window`, or the whole PC (a screen) but this app.
+async fn share_sound(room: &Room, window: Option<u64>, settings: &crate::share::ShareSettings) -> Result<Option<(crate::stream_audio::Capture, livekit::id::TrackSid)>, String> {
+    use crate::stream_audio::{Source, StreamAudio, CHANNELS, RATE};
+    use livekit::options::AudioEncoding;
+    let source = match (settings.audio, window) {
+        (StreamAudio::Off, _) => return Ok(None),
+        (StreamAudio::Apps, _) if settings.apps.is_empty() => return Ok(None),
+        (StreamAudio::Apps, _) => Source::Apps(settings.apps.clone()),
+        (StreamAudio::App, Some(w)) => Source::Window(w),
+        (StreamAudio::App, None) | (StreamAudio::Pc, _) => Source::Pc,
+    };
+    // Sound as it is: no voice processing.
+    let options = AudioSourceOptions { echo_cancellation: false, noise_suppression: false, auto_gain_control: false };
+    let native = NativeAudioSource::new(options, RATE, CHANNELS, 100);
+    let recording = crate::stream_audio::start(source, native.clone())?;
+    let track = LocalAudioTrack::create_audio_track("screen_audio", RtcAudioSource::Native(native));
+    // Music, not speech: stereo at a higher rate, no gaps in silence.
+    let options = TrackPublishOptions { source: TrackSource::ScreenshareAudio, dtx: false, red: false, audio_encoding: Some(AudioEncoding { max_bitrate: 128_000 }), ..Default::default() };
+    let publication = room.local_participant().publish_track(LocalTrack::Audio(track), options).await.map_err(|e| e.to_string())?;
+    Ok(Some((recording, publication.sid())))
 }
 
 /// `INFERNO_DEBUG_VIDEO`: frames a second, logged every 5 s.
@@ -252,10 +278,42 @@ async fn watch_video(identity: String, kind: VideoKind, track: livekit::webrtc::
     }
 }
 
-/// A test run's camera (`INFERNO_FAKE_VIDEO`): a moving pattern, so others'
-/// cards can be seen showing video without a real camera.
-async fn fake_camera(source: livekit::webrtc::video_source::native::NativeVideoSource) {
-    use livekit::webrtc::video_frame::{I420Buffer, VideoFrame, VideoRotation};
+/// Where our camera's frames go while it's on: the published track's
+/// source, and our own card (under our LiveKit identity).
+struct CameraOut {
+    source: livekit::webrtc::video_source::native::NativeVideoSource,
+    me: String,
+    epoch: std::time::Instant,
+    seq: u64,
+    last_preview: std::time::Instant,
+}
+
+static CAMERA: Mutex<Option<CameraOut>> = Mutex::new(None);
+
+/// Whether a camera frame would go anywhere (the camera is on in a call).
+pub fn camera_live() -> bool {
+    CAMERA.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
+/// One frame from our camera: sent, and shown on our card (15 times a
+/// second is plenty there).
+pub fn camera_frame(buffer: livekit::webrtc::video_frame::I420Buffer) {
+    use livekit::webrtc::video_frame::{VideoFrame, VideoRotation};
+    let mut out = CAMERA.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(o) = out.as_mut() else { return };
+    if o.last_preview.elapsed() >= std::time::Duration::from_millis(66) {
+        o.last_preview = std::time::Instant::now();
+        o.seq += 1;
+        crate::share::preview(&o.me, VideoKind::Camera, &buffer, o.seq);
+    }
+    let timestamp_us = o.epoch.elapsed().as_micros() as i64;
+    o.source.capture_frame(&VideoFrame { rotation: VideoRotation::VideoRotation0, timestamp_us, frame_metadata: None, buffer });
+}
+
+/// A test run's camera (`INFERNO_FAKE_VIDEO`): a moving pattern, so cards
+/// can be seen showing video without a real camera.
+async fn fake_camera() {
+    use livekit::webrtc::video_frame::I420Buffer;
     const W: u32 = 640;
     const H: u32 = 360;
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(1000 / 15));
@@ -278,8 +336,7 @@ async fn fake_camera(source: livekit::webrtc::video_source::native::NativeVideoS
             }
         }
         n += 1;
-        let frame = VideoFrame { rotation: VideoRotation::VideoRotation0, timestamp_us: 0, frame_metadata: None, buffer };
-        source.capture_frame(&frame);
+        camera_frame(buffer);
     }
 }
 
@@ -351,15 +408,51 @@ async fn meter(identity: String, track: livekit::webrtc::prelude::RtcAudioTrack)
     }
 }
 
-/// Every remote audio track in `room`, on or off.
-/// Each person's volume (1 = as sent; Rails' 0..200%) and whether we've
-/// muted them for ourselves, by LiveKit identity.
-pub type People = HashMap<String, (f32, bool)>;
+/// `INFERNO_DEBUG_VIDEO`: how loud a watched stream's sound arrives,
+/// every 5 s (test windows have no speakers to hear it).
+async fn log_stream_sound(identity: String, track: livekit::webrtc::prelude::RtcAudioTrack) {
+    use futures_util::StreamExt;
+    let mut stream = livekit::webrtc::audio_stream::native::NativeAudioStream::new(track, 48_000, 2);
+    let (mut sum, mut n, mut peak, mut since) = (0f64, 0u64, 0f32, std::time::Instant::now());
+    while let Some(frame) = stream.next().await {
+        for s in frame.data.iter() {
+            let v = *s as f32 / 32768.0;
+            sum += (v * v) as f64;
+            peak = peak.max(v.abs());
+        }
+        n += frame.data.len() as u64;
+        if since.elapsed().as_secs() >= 5 {
+            eprintln!("stream sound from {identity}: rms {:.4}, peak {:.3}", (sum / n.max(1) as f64).sqrt(), peak);
+            (sum, n, peak, since) = (0.0, 0, 0.0, std::time::Instant::now());
+        }
+    }
+}
 
-/// One remote voice as we want to hear it: on unless deafened or muted for
-/// us (and, `gate` given, only if it passes), at its volume.
-fn tune(t: &RemoteAudioTrack, identity: &str, deaf: bool, people: &People, gate: Option<&std::collections::HashSet<String>>) {
-    let (volume, muted) = people.get(identity).copied().unwrap_or((1.0, false));
+/// How we hear one person, voice and stream apart: volume (1 = as sent;
+/// Rails' 0..200%) and whether we've muted it for ourselves.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Hearing {
+    pub volume: f32,
+    pub muted: bool,
+    pub stream_volume: f32,
+    pub stream_muted: bool,
+}
+
+impl Default for Hearing {
+    fn default() -> Self {
+        Self { volume: 1.0, muted: false, stream_volume: 1.0, stream_muted: false }
+    }
+}
+
+/// Everyone's, by LiveKit identity.
+pub type People = HashMap<String, Hearing>;
+
+/// One remote sound as we want to hear it: on unless deafened or muted for
+/// us (and, `gate` given, only if it passes), at its volume. `stream`: a
+/// stream's sound, with its own volume and mute.
+fn tune(t: &RemoteAudioTrack, identity: &str, deaf: bool, people: &People, gate: Option<&std::collections::HashSet<String>>, stream: bool) {
+    let h = people.get(identity).copied().unwrap_or_default();
+    let (volume, muted) = if stream { (h.stream_volume, h.stream_muted) } else { (h.volume, h.muted) };
     let on = !deaf && !muted && gate.is_none_or(|g| g.contains(identity));
     if on {
         t.enable();
@@ -375,7 +468,7 @@ fn hear(room: &Room, deaf: bool, people: &People, gate: Option<&std::collections
         let who = p.identity().to_string();
         for publication in p.track_publications().values() {
             if let Some(RemoteTrack::Audio(t)) = publication.track() {
-                tune(&t, &who, deaf, people, gate);
+                tune(&t, &who, deaf, people, gate, publication.source() == TrackSource::ScreenshareAudio);
             }
         }
     }
@@ -463,23 +556,6 @@ impl Calls {
         if mute || deaf {
             mic.mute();
         }
-        // A test run's camera (no real one is opened).
-        let fake_cam = if std::env::var_os("INFERNO_FAKE_VIDEO").is_some() {
-            use livekit::webrtc::video_source::{native::NativeVideoSource, RtcVideoSource, VideoResolution};
-            let source = NativeVideoSource::new(VideoResolution { width: 640, height: 360 }, false);
-            let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
-            let codec = if GPU_VIDEO.load(std::sync::atomic::Ordering::Relaxed) { VideoCodec::H264 } else { VideoCodec::VP8 };
-            let options = TrackPublishOptions { source: TrackSource::Camera, video_codec: codec, ..Default::default() };
-            match room.local_participant().publish_track(LocalTrack::Video(track), options).await {
-                Ok(_) => Some(tokio::spawn(fake_camera(source))),
-                Err(e) => {
-                    makepad_widgets::log!("test camera: {e}");
-                    None
-                }
-            }
-        } else {
-            None
-        };
         let deaf_flag = Arc::new(std::sync::atomic::AtomicBool::new(deaf));
         let (r, d, ppl, watching) = (room.clone(), deaf_flag.clone(), self.people.clone(), self.watching.clone());
         // Streams already running when we join.
@@ -522,9 +598,12 @@ impl Calls {
                         publication.set_subscribed(false);
                     }
                     RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(t), publication, participant } if publication.source() == TrackSource::ScreenshareAudio => {
-                        // A watched stream's sound, at its sharer's volume.
+                        // A watched stream's sound, at its own volume.
                         let who = participant.identity().to_string();
-                        tune(&t, &who, d.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), None);
+                        tune(&t, &who, d.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), None, true);
+                        if std::env::var_os("INFERNO_DEBUG_VIDEO").is_some() {
+                            tokio::spawn(log_stream_sound(who, t.rtc_track()));
+                        }
                     }
                     RoomEvent::TrackSubscribed { track: RemoteTrack::Video(t), publication, participant } => {
                         let kind = if publication.source() == TrackSource::Screenshare { VideoKind::Screen } else { VideoKind::Camera };
@@ -538,7 +617,7 @@ impl Calls {
                     }
                     RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(t), participant, .. } => {
                         let who = participant.identity().to_string();
-                        tune(&t, &who, d.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), None);
+                        tune(&t, &who, d.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), None, false);
                         if let Some(old) = meters.insert(who.clone(), tokio::spawn(meter(who, t.rtc_track()))) {
                             old.abort();
                         }
@@ -614,15 +693,6 @@ impl Calls {
                 screen.abort();
             });
         }
-        if let Some(cam) = fake_cam {
-            let r = room.clone();
-            tokio::spawn(async move {
-                while r.connection_state() != ConnectionState::Disconnected {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                }
-                cam.abort();
-            });
-        }
         if let Some(tone) = tone {
             // Ends with the call (the room's task outlives it otherwise).
             let r = room.clone();
@@ -633,7 +703,7 @@ impl Calls {
                 tone.abort();
             });
         }
-        self.live = Some(Live { room, mic, _audio: audio, events: task, deaf: deaf_flag, relays: HashMap::new(), share: None });
+        self.live = Some(Live { room, mic, _audio: audio, events: task, deaf: deaf_flag, relays: HashMap::new(), share: None, camera: None });
         post(CallState::Connected);
         Ok(())
     }
@@ -662,7 +732,7 @@ impl Calls {
                     RoomEvent::TrackSubscribed { track: RemoteTrack::Audio(t), participant, .. } => {
                         let who = participant.identity().to_string();
                         let gate = broadcasters.lock().unwrap_or_else(|e| e.into_inner()).clone();
-                        tune(&t, &who, deaf.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), Some(&gate));
+                        tune(&t, &who, deaf.load(std::sync::atomic::Ordering::Relaxed), &ppl.lock().unwrap_or_else(|e| e.into_inner()), Some(&gate), false);
                         if let Some(old) = meters.insert(who.clone(), tokio::spawn(meter(who, t.rtc_track()))) {
                             old.abort();
                         }
@@ -706,6 +776,47 @@ impl Calls {
         if self.close().await {
             post(CallState::Idle);
         }
+    }
+
+    /// Turns our camera on: its track published; frames come from the UI's
+    /// capture (or the test pattern) through `camera_frame`.
+    pub async fn start_camera(&mut self) -> Result<(), String> {
+        use livekit::options::VideoEncoding;
+        use livekit::webrtc::video_source::{native::NativeVideoSource, RtcVideoSource, VideoResolution};
+        let Some(live) = self.live.as_mut() else { return Err("You're not in voice.".into()) };
+        if live.camera.is_some() {
+            return Ok(());
+        }
+        let me = live.room.local_participant().identity().to_string();
+        let source = NativeVideoSource::new(VideoResolution { width: 1280, height: 720 }, false);
+        let track = LocalVideoTrack::create_video_track("camera", RtcVideoSource::Native(source.clone()));
+        let codec = if GPU_VIDEO.load(std::sync::atomic::Ordering::Relaxed) { VideoCodec::H264 } else { VideoCodec::VP8 };
+        // LiveKit's 720p: smaller layers for small cards (simulcast).
+        let options = TrackPublishOptions { source: TrackSource::Camera, video_codec: codec, video_encoding: Some(VideoEncoding { max_bitrate: 1_700_000, max_framerate: 30.0 }), ..Default::default() };
+        let publication = live.room.local_participant().publish_track(LocalTrack::Video(track), options).await.map_err(|e| format!("Couldn't turn the camera on: {e}"))?;
+        let now = std::time::Instant::now();
+        *CAMERA.lock().unwrap_or_else(|e| e.into_inner()) = Some(CameraOut { source, me, epoch: now, seq: 0, last_preview: now - std::time::Duration::from_secs(1) });
+        let fake = std::env::var_os("INFERNO_FAKE_VIDEO").is_some().then(|| tokio::spawn(fake_camera()));
+        live.camera = Some((publication.sid(), fake));
+        Ok(())
+    }
+
+    /// Turns our camera off (true when it was on).
+    pub async fn stop_camera(&mut self) -> bool {
+        let Some(live) = self.live.as_mut() else { return false };
+        let Some((sid, fake)) = live.camera.take() else { return false };
+        *CAMERA.lock().unwrap_or_else(|e| e.into_inner()) = None;
+        if let Some(f) = fake {
+            f.abort();
+        }
+        let _ = live.room.local_participant().unpublish_track(&sid).await;
+        let me = live.room.local_participant().identity().to_string();
+        forget_video(&me, Some(VideoKind::Camera));
+        true
+    }
+
+    pub fn camera_on(&self) -> bool {
+        self.live.as_ref().is_some_and(|l| l.camera.is_some())
     }
 
     /// Shares a screen (`window` false) or window: Rails' Go Live.
@@ -754,7 +865,15 @@ impl Calls {
             ..Default::default()
         };
         let publication = live.room.local_participant().publish_track(LocalTrack::Video(track), options).await.map_err(|e| format!("Couldn't share: {e}"))?;
-        live.share = Some((capture, publication.sid()));
+        let sound = match share_sound(&live.room, window.then_some(id), &settings).await {
+            Ok(s) => s,
+            Err(e) => {
+                makepad_widgets::log!("stream audio: {e}");
+                Cx::post_action(Update::Error(format!("Streaming without sound: {e}")));
+                None
+            }
+        };
+        live.share = Some((capture, publication.sid(), sound));
         set_streaming(&me, true);
         Ok(())
     }
@@ -762,9 +881,13 @@ impl Calls {
     /// Stops our screen share (true when there was one).
     pub async fn stop_share(&mut self) -> bool {
         let Some(live) = self.live.as_mut() else { return false };
-        let Some((capture, sid)) = live.share.take() else { return false };
+        let Some((capture, sid, sound)) = live.share.take() else { return false };
         drop(capture);
         let _ = live.room.local_participant().unpublish_track(&sid).await;
+        if let Some((recording, sid)) = sound {
+            drop(recording);
+            let _ = live.room.local_participant().unpublish_track(&sid).await;
+        }
         let me = live.room.local_participant().identity().to_string();
         set_streaming(&me, false);
         forget_video(&me, Some(VideoKind::Screen));
@@ -778,6 +901,7 @@ impl Calls {
     /// Ends the call without telling the UI (true when there was one).
     async fn close(&mut self) -> bool {
         self.stop_share().await;
+        self.stop_camera().await;
         let Some(live) = self.live.take() else { return false };
         live.events.abort();
         for (room, task) in live.relays.into_values() {

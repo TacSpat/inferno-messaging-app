@@ -40,6 +40,11 @@ pub struct VoiceState {
     pub broadcasting: bool,
     /// From an ember, heard in the hearths above (let up after asking).
     pub showcased: bool,
+    /// Sharing their screen (Rails' `screen_share_on`), so the sidebar can
+    /// say so to people not in the call.
+    pub streaming: bool,
+    /// Their camera is on (Rails' `video_on`).
+    pub camera: bool,
     /// When they joined this channel (or when we first saw them in it).
     pub since: i64,
 }
@@ -118,6 +123,8 @@ struct Parsed {
     server_deaf: bool,
     broadcasting: bool,
     showcased: bool,
+    streaming: bool,
+    camera: bool,
     device_id: String,
     expires: u64,
 }
@@ -141,6 +148,8 @@ fn parse(event: &Event) -> Option<Parsed> {
         server_deaf: v.get("server_deaf").and_then(Value::as_bool).unwrap_or(false),
         broadcasting: v.get("broadcasting").and_then(Value::as_bool).unwrap_or(false),
         showcased: v.get("showcased").and_then(Value::as_bool).unwrap_or(false),
+        streaming: v.get("screen_share_on").and_then(Value::as_bool).unwrap_or(false),
+        camera: v.get("video_on").and_then(Value::as_bool).unwrap_or(false),
         device_id: s("device_id"),
         expires,
     })
@@ -190,6 +199,8 @@ impl Session {
             server_deaf,
             broadcasting: false,
             showcased: false,
+            streaming: false,
+            camera: false,
             since: Timestamp::now().as_secs() as i64,
         };
         let previous = self.voice.lock().unwrap_or_else(|e| e.into_inner()).mine.replace(mine.clone());
@@ -215,6 +226,31 @@ impl Session {
                 return Ok(());
             }
             m.broadcasting = on;
+            m.clone()
+        };
+        let _ = self.updates.send(Update::Voice(mine.gid.clone()));
+        self.publish_voice("update", &mine, true).await
+    }
+
+    /// Whether we're sharing our screen, for everyone's sidebar.
+    pub async fn set_voice_streaming(&self, on: bool) -> Result<()> {
+        self.set_mine(|m| std::mem::replace(&mut m.streaming, on) != on).await
+    }
+
+    /// Whether our camera is on, for everyone's sidebar.
+    pub async fn set_voice_camera(&self, on: bool) -> Result<()> {
+        self.set_mine(|m| std::mem::replace(&mut m.camera, on) != on).await
+    }
+
+    /// Our voice state changed by `edit` (which says whether it changed),
+    /// told to everyone.
+    async fn set_mine(&self, edit: impl FnOnce(&mut VoiceState) -> bool) -> Result<()> {
+        let mine = {
+            let mut voice = self.voice.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(m) = voice.mine.as_mut() else { return Ok(()) };
+            if !edit(m) {
+                return Ok(());
+            }
             m.clone()
         };
         let _ = self.updates.send(Update::Voice(mine.gid.clone()));
@@ -315,6 +351,8 @@ impl Session {
             "server_deaf": state.server_deaf,
             "broadcasting": state.broadcasting,
             "showcased": state.showcased,
+            "screen_share_on": state.streaming,
+            "video_on": state.camera,
         });
         let expires = Timestamp::now().as_secs() + EXPIRY;
         let event = EventBuilder::new(Kind::Custom(kinds::VOICE_STATE), content.to_string())
@@ -620,7 +658,7 @@ impl Session {
             // leave, so others stop seeing us.
             let ours = self.voice.lock().unwrap_or_else(|e| e.into_inner()).published_at;
             if p.action != "leave" && ours.is_none() && p.expires > Timestamp::now().as_secs() {
-                let ghost = VoiceState { pubkey: me, gid: p.gid, channel_id: p.channel_id, self_mute: false, self_deaf: false, server_mute: false, server_deaf: false, broadcasting: false, showcased: false, since: 0 };
+                let ghost = VoiceState { pubkey: me, gid: p.gid, channel_id: p.channel_id, self_mute: false, self_deaf: false, server_mute: false, server_deaf: false, broadcasting: false, showcased: false, streaming: false, camera: false, since: 0 };
                 self.publish_voice("leave", &ghost, false).await?;
             }
             return Ok(());
@@ -645,6 +683,8 @@ impl Session {
                     server_deaf: p.server_deaf,
                     broadcasting: p.broadcasting,
                     showcased: p.showcased,
+                    streaming: p.streaming,
+                    camera: p.camera,
                     // A refresh or an update keeps when they joined.
                     since: before
                         .as_ref()

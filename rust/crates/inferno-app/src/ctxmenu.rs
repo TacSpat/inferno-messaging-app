@@ -60,6 +60,8 @@ pub enum Action {
     Showcase { target: String, on: bool },
     /// Mute someone for ourselves only (not a server mute).
     LocalMute { target: String, on: bool },
+    /// Mute someone's stream sound for ourselves.
+    StreamMute { target: String, on: bool },
     /// Returns to the menu this submenu came from.
     Back,
 }
@@ -92,7 +94,14 @@ impl Item {
     pub fn volume(pubkey: impl Into<String>, percent: u32) -> Self {
         Item::Volume { pubkey: pubkey.into(), percent }
     }
+    /// Someone's stream volume (its key: `stream:` and the pubkey).
+    pub fn stream_volume(pubkey: &str, percent: u32) -> Self {
+        Item::Volume { pubkey: format!("{STREAM}{pubkey}"), percent }
+    }
 }
+
+/// A volume slider's key for a stream rather than a voice.
+pub const STREAM: &str = "stream:";
 
 /// What a slot does.
 #[derive(Debug, Clone, PartialEq)]
@@ -121,6 +130,7 @@ pub fn flipped(action: &Action) -> Action {
         Action::Moderate { target, action: M::ServerDeafen(on) } => Action::Moderate { target: target.clone(), action: M::ServerDeafen(!on) },
         Action::Showcase { target, on } => Action::Showcase { target: target.clone(), on: !on },
         Action::LocalMute { target, on } => Action::LocalMute { target: target.clone(), on: !on },
+        Action::StreamMute { target, on } => Action::StreamMute { target: target.clone(), on: !on },
         other => other.clone(),
     }
 }
@@ -148,7 +158,10 @@ pub fn layout(items: &[Item]) -> Vec<Slot> {
             Item::Action { action, label, danger } => (label.clone(), *danger, Kind::Action(action.clone())),
             Item::Toggle { action, label, on } => (label.clone(), false, Kind::Toggle(action.clone(), *on)),
             Item::Sub { label, items } => (label.clone(), false, Kind::Sub(items.clone())),
-            Item::Volume { pubkey, percent } => ("User Volume".to_owned(), false, Kind::Volume(pubkey.clone(), *percent)),
+            Item::Volume { pubkey, percent } => {
+                let label = if pubkey.starts_with(STREAM) { "Stream Volume" } else { "User Volume" };
+                (label.to_owned(), false, Kind::Volume(pubkey.clone(), *percent))
+            }
         };
         out.push(Slot { sep, label, danger, kind });
         sep = false;

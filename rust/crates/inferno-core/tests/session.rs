@@ -796,6 +796,11 @@ async fn joining_and_leaving_voice_reaches_everyone() {
     // Mute shows; moving keeps one state.
     alice.set_voice_flags(true, false).await.unwrap();
     wait_for(&mut owner_rx, "alice muted", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.self_mute)).await;
+    // Sharing her screen shows to others (the sidebar's LIVE).
+    alice.set_voice_streaming(true).await.unwrap();
+    wait_for(&mut owner_rx, "alice live", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.streaming)).await;
+    alice.set_voice_camera(true).await.unwrap();
+    wait_for(&mut owner_rx, "alice's camera", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.camera && v.streaming)).await;
     alice.join_voice(&gid, &den).await.unwrap();
     wait_for(&mut owner_rx, "alice moved", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.channel_id == den)).await;
     assert_eq!(owner.voice_states(&gid).len(), 1);
