@@ -27,3 +27,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 # Copy Image: Makepad's clipboard takes text only. arboard serves image data
 # on X11 (large ones too), Windows and macOS.
 arboard = "3.6"
+# Voice calls: LiveKit rooms (WebRTC). The first build downloads a prebuilt
+# libwebrtc; audio itself goes through Makepad's own input and output.
+log = "0.4"
+futures-util = { version = "0.3", default-features = false }
+livekit = { version = "0.9.4", features = ["rustls-tls-webpki-roots"] }

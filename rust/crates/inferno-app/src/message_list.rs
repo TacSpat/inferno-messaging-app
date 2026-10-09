@@ -13,6 +13,15 @@ use crate::lists::rgba;
 
 const DEMO_HISTORY: usize = 10_000;
 
+/// A gap's placeholders are on screen: the app asks for the page that
+/// fills it (posted from the draw).
+#[derive(Debug)]
+pub struct HistoryWanted(pub i64);
+
+/// A gap still on screen this long after its page was asked for is asked
+/// for again (the fetch may have failed).
+const ASK_AGAIN: std::time::Duration = std::time::Duration::from_secs(6);
+
 #[derive(Script, ScriptHook, Widget)]
 pub struct MessageList {
     #[deref]
@@ -43,6 +52,9 @@ pub struct MessageList {
     /// A right-click waiting for the app: row, where, what it landed on.
     #[rust]
     context: Option<(usize, DVec2, Option<crate::message_text::MediaTarget>)>,
+    /// Gaps whose pages were asked for, and when.
+    #[rust]
+    asked: HashMap<i64, std::time::Instant>,
 }
 
 /// What a click in the list asks the app to do.
@@ -133,6 +145,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 emojis: Default::default(),
                 files: Vec::new(),
                 spoiler: false,
+                gap: None,
                 grouped: demo::grouped(i.checked_sub(1).map(|p| &history[p]), m),
                 system: m.system,
             }
@@ -143,13 +156,41 @@ pub fn demo_rows() -> Vec<MessageRow> {
 impl MessageList {
     /// Replaces the rows. A new channel opens at its newest message; the same
     /// channel keeps its scroll (and keeps following if it was at the end).
+    ///
+    /// Rows coming in above (older history) or replacing placeholders don't
+    /// move what's on screen: the first message showing stays where it is.
     pub fn set_rows(&mut self, cx: &mut Cx, rows: Vec<MessageRow>, new_channel: bool) {
+        let list = self.view.portal_list(cx, ids!(list));
+        // Until the list has made its jump to the newest message, there's
+        // no reading position to keep.
+        let settled = self.opened_frames > 2;
+        let anchor = if new_channel || !settled { None } else { self.anchor(&list) };
         self.rows = rows;
         if new_channel {
             self.opened_frames = 0;
+            self.asked.clear();
+            self.hovered = None;
+        } else if let Some((id, start)) = anchor {
+            if let (Some(index), Some(mut l)) = (self.rows.iter().position(|r| r.id == id), list.borrow_mut()) {
+                l.set_first_id_and_scroll_in_place(index, start);
+            }
         }
         crate::lists::redraw_items(cx, &self.view.portal_list(cx, ids!(list)));
         self.view.redraw(cx);
+    }
+
+    /// The first message drawn on screen and where its top was, unless the
+    /// list is following the newest (it keeps following).
+    fn anchor(&self, list: &PortalListRef) -> Option<(String, f64)> {
+        let l = list.borrow()?;
+        if l.is_at_end() {
+            return None;
+        }
+        let first = l.first_id();
+        (first..first + l.visible_items() + 2).find_map(|i| {
+            let row = self.rows.get(i).filter(|r| r.gap.is_none() && !r.id.is_empty())?;
+            Some((row.id.clone(), l.drawn_slot(i)?.start))
+        })
     }
 
     pub fn row(&self, index: usize) -> Option<&MessageRow> {
@@ -169,6 +210,15 @@ impl MessageList {
         true
     }
 
+    /// Whether `abs` is on the hovered row's toolbar.
+    fn on_toolbar(&self, cx: &mut Cx, abs: DVec2) -> bool {
+        let Some(index) = self.hovered else { return false };
+        let list = self.view.portal_list(cx, ids!(list));
+        let Some((_, item)) = list.get_item(index) else { return false };
+        let bar = item.view(cx, ids!(toolbar));
+        bar.visible() && bar.area().clipped_rect(cx).contains(abs)
+    }
+
     /// The row under `abs` and what in it is there.
     fn context_at(&mut self, cx: &mut Cx, abs: DVec2) -> Option<(usize, DVec2, Option<crate::message_text::MediaTarget>)> {
         let list = self.view.portal_list(cx, ids!(list));
@@ -179,7 +229,7 @@ impl MessageList {
             .map(|(i, item)| (*i, item.widget.clone()))
             .find(|(_, w)| w.area().is_valid(cx) && w.area().clipped_rect(cx).contains(abs))?;
         drop(list);
-        if self.rows.get(index).is_none_or(|r| r.id.is_empty()) {
+        if self.rows.get(index).is_none_or(|r| r.id.is_empty() || r.gap.is_some()) {
             return None;
         }
         let target = item
@@ -197,13 +247,19 @@ impl MessageList {
         let list = self.view.portal_list(cx, ids!(list));
         let mut out = None;
         for (index, item) in list.items_with_actions(actions) {
-            if item.as_view().finger_hover_in(actions).is_some() {
-                self.hovered = Some(index);
-                crate::lists::redraw_items(cx, &list);
+            // The toolbar hangs over the row above: while the pointer is on
+            // it, its own row stays the hovered one.
+            if let Some(e) = item.as_view().finger_hover_in(actions) {
+                if !self.on_toolbar(cx, e.abs) {
+                    self.hovered = Some(index);
+                    crate::lists::redraw_items(cx, &list);
+                }
             }
-            if item.as_view().finger_hover_out(actions).is_some() && self.hovered == Some(index) {
-                self.hovered = None;
-                crate::lists::redraw_items(cx, &list);
+            if let Some(e) = item.as_view().finger_hover_out(actions) {
+                if self.hovered == Some(index) && !self.on_toolbar(cx, e.abs) {
+                    self.hovered = None;
+                    crate::lists::redraw_items(cx, &list);
+                }
             }
             let author_paths: [&[LiveId]; 2] = [ids!(line.avatar), ids!(line.content.head.who)];
             for path in author_paths {
@@ -333,6 +389,30 @@ impl Widget for MessageList {
                 let flash = flash_alpha(index);
                 let body = msg.body.as_deref().unwrap_or("🔒 Encrypted — you don't have this channel's key yet");
 
+                if let Some(until) = msg.gap {
+                    let row = list.item(cx, index, id!(MsgPlaceholder));
+                    // Varied like real messages: name, then a line or two.
+                    let k = msg.id.rsplit(':').next().and_then(|k| k.parse::<usize>().ok()).unwrap_or(0) + (until.rem_euclid(7)) as usize;
+                    for (path, widths) in [
+                        (ids!(name_bar), [96.0, 132.0, 110.0, 84.0, 120.0]),
+                        (ids!(line1), [340.0, 260.0, 420.0, 300.0, 220.0]),
+                        (ids!(line2), [0.0, 180.0, 0.0, 240.0, 140.0]),
+                    ] {
+                        let w = widths[k % widths.len()];
+                        let bar = row.view(cx, path);
+                        bar.set_visible(cx, w > 0.0);
+                        if let Some(mut v) = bar.borrow_mut() {
+                            v.walk.width = Size::Fixed(w);
+                        };
+                    }
+                    row.draw_all(cx, &mut Scope::empty());
+                    let due = self.asked.get(&until).is_none_or(|at| at.elapsed() > ASK_AGAIN);
+                    if due {
+                        self.asked.insert(until, std::time::Instant::now());
+                        Cx::post_action(HistoryWanted(until));
+                    }
+                    continue;
+                }
                 if msg.system {
                     let row = list.item(cx, index, id!(MsgSystem));
                     row.label(cx, ids!(body)).set_text(cx, body);
@@ -343,6 +423,12 @@ impl Widget for MessageList {
                 let item = list.item(cx, index, if msg.grouped { id!(MsgGrouped) } else { id!(MsgFull) });
                 let toolbar = item.view(cx, ids!(toolbar));
                 toolbar.set_visible(cx, hovered && !msg.id.is_empty());
+                // It hangs over the row above; a row at the very top has
+                // nothing above it in view, so there it sits inside instead.
+                let at_top = index == list.first_id() && list.first_scroll() > -18.0;
+                if let Some(mut bar) = toolbar.borrow_mut() {
+                    bar.walk.margin.top = if at_top { 2.0 } else { -16.0 };
+                };
                 item.view(cx, ids!(toolbar.edit_btn)).set_visible(cx, msg.own);
                 item.view(cx, ids!(toolbar.pin_btn)).set_visible(cx, self.can_pin);
                 item.view(cx, ids!(toolbar.reply_btn)).set_visible(cx, !self.no_reply);
@@ -425,6 +511,15 @@ impl Widget for MessageList {
                 if self.context.is_some() {
                     cx.widget_action(self.widget_uid(), MessageAction::Context(0, m.abs, None));
                 }
+            }
+        }
+        // Off both the hovered row and its toolbar: no row is hovered.
+        if let (Event::MouseMove(m), Some(index)) = (event, self.hovered) {
+            let list = self.view.portal_list(cx, ids!(list));
+            let row = list.get_item(index).map(|(_, item)| item.area().clipped_rect(cx));
+            if row.is_none_or(|r| !r.contains(m.abs)) && !self.on_toolbar(cx, m.abs) {
+                self.hovered = None;
+                crate::lists::redraw_items(cx, &list);
             }
         }
         self.view.handle_event(cx, event, scope);

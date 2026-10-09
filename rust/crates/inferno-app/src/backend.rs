@@ -46,7 +46,58 @@ pub enum SidebarRow {
         last: bool,
         /// Per level above, whether that level's line runs on past this row.
         guides: Vec<bool>,
+        /// The server's AFK channel (Rails' moon icon).
+        afk: bool,
     },
+}
+
+/// Someone in a voice channel, as the sidebar lists them under it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct VoicePerson {
+    pub pubkey: String,
+    pub name: String,
+    pub initial: String,
+    pub avatar: u32,
+    pub picture: Option<String>,
+    pub self_mute: bool,
+    pub self_deaf: bool,
+    pub server_mute: bool,
+    pub server_deaf: bool,
+    /// Heard in the embers below (Rails' broadcast badge).
+    pub broadcasting: bool,
+    /// Let up from an ember (heard above).
+    pub showcased: bool,
+    /// In an ember below the channel we're in (we may let them up).
+    pub below_us: bool,
+    /// Us.
+    pub me: bool,
+    /// The server's owner (no one moderates them).
+    pub owner: bool,
+}
+
+/// The voice channel we're in (Rails' "Voice Connected" bar).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MyVoice {
+    pub gid: String,
+    pub channel_id: String,
+    pub channel: String,
+    pub server: String,
+    pub self_mute: bool,
+    pub self_deaf: bool,
+    pub server_mute: bool,
+    pub server_deaf: bool,
+    pub broadcasting: bool,
+    /// Let up from our ember: heard in the hearths above.
+    pub showcased: bool,
+    /// Our channel has embers below it (Rails' Broadcast button shows).
+    pub has_embers: bool,
+    /// Our channel is an ember (Rails' Ask to Speak shows).
+    pub in_ember: bool,
+    /// The server's AFK rules (Rails): its AFK channel, the idle minutes
+    /// before acting (0 = never), and "move" or "kick".
+    pub afk_channel: Option<String>,
+    pub afk_timeout: u32,
+    pub afk_action: String,
 }
 
 /// What we may do in the selected server (drives which controls show).
@@ -61,6 +112,12 @@ pub struct ServerPerms {
     pub create_invite: bool,
     pub manage_invites: bool,
     pub create_emojis: bool,
+    /// Rails' voice moderation.
+    pub mute_members: bool,
+    pub deafen_members: bool,
+    pub move_members: bool,
+    /// May let people below be heard (`elevate_voice`, on by default).
+    pub elevate_voice: bool,
     pub create_stickers: bool,
     pub manage_emojis: bool,
     pub owner: bool,
@@ -137,7 +194,7 @@ mod role_tests {
 }
 
 /// Rails' permissions that are on unless a role sets them to false.
-pub const DEFAULT_ON: [&str; 3] = ["send_gifs", "send_custom_emojis", "send_custom_stickers"];
+pub const DEFAULT_ON: [&str; 4] = ["send_gifs", "send_custom_emojis", "send_custom_stickers", "elevate_voice"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BanItem {
@@ -284,6 +341,9 @@ pub struct ChannelForm {
     pub video_enabled: bool,
     /// How deep it sits (0 = top); a hearth must be at depth 0 or 1.
     pub depth: u8,
+    /// A voice channel's chat: a linked text channel (Rails' sidechat),
+    /// otherwise its own messages.
+    pub sidechat: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -335,6 +395,40 @@ pub struct MessageRow {
     pub files: Vec<inferno_core::media::FileMeta>,
     /// Sent as a spoiler: its pictures and files stay hidden until clicked.
     pub spoiler: bool,
+    /// A placeholder where history is still missing: the `until` of the
+    /// page that fills it (session/history.rs). Drawn as a grey message.
+    pub gap: Option<i64>,
+}
+
+/// Placeholders per gap in the history.
+const GAP_ROWS: usize = 3;
+
+impl MessageRow {
+    fn placeholder(until: i64, k: usize) -> Self {
+        MessageRow {
+            id: format!("gap:{until}:{k}"),
+            own: false,
+            author_pk: String::new(),
+            reply_to: None,
+            author: String::new(),
+            initial: String::new(),
+            color: 0,
+            avatar: 0,
+            picture: None,
+            at: 0,
+            body: None,
+            reply: None,
+            edited: false,
+            pinned: false,
+            grouped: false,
+            system: false,
+            invite: None,
+            emojis: HashMap::new(),
+            files: Vec::new(),
+            spoiler: false,
+            gap: Some(until),
+        }
+    }
 }
 
 /// An invite link's card, as it resolves.
@@ -497,6 +591,22 @@ pub enum Update {
         channels: Vec<ChannelForm>,
     },
     Channel { gid: String, channel_id: String, name: String, topic: String, encrypted: bool },
+    /// Who is in the selected server's voice channels, by channel.
+    VoicePeople { gid: String, people: HashMap<String, Vec<VoicePerson>> },
+    /// The voice channel we're in, if any.
+    MyVoice(Option<MyVoice>),
+    /// How the call itself is going.
+    CallState(crate::calls::CallState),
+    /// What there is to share (for the picker).
+    ShareSources(Vec<crate::share::Source>),
+    /// Whether we're sharing our screen now.
+    Sharing(bool),
+    /// The shared window closed (the capture ended on its own).
+    ShareEnded,
+    /// Someone below asks to speak in our channel (Allow / dismiss).
+    SpeakRequest { pubkey: String, name: String, channel: String },
+    /// Our LiveKit credentials as saved (the secret only as whether it's set).
+    Livekit { url: String, api_key: String, has_secret: bool },
     /// `mentions`: lowercase `@word` → its `mention:` target (see
     /// message_format), for the names that resolve here.
     Timeline { gid: String, channel_id: String, rows: Vec<MessageRow>, can_pin: bool, mentions: Vec<(String, String)> },
@@ -515,6 +625,35 @@ pub enum Update {
 
 #[derive(Debug)]
 pub enum Command {
+    /// Join a voice channel of the selected server (leaving any other).
+    JoinVoice(String),
+    /// Per-person volume or mute-for-me changed (saved in the prefs).
+    PeopleAudio,
+    /// Start or stop watching someone's stream (pubkey hex).
+    WatchStream { pubkey: String, on: bool },
+    /// List the screens and windows there are to share.
+    ShareSources,
+    /// Rails' Go Live: share a screen or window.
+    StartShare { window: bool, id: u64, settings: crate::share::ShareSettings },
+    StopShare,
+    /// Rails' hearth Broadcast on or off.
+    VoiceBroadcast(bool),
+    /// Rails' Ask to Speak (from an ember).
+    AskToSpeak,
+    /// Let someone below be heard in our channel (or stop it).
+    Showcase { target: String, on: bool },
+    /// Stop being heard above (our own choice).
+    StopShowcase,
+    /// Join a voice channel of any server we're in (the AFK move).
+    JoinVoiceIn { gid: String, channel_id: String },
+    LeaveVoice,
+    VoiceFlags { self_mute: bool, self_deaf: bool },
+    /// A moderator's voice action on `target` (pubkey hex).
+    Moderate { target: String, action: inferno_core::session::VoiceModeration },
+    /// Save (or with all empty, clear) our LiveKit credentials.
+    SaveLivekit { url: String, api_key: String, api_secret: String },
+    /// The app is closing: leave voice, then answer.
+    Shutdown(std::sync::mpsc::Sender<()>),
     SelectServer(String),
     SelectChannel(String),
     /// `files`: uploaded attachments; their URLs follow the text, as Rails
@@ -578,6 +717,8 @@ pub enum Command {
     /// Home: the DM sidebar and friends page.
     Home,
     OpenDm(String),
+    /// A gap's placeholders are on screen: fetch the page that fills it.
+    LoadHistory { gid: String, channel_id: String, until: i64 },
     AddFriend(String),
     AnswerFriend { pubkey: String, accept: bool },
     RemoveFriend(String),
@@ -685,6 +826,9 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
         previews: HashMap::new(),
         preview_tx,
         wizard_shown: Default::default(),
+        calls: Default::default(),
+        renew_due: None,
+        relays_dirty: false,
     };
     if let Ok(Some(serde_json::Value::String(theme))) = session.synced_setting("theme") {
         Cx::post_action(Update::Theme(theme));
@@ -693,12 +837,14 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
     ui.publish_home();
     ui.publish_gifs();
     ui.publish_relays();
+    ui.publish_livekit();
     ui.publish_servers();
 
     let mut updates = session.updates();
     // Profiles arrive in bursts (hundreds at startup): one refresh per burst.
     let mut people_due: Option<tokio::time::Instant> = None;
     loop {
+        let renew_due = ui.renew_due;
         tokio::select! {
             cmd = commands.recv() => {
                 let Some(cmd) = cmd else { break };
@@ -710,6 +856,10 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
                 ui.previews.insert(link, card);
                 ui.republish_messages();
             }
+            _ = async { tokio::time::sleep_until(renew_due.expect("guarded")).await }, if renew_due.is_some() => {
+                ui.renew_due = None;
+                ui.renew_call().await;
+            }
             _ = async { tokio::time::sleep_until(people_due.expect("guarded")).await }, if people_due.is_some() => {
                 people_due = None;
                 ui.refresh_people();
@@ -718,7 +868,13 @@ async fn run(mut commands: mpsc::UnboundedReceiver<Command>) -> Result<(), Strin
                 Ok(SessionUpdate::Profile(_)) => {
                     people_due.get_or_insert_with(|| tokio::time::Instant::now() + std::time::Duration::from_millis(300));
                 }
-                Ok(u) => ui.session_update(u),
+                Ok(SessionUpdate::VoiceModerated { gid, action, .. }) => ui.moderated(gid, action).await,
+                Ok(u) => {
+                    ui.session_update(u);
+                    if std::mem::take(&mut ui.relays_dirty) && ui.calls.in_call() {
+                        ui.sync_relays().await;
+                    }
+                }
                 // Fell behind a burst: just redraw everything once.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => ui.refresh_all(),
                 Err(_) => break,
@@ -745,6 +901,12 @@ struct Backend {
     preview_tx: mpsc::UnboundedSender<(String, InviteCard)>,
     /// Servers whose onboarding wizard we've shown this session.
     wizard_shown: std::collections::HashSet<String>,
+    /// The voice call we're in (calls.rs).
+    calls: crate::calls::Calls,
+    /// When the call's token is renewed (Rails: 30 minutes before it expires).
+    renew_due: Option<tokio::time::Instant>,
+    /// Voice states changed: the rooms we hear need another look.
+    relays_dirty: bool,
 }
 
 fn initials(name: &str) -> String {
@@ -919,11 +1081,90 @@ impl Backend {
     async fn command(&mut self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::SelectServer(gid) => {
+                // Its channels' newest history comes first.
+                let _ = self.session.prefer_server(&gid);
                 self.home = false;
                 self.dm = None;
                 self.server = Some(gid);
                 self.channel = None;
                 self.publish_server();
+            }
+            Command::JoinVoice(channel_id) => {
+                let gid = self.server.clone().ok_or("no server selected")?;
+                self.join_call(&gid, &channel_id).await?;
+            }
+            Command::JoinVoiceIn { gid, channel_id } => self.join_call(&gid, &channel_id).await?,
+            Command::WatchStream { pubkey, on } => self.calls.watch(&pubkey.chars().take(12).collect::<String>(), on),
+            Command::ShareSources => {
+                tokio::task::spawn_blocking(|| Cx::post_action(Update::ShareSources(crate::share::sources())));
+            }
+            Command::StartShare { window, id, settings } => {
+                let r = self.calls.start_share(window, id, settings).await;
+                Cx::post_action(Update::Sharing(self.calls.sharing()));
+                r?;
+            }
+            Command::StopShare => {
+                self.calls.stop_share().await;
+                Cx::post_action(Update::Sharing(false));
+            }
+            Command::PeopleAudio => self.calls.set_people(crate::voice_audio::VoicePrefs::load().call_people()),
+            Command::VoiceBroadcast(on) => self.session.set_voice_broadcast(on).await.map_err(|e| e.to_string())?,
+            Command::Showcase { target, on } => {
+                let gid = self.session.my_voice().map(|v| v.gid).ok_or("You're not in voice.")?;
+                let pk = PublicKey::from_hex(&target).map_err(|e| e.to_string())?;
+                self.session.showcase(&gid, &pk, on).await.map_err(|e| e.to_string())?;
+            }
+            Command::StopShowcase => self.session.stop_showcase().await.map_err(|e| e.to_string())?,
+            Command::AskToSpeak => {
+                self.session.ask_to_speak().await.map_err(|e| e.to_string())?;
+                Cx::post_action(Update::Notice("Request to speak sent.".into()));
+            }
+            Command::Moderate { target, action } => {
+                let gid = self.server.clone().ok_or("no server selected")?;
+                let pk = PublicKey::from_hex(&target).map_err(|e| e.to_string())?;
+                self.session.moderate_voice(&gid, &pk, &action).await.map_err(|e| e.to_string())?;
+            }
+            Command::LeaveVoice => {
+                self.renew_due = None;
+                self.calls.leave().await;
+                self.session.leave_voice().await.map_err(|e| e.to_string())?;
+            }
+            Command::VoiceFlags { self_mute, self_deaf } => {
+                let (sm, sd) = self.session.my_voice().map_or((false, false), |v| (v.server_mute, v.server_deaf));
+                self.calls.set_flags(self_mute || sm, self_deaf || sd);
+                self.session.set_voice_flags(self_mute, self_deaf).await.map_err(|e| e.to_string())?;
+            }
+            Command::SaveLivekit { url, api_key, api_secret } => {
+                let (url, api_key) = (url.trim().to_owned(), api_key.trim().to_owned());
+                if url.is_empty() && api_key.is_empty() && api_secret.is_empty() {
+                    self.session.set_livekit_credentials(None).map_err(|e| e.to_string())?;
+                    Cx::post_action(Update::Notice("LiveKit credentials removed.".into()));
+                } else {
+                    if !(url.starts_with("wss://") || url.starts_with("ws://127.0.0.1") || url.starts_with("ws://localhost")) {
+                        return Err("The LiveKit URL must use wss:// (secure WebSocket).".into());
+                    }
+                    // A blank secret keeps the saved one (Rails).
+                    let api_secret = if api_secret.is_empty() {
+                        self.session.livekit_credentials().map(|c| c.api_secret).ok_or("Enter the API secret.")?
+                    } else {
+                        api_secret
+                    };
+                    let creds = inferno_core::livekit_token::Credentials { url, api_key, api_secret };
+                    self.session.set_livekit_credentials(Some(&creds)).map_err(|e| e.to_string())?;
+                    Cx::post_action(Update::Notice("LiveKit credentials saved.".into()));
+                }
+                self.publish_livekit();
+            }
+            Command::Shutdown(done) => {
+                let _ = tokio::time::timeout(std::time::Duration::from_millis(1500), async {
+                    self.calls.leave().await;
+                    let _ = self.session.leave_voice().await;
+                })
+                .await;
+                let _ = done.send(());
+            }
+            Command::LoadHistory { gid, channel_id, until } => {
+                self.session.want_history(&gid, &channel_id, until).map_err(|e| e.to_string())?;
             }
             Command::SelectChannel(id) => {
                 self.channel = Some(id);
@@ -1707,6 +1948,7 @@ impl Backend {
                 emojis: all_emojis.clone(),
                 files: Vec::new(),
                 spoiler: m.spoiler,
+                gap: None,
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -1754,6 +1996,144 @@ impl Backend {
         }
         out.truncate(25);
         out
+    }
+
+    /// Rails' join: the token first (only a join that can connect is
+    /// announced), then the state, then the call.
+    async fn join_call(&mut self, gid: &str, channel_id: &str) -> Result<(), String> {
+        let ticket = match self.session.voice_ticket(gid, channel_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                Cx::post_action(Update::CallState(crate::calls::CallState::Idle));
+                return Err(e.to_string());
+            }
+        };
+        self.session.join_voice(gid, channel_id).await.map_err(|e| e.to_string())?;
+        let (mute, deaf) = self.session.my_voice().map_or((false, false), |v| (v.self_mute || v.server_mute, v.self_deaf || v.server_deaf));
+        let prefs = crate::voice_audio::VoicePrefs::load();
+        self.calls.set_people(prefs.call_people());
+        if let Err(e) = self.calls.join(&ticket.url, &ticket.token, mute, deaf, prefs.processing()).await {
+            let _ = self.session.leave_voice().await;
+            return Err(e);
+        }
+        self.schedule_renewal(&ticket.token);
+        self.sync_relays().await;
+        Ok(())
+    }
+
+    /// The other rooms we hear, listen-only, and whose voices in them:
+    /// the hearths above us (Rails' hearth audio; their broadcasters), and
+    /// embers below us where someone was let up (they alone). Rooms no
+    /// longer needed are closed.
+    async fn sync_relays(&mut self) {
+        let Some(mine) = self.session.my_voice() else { return };
+        let Ok(Some(state)) = self.session.server(&mine.gid) else { return };
+        let above = state.structure.ancestors(&mine.channel_id);
+        let states = self.session.voice_states(&mine.gid);
+        let below: std::collections::HashSet<String> = states
+            .iter()
+            .filter(|v| v.showcased && state.structure.ancestors(&v.channel_id).contains(&mine.channel_id))
+            .map(|v| v.channel_id.clone())
+            .collect();
+        let heard: std::collections::HashSet<String> = states
+            .iter()
+            .filter(|v| (v.broadcasting && above.contains(&v.channel_id)) || (v.showcased && below.contains(&v.channel_id)))
+            .map(|v| v.pubkey.to_hex()[..12].to_owned())
+            .collect();
+        self.calls.set_broadcasters(heard);
+        let wanted: std::collections::HashSet<String> = above.iter().cloned().chain(below.iter().cloned()).collect();
+        for ch in self.calls.listening() {
+            if !wanted.contains(&ch) {
+                self.calls.stop_listening(&ch).await;
+            }
+        }
+        let have: std::collections::HashSet<String> = self.calls.listening().into_iter().collect();
+        for ch in wanted.difference(&have) {
+            match self.session.voice_listen_ticket(&mine.gid, ch).await {
+                Ok(t) => {
+                    if let Err(e) = self.calls.listen(ch, &t.url, &t.token).await {
+                        Cx::post_action(Update::Error(e));
+                    }
+                }
+                Err(e) => makepad_widgets::log!("listening to {ch}: {e}"),
+            }
+        }
+    }
+
+    /// Rails renews 30 minutes before the token's six hours run out
+    /// (`INFERNO_VOICE_RENEW_SECS` overrides, for testing).
+    fn schedule_renewal(&mut self, token: &str) {
+        let now = inferno_core::nostr::prelude::Timestamp::now().as_secs();
+        let exp = inferno_core::livekit_token::claims(token).and_then(|c| c["exp"].as_u64()).unwrap_or(now + 6 * 3600);
+        let secs = std::env::var("INFERNO_VOICE_RENEW_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or_else(|| exp.saturating_sub(now).saturating_sub(30 * 60).max(60));
+        self.renew_due = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(secs));
+    }
+
+    /// A fresh token, and the call reconnected with it (mute and deafen
+    /// kept); the voice state stays as it is.
+    async fn renew_call(&mut self) {
+        let Some(v) = self.session.my_voice() else { return };
+        let ticket = match self.session.voice_ticket(&v.gid, &v.channel_id).await {
+            Ok(t) => t,
+            Err(e) => {
+                // Try again in a minute; the old token has 30 left.
+                Cx::post_action(Update::Error(format!("Couldn't renew the voice connection: {e}")));
+                self.renew_due = Some(tokio::time::Instant::now() + std::time::Duration::from_secs(60));
+                return;
+            }
+        };
+        let processing = crate::voice_audio::VoicePrefs::load().processing();
+        let (mute, deaf) = (v.self_mute || v.server_mute, v.self_deaf || v.server_deaf);
+        match self.calls.join(&ticket.url, &ticket.token, mute, deaf, processing).await {
+            Ok(()) => {
+                self.schedule_renewal(&ticket.token);
+                self.sync_relays().await;
+            }
+            Err(e) => Cx::post_action(Update::Error(e)),
+        }
+    }
+
+    /// A moderator acted on us in voice.
+    async fn moderated(&mut self, gid: String, action: inferno_core::session::VoiceModeration) {
+        use inferno_core::session::VoiceModeration as M;
+        let notice = match &action {
+            M::ServerMute(true) => "You were server muted.",
+            M::ServerMute(false) => "Your server mute was removed.",
+            M::ServerDeafen(true) => "You were server deafened.",
+            M::ServerDeafen(false) => "Your server deafen was removed.",
+            M::Move(_) => "A moderator moved you to another voice channel.",
+            M::Disconnect => "A moderator disconnected you from voice.",
+        };
+        match action {
+            M::ServerMute(_) | M::ServerDeafen(_) => {
+                if let Some(v) = self.session.my_voice() {
+                    // Rails: lifting it doesn't unmute (self flags stay as set).
+                    self.calls.set_flags(v.self_mute || v.server_mute, v.self_deaf || v.server_deaf);
+                }
+            }
+            M::Move(to) => {
+                if let Err(e) = self.join_call(&gid, &to).await {
+                    Cx::post_action(Update::Error(e));
+                }
+            }
+            M::Disconnect => {
+                self.calls.leave().await;
+                let _ = self.session.leave_voice().await;
+            }
+        }
+        Cx::post_action(Update::Notice(notice.into()));
+    }
+
+    fn publish_livekit(&self) {
+        let c = self.session.livekit_credentials();
+        Cx::post_action(Update::Livekit {
+            url: c.as_ref().map(|c| c.url.clone()).unwrap_or_default(),
+            api_key: c.as_ref().map(|c| c.api_key.clone()).unwrap_or_default(),
+            has_secret: c.is_some(),
+        });
     }
 
     fn publish_me(&mut self) {
@@ -1804,6 +2184,21 @@ impl Backend {
                 }
             }
             SessionUpdate::Profile(_) => self.refresh_people(),
+            SessionUpdate::Voice(_) => self.publish_voice(),
+            SessionUpdate::VoiceModerated { .. } => {}
+            SessionUpdate::SpeakRequest { gid, channel_id, from } => {
+                if let Ok(Some(state)) = self.session.server(&gid) {
+                    let name = display(&state, &from, &People::new(&self.session)).name;
+                    let channel = state.channel(&channel_id).map(|c| c.name.clone()).unwrap_or_default();
+                    Cx::post_action(Update::SpeakRequest { pubkey: from.to_hex(), name, channel });
+                }
+            }
+            SessionUpdate::Showcased { gid, on, by } => {
+                if let Ok(Some(state)) = self.session.server(&gid) {
+                    let who = display(&state, &by, &People::new(&self.session)).name;
+                    Cx::post_action(Update::Notice(if on { format!("{who} let you speak in the channel above.") } else { format!("{who} lowered you back to your channel.") }));
+                }
+            }
             SessionUpdate::Dm(_) | SessionUpdate::Social => {
                 // The badge and request bar show everywhere, not only in Home.
                 self.publish_home();
@@ -2000,6 +2395,7 @@ impl Backend {
                     depth: n.depth as u8,
                     last: n.last,
                     guides: n.guides.clone(),
+                    afk: c.kind == "voice" && state.metadata.afk_channel.as_deref() == Some(c.id.as_str()),
                 });
             }
         };
@@ -2049,7 +2445,8 @@ impl Backend {
             push_group(&mut members, "MEMBERS".into(), 0x878583, list);
         }
 
-        let selectable = |id: &String| state.channel(id).is_some_and(|c| c.kind != "voice" && state.can_read(&me, c));
+        // A voice channel can be open too: its chat beside its page.
+        let selectable = |id: &String| state.channel(id).is_some_and(|c| state.can_read(&me, c));
         if self.channel.as_ref().is_none_or(|id| !selectable(id)) {
             self.channel = sidebar.iter().find_map(|r| match r {
                 SidebarRow::Channel { id, voice: false, .. } => Some(id.clone()),
@@ -2066,6 +2463,10 @@ impl Backend {
             create_invite: state.has(&me, inferno_core::server::Permission::CreateInvite),
             manage_invites: state.has(&me, inferno_core::server::Permission::ManageInvites),
             create_emojis: state.has(&me, inferno_core::server::Permission::CreateEmojis),
+            mute_members: state.has(&me, inferno_core::server::Permission::MuteMembers),
+            deafen_members: state.has(&me, inferno_core::server::Permission::DeafenMembers),
+            move_members: state.has(&me, inferno_core::server::Permission::MoveMembers),
+            elevate_voice: state.has(&me, inferno_core::server::Permission::ElevateVoice),
             create_stickers: state.has(&me, inferno_core::server::Permission::CreateStickers),
             manage_emojis: state.has(&me, inferno_core::server::Permission::ManageEmojis),
             owner: state.is_owner(&me),
@@ -2096,6 +2497,7 @@ impl Backend {
                 voice_user_limit: c.voice_user_limit,
                 video_enabled: c.video_enabled,
                 depth: state.structure.ancestors(&c.id).len() as u8,
+                sidechat: c.sidechat.clone().filter(|s| state.channel(s).is_some_and(|t| t.kind != "voice")),
             })
             .collect();
         let mut role_forms: Vec<RoleForm> = state
@@ -2298,7 +2700,69 @@ impl Backend {
             channels,
         });
         self.publish_channel();
+        self.publish_voice();
         self.maybe_onboard();
+    }
+
+
+    /// Who is in the selected server's voice channels, and where we are.
+    fn publish_voice(&mut self) {
+        self.relays_dirty = true;
+        let mine = self.session.my_voice().and_then(|v| {
+            let state = self.session.server(&v.gid).ok().flatten()?;
+            let has_embers = state.structure.channels.iter().any(|c| c.parent.as_deref() == Some(v.channel_id.as_str()));
+            let in_ember = !state.structure.ancestors(&v.channel_id).is_empty();
+            Some(MyVoice {
+                channel: state.channel(&v.channel_id).map(|c| c.name.clone()).unwrap_or_default(),
+                server: state.metadata.name.clone(),
+                gid: v.gid,
+                channel_id: v.channel_id,
+                self_mute: v.self_mute,
+                self_deaf: v.self_deaf,
+                server_mute: v.server_mute,
+                server_deaf: v.server_deaf,
+                broadcasting: v.broadcasting,
+                showcased: v.showcased,
+                has_embers,
+                in_ember,
+                afk_channel: state.metadata.afk_channel.clone(),
+                afk_timeout: state.metadata.afk_timeout_mins,
+                afk_action: state.metadata.afk_action.clone(),
+            })
+        });
+        Cx::post_action(Update::MyVoice(mine));
+        let Some(gid) = self.server.clone() else { return };
+        let Ok(Some(state)) = self.session.server(&gid) else { return };
+        let people = People::new(&self.session);
+        let mine_channel = self.session.my_voice().filter(|m| m.gid == gid).map(|m| m.channel_id);
+        let mut by_channel: HashMap<String, Vec<VoicePerson>> = HashMap::new();
+        for v in self.session.voice_states(&gid) {
+            if state.channel(&v.channel_id).is_none_or(|c| c.kind != "voice") {
+                continue;
+            }
+            let d = display(&state, &v.pubkey, &people);
+            by_channel.entry(v.channel_id.clone()).or_default().push(VoicePerson {
+                pubkey: v.pubkey.to_hex(),
+                initial: first_initial(&d.name),
+                name: d.name,
+                avatar: d.avatar,
+                picture: d.picture,
+                self_mute: v.self_mute,
+                self_deaf: v.self_deaf,
+                server_mute: v.server_mute,
+                server_deaf: v.server_deaf,
+                broadcasting: v.broadcasting,
+                showcased: v.showcased,
+                below_us: mine_channel.as_ref().is_some_and(|m| state.structure.ancestors(&v.channel_id).contains(m)),
+                me: v.pubkey == self.session.keys().public_key(),
+                owner: state.is_owner(&v.pubkey),
+            });
+        }
+        // Alphabetical, so every client lists a channel the same way.
+        for people in by_channel.values_mut() {
+            people.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()).then_with(|| a.pubkey.cmp(&b.pubkey)));
+        }
+        Cx::post_action(Update::VoicePeople { gid, people: by_channel });
     }
 
     fn publish_channel(&mut self) {
@@ -2359,7 +2823,20 @@ impl Backend {
                 },
                 files: m.files.clone(),
                 spoiler: m.spoiler,
+                gap: None,
             });
+        }
+        // Where history is still missing, placeholders: above the first
+        // message from the gap's newer side on (newest gap first, so the
+        // places found stay put).
+        for until in self.session.history_gaps(&gid, &ch).unwrap_or_default() {
+            let at = rows.iter().position(|r| r.at >= until).unwrap_or(rows.len());
+            for k in 0..GAP_ROWS {
+                rows.insert(at, MessageRow::placeholder(until, k));
+            }
+            if let Some(next) = rows.get_mut(at + GAP_ROWS) {
+                next.grouped = false;
+            }
         }
         let can_pin = state.has(&self.session.keys().public_key(), inferno_core::server::Permission::ManageMessages);
         let mentions = server_mentions(&state, &people);

@@ -8,6 +8,7 @@ pub mod dtag;
 pub mod gifs;
 pub mod gif_search;
 pub mod keys;
+pub mod livekit_token;
 pub mod kinds;
 pub mod media;
 pub mod relay;

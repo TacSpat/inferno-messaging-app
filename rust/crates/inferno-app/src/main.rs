@@ -28,6 +28,10 @@ mod rich_input;
 mod theme;
 mod time_fmt;
 mod uploads;
+mod calls;
+mod share;
+mod voice_audio;
+mod voice_view;
 mod gif_service;
 
 use gif_service::GifService;
@@ -44,6 +48,18 @@ use attachments::Attachment;
 use picker::{Cell, GifView, ServerSet};
 use inferno_core::gifs::{Collection as GifCollection, Gif};
 use std::collections::HashSet;
+/// Who is in each voice channel of a server, by channel id.
+type VoicePeopleMap = std::collections::HashMap<String, Vec<backend::VoicePerson>>;
+/// Who is speaking (pubkey hex) and how loud (0..1).
+use voice_audio::Mic;
+use calls::CallState;
+type VoiceLevels = std::collections::HashMap<String, f32>;
+type VoiceSprings = std::collections::HashMap<String, (f32, f32)>;
+/// Video textures by (LiveKit identity, kind), with the frame count last
+/// uploaded.
+type VideoTextures = std::collections::HashMap<(String, calls::VideoKind), (voice_view::VideoTex, u64)>;
+type PubkeySet = std::collections::HashSet<String>;
+type SharePicker = share::Picker;
 use backend::{Card, Friend, Home, ServerPerms, ServerSettings};
 
 app_main!(App);
@@ -80,11 +96,13 @@ script_mod! {
     let accent_40 = #(theme::tok("accent", 0.4))
     let accent_50 = #(theme::tok("accent", 0.5))
     let gray_700_00 = #(theme::tok("gray_700", 0.0))
+    let gray_600_00 = #(theme::tok("gray_600", 0.0))
     let gray_700_50 = #(theme::tok("gray_700", 0.5))
     let gray_100_60 = #(theme::tok("gray_100", 0.6))
     let gray_400_60 = #(theme::tok("gray_400", 0.6))
     let gray_500_40 = #(theme::tok("gray_500", 0.4))
     let gray_800_60 = #(theme::tok("gray_800", 0.6))
+    let gray_600_60 = #(theme::tok("gray_600", 0.6))
 
     let Txt = Label{
         draw_text.color: gray_100
@@ -170,7 +188,17 @@ script_mod! {
         draw_bg.color: #0000
         draw_bg.border_radius: 4.0
         hash := Txt{text: "#" draw_text.color: gray_400_60 draw_text.text_style.font_size: 12.5}
+        // Rails' voice and AFK icons, w-4 h-4 at 60%.
+        i_voice := View{visible: false width: Fit height: Fit
+            Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_400_60 draw_icon.svg: crate_resource("self:resources/icons/speaker.svg")}}
+        i_afk := View{visible: false width: Fit height: Fit
+            Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_400_60 draw_icon.svg: crate_resource("self:resources/icons/moon.svg")}}
         name := Txt{width: Fill text: "channel" draw_text.color: gray_400 draw_text.text_style.font_size: 10.5}
+        // Rails' hover "Open chat" on voice channels (sidechat-btn, w-3.5).
+        // Not a hit target of its own (it would take the row's hover and
+        // flicker): a click inside it is told apart by position.
+        chat := View{visible: false width: Fit height: Fit padding: 2
+            Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/chat.svg")}}
         // Rails' drop zone label while a dragged channel hovers here.
         nest_hint := Txt{visible: false text: "Nest as ember" draw_text.color: accent_light draw_text.text_style.font_size: 8.5}
     }
@@ -217,6 +245,142 @@ script_mod! {
                     sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
                 }
                 return sdf.result
+            }
+        }
+    }
+
+    // Rails' sidebar participant (voice_states/_sidebar_participant): py-0.5
+    // pl-6 pr-2, a 20px avatar, the name in xs gray-300, then gray-500
+    // icons for self mute (speaker-x, as Rails draws it) and deafen.
+    let VoicePerson = View{
+        visible: false
+        cursor: MouseCursor.Default
+        width: Fill height: Fit
+        // 8px above and below for the speaking glow, overlapped away by
+        // the -6px margins (rows stay Rails' py-0.5 apart).
+        padding: Inset{left: 24 right: 8 top: 8 bottom: 8}
+        margin: Inset{top: -6 bottom: -6}
+        flow: Right
+        align: Align{y: 0.5}
+        // Speaking (Rails' .voice-participants .voice-speaking): the row
+        // tinted accent/(.03+.05L), the avatar ringed in accent with a glow.
+        show_bg: true
+        draw_bg +: {
+            speak: instance(0.0)
+            level: instance(0.0)
+            edge: uniform(accent)
+            pixel: fn() {
+                let e = self.edge.xyz
+                let s = self.speak
+                let l = self.level
+                let p = self.pos * self.rect_size
+                let h = self.rect_size.y
+                // The row's tint, inside its own (un-extended) box.
+                let sdf = Sdf2d.viewport(p)
+                sdf.box(0.0, 6.0, self.rect_size.x, h - 12.0, 4.0)
+                let tint = s * (0.03 + 0.05 * l) * clamp(0.5 - sdf.shape, 0.0, 1.0)
+                // Around the 20px avatar: a 2px ring, then a soft glow
+                // reaching 3+8L px (Rails' box-shadow).
+                let d = length(p - vec2(34.0, h * 0.5)) - 10.0
+                let ring = s * (smoothstep(-0.5, 0.5, d) - smoothstep(1.5, 2.5, d))
+                let fall = clamp(1.0 - max(d - 2.0, 0.0) / (3.0 + 8.0 * l), 0.0, 1.0)
+                let glow = s * (0.3 + 0.5 * l) * fall * fall * step(0.0, d)
+                let a = tint + (1.0 - tint) * max(ring, glow * 0.7)
+                return vec4(e * a, a)
+            }
+        }
+        View{width: 20 height: 20 flow: Overlay
+            avatar := RoundedView{flow: Overlay
+                width: 20 height: 20 align: Center new_batch: true
+                draw_bg.color: #x1e1c1b
+                draw_bg.border_radius: 10.0
+                initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 6.5}}
+                pic := Image{width: 20 height: 20 fit: ImageFit.CropToFill draw_bg.border_radius: 10.0}
+            }
+            // Rails' .voice-broadcast-badge: a 12px success-green circle at
+            // the avatar's corner, gray-800 rim, a white megaphone.
+            // Let up from below: heard in the channel above (accent-light).
+            lifted := RoundedView{visible: false width: 12 height: 12 margin: Inset{left: 10 top: 10} align: Center new_batch: true
+                draw_bg.color: accent_light draw_bg.border_radius: 6.0 draw_bg.border_size: 1.5 draw_bg.border_color: gray_800
+                Ico{icon_walk: Walk{width: 8 height: 8} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/arrow_up.svg")}}
+            bcast := RoundedView{visible: false width: 12 height: 12 margin: Inset{left: 10 top: 10} align: Center new_batch: true
+                draw_bg.color: #x16a34a draw_bg.border_radius: 6.0 draw_bg.border_size: 1.5 draw_bg.border_color: gray_800
+                Ico{icon_walk: Walk{width: 7 height: 7} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/megaphone.svg")}}
+        }
+        name := Txt{width: Fill margin: Inset{left: 6} text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
+        muted := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/deafened.svg")}}
+        deaf := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/ban.svg")}}
+        // Muted just for us (not a server mute).
+        lmute := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/volume_off.svg")}}
+        // A moderator's mute and deafen, in danger-light.
+        smute := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/mic_off.svg")}}
+        sdeaf := View{visible: false width: Fit height: Fit margin: Inset{left: 4}
+            Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/ban.svg")}}
+    }
+
+    // The people under a voice channel, indented with it; an ember's
+    // connector lines run on past them to the next ember.
+    let VoicePeople = View{
+        visible: false
+        width: Fill height: Fit
+        flow: Down
+        show_bg: true
+        draw_bg +: {
+            depth: uniform(0.0)
+            last: uniform(1.0)
+            g0: uniform(0.0)
+            line: uniform(accent_light)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let h = self.rect_size.y
+                let x = self.depth * 26.0 - 10.0
+                let c = self.line
+                if self.g0 > 0.5 {
+                    sdf.move_to(16.0, 0.0)
+                    sdf.line_to(16.0, h)
+                    sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
+                }
+                if self.depth > 0.5 && self.last < 0.5 {
+                    sdf.move_to(x, 0.0)
+                    sdf.line_to(x, h)
+                    sdf.stroke(vec4(c.x, c.y, c.z, 0.42), 2.0)
+                }
+                return sdf.result
+            }
+        }
+        p0 := VoicePerson{} p1 := VoicePerson{} p2 := VoicePerson{} p3 := VoicePerson{}
+        p4 := VoicePerson{} p5 := VoicePerson{} p6 := VoicePerson{} p7 := VoicePerson{}
+        p8 := VoicePerson{} p9 := VoicePerson{} p10 := VoicePerson{} p11 := VoicePerson{}
+        more := Txt{visible: false margin: Inset{left: 24 top: 2 bottom: 2} text: "" draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+    }
+
+    // Rails' voice bar buttons: p-1.5 rounded, gray-300, hover gray-600.
+    let VoiceBtn = RoundedView{
+        width: Fit height: Fit
+        padding: 6
+        flow: Overlay
+        cursor: MouseCursor.Hand
+        new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            c_clear: uniform(gray_600_00)
+            c_hover: uniform(gray_600)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
+                sdf.fill(mix(self.c_clear, self.c_hover, self.hover))
+                return sdf.result
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 1.0}}}
             }
         }
     }
@@ -280,6 +444,8 @@ script_mod! {
     // left border over 0.15s (spec: "Every transition takes 0.15s").
     let MsgRow = RoundedView{
         width: Fill height: Fit
+        // Its toolbar hangs above its top edge.
+        clip_x: false clip_y: false
         margin: Inset{left: 16 right: 16 top: 1 bottom: 1}
         padding: Inset{left: 8 right: 8 top: 2 bottom: 2}
         flow: Right
@@ -608,12 +774,15 @@ script_mod! {
         pin_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
         edit_btn := ToolBtn{Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.svg: crate_resource("self:resources/icons/edit.svg")}}
     }
-    // Floats at the row's top right (Rails: top-0 right-2).
+    // Floats at the row's top right, centred on its top edge (Rails: top-0
+    // right-2 -translate-y-1/2). The slot takes no height, so showing the
+    // toolbar never makes a short row taller.
     let ToolbarSlot = View{
-        width: Fill height: Fit
+        width: Fill height: 0
+        clip_x: false clip_y: false
         align: Align{x: 1.0 y: 0.0}
         padding: Inset{right: 8}
-        toolbar := Toolbar{}
+        toolbar := Toolbar{margin: Inset{top: -16}}
     }
 
     mod.widgets.InlineVideoHost = #(inline_video::InlineVideoHost::register_widget(vm))
@@ -689,6 +858,22 @@ script_mod! {
                 slot := ToolbarSlot{}
             }
 
+            // Where history is still loading: a message's shape in grey
+            // (avatar, name, a line or two), the bar widths varied per row.
+            MsgPlaceholder := View{
+                width: Fill height: Fit
+                margin: Inset{left: 16 right: 16 top: 8 bottom: 8}
+                padding: Inset{left: 8 right: 8 top: 4 bottom: 4}
+                flow: Right
+                RoundedView{width: 40 height: 40 margin: Inset{right: 16}
+                    draw_bg.color: gray_600 draw_bg.border_radius: 20.0}
+                View{width: Fill height: Fit flow: Down spacing: 8 margin: Inset{top: 4}
+                    name_bar := RoundedView{width: 120 height: 12 draw_bg.color: gray_600 draw_bg.border_radius: 6.0}
+                    line1 := RoundedView{width: 320 height: 10 draw_bg.color: gray_600_60 draw_bg.border_radius: 5.0}
+                    line2 := RoundedView{width: 200 height: 10 draw_bg.color: gray_600_60 draw_bg.border_radius: 5.0}
+                }
+            }
+
             // System lines: green arrow, gray-300 text, timestamp.
             MsgSystem := View{
                 width: Fill height: Fit
@@ -746,23 +931,372 @@ script_mod! {
             Channel := View{
                 width: Fill height: Fit
                 margin: Inset{left: 8 right: 8 top: 1 bottom: 1}
-                flow: Right
+                flow: Down
                 cursor: MouseCursor.Hand
-                tree := TreeLines{}
-                item := ChannelItem{}
+                View{width: Fill height: Fit flow: Right
+                    tree := TreeLines{}
+                    item := ChannelItem{}
+                }
+                people := VoicePeople{}
             }
             // Active: gray-600 fill with a 2px accent left border.
-            ActiveChannel := RoundedView{
+            ActiveChannel := View{
                 width: Fill height: Fit
                 margin: Inset{left: 8 right: 8 top: 1 bottom: 1}
-                flow: Overlay
+                flow: Down
                 cursor: MouseCursor.Hand
-                new_batch: true
-                draw_bg.color: gray_600
-                draw_bg.border_radius: 4.0
-                item := ChannelItem{hash.draw_text.color: gray_100_60 name.draw_text.color: #xffffff}
-                RoundedView{width: 2 height: 33 draw_bg.color: accent draw_bg.border_radius: 1.0}
+                View{width: Fill height: Fit flow: Right
+                    tree := TreeLines{}
+                    RoundedView{
+                        width: Fill height: Fit
+                        flow: Overlay
+                        new_batch: true
+                        draw_bg.color: gray_600
+                        draw_bg.border_radius: 4.0
+                        item := ChannelItem{hash.draw_text.color: gray_100_60 name.draw_text.color: #xffffff
+                            i_voice +: {Ico{draw_icon.color: gray_100_60}}}
+                        RoundedView{width: 2 height: 33 draw_bg.color: accent draw_bg.border_radius: 1.0}
+                    }
+                }
+                people := VoicePeople{}
             }
+        }
+    }
+
+    // ─── Voice channel screen (voice_view.rs) ────────────────────────
+    // Video on the GPU: a frame's Y, U and V planes turned into colour here
+    // (BT.601, video range, as WebRTC decodes). `contain` 0 crops to fill
+    // (a camera in its card), 1 fits inside on black (a shared screen).
+    let YuvVideo = View{visible: false width: Fill height: Fill show_bg: true
+        draw_bg +: {
+            tex_y: texture_2d(float)
+            tex_u: texture_2d(float)
+            tex_v: texture_2d(float)
+            vw: uniform(16.0)
+            vh: uniform(9.0)
+            contain: uniform(0.0)
+            radius: uniform(12.0)
+            pixel: fn() {
+                let size = self.rect_size
+                let rs = size.x / size.y
+                let vs = self.vw / self.vh
+                let wide = step(rs, vs)
+                let side = mix(wide, 1.0 - wide, self.contain)
+                let sx = mix(1.0, rs / vs, side)
+                let sy = mix(vs / rs, 1.0, side)
+                let uv = vec2(0.5 + (self.pos.x - 0.5) * sx, 0.5 + (self.pos.y - 0.5) * sy)
+                let inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0)
+                let y = (self.tex_y.sample(uv).x * 255.0 - 16.0) / 219.0
+                let u = (self.tex_u.sample(uv).x * 255.0 - 128.0) / 224.0
+                let v = (self.tex_v.sample(uv).x * 255.0 - 128.0) / 224.0
+                let r = clamp(y + 1.402 * v, 0.0, 1.0) * inside
+                let g = clamp(y - 0.3441 * u - 0.7141 * v, 0.0, 1.0) * inside
+                let b = clamp(y + 1.772 * u, 0.0, 1.0) * inside
+                let sdf = Sdf2d.viewport(self.pos * size)
+                sdf.box(0.0, 0.0, size.x, size.y, self.radius)
+                sdf.fill(vec4(r, g, b, 1.0))
+                return sdf.result
+            }
+        }
+    }
+
+    // A stream's small round button (Rails' .voice-screen-close-btn).
+    // Rails' .ss-pill: gray-700, 1px white/6 edge, full radius, 0.8rem
+    // semibold gray-200; hover gray-600; active an accent-dark → light
+    // gradient with an accent edge (`on`).
+    let SsPill = RoundedView{width: Fit height: 28 padding: Inset{left: 12 right: 12} align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            on: uniform(0.0)
+            c_off: uniform(gray_700)
+            c_hover: uniform(gray_600)
+            c_a: uniform(accent_dark)
+            c_b: uniform(accent_light)
+            c_edge: uniform(accent)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let r = self.rect_size.y * 0.5
+                sdf.box(0.5 0.5 self.rect_size.x - 1.0 self.rect_size.y - 1.0 r)
+                let idle = mix(self.c_off, self.c_hover, self.hover)
+                let grad = mix(self.c_a, self.c_b, self.pos.x)
+                sdf.fill_keep(mix(idle, grad, self.on))
+                sdf.stroke(mix(vec4(1.0, 1.0, 1.0, 0.06), self.c_edge, self.on), 1.0)
+                return sdf.result
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+        label := Txt{text: "" draw_text.color: gray_200 draw_text.text_style: theme.font_bold{font_size: 8.5}}
+    }
+    // A screen or window to share: its picture (gray-900 behind it) and
+    // name; an accent ring when picked.
+    let SsSource = RoundedView{visible: false width: 164 height: Fit flow: Down spacing: 6 padding: 6 cursor: MouseCursor.Hand new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            on: uniform(0.0)
+            c_hover: uniform(gray_700)
+            c_edge: uniform(accent)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                sdf.box(1.0 1.0 self.rect_size.x - 2.0 self.rect_size.y - 2.0 6.0)
+                sdf.fill_keep(vec4(self.c_hover.rgb * self.hover * 0.6, self.hover * 0.6))
+                sdf.stroke(vec4(self.c_edge.rgb * self.on, self.on), 2.0)
+                return sdf.result
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+        RoundedView{width: 152 height: 86 flow: Overlay align: Center new_batch: true draw_bg.color: gray_900 draw_bg.border_radius: 4.0
+            thumb := Image{width: 152 height: 86 fit: ImageFit.Smallest}}
+        name := Txt{width: Fill text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5
+            flow: Flow.Right{wrap: false} text_overflow: TextOverflow.Ellipsis}
+    }
+
+    let StreamBtn = RoundedView{width: 28 height: 28 align: Center cursor: MouseCursor.Hand new_batch: true
+        draw_bg.color: #x000000b3 draw_bg.border_radius: 14.0}
+
+    // Someone sharing their screen (Rails' .voice-screen-placeholder, then
+    // .voice-screen-preview once watched): sized and inset like a card.
+    let StreamCard = View{
+        visible: false
+        width: 208 height: 163
+        margin: -8
+        flow: Overlay
+        RoundedView{width: Fill height: Fill margin: 14 new_batch: true
+            draw_bg.color: #x00000099 draw_bg.border_radius: 12.0 draw_bg.border_size: 1.0 draw_bg.border_color: accent_15}
+        waiting := View{width: Fill height: Fill margin: 14 flow: Down align: Center spacing: 8
+            Ico{icon_walk: Walk{width: 40 height: 40} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/screen.svg")}
+            st_text := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
+            // .voice-watch-btn: accent, .4rem .875rem, .8rem.
+            watch_btn := RoundedView{width: Fit height: Fit padding: Inset{left: 14 right: 14 top: 6 bottom: 6} cursor: MouseCursor.Hand new_batch: true
+                draw_bg.color: accent draw_bg.border_radius: 6.0
+                Txt{text: "Watch Stream" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}
+        }
+        live := View{visible: false width: Fill height: Fill margin: 14 flow: Overlay cursor: MouseCursor.Hand
+            sv_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
+            sv_yuv := YuvVideo{draw_bg +: {contain: 1.0}}
+            View{width: Fill height: Fill padding: 8 align: Align{x: 0.0 y: 0.0}
+                // .voice-live-badge.
+                RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: accent draw_bg.border_radius: 4.0
+                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 7.5}}}}
+            View{width: Fill height: Fill padding: 8 align: Align{x: 0.0 y: 1.0}
+                RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0
+                    st_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.0}}}}
+            View{width: Fill height: Fill padding: 8 align: Align{x: 1.0 y: 0.0} flow: Right spacing: 4
+                st_focus := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/theater.svg")}}
+                st_full := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
+                st_stop := StreamBtn{Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+            }
+        }
+    }
+    // Rails' .voice-card: 12px radius, 4:3, a 1px accent/.15 border (.4 on
+    // hover), filled with a radial gradient of the profile colour (10%
+    // lighter at its centre, 40% down; 30% darker at the corners).
+    let VoiceCard = RoundedView{
+        visible: false
+        cursor: MouseCursor.Default
+        // The card is drawn 14px in from the widget's edges, room for its
+        // speaking glow; -8px margins leave Rails' 12px between cards.
+        width: 208 height: 163
+        margin: -8
+        flow: Overlay
+        align: Align{x: 0.5 y: 0.5}
+        new_batch: true
+        draw_bg +: {
+            hover: instance(0.0)
+            // Speaking (0/1) and how loud (Rails' --audio-level).
+            speak: instance(0.0)
+            level: instance(0.0)
+            edge: uniform(accent)
+            pixel: fn() {
+                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                let inner = self.rect_size - vec2(28.0, 28.0)
+                sdf.box(14.0, 14.0, inner.x, inner.y, 12.0)
+                let dist = sdf.shape
+                let c = self.color
+                let q = (self.pos * self.rect_size - vec2(14.0, 14.0)) / inner
+                let p = q - vec2(0.5, 0.4)
+                let d = length(vec2(p.x / 0.901, p.y / 0.721))
+                let light = mix(c, vec4(1.0, 1.0, 1.0, 1.0), 0.1)
+                let dark = mix(c, vec4(0.0, 0.0, 0.0, 1.0), 0.3)
+                let base = mix(mix(light, c, clamp(d / 0.6, 0.0, 1.0)), dark, clamp((d - 0.6) / 0.4, 0.0, 1.0)).xyz
+                let e = self.edge.xyz
+                let s = self.speak
+                let l = self.level
+                // Speaking: an inset glow and a 2px ring (Rails' inset shadows).
+                let glow_in = mix(base, e, s * (0.04 + 0.08 * l) * clamp(1.0 + dist / (15.0 + 20.0 * l), 0.0, 1.0))
+                let ringed = mix(glow_in, e, s * (0.4 + 0.4 * l) * step(-2.0, dist))
+                // 1px border: accent/.15, /.4 on hover, solid while speaking.
+                let border = mix(mix(0.15, 0.4, self.hover), 1.0, s)
+                let col = mix(ringed, e, border * step(-1.0, dist))
+                let cover = clamp(0.5 - dist, 0.0, 1.0)
+                // Speaking: a glow outside the card, wider and brighter the
+                // louder (Rails: blur 8+20L px at .25+.5L).
+                let reach = min(4.0 + 10.0 * l, 14.0)
+                let fall = clamp(1.0 - dist / reach, 0.0, 1.0)
+                let glow = s * (0.25 + 0.5 * l) * fall * fall * (1.0 - cover)
+                return vec4(col * cover + e * glow, cover + glow)
+            }
+        }
+        animator: Animator{
+            hover: {
+                default: @off
+                off: AnimatorState{from: {all: Forward {duration: 0.3}} apply: {draw_bg: {hover: 0.0}}}
+                on: AnimatorState{from: {all: Forward {duration: 0.3}} apply: {draw_bg: {hover: 1.0}}}
+            }
+        }
+        // 96px avatar; without a picture, the colour 20% lighter and the
+        // first letter in bold white.
+        face := RoundedView{flow: Overlay width: 96 height: 96 align: Center new_batch: true
+            draw_bg.color: #x4b4948 draw_bg.border_radius: 48.0
+            initial := Txt{text: "?" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 24.0}}
+            pic := Image{width: 96 height: 96 fit: ImageFit.CropToFill draw_bg.border_radius: 48.0}
+        }
+        // Their camera, over the avatar, filling the card (Rails'
+        // .voice-camera-video: object-fit cover, the card's radius).
+        video := Image{visible: false width: Fill height: Fill margin: 14 fit: ImageFit.CropToFill draw_bg.border_radius: 12.0}
+        yuv := YuvVideo{margin: 14}
+        // .voice-username-pill: bottom-left, black/70, 6px radius, accent/.15 edge.
+        View{width: Fill height: Fill align: Align{x: 0.0 y: 1.0} padding: 22
+            pill := RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} new_batch: true
+                draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0 draw_bg.border_size: 1.0 draw_bg.border_color: accent_15
+                who := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}
+            }
+        }
+        // .voice-status-badge: 24px black/80 circles, danger-light icons.
+        View{width: Fill height: Fill align: Align{x: 1.0 y: 1.0} padding: 22 flow: Right spacing: 4
+            badge_mute := RoundedView{visible: false width: 24 height: 24 align: Center new_batch: true
+                draw_bg.color: #x000000cc draw_bg.border_radius: 12.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xf871714d
+                Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/mic_off.svg")}}
+            badge_deaf := RoundedView{visible: false width: 24 height: 24 align: Center new_batch: true
+                draw_bg.color: #x000000cc draw_bg.border_radius: 12.0 draw_bg.border_size: 1.0 draw_bg.border_color: #xf871714d
+                Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/deafened.svg")}}
+        }
+    }
+
+    // The 96px faint circle Rails puts over its empty states.
+    let VoiceHalo = RoundedView{width: 96 height: 96 margin: Inset{bottom: 24} align: Center new_batch: true
+        draw_bg.color: #xffffff0d draw_bg.border_radius: 48.0}
+
+    mod.widgets.VoiceViewBase = #(voice_view::VoiceView::register_widget(vm))
+    mod.widgets.VoiceView = set_type_default() do mod.widgets.VoiceViewBase{
+        width: Fill height: Fill
+        flow: Overlay
+        SolidView{width: Fill height: Fill draw_bg.color: gray_950}
+        View{width: Fill height: Fill flow: Down
+        unavailable := View{visible: false width: Fill height: Fill align: Center padding: 16
+            View{width: 384 height: Fit flow: Down align: Align{x: 0.5}
+                VoiceHalo{Ico{icon_walk: Walk{width: 48 height: 48} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/mic_thin.svg")}}
+                Txt{text: "Voice Not Available" margin: Inset{bottom: 8} draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+                Txt{width: Fill margin: Inset{bottom: 16} align: Align{x: 0.5} draw_text.color: gray_400
+                    text: "Voice channels need at least one voice provider. Members can volunteer their LiveKit credentials in server settings."}
+                settings_btn := RoundedView{width: Fit height: Fit padding: Inset{left: 16 right: 16 top: 8 bottom: 8} cursor: MouseCursor.Hand new_batch: true
+                    draw_bg.color: accent draw_bg.border_radius: 4.0
+                    Txt{text: "Voice Settings" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}}
+                ask_admin := Txt{text: "Ask a server admin to set up voice in Server Settings > Voice." draw_text.color: gray_500 draw_text.text_style.font_size: 9.0}
+            }
+        }
+        empty := View{visible: false width: Fill height: Fill flow: Down align: Center padding: 32
+            VoiceHalo{Ico{icon_walk: Walk{width: 48 height: 48} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/waves_thin.svg")}}
+            empty_name := Txt{text: "" margin: Inset{bottom: 4} draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 15.0}}
+            Txt{text: "No one is in this channel yet." draw_text.color: gray_500}
+        }
+        // Rails' theater mode: the stream large, the cards below it.
+        focus_area := View{visible: false width: Fill height: Fill padding: Inset{left: 12 right: 12 top: 12 bottom: 4} flow: Overlay
+            RoundedView{width: Fill height: Fill new_batch: true draw_bg.color: #x000000 draw_bg.border_radius: 12.0}
+            fv_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
+            fv_yuv := YuvVideo{draw_bg +: {contain: 1.0}}
+            View{width: Fill height: Fill padding: 10 align: Align{x: 0.0 y: 0.0}
+                RoundedView{width: Fit height: Fit padding: Inset{left: 6 right: 6 top: 2 bottom: 2} new_batch: true draw_bg.color: accent draw_bg.border_radius: 4.0
+                    Txt{text: "LIVE" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.0}}}}
+            View{width: Fill height: Fill padding: 10 align: Align{x: 0.0 y: 1.0}
+                RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} new_batch: true draw_bg.color: #x000000b3 draw_bg.border_radius: 6.0
+                    fv_label := Txt{text: "" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.0}}}}
+            // Left of the page's chat button, which sits in that corner.
+            View{width: Fill height: Fill padding: Inset{top: 10 right: 52} align: Align{x: 1.0 y: 0.0} flow: Right spacing: 6
+                fv_unfocus := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/theater.svg")}}
+                fv_full := StreamBtn{Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/fullscreen.svg")}}
+                fv_stop := StreamBtn{Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+            }
+        }
+        grid := ScrollYView{visible: false width: Fill height: Fill padding: 6 flow: Down align: Align{x: 0.5}
+            cards := View{width: 400 height: Fit flow: Flow.Right{wrap: true}
+                st0 := StreamCard{} st1 := StreamCard{} st2 := StreamCard{} st3 := StreamCard{}
+                c0 := VoiceCard{}
+                c1 := VoiceCard{}
+                c2 := VoiceCard{}
+                c3 := VoiceCard{}
+                c4 := VoiceCard{}
+                c5 := VoiceCard{}
+                c6 := VoiceCard{}
+                c7 := VoiceCard{}
+                c8 := VoiceCard{}
+                c9 := VoiceCard{}
+                c10 := VoiceCard{}
+                c11 := VoiceCard{}
+                c12 := VoiceCard{}
+                c13 := VoiceCard{}
+                c14 := VoiceCard{}
+                c15 := VoiceCard{}
+                c16 := VoiceCard{}
+                c17 := VoiceCard{}
+                c18 := VoiceCard{}
+                c19 := VoiceCard{}
+                c20 := VoiceCard{}
+                c21 := VoiceCard{}
+                c22 := VoiceCard{}
+                c23 := VoiceCard{}
+            }
+        }
+        // Join / connected bar: px-4 py-3, centred.
+        status := View{visible: false width: Fill height: Fit padding: Inset{left: 16 right: 16 top: 12 bottom: 12} align: Align{x: 0.5 y: 0.5}
+            // px-6 py-2.5 green-600 (hover green-500), round, white semibold.
+            join_btn := RoundedView{width: Fit height: Fit padding: Inset{left: 24 right: 24 top: 10 bottom: 10} flow: Right spacing: 8 align: Align{y: 0.5}
+                cursor: MouseCursor.Hand new_batch: true
+                draw_bg +: {
+                    hover: instance(0.0)
+                    pixel: fn() {
+                        let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                        sdf.box(0.0, 0.0, self.rect_size.x, self.rect_size.y, self.rect_size.y * 0.5)
+                        sdf.fill(mix(#x16a34a, #x22c55e, self.hover))
+                        return sdf.result
+                    }
+                }
+                animator: Animator{
+                    hover: {
+                        default: @off
+                        off: AnimatorState{from: {all: Forward {duration: 0.15}} apply: {draw_bg: {hover: 0.0}}}
+                        on: AnimatorState{from: {all: Forward {duration: 0.15}} apply: {draw_bg: {hover: 1.0}}}
+                    }
+                }
+                Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/waves_short.svg")}
+                Txt{text: "Join Voice" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 10.5}}
+            }
+            connecting := View{visible: false width: Fit height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                RoundedView{width: 14 height: 14 draw_bg.color: #0000 draw_bg.border_radius: 7.0 draw_bg.border_size: 2.0 draw_bg.border_color: accent}
+                Txt{text: "Connecting..." draw_text.color: gray_400}
+            }
+            connected := View{visible: false width: Fit height: Fit flow: Right spacing: 8 align: Align{y: 0.5}
+                RoundedView{width: 8 height: 8 draw_bg.color: #x4ade80 draw_bg.border_radius: 4.0}
+                Txt{text: "Voice Connected" draw_text.color: #x4ade80}
+            }
+        }
+        }
+        // Opens the channel's chat beside the cards (Rails' "Open chat").
+        View{width: Fill height: Fit align: Align{x: 1.0} padding: Inset{top: 10 right: 12}
+            chat_btn := RoundedView{visible: false width: Fit height: Fit padding: 6 cursor: MouseCursor.Hand new_batch: true
+                draw_bg.color: #x00000066 draw_bg.border_radius: 6.0
+                Ico{icon_walk: Walk{width: 18 height: 18} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/chat.svg")}}
         }
     }
 
@@ -942,7 +1476,30 @@ script_mod! {
         width: Fill height: Fit
         flow: Down
         sep := SolidView{visible: false width: Fill height: 1 margin: Inset{top: 4 bottom: 4} draw_bg.color: gray_700}
-        item := MenuItem{icon.icon_walk: Walk{width: 0 height: 16}}
+        item := MenuItem{icon.icon_walk: Walk{width: 0 height: 16}
+            label +: {width: Fill}
+            // A flyout's "›".
+            chev := Txt{visible: false text: "›" draw_text.color: gray_400 draw_text.text_style.font_size: 12.0}
+            // Rails' toggle: a w-8 h-4 track (accent on, gray-600 off), a
+            // 12px white knob.
+            switch := View{visible: false width: 32 height: 16 flow: Overlay align: Align{y: 0.5}
+                track := RoundedView{width: 32 height: 16 new_batch: true draw_bg.color: gray_600 draw_bg.border_radius: 8.0}
+                knob := RoundedView{width: 12 height: 12 margin: Inset{left: 2} new_batch: true draw_bg.color: #xffffff draw_bg.border_radius: 6.0}
+            }
+        }
+        // Rails' "User Volume": a label, its percent (10px gray-500), and a
+        // 0..200 slider.
+        vol := View{visible: false width: Fill height: Fit flow: Down padding: Inset{left: 10 right: 10 top: 4 bottom: 6}
+            View{width: Fill height: Fit flow: Right align: Align{y: 0.5}
+                Txt{width: Fill text: "User Volume" draw_text.color: gray_300 draw_text.text_style.font_size: 9.5}
+                vol_pct := Txt{text: "100%" draw_text.color: gray_500 draw_text.text_style.font_size: 7.5}
+            }
+            // The percent above says the value; the slider's own number
+            // field is hidden.
+            vol_slider := Slider{width: Fill text: "" min: 0.0 max: 200.0 default: 100.0 precision: 0
+                label_walk: Walk{width: Fill height: 0 margin: 0}
+                text_input +: {width: 0 height: 0 draw_text +: {color: #0000 color_hover: #0000 color_focus: #0000 color_empty: #0000}}}
+        }
     }
 
     // Rails form card: gray-800, rounded-xl, border gray-700/50, p-5.
@@ -986,6 +1543,8 @@ script_mod! {
         draw_text.text_style: theme.font_bold{font_size: 15.0}
     }
     let Hint = Txt{width: Fill draw_text.color: gray_400 draw_text.text_style.font_size: 9.5}
+    // Rails' settings section heading: sm semibold white/80, uppercase.
+    let VvSection = Txt{margin: Inset{top: 16} draw_text.color: #xffffffcc draw_text.text_style: theme.font_bold{font_size: 9.5}}
     let Swatch = RoundedView{width: 28 height: 28 cursor: MouseCursor.Hand new_batch: true draw_bg.border_radius: 2.0}
     let Divider = SolidView{width: Fill height: 1 margin: Inset{top: 24} draw_bg.color: gray_700}
     // Rails' text button (Remove Icon): danger-light, no well.
@@ -1795,6 +2354,102 @@ script_mod! {
                                 }
                             }
 
+                            // Rails' voice controls bar (.voice-controls-inferno):
+                            // an accent/.25 top border over an accent/.06 → clear
+                            // wash; "Voice Connected" in green-500 with the
+                            // channel under it and a red hang-up; then mute and
+                            // deafen.
+                            voice_bar := View{
+                                visible: false
+                                width: Fill height: Fit
+                                flow: Down
+                                show_bg: true
+                                draw_bg +: {
+                                    wash: uniform(accent)
+                                    pixel: fn() {
+                                        let a = self.wash
+                                        let y = self.pos.y * self.rect_size.y
+                                        // Premultiplied.
+                                        let k = mix(0.06 * (1.0 - self.pos.y), 0.25, 1.0 - step(1.0, y))
+                                        return vec4(a.x * k, a.y * k, a.z * k, k)
+                                    }
+                                }
+                                View{width: Fill height: Fit padding: Inset{left: 12 right: 12 top: 8 bottom: 4} flow: Right align: Align{y: 0.5}
+                                    View{width: Fill height: Fit flow: Down spacing: 1
+                                        View{width: Fill height: Fit flow: Right align: Align{y: 0.5} spacing: 6
+                                            voice_title_icon := Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #x22c55e draw_icon.svg: crate_resource("self:resources/icons/waves.svg")}
+                                            voice_title := Txt{text: "Voice Connected" draw_text.color: #x22c55e draw_text.text_style: theme.font_bold{font_size: 9.5}}
+                                        }
+                                        voice_where := Txt{width: Fill text: "" draw_text.color: gray_400 draw_text.text_style.font_size: 8.5}
+                                    }
+                                    // p-1.5 rounded bg-danger/20, hover /40.
+                                    voice_leave := RoundedView{width: Fit height: Fit padding: 6 margin: Inset{left: 8} cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg +: {
+                                            hover: instance(0.0)
+                                            red: uniform(danger)
+                                            pixel: fn() {
+                                                let sdf = Sdf2d.viewport(self.pos * self.rect_size)
+                                                let d = self.red
+                                                sdf.box(0. 0. self.rect_size.x self.rect_size.y 4.0)
+                                                sdf.fill(vec4(d.x, d.y, d.z, mix(0.2, 0.4, self.hover)))
+                                                return sdf.result
+                                            }
+                                        }
+                                        animator: Animator{
+                                            hover: {
+                                                default: @off
+                                                off: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 0.0}}}
+                                                on: AnimatorState{from: {all: Forward {duration: 0.1}} apply: {draw_bg: {hover: 1.0}}}
+                                            }
+                                        }
+                                        Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/hangup.svg")}
+                                    }
+                                }
+                                // Rails' hierarchy row: Broadcast (a hearth with
+                                // embers; green-400 when on) and Ask to Speak (in
+                                // an ember). px-2 py-0.5 xs gray-300.
+                                // Someone below asks to speak: Allow lets them be
+                                // heard here (Rails' Showcase).
+                                vb_request := View{visible: false width: Fill height: Fit padding: Inset{left: 12 right: 12 bottom: 4} flow: Right spacing: 6 align: Align{y: 0.5}
+                                    vb_req_text := Txt{width: Fill text: "" draw_text.color: gray_300 draw_text.text_style.font_size: 8.5}
+                                    vb_allow := RoundedView{width: Fit height: Fit padding: Inset{left: 8 right: 8 top: 3 bottom: 3} cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: #x16a34a draw_bg.border_radius: 4.0
+                                        Txt{text: "Allow" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 8.5}}}
+                                    vb_dismiss := View{width: Fit height: Fit padding: 2 cursor: MouseCursor.Hand
+                                        Ico{icon_walk: Walk{width: 12 height: 12} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                                }
+                                vb_hier := View{visible: false width: Fill height: Fit padding: Inset{left: 12 right: 12 bottom: 4} flow: Right spacing: 6 align: Align{x: 0.5}
+                                    vb_broadcast := VoiceBtn{visible: false padding: Inset{left: 8 right: 8 top: 2 bottom: 2} flow: Right spacing: 4 align: Align{y: 0.5}
+                                        off := View{width: Fit height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                                            Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/arrow_down.svg")}
+                                            Txt{text: "Broadcast" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 8.5}}}
+                                        on := View{visible: false width: Fit height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                                            Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: #x4ade80 draw_icon.svg: crate_resource("self:resources/icons/arrow_down.svg")}
+                                            Txt{text: "Broadcast" draw_text.color: #x4ade80 draw_text.text_style: theme.font_bold{font_size: 8.5}}}
+                                    }
+                                    vb_ask := VoiceBtn{visible: false padding: Inset{left: 8 right: 8 top: 2 bottom: 2} flow: Right spacing: 4 align: Align{y: 0.5}
+                                        View{width: Fit height: Fit flow: Right spacing: 4 align: Align{y: 0.5}
+                                            Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/arrow_up.svg")}
+                                            ask_label := Txt{text: "Ask to Speak" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 8.5}}}
+                                    }
+                                }
+                                View{width: Fill height: Fit padding: Inset{left: 12 right: 12 bottom: 8} flow: Right spacing: 8 align: Align{x: 0.5}
+                                    voice_mute := VoiceBtn{
+                                        on := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/mic.svg")}}
+                                        off := View{visible: false width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/mic_off.svg")}}
+                                    }
+                                    voice_deafen := VoiceBtn{
+                                        on := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/deafen.svg")}}
+                                        off := View{visible: false width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #xf87171 draw_icon.svg: crate_resource("self:resources/icons/deafened.svg")}}
+                                    }
+                                    // Rails' Share Screen: gray-300, green-400 while live.
+                                    voice_share := VoiceBtn{
+                                        on := View{width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: gray_300 draw_icon.svg: crate_resource("self:resources/icons/screen.svg")}}
+                                        off := View{visible: false width: Fit height: Fit Ico{icon_walk: Walk{width: 20 height: 20} draw_icon.color: #x4ade80 draw_icon.svg: crate_resource("self:resources/icons/screen.svg")}}
+                                    }
+                                }
+                            }
+
                             // User panel: gray-950, 8px padding, 32px avatar,
                             // name 14 medium, status 12 gray-400, version 10 gray-600.
                             SolidView{
@@ -1910,6 +2565,13 @@ script_mod! {
                             }
                         }
 
+                        // The voice page, and beside it its chat (Rails'
+                        // sidechat, 350px, a gray-800 rule on its left); or
+                        // the chat alone.
+                        View{width: Fill height: Fill flow: Right
+                        voice_col := mod.widgets.VoiceView{visible: false}
+                        chat_edge := SolidView{visible: false width: 1 height: Fill draw_bg.color: gray_800}
+
                         // ── Chat column ──
                         chat_col := View{
                             width: Fill height: Fill
@@ -1931,6 +2593,9 @@ script_mod! {
                                     Ico{draw_icon.svg: crate_resource("self:resources/icons/pin.svg")}}
                                 invite_btn := View{width: Fit height: Fit cursor: MouseCursor.Hand
                                     Ico{draw_icon.svg: crate_resource("self:resources/icons/users.svg")}}
+                                // The voice page's chat: Rails' "Close chat".
+                                sidechat_close := View{visible: false width: Fit height: Fit padding: 2 cursor: MouseCursor.Hand
+                                    Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: gray_500 draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
                                 // Rails: bg-gray-900 rounded h-7, 200px.
                                 search_bar := RoundedView{width: 200 height: 28 padding: Inset{left: 4 right: 8}
                                     align: Align{y: 0.5} new_batch: true
@@ -2149,6 +2814,7 @@ script_mod! {
                                 }
                             }
                         }
+                        }
 
                         }
                         }
@@ -2196,6 +2862,7 @@ script_mod! {
                             nav_profile := NavItem{label.text: "Profile"}
                             NavHeader{text: "APP SETTINGS"}
                             nav_appearance := NavItem{label.text: "Appearance"}
+                            nav_voice := NavItem{label.text: "Voice & Video"}
                             nav_relays := NavItem{label.text: "Relays"}
                         }
                         settings_pages := ScrollYView{
@@ -2315,6 +2982,56 @@ script_mod! {
                                     add_relay := Button{text: "Add"}
                                 }
                                 relay_list := mod.widgets.RelayList{}
+                            }
+
+                            // Rails' Voice & Video (settings/voice): devices, a mic
+                            // test, audio processing, and LiveKit credentials for
+                            // volunteering as a voice provider.
+                            page_voice := View{
+                                visible: false
+                                width: 512 height: Fit flow: Down
+                                PageTitle{text: "Voice & Video" margin: Inset{bottom: 8}}
+                                VvSection{text: "INPUT DEVICE"}
+                                FieldLabel{text: "MICROPHONE"}
+                                vv_input := DropDown{width: Fill labels: ["Default"]}
+                                Hint{margin: Inset{top: 4} text: "Device selection is stored on this device."}
+                                FieldLabel{text: "MIC TEST"}
+                                View{width: Fill height: Fit flow: Right spacing: 12 align: Align{y: 0.5}
+                                    vv_test := Button{text: "Test Mic"}
+                                    vv_track := RoundedView{width: Fill height: 8 flow: Overlay new_batch: true
+                                        draw_bg.color: gray_800 draw_bg.border_radius: 4.0
+                                        vv_level := RoundedView{width: 0 height: 8 draw_bg.color: #x22c55e draw_bg.border_radius: 4.0}}
+                                }
+                                Divider{}
+                                VvSection{text: "OUTPUT DEVICE"}
+                                FieldLabel{text: "SPEAKER / HEADPHONES"}
+                                vv_output := DropDown{width: Fill labels: ["Default"]}
+                                Divider{}
+                                VvSection{text: "AUDIO PROCESSING"}
+                                vv_ns := CheckBox{text: "Noise Suppression"}
+                                Hint{margin: Inset{left: 26 bottom: 8} text: "Removes background noise from your microphone"}
+                                vv_ec := CheckBox{text: "Echo Cancellation"}
+                                Hint{margin: Inset{left: 26 bottom: 8} text: "Prevent your speakers from being picked up by your mic"}
+                                vv_agc := CheckBox{text: "Automatic Gain Control"}
+                                Hint{margin: Inset{left: 26 bottom: 8} text: "Automatically adjust microphone volume"}
+                                VvSection{text: "VIDEO"}
+                                vv_gpu := CheckBox{text: "Use GPU for video"}
+                                Hint{margin: Inset{left: 26 bottom: 8} text: "Encode what you send on the graphics card (H.264 through VA-API) and convert incoming video there. Off: both on the processor."}
+                                Hint{text: "Changes apply the next time you join a voice channel."}
+                                Divider{}
+                                Txt{margin: Inset{top: 16 bottom: 6} text: "LiveKit Credentials" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 12.5}}
+                                Hint{text: "Configure your LiveKit account to volunteer as a voice provider for servers you're a member of. Get a free account at livekit.io, or self-host LiveKit Server."}
+                                FieldLabel{text: "LIVEKIT SERVER URL"}
+                                lk_url := Field{empty_text: "wss://your-project.livekit.cloud"}
+                                Hint{margin: Inset{top: 4} text: "Must use wss:// (secure WebSocket)"}
+                                FieldLabel{text: "API KEY"}
+                                lk_key := Field{empty_text: "APIxxxxxxxx"}
+                                FieldLabel{text: "API SECRET"}
+                                lk_secret := Field{is_password: true empty_text: "Leave blank to keep the saved secret"}
+                                View{width: Fill height: Fit margin: Inset{top: 16} flow: Right spacing: 12 align: Align{y: 0.5}
+                                    lk_save := Button{text: "Save Credentials"}
+                                    lk_status := Hint{width: Fit text: ""}
+                                }
                             }
                         }
                         // Appearance: Rails clears the overlay so the app shows
@@ -2948,6 +3665,22 @@ script_mod! {
                     ctx_layer := View{
                         visible: false
                         width: Fill height: Fill
+                        flow: Overlay
+                        // A submenu, opened beside the row that holds it.
+                        ctx_sub := RoundedView{
+                            visible: false
+                            width: 200 height: Fit
+                            flow: Down
+                            padding: 6
+                            new_batch: true
+                            draw_bg.color: gray_900
+                            draw_bg.border_radius: 8.0
+                            draw_bg.border_size: 1.0
+                            draw_bg.border_color: gray_700
+                            u0 := CtxSlot{} u1 := CtxSlot{} u2 := CtxSlot{} u3 := CtxSlot{} u4 := CtxSlot{}
+                            u5 := CtxSlot{} u6 := CtxSlot{} u7 := CtxSlot{} u8 := CtxSlot{} u9 := CtxSlot{}
+                            u10 := CtxSlot{} u11 := CtxSlot{} u12 := CtxSlot{} u13 := CtxSlot{}
+                        }
                         ctx_menu := RoundedView{
                             width: 200 height: Fit
                             flow: Down
@@ -2967,6 +3700,15 @@ script_mod! {
                     ip_full := mod.widgets.InlineFullHost{
                         width: Fill height: Fill
                         SolidView{width: Fill height: Fill draw_bg.color: #x000000}
+                    }
+                    // A stream filling the window (or the screen) on black.
+                    stream_full := View{visible: false width: Fill height: Fill flow: Overlay
+                        SolidView{width: Fill height: Fill draw_bg.color: #x000000}
+                        sf_img := Image{visible: false width: Fill height: Fill fit: ImageFit.Smallest}
+                        sf_yuv := YuvVideo{draw_bg +: {contain: 1.0 radius: 0.0}}
+                        View{width: Fill height: Fill padding: 16 align: Align{x: 1.0 y: 0.0}
+                            sf_exit := StreamBtn{width: 36 height: 36 draw_bg.border_radius: 18.0
+                                Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}}
                     }
                     }
 
@@ -3166,6 +3908,98 @@ script_mod! {
                         }
                     }
 
+                    // Rails' Screen Share Settings (tpl-screen-share-picker):
+                    // #1a1918, rounded-xl, gray-700/50 edge; uppercase xs
+                    // gray-400 labels; pill groups; a gray-900 footer with
+                    // Cancel and Go Live. The browser chose the screen in
+                    // Rails; here it's picked above the settings.
+                    share_dialog := Modal{
+                        content +: {
+                            RoundedView{
+                                width: 560 height: Fit flow: Down new_batch: true
+                                draw_bg.color: #x1a1918 draw_bg.border_radius: 12.0
+                                draw_bg.border_size: 1.0 draw_bg.border_color: gray_700_50
+                                View{width: Fill height: Fit flow: Right align: Align{y: 0.5} padding: Inset{left: 20 right: 16 top: 20 bottom: 12}
+                                    Txt{width: Fill text: "Screen Share Settings" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 13.0}}
+                                    ss_close := RoundedView{width: 32 height: 32 align: Center cursor: MouseCursor.Hand new_batch: true
+                                        draw_bg.color: #0000 draw_bg.border_radius: 16.0
+                                        Ico{icon_walk: Walk{width: 14 height: 14} draw_icon.color: gray_400 draw_icon.svg: crate_resource("self:resources/icons/close.svg")}}
+                                }
+                                View{width: Fill height: Fit flow: Down spacing: 16 padding: Inset{left: 20 right: 20 bottom: 20}
+                                    View{width: Fill height: Fit flow: Down
+                                        View{width: Fill height: Fit flow: Right spacing: 8 margin: Inset{bottom: 8}
+                                            ss_tab_screens := TabPill{draw_bg.color: gray_600 label.text: "Screens"}
+                                            ss_tab_windows := TabPill{label.text: "Windows"}
+                                        }
+                                        ss_loading := Txt{text: "Looking for screens and windows…" draw_text.color: gray_400 draw_text.text_style.font_size: 9.0}
+                                        ss_grid := ScrollYView{width: Fill height: 236 flow: Flow.Right{wrap: true} spacing: 4
+                                        ss_src0 := SsSource{}
+                                        ss_src1 := SsSource{}
+                                        ss_src2 := SsSource{}
+                                        ss_src3 := SsSource{}
+                                        ss_src4 := SsSource{}
+                                        ss_src5 := SsSource{}
+                                        ss_src6 := SsSource{}
+                                        ss_src7 := SsSource{}
+                                        ss_src8 := SsSource{}
+                                        ss_src9 := SsSource{}
+                                        ss_src10 := SsSource{}
+                                        ss_src11 := SsSource{}
+                                        ss_src12 := SsSource{}
+                                        ss_src13 := SsSource{}
+                                        ss_src14 := SsSource{}
+                                        ss_src15 := SsSource{}
+                                        ss_src16 := SsSource{}
+                                        ss_src17 := SsSource{}
+                                        ss_src18 := SsSource{}
+                                        ss_src19 := SsSource{}
+                                        ss_src20 := SsSource{}
+                                        ss_src21 := SsSource{}
+                                        ss_src22 := SsSource{}
+                                        ss_src23 := SsSource{}
+                                        }
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        Txt{text: "RESOLUTION" margin: Inset{bottom: 8} draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                        ss_res_480 := SsPill{label.text: "480p"}
+                                        ss_res_720 := SsPill{label.text: "720p"}
+                                        ss_res_1080 := SsPill{label.text: "1080p"}
+                                        ss_res_1440 := SsPill{label.text: "1440p"}
+                                        ss_res_2160 := SsPill{label.text: "4K"}
+                                        }
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        Txt{text: "FRAME RATE" margin: Inset{bottom: 8} draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                        ss_fps_15 := SsPill{label.text: "15 fps"}
+                                        ss_fps_30 := SsPill{label.text: "30 fps"}
+                                        ss_fps_60 := SsPill{label.text: "60 fps"}
+                                        }
+                                    }
+                                    View{width: Fill height: Fit flow: Down
+                                        Txt{text: "CONTENT TYPE" margin: Inset{bottom: 8} draw_text.color: gray_400 draw_text.text_style: theme.font_bold{font_size: 8.0}}
+                                        View{width: Fill height: Fit flow: Right spacing: 6
+                                            ss_smooth := SsPill{width: Fill label.text: "Prefer Smoothness"}
+                                            ss_clear := SsPill{width: Fill label.text: "Prefer Clarity"}
+                                        }
+                                        Txt{margin: Inset{top: 6} text: "Choosing 'Prefer Clarity' will result in a lower framerate for a sharper image." draw_text.color: gray_500 draw_text.text_style.font_size: 8.0}
+                                    }
+                                }
+                                SolidView{width: Fill height: Fit flow: Right spacing: 12 align: Align{x: 1.0 y: 0.5} padding: Inset{left: 20 right: 20 top: 12 bottom: 12}
+                                    draw_bg.color: gray_900
+                                    ss_cancel := View{width: Fit height: Fit padding: 8 cursor: MouseCursor.Hand
+                                        Txt{text: "Cancel" draw_text.color: gray_300 draw_text.text_style: theme.font_bold{font_size: 9.5}}}
+                                    // .ss-go-live-btn: accent-dark → light, white semibold.
+                                    ss_go := SsPill{height: 36 padding: Inset{left: 20 right: 20} draw_bg.on: 1.0 flow: Right spacing: 8 align: Align{y: 0.5}
+                                        Ico{icon_walk: Walk{width: 16 height: 16} draw_icon.color: #xffffff draw_icon.svg: crate_resource("self:resources/icons/screen.svg")}
+                                        label.visible: false
+                                        Txt{text: "Go Live" draw_text.color: #xffffff draw_text.text_style: theme.font_bold{font_size: 9.5}}}
+                                }
+                            }
+                        }
+                    }
+
                     confirm_dialog := Modal{
                         content +: {
                             RoundedView{
@@ -3315,13 +4149,24 @@ pub struct App {
     /// The action waiting on the confirm dialog.
     #[rust]
     pending: Option<Pending>,
+    /// Screen Share Settings, while open.
+    #[rust]
+    share_picker: SharePicker,
+    /// We're sharing our screen.
+    #[rust]
+    sharing: bool,
     #[rust]
     categories: Vec<backend::RoleItem>,
     #[rust]
     server_name: String,
     /// Slots of the open context menu, and the menus it came from.
     #[rust]
-    ctx: Vec<CtxSlotData>,
+    ctx: Vec<ctxmenu::Slot>,
+    /// The open flyout: its rows, and which menu row it belongs to.
+    #[rust]
+    ctx_sub: Vec<ctxmenu::Slot>,
+    #[rust]
+    ctx_sub_row: Option<usize>,
     #[rust]
     ctx_back: Vec<CtxMenuData>,
     /// The items of the open menu, so a submenu can come back to it.
@@ -3409,6 +4254,67 @@ pub struct App {
     /// The open server (for its custom emoji in the composer).
     #[rust]
     server_gid: String,
+    /// The voice channel we're in.
+    #[rust]
+    my_voice: Option<backend::MyVoice>,
+    /// The call's connection (calls.rs).
+    #[rust]
+    call_state: CallState,
+    /// We asked to leave (so the call ending isn't a drop).
+    #[rust]
+    voice_leaving: bool,
+    /// Our LiveKit credentials are saved (we can provide voice).
+    #[rust]
+    livekit_set: bool,
+    /// Asks to speak from below: (pubkey, name, channel), oldest first.
+    #[rust]
+    speak_requests: Vec<(String, String, String)>,
+    /// The Voice & Video page's mic test is running.
+    #[rust]
+    mic_test: bool,
+    /// When we last used the app or spoke (Rails' AFK check).
+    #[rust]
+    last_active: Option<std::time::Instant>,
+    #[rust]
+    afk_checked: Option<std::time::Instant>,
+    /// The voice channel on screen (Rails' voice page), in this server.
+    #[rust]
+    voice_open: Option<String>,
+    /// A join we asked for and haven't seen land yet.
+    #[rust]
+    voice_joining: Option<String>,
+    /// Who is in this server's voice channels.
+    #[rust]
+    voice_people: VoicePeopleMap,
+    /// The text channel the sidebar marks when no voice page is open.
+    #[rust]
+    text_channel: Option<String>,
+    /// The voice page's chat is open beside it (Rails' sidechat).
+    #[rust]
+    sidechat_open: bool,
+    /// Our microphone while in voice, and its level (voice_audio.rs).
+    #[rust]
+    mic: Mic,
+    /// Samples the levels each frame while in voice.
+    #[rust]
+    voice_timer: Timer,
+    /// New video frames, 60 a second while in voice (a 60 fps stream
+    /// plays at 60; the glow keeps its own 30).
+    #[rust]
+    video_timer: Timer,
+    #[rust]
+    voice_levels: VoiceLevels,
+    /// Each speaking indicator's spring: (value, velocity).
+    #[rust]
+    voice_spring: VoiceSprings,
+    #[rust]
+    video_tex: VideoTextures,
+    /// Streams we watch (pubkey hex).
+    #[rust]
+    watching: PubkeySet,
+    /// The stream filling the window (pubkey hex).
+    #[rust]
+    stream_full: Option<String>,
     /// Channel ids behind the Hearth dropdown's entries (after "None").
     #[rust]
     hearth_options: Vec<String>,
@@ -3476,15 +4382,6 @@ pub enum Pending {
     JoinPublic(String, String),
 }
 
-/// One filled context-menu slot (separator above, action, label, danger).
-#[derive(Debug, Clone)]
-pub struct CtxSlotData {
-    sep: bool,
-    action: ctxmenu::Action,
-    label: String,
-    danger: bool,
-}
-
 #[derive(Debug, Clone)]
 pub struct CtxMenuData {
     items: Vec<ctxmenu::Item>,
@@ -3493,6 +4390,11 @@ pub struct CtxMenuData {
 const CTX_SLOTS: [LiveId; ctxmenu::SLOTS] = [
     id!(s0), id!(s1), id!(s2), id!(s3), id!(s4), id!(s5), id!(s6),
     id!(s7), id!(s8), id!(s9), id!(s10), id!(s11), id!(s12), id!(s13),
+];
+/// The flyout's slots (`ctx_sub.u0` …).
+const SUB_SLOTS: [LiveId; ctxmenu::SLOTS] = [
+    id!(u0), id!(u1), id!(u2), id!(u3), id!(u4), id!(u5), id!(u6),
+    id!(u7), id!(u8), id!(u9), id!(u10), id!(u11), id!(u12), id!(u13),
 ];
 
 /// Server settings pages: (nav, page, required permission check index).
@@ -3544,12 +4446,14 @@ const BITRATES: [u32; 5] = [32_000, 64_000, 96_000, 128_000, 256_000];
 const INVITE_EXPIRY: [i64; 7] = [0, 30 * 60, 3600, 6 * 3600, 12 * 3600, 86400, 7 * 86400];
 const INVITE_USES: [u32; 7] = [0, 1, 5, 10, 25, 50, 100];
 
-const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 4] = [
+const SETTINGS_PAGES: [(&[LiveId], &[LiveId]); 5] = [
     (ids!(nav_account), ids!(page_account)),
     (ids!(nav_profile), ids!(page_profile)),
     (ids!(nav_appearance), ids!(page_appearance)),
     (ids!(nav_relays), ids!(page_relays)),
+    (ids!(nav_voice), ids!(page_voice)),
 ];
+const VOICE_PAGE: usize = 4;
 
 const APPEARANCE_PAGE: usize = 2;
 
@@ -3566,6 +4470,10 @@ pub enum Toast {
 }
 
 const TOAST_SLOTS: [&[LiveId]; 3] = [ids!(t0), ids!(t1), ids!(t2)];
+/// The share picker's source slots (ss_src0..).
+const SHARE_SLOTS: usize = 24;
+const SHARE_HEIGHTS: [(&[LiveId], u32); 5] = [(ids!(ss_res_480), 480), (ids!(ss_res_720), 720), (ids!(ss_res_1080), 1080), (ids!(ss_res_1440), 1440), (ids!(ss_res_2160), 2160)];
+const SHARE_FPS: [(&[LiveId], u32); 3] = [(ids!(ss_fps_15), 15), (ids!(ss_fps_30), 30), (ids!(ss_fps_60), 60)];
 
 const THEME_TILES: [(&[LiveId], &str); 7] = [
     (ids!(th_inferno), "inferno"),
@@ -3593,6 +4501,20 @@ impl App {
         if let Some(tx) = &self.backend {
             let _ = tx.send(cmd);
         }
+    }
+
+    /// Off to another channel, server, DM or home: a video playing in this
+    /// one stops (Rails' page change), then the backend switches.
+    fn navigate(&mut self, cx: &mut Cx, cmd: backend::Command) {
+        let same = match (&cmd, &self.showing) {
+            (backend::Command::SelectChannel(id), Some((_, ch))) => id == ch,
+            (backend::Command::SelectServer(gid), Some((g, _))) => gid == g,
+            _ => false,
+        };
+        if !same {
+            self.stop_inline(cx);
+        }
+        self.send(cmd);
     }
 
     fn focus_composer(&self, cx: &mut Cx) {
@@ -3634,7 +4556,7 @@ impl App {
                 let Some((link, backend::InviteCard::Ready(p))) = row.invite.clone() else { return };
                 if p.joined {
                     self.set_home(cx, false);
-                    self.send(backend::Command::SelectServer(p.gid.clone()));
+                    self.navigate(cx, backend::Command::SelectServer(p.gid.clone()));
                 } else if p.age_restricted {
                     // Rails: joining an 18+ server is a confirmation.
                     let body = format!("{} is age-restricted (18+). By joining, you confirm you are 18 years of age or older.", p.name);
@@ -3705,6 +4627,11 @@ impl App {
 
     fn show_settings_page(&mut self, cx: &mut Cx, page: usize) {
         self.settings_page = page;
+        if page == VOICE_PAGE {
+            self.fill_voice_settings(cx);
+        } else if self.mic_test {
+            self.set_mic_test(cx, false);
+        }
         self.mark_theme_tiles(cx);
         // Appearance shows the app through the overlay (Rails' theme-picker).
         let appearance = page == APPEARANCE_PAGE;
@@ -3870,24 +4797,9 @@ impl App {
         if slots.is_empty() {
             return;
         }
-        self.ctx = slots
-            .iter()
-            .map(|(sep, action, label, danger)| CtxSlotData { sep: *sep, action: action.clone(), label: label.clone(), danger: *danger })
-            .collect();
-        for (i, slot_id) in CTX_SLOTS.iter().enumerate() {
-            let slot = self.ui.view(cx, &[id!(ctx_menu), *slot_id]);
-            match self.ctx.get(i) {
-                Some(d) => {
-                    slot.set_visible(cx, true);
-                    self.ui.view(cx, &[id!(ctx_menu), *slot_id, id!(sep)]).set_visible(cx, d.sep);
-                    let mut label = self.ui.widget(cx, &[id!(ctx_menu), *slot_id, id!(item), id!(label)]);
-                    let color = if d.danger { lists::rgba(0xf87171, 1.0) } else { theme::tok("gray_300", 1.0) };
-                    script_apply_eval!(cx, label, {draw_text +: {color: #(color)}});
-                    label.set_text(cx, &d.label);
-                }
-                None => slot.set_visible(cx, false),
-            }
-        }
+        self.ctx = slots.clone();
+        self.close_flyout(cx);
+        self.fill_menu_slots(cx, id!(ctx_menu), &CTX_SLOTS, &slots);
         let win = self.ui.view(cx, ids!(ctx_layer)).area().rect(cx).size;
         let win = if win.x > 0.0 { win } else { dvec2(1400.0, 860.0) };
         let (x, y) = ctxmenu::place((at.x, at.y), (ctxmenu::WIDTH, ctxmenu::height(&slots)), (win.x, win.y));
@@ -3898,6 +4810,114 @@ impl App {
         self.ui.redraw(cx);
         self.ctx_place = cx.new_next_frame();
         self.ctx_place_tries = 5;
+    }
+
+    /// Draws `slots` into a menu panel's rows: the label (danger-light for
+    /// destructive ones), a flyout's "›", a toggle's switch.
+    fn fill_menu_slots(&mut self, cx: &mut Cx, panel: LiveId, ids: &[LiveId], slots: &[ctxmenu::Slot]) {
+        use ctxmenu::Kind;
+        for (i, slot_id) in ids.iter().enumerate() {
+            let slot = self.ui.view(cx, &[panel, *slot_id]);
+            let Some(d) = slots.get(i) else {
+                slot.set_visible(cx, false);
+                continue;
+            };
+            slot.set_visible(cx, true);
+            self.ui.view(cx, &[panel, *slot_id, id!(sep)]).set_visible(cx, d.sep);
+            let mut label = self.ui.widget(cx, &[panel, *slot_id, id!(item), id!(label)]);
+            let color = if d.danger { lists::rgba(0xf87171, 1.0) } else { theme::tok("gray_300", 1.0) };
+            script_apply_eval!(cx, label, {draw_text +: {color: #(color)}});
+            label.set_text(cx, &d.label);
+            self.ui.widget(cx, &[panel, *slot_id, id!(item), id!(chev)]).set_visible(cx, matches!(d.kind, Kind::Sub(_)));
+            let volume = match &d.kind {
+                Kind::Volume(_, percent) => Some(*percent),
+                _ => None,
+            };
+            self.ui.view(cx, &[panel, *slot_id, id!(item)]).set_visible(cx, volume.is_none());
+            self.ui.view(cx, &[panel, *slot_id, id!(vol)]).set_visible(cx, volume.is_some());
+            if let Some(percent) = volume {
+                self.ui.slider(cx, &[panel, *slot_id, id!(vol), id!(vol_slider)]).set_value(cx, percent as f64);
+                self.ui.label(cx, &[panel, *slot_id, id!(vol), id!(vol_pct)]).set_text(cx, &format!("{percent}%"));
+            }
+            let toggle = match d.kind {
+                Kind::Toggle(_, on) => Some(on),
+                _ => None,
+            };
+            self.ui.view(cx, &[panel, *slot_id, id!(item), id!(switch)]).set_visible(cx, toggle.is_some());
+            if let Some(on) = toggle {
+                let mut track = self.ui.widget(cx, &[panel, *slot_id, id!(item), id!(switch), id!(track)]);
+                let c = if on { theme::tok("accent", 1.0) } else { theme::tok("gray_600", 1.0) };
+                script_apply_eval!(cx, track, {draw_bg +: {color: #(c)}});
+                let mut knob = self.ui.widget(cx, &[panel, *slot_id, id!(item), id!(switch), id!(knob)]);
+                let left = if on { 18.0 } else { 2.0 };
+                script_apply_eval!(cx, knob, {margin: mod.prelude.widgets.Inset{left: #(left)}});
+            }
+        }
+        self.ui.view(cx, &[panel]).redraw(cx);
+    }
+
+    /// Opens the flyout of menu row `row` beside it.
+    fn open_flyout(&mut self, cx: &mut Cx, row: usize) {
+        if self.ctx_sub_row == Some(row) {
+            return;
+        }
+        let Some(ctxmenu::Kind::Sub(items)) = self.ctx.get(row).map(|s| s.kind.clone()) else {
+            self.close_flyout(cx);
+            return;
+        };
+        let slots = ctxmenu::layout(&items);
+        self.ctx_sub = slots.clone();
+        self.ctx_sub_row = Some(row);
+        self.fill_menu_slots(cx, id!(ctx_sub), &SUB_SLOTS, &slots);
+        let menu = self.ui.view(cx, ids!(ctx_menu)).area().rect(cx);
+        let row_y = self.ui.view(cx, &[id!(ctx_menu), CTX_SLOTS[row], id!(item)]).area().rect(cx).pos.y;
+        let win = self.ui.view(cx, ids!(ctx_layer)).area().rect(cx).size;
+        let (x, y) = ctxmenu::flyout((menu.pos.x, menu.pos.y, menu.size.x), row_y, (ctxmenu::WIDTH, ctxmenu::height(&slots)), (win.x, win.y));
+        let mut sub = self.ui.widget(cx, ids!(ctx_sub));
+        script_apply_eval!(cx, sub, {margin: mod.prelude.widgets.Inset{left: #(x) top: #(y)}});
+        self.ui.view(cx, ids!(ctx_sub)).set_visible(cx, true);
+        self.ui.redraw(cx);
+    }
+
+    fn close_flyout(&mut self, cx: &mut Cx) {
+        if self.ctx_sub_row.take().is_some() || !self.ctx_sub.is_empty() {
+            self.ctx_sub.clear();
+            self.ui.view(cx, ids!(ctx_sub)).set_visible(cx, false);
+            self.ui.redraw(cx);
+        }
+    }
+
+    /// A menu row was picked: run it (toggles flip in place and stay open;
+    /// flyouts open).
+    fn pick_menu_row(&mut self, cx: &mut Cx, in_flyout: bool, i: usize) {
+        use ctxmenu::Kind;
+        let Some(slot) = (if in_flyout { self.ctx_sub.get(i) } else { self.ctx.get(i) }).cloned() else { return };
+        match slot.kind {
+            Kind::Volume(..) => {}
+            Kind::Sub(_) if !in_flyout => self.open_flyout(cx, i),
+            Kind::Sub(_) => {}
+            Kind::Toggle(action, on) => {
+                let next = ctxmenu::Slot { kind: Kind::Toggle(ctxmenu::flipped(&action), !on), ..slot };
+                if in_flyout {
+                    self.ctx_sub[i] = next;
+                    let slots = self.ctx_sub.clone();
+                    self.fill_menu_slots(cx, id!(ctx_sub), &SUB_SLOTS, &slots);
+                } else {
+                    self.ctx[i] = next;
+                    let slots = self.ctx.clone();
+                    self.fill_menu_slots(cx, id!(ctx_menu), &CTX_SLOTS, &slots);
+                }
+                self.run_menu_action(cx, action);
+            }
+            Kind::Action(action) => {
+                use ctxmenu::Action as A;
+                let stays_open = matches!(action, A::Back | A::RolesFor(_) | A::TimeoutFor(_) | A::MoveFor(_));
+                if !stays_open {
+                    self.close_menu(cx);
+                }
+                self.run_menu_action(cx, action);
+            }
+        }
     }
 
     /// Keeps an open menu inside the window by the size it was drawn at
@@ -3929,6 +4949,7 @@ impl App {
     }
 
     fn close_menu(&mut self, cx: &mut Cx) {
+        self.close_flyout(cx);
         self.ctx.clear();
         self.ctx_back.clear();
         self.ctx_items.clear();
@@ -4136,12 +5157,12 @@ impl App {
         }
         if p.manage_roles && !owner {
             v.push(Item::Separator);
-            v.push(Item::new("Roles  ›", A::RolesFor(pubkey.into())));
+            v.push(Item::sub("Roles", self.roles_menu(pubkey, false)));
         }
         if !me && !owner && (p.kick_members || p.ban_members) {
             v.push(Item::Separator);
             if p.kick_members {
-                v.push(Item::new("Timeout  ›", A::TimeoutFor(pubkey.into())));
+                v.push(Item::sub("Timeout", self.timeout_menu(pubkey, false)));
                 v.push(Item::danger(format!("Kick {name}"), A::Kick(pubkey.into())));
             }
             if p.ban_members {
@@ -4160,6 +5181,141 @@ impl App {
         v
     }
 
+    /// Rails' voice context menu (voice/_context_menu) for someone in voice:
+    /// Profile; our own mute and deafen; a moderator's server mute, server
+    /// deafen, move and disconnect; Copy User ID.
+    fn voice_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        use inferno_core::session::VoiceModeration as M;
+        let Some(person) = self.voice_people.values().flatten().find(|p| p.pubkey == pubkey).cloned() else { return vec![] };
+        let mut v = vec![Item::new("Profile", A::VoiceProfile(pubkey.into()))];
+        if person.me {
+            v.push(Item::Separator);
+            v.push(Item::toggle("Mute", person.self_mute, A::VoiceSelfMute));
+            v.push(Item::toggle("Deafen", person.self_deaf, A::VoiceSelfDeafen));
+        } else {
+            // Rails' User Volume, and our own mute for them; remembered.
+            let mine = voice_audio::VoicePrefs::load().person(pubkey);
+            v.push(Item::Separator);
+            v.push(Item::volume(pubkey, mine.volume));
+            v.push(Item::toggle("Mute for Me", mine.muted, A::LocalMute { target: pubkey.into(), on: !mine.muted }));
+            // Someone in a channel below ours: let them be heard here.
+            if person.below_us && self.perms.elevate_voice {
+                v.push(Item::Separator);
+                v.push(Item::toggle("Let Speak Here", person.showcased, A::Showcase { target: pubkey.into(), on: !person.showcased }));
+            }
+        }
+        if !person.me && !person.owner {
+            let p = &self.perms;
+            let mut moderation = Vec::new();
+            if p.mute_members {
+                moderation.push(Item::toggle("Server Mute", person.server_mute, A::Moderate { target: pubkey.into(), action: M::ServerMute(!person.server_mute) }));
+            }
+            if p.deafen_members {
+                moderation.push(Item::toggle("Server Deafen", person.server_deaf, A::Moderate { target: pubkey.into(), action: M::ServerDeafen(!person.server_deaf) }));
+            }
+            if p.move_members {
+                moderation.push(Item::sub("Move to Channel", self.move_menu(pubkey)));
+                moderation.push(Item::danger("Disconnect", A::VoiceDisconnect(pubkey.into())));
+            }
+            if !moderation.is_empty() {
+                v.push(Item::Separator);
+                v.extend(moderation);
+            }
+        }
+        v.push(Item::Separator);
+        let npub = inferno_core::nostr::prelude::PublicKey::from_hex(pubkey)
+            .ok()
+            .and_then(|pk| {
+                use inferno_core::nostr::nips::nip19::ToBech32;
+                pk.to_bech32().ok()
+            })
+            .unwrap_or_else(|| pubkey.to_owned());
+        v.push(Item::new("Copy User ID", A::Copy(npub)));
+        v
+    }
+
+    /// Rails' "Move to" flyout: the other voice channels.
+    fn move_menu(&self, pubkey: &str) -> Vec<ctxmenu::Item> {
+        use ctxmenu::{Action as A, Item};
+        use inferno_core::session::VoiceModeration as M;
+        let here = self.voice_people.iter().find(|(_, ps)| ps.iter().any(|p| p.pubkey == pubkey)).map(|(c, _)| c.clone());
+        let mut v = Vec::new();
+        let others: Vec<_> = self.srv.voice_channels.iter().filter(|(id, _, _)| Some(id) != here.as_ref()).collect();
+        if others.is_empty() {
+            v.push(Item::new("No other voice channels", A::Back));
+        }
+        for (id, name, _) in others {
+            v.push(Item::new(name.clone(), A::Moderate { target: pubkey.into(), action: M::Move(id.clone()) }));
+        }
+        v
+    }
+
+    fn show_speak_request(&mut self, cx: &mut Cx) {
+        let first = self.speak_requests.first().cloned();
+        self.ui.view(cx, ids!(vb_request)).set_visible(cx, first.is_some() && self.my_voice.is_some());
+        if let Some((_, name, channel)) = first {
+            let more = self.speak_requests.len() - 1;
+            let tail = if more > 0 { format!(" (+{more})") } else { String::new() };
+            self.ui.label(cx, ids!(vb_req_text)).set_text(cx, &format!("{name} asks to speak (from {channel}){tail}"));
+        }
+        self.ui.redraw(cx);
+    }
+
+    fn next_speak_request(&mut self, cx: &mut Cx) {
+        if !self.speak_requests.is_empty() {
+            self.speak_requests.remove(0);
+        }
+        self.show_speak_request(cx);
+    }
+
+    /// Someone's volume or mute-for-me changed: saved, and applied to the
+    /// call now.
+    fn set_person_audio(&mut self, cx: &mut Cx, pubkey: &str, volume: Option<u32>, muted: Option<bool>) {
+        let mut prefs = voice_audio::VoicePrefs::load();
+        let entry = prefs.people.entry(pubkey.to_owned()).or_default();
+        if let Some(v) = volume {
+            entry.volume = v;
+        }
+        if let Some(m) = muted {
+            entry.muted = m;
+        }
+        if *entry == voice_audio::PersonAudio::default() {
+            prefs.people.remove(pubkey);
+        }
+        prefs.save();
+        self.send(backend::Command::PeopleAudio);
+        self.push_local_mutes(cx, &prefs);
+    }
+
+    /// The sidebar's "muted for me" icons.
+    fn push_local_mutes(&mut self, cx: &mut Cx, prefs: &voice_audio::VoicePrefs) {
+        let muted: std::collections::HashSet<String> = prefs.people.iter().filter(|(_, p)| p.muted).map(|(k, _)| k.clone()).collect();
+        if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+            list.local_muted = muted;
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
+    }
+
+    /// Our mute or deafen toggled (Rails' rules: deafening mutes,
+    /// undeafening unmutes, unmuting undeafens). A moderator's holds.
+    fn toggle_voice(&mut self, cx: &mut Cx, deafen: bool) {
+        let Some(v) = self.my_voice.clone() else { return };
+        if (!deafen && v.server_mute) || (deafen && v.server_deaf) {
+            let what = if deafen { "deafened" } else { "muted" };
+            self.toast(cx, &format!("You were server {what} by a moderator."), Toast::Error);
+            return;
+        }
+        let (self_mute, self_deaf) = if deafen {
+            if v.self_deaf { (false, false) } else { (true, true) }
+        } else if v.self_mute {
+            (false, false)
+        } else {
+            (true, v.self_deaf)
+        };
+        self.send(backend::Command::VoiceFlags { self_mute, self_deaf });
+    }
+
     /// A member's roles to toggle: only those below our own highest
     /// (Flutter's hierarchy rule).
     fn roles_menu(&self, pubkey: &str, back: bool) -> Vec<ctxmenu::Item> {
@@ -4170,8 +5326,7 @@ impl App {
         let assignable: std::collections::HashSet<&str> =
             self.srv.roles.iter().filter(|r| !r.everyone && r.position < rank).map(|r| r.id.as_str()).collect();
         for r in self.roles.iter().filter(|r| assignable.contains(r.id.as_str())) {
-            let mark = if held.contains(&r.id) { "✓" } else { "  " };
-            v.push(Item::new(format!("{mark}  {}", r.name), A::ToggleRole { member: pubkey.into(), role: r.id.clone() }));
+            v.push(Item::toggle(r.name.clone(), held.contains(&r.id), A::ToggleRole { member: pubkey.into(), role: r.id.clone() }));
         }
         v
     }
@@ -4232,6 +5387,21 @@ impl App {
                 let items = self.roles_menu(&pk, true);
                 self.open_submenu(cx, items);
             }
+            A::MoveFor(pk) => {
+                let items = self.move_menu(&pk);
+                self.open_submenu(cx, items);
+            }
+            A::VoiceProfile(pk) => self.send(backend::Command::Card(pk)),
+            A::Showcase { target, on } => self.send(backend::Command::Showcase { target, on }),
+            A::LocalMute { target, on } => self.set_person_audio(cx, &target, None, Some(on)),
+            A::VoiceSelfMute => self.toggle_voice(cx, false),
+            A::VoiceSelfDeafen => self.toggle_voice(cx, true),
+            A::Moderate { target, action } => self.send(backend::Command::Moderate { target, action }),
+            A::VoiceDisconnect(ref pk) => {
+                let name = self.voice_people.values().flatten().find(|p| p.pubkey == *pk).map(|p| p.name.clone()).unwrap_or_default();
+                let body = format!("Disconnect {name} from voice?");
+                self.confirm(cx, Pending::Menu(action), "Disconnect", &body, "Disconnect", false);
+            }
             A::TimeoutFor(pk) => {
                 let items = self.timeout_menu(&pk, true);
                 self.open_submenu(cx, items);
@@ -4279,12 +5449,15 @@ impl App {
         use ctxmenu::Action as A;
         let reason = self.ui.text_input(cx, ids!(confirm_input)).text();
         match pending {
-            Pending::Leave => self.send(backend::Command::LeaveServer),
+            Pending::Leave => self.navigate(cx, backend::Command::LeaveServer),
             Pending::Menu(A::DeleteChannel(id)) => {
                 self.send(backend::Command::DeleteChannel(id));
                 self.close_pages(cx);
             }
             Pending::Menu(A::DeleteCategory(id)) => self.send(backend::Command::DeleteCategory(id)),
+            Pending::Menu(A::VoiceDisconnect(target)) => {
+                self.send(backend::Command::Moderate { target, action: inferno_core::session::VoiceModeration::Disconnect });
+            }
             Pending::Menu(A::DeleteMessage(i)) => {
                 if let Some(row) = self.message_row(cx, i) {
                     self.send(backend::Command::DeleteMessage(row.id));
@@ -4694,13 +5867,16 @@ impl App {
         let list = if o.voice_providers.is_empty() { "No providers yet.".to_owned() } else { o.voice_providers.join(", ") };
         self.ui.label(cx, ids!(vo_providers)).set_text(cx, &list);
         // Providers are listed in the server's metadata, which only admins
-        // publish; LiveKit credentials come with voice calling itself.
+        // publish; a provider's app answers token requests with its own
+        // LiveKit credentials (Settings → Voice & Video).
         self.ui.button(cx, ids!(vo_volunteer)).set_visible(cx, admin);
         self.ui.button(cx, ids!(vo_volunteer)).set_text(cx, if o.me_provider { "Stop Providing Voice" } else { "Volunteer as Voice Provider" });
-        let note = if admin {
-            "Voice calling isn't in this app yet: volunteering lists you, and LiveKit setup arrives with calls."
-        } else {
-            "Ask an admin to list you as a provider. LiveKit setup arrives with voice calling."
+        let note = match (o.me_provider, self.livekit_set) {
+            (true, true) => "Your LiveKit server powers voice here while this app is open.",
+            (true, false) => "Add your LiveKit credentials in Settings → Voice & Video, or members can't connect through you.",
+            (false, true) if admin => "Volunteer to let your LiveKit server power voice here (while this app is open).",
+            (false, _) if admin => "Volunteering needs LiveKit credentials: add them in Settings → Voice & Video.",
+            _ => "Ask an admin to list you as a provider. You'll need LiveKit credentials (Settings → Voice & Video).",
         };
         self.ui.label(cx, ids!(vo_note)).set_text(cx, note);
         let mut labels = vec!["None".to_owned()];
@@ -5050,7 +6226,606 @@ impl App {
         self.ui.widget(cx, ids!(composer)).redraw(cx);
     }
 
+    /// Opens a voice channel's page, or (`None`) goes back to the chat.
+    fn show_voice(&mut self, cx: &mut Cx, channel: Option<String>) {
+        if channel.is_some() {
+            self.close_card(cx);
+            self.stop_inline(cx);
+        }
+        self.voice_open = channel.clone();
+        self.ui.widget(cx, ids!(voice_col)).set_visible(cx, channel.is_some());
+        let open = self.sidechat_open;
+        self.set_sidechat(cx, open);
+        if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+            list.selected = channel.or_else(|| self.text_channel.clone());
+            list.refilter();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
+        self.fill_voice_view(cx);
+        self.ui.redraw(cx);
+    }
+
+    /// The chat a voice channel shows beside it: its linked text channel,
+    /// or its own (`None` for the AFK channel, which has none).
+    fn sidechat_of(&self, voice: &str) -> Option<String> {
+        if self.srv.afk_channel.as_deref() == Some(voice) {
+            return None;
+        }
+        let form = self.channel_forms.iter().find(|c| c.id.as_deref() == Some(voice))?;
+        Some(form.sidechat.clone().unwrap_or_else(|| voice.to_owned()))
+    }
+
+    /// Opens or closes the voice page's chat (Rails' sidechat panel: 350px
+    /// on the right, a "Chat" header with pins and a close button). With no
+    /// voice page, the chat column is the whole main area again.
+    fn set_sidechat(&mut self, cx: &mut Cx, open: bool) {
+        self.sidechat_open = open;
+        let target = self.voice_open.as_deref().and_then(|v| self.sidechat_of(v));
+        let side = open && target.is_some();
+        let voice_page = self.voice_open.is_some();
+        let friends = self.ui.view(cx, ids!(friends_page)).visible();
+        self.ui.view(cx, ids!(chat_col)).set_visible(cx, (!voice_page || side) && !friends);
+        self.ui.view(cx, ids!(chat_edge)).set_visible(cx, side);
+        if let Some(mut col) = self.ui.view(cx, ids!(chat_col)).borrow_mut() {
+            col.walk.width = if side { Size::Fixed(350.0) } else { Size::fill() };
+        }
+        for path in [ids!(invite_btn), ids!(search_bar), ids!(topic_divider)] {
+            self.ui.view(cx, path).set_visible(cx, !side && !self.home);
+        }
+        // Visible either way: in the panel it's an empty spacer.
+        self.ui.widget(cx, ids!(channel_topic)).set_visible(cx, !self.home);
+        if side {
+            self.ui.label(cx, ids!(channel_topic)).set_text(cx, "");
+        }
+        self.ui.widget(cx, ids!(channel_hash)).set_visible(cx, !side);
+        self.ui.view(cx, ids!(sidechat_close)).set_visible(cx, side);
+        // The chat shown: the voice channel's, or back to our text channel.
+        let showing = self.showing.as_ref().map(|(_, c)| c.clone());
+        let want = if side { target.clone() } else { self.text_channel.clone() };
+        if let Some(want) = want.filter(|w| Some(w) != showing.as_ref() && !self.home) {
+            self.send(backend::Command::SelectChannel(want));
+        }
+        if side {
+            self.ui.label(cx, ids!(channel_name)).set_text(cx, "Chat");
+        }
+        let chat_available = target.is_some();
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            v.compact = side;
+            v.chat_available = chat_available;
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+        self.ui.redraw(cx);
+    }
+
+    /// Voice is set up here: on, with a provider (Rails' `voice_configured`).
+    fn voice_ready(&self) -> bool {
+        self.srv.voice_enabled && !self.srv.voice_providers.is_empty()
+    }
+
+    fn join_voice(&mut self, id: String) {
+        let here = self.my_voice.as_ref().is_some_and(|v| v.gid == self.server_gid && v.channel_id == id);
+        if !here && self.voice_ready() {
+            self.voice_joining = Some(id.clone());
+            self.send(backend::Command::JoinVoice(id));
+        }
+    }
+
+    /// Rails' voice bar: where we are, the call's state, mute and deafen.
+    fn fill_voice_bar(&mut self, cx: &mut Cx) {
+        let mine = self.my_voice.clone();
+        self.ui.view(cx, ids!(voice_bar)).set_visible(cx, mine.is_some());
+        if let Some(v) = mine {
+            self.ui.label(cx, ids!(voice_where)).set_text(cx, &format!("{} / {}", v.channel, v.server));
+            for (btn, off) in [(ids!(voice_mute), v.self_mute || v.server_mute), (ids!(voice_deafen), v.self_deaf || v.server_deaf)] {
+                let b = self.ui.view(cx, btn);
+                b.view(cx, ids!(on)).set_visible(cx, !off);
+                b.view(cx, ids!(off)).set_visible(cx, off);
+            }
+            let share = self.ui.view(cx, ids!(voice_share));
+            share.view(cx, ids!(on)).set_visible(cx, !self.sharing);
+            share.view(cx, ids!(off)).set_visible(cx, self.sharing);
+            let (text, color) = match self.call_state {
+                CallState::Connected => ("Voice Connected", 0x22c55e),
+                CallState::Reconnecting => ("Reconnecting...", 0xfacc15),
+                _ => ("Connecting...", 0xfacc15),
+            };
+            self.ui.label(cx, ids!(voice_title)).set_text(cx, text);
+            self.ui.view(cx, ids!(vb_hier)).set_visible(cx, v.has_embers || v.in_ember);
+            self.ui.view(cx, ids!(vb_broadcast)).set_visible(cx, v.has_embers);
+            self.ui.view(cx, ids!(vb_broadcast.on)).set_visible(cx, v.broadcasting);
+            self.ui.view(cx, ids!(vb_broadcast.off)).set_visible(cx, !v.broadcasting);
+            self.ui.view(cx, ids!(vb_ask)).set_visible(cx, v.in_ember);
+            self.ui.label(cx, ids!(ask_label)).set_text(cx, if v.showcased { "Stop Speaking Up" } else { "Ask to Speak" });
+            let c = lists::rgba(color, 1.0);
+            for path in [ids!(voice_title)] {
+                let mut w = self.ui.widget(cx, path);
+                script_apply_eval!(cx, w, {draw_text +: {color: #(c)}});
+            }
+            let mut ico = self.ui.widget(cx, ids!(voice_title_icon));
+            script_apply_eval!(cx, ico, {draw_icon +: {color: #(c)}});
+        }
+        self.ui.redraw(cx);
+    }
+
+    fn fill_voice_view(&mut self, cx: &mut Cx) {
+        let Some(id) = self.voice_open.clone() else { return };
+        let name = self.channel_forms.iter().find(|c| c.id.as_deref() == Some(id.as_str())).map(|c| c.name.clone()).unwrap_or_default();
+        let here = self.my_voice.as_ref().is_some_and(|v| v.gid == self.server_gid && v.channel_id == id);
+        let status = if here && self.call_state == CallState::Connected {
+            voice_view::Status::Connected
+        } else if here || self.voice_joining.as_ref() == Some(&id) {
+            voice_view::Status::Connecting
+        } else {
+            voice_view::Status::Join
+        };
+        let (ready, admin) = (self.voice_ready(), self.perms.manage_server);
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            v.channel_id = id.clone();
+            v.name = name;
+            v.people = self.voice_people.get(&id).cloned().unwrap_or_default();
+            v.ready = ready;
+            v.admin = admin;
+            v.status = status;
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+    }
+
+    /// The microphone is open only while in voice and not muted, or while
+    /// the settings page tests it; the level loop runs while it might glow.
+    fn update_mic(&mut self, cx: &mut Cx) {
+        let in_voice = self.my_voice.is_some();
+        let open = self.my_voice.as_ref().is_some_and(|v| !(v.self_mute || v.self_deaf || v.server_mute || v.server_deaf)) || self.mic_test;
+        self.mic.set_on(cx, open);
+        let run = in_voice || self.mic_test;
+        if run && self.voice_timer.is_empty() {
+            // 30 a second: smooth enough for the glow, and each tick that
+            // changes something is a redraw.
+            self.voice_timer = cx.start_interval(1.0 / 30.0);
+        } else if !run && !self.voice_timer.is_empty() {
+            cx.stop_timer(self.voice_timer);
+            self.voice_timer = Timer::empty();
+        }
+        if in_voice && self.video_timer.is_empty() {
+            self.video_timer = cx.start_interval(1.0 / 60.0);
+        } else if !in_voice && !self.video_timer.is_empty() {
+            cx.stop_timer(self.video_timer);
+            self.video_timer = Timer::empty();
+            self.sample_video(cx);
+        }
+        if !run && self.voice_timer.is_empty() && !self.voice_levels.is_empty() {
+            self.voice_levels.clear();
+            self.push_levels(cx);
+        }
+    }
+
+    /// Rails' Voice & Video page from the saved preferences.
+    fn fill_voice_settings(&mut self, cx: &mut Cx) {
+        let prefs = voice_audio::VoicePrefs::load();
+        for (path, input, chosen) in [(ids!(vv_input), true, &prefs.input), (ids!(vv_output), false, &prefs.output)] {
+            let names = self.mic.names(input);
+            let mut labels = vec!["Default".to_owned()];
+            labels.extend(names.iter().cloned());
+            let dd = self.ui.drop_down(cx, path);
+            dd.set_labels(cx, labels);
+            let at = chosen.as_ref().and_then(|c| names.iter().position(|n| n == c)).map_or(0, |i| i + 1);
+            dd.set_selected_item(cx, at);
+        }
+        self.ui.check_box(cx, ids!(vv_ns)).set_active(cx, prefs.noise_suppression, Animate::No);
+        self.ui.check_box(cx, ids!(vv_ec)).set_active(cx, prefs.echo_cancellation, Animate::No);
+        self.ui.check_box(cx, ids!(vv_agc)).set_active(cx, prefs.auto_gain_control, Animate::No);
+        self.ui.check_box(cx, ids!(vv_gpu)).set_active(cx, prefs.gpu_video, Animate::No);
+        self.mic.devices_changed = false;
+    }
+
+    fn set_mic_test(&mut self, cx: &mut Cx, on: bool) {
+        self.mic_test = on;
+        self.ui.button(cx, ids!(vv_test)).set_text(cx, if on { "Stop Test" } else { "Test Mic" });
+        if !on {
+            let mut bar = self.ui.widget(cx, ids!(vv_level));
+            script_apply_eval!(cx, bar, {width: 0.0});
+        }
+        self.update_mic(cx);
+    }
+
+    /// Rails' AFK rule, kept by our own app: in voice, idle (no input, no
+    /// talking) for the server's AFK timeout, we're moved to its AFK
+    /// channel (muted) or disconnected. Checked about once a second.
+    fn check_afk(&mut self, cx: &mut Cx) {
+        let now = std::time::Instant::now();
+        if self.afk_checked.is_some_and(|t| now.duration_since(t) < std::time::Duration::from_secs(1)) {
+            return;
+        }
+        self.afk_checked = Some(now);
+        let Some(v) = self.my_voice.clone() else { return };
+        let Some(afk) = v.afk_channel.clone() else { return };
+        if v.afk_timeout == 0 || v.channel_id == afk {
+            return;
+        }
+        let idle = now.duration_since(*self.last_active.get_or_insert(now));
+        if idle < std::time::Duration::from_secs(v.afk_timeout as u64 * 60) {
+            return;
+        }
+        // Once per idle stretch.
+        self.last_active = Some(now);
+        if v.afk_action == "kick" {
+            self.voice_leaving = true;
+            self.send(backend::Command::LeaveVoice);
+            self.toast(cx, "You were disconnected from voice for being AFK.", Toast::Error);
+        } else {
+            self.send(backend::Command::JoinVoiceIn { gid: v.gid, channel_id: afk });
+            self.toast(cx, "You were moved to AFK.", Toast::Error);
+        }
+    }
+
+    /// New video frames into textures, and which cards show video.
+    fn sample_video(&mut self, cx: &mut Cx) {
+        use voice_view::VideoTex;
+        let mut fresh: Vec<(String, calls::VideoKind)> = Vec::new();
+        let mut changed = false;
+        if let Some(all) = calls::FRAMES.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            for ((identity, kind), frame) in all.iter_mut() {
+                if frame.at.elapsed() > std::time::Duration::from_secs(2) {
+                    continue;
+                }
+                let key = (identity.clone(), *kind);
+                fresh.push(key.clone());
+                let Some(pixels) = frame.pixels.take() else { continue };
+                let (w, h) = (frame.width, frame.height);
+                let same_kind = matches!(
+                    (self.video_tex.get(&key).map(|e| &e.0), &pixels),
+                    (Some(VideoTex::Bgra(_)), calls::Pixels::Bgra(_)) | (Some(VideoTex::Yuv { .. }), calls::Pixels::I420 { .. })
+                );
+                if !same_kind {
+                    self.video_tex.remove(&key);
+                }
+                let plane = |cx: &mut Cx| {
+                    Texture::new_with_format(cx, TextureFormat::VecRu8 { width: 1, height: 1, data: None, unpack_row_length: None, updated: TextureUpdated::Empty })
+                };
+                let entry = self.video_tex.entry(key).or_insert_with(|| match &pixels {
+                    calls::Pixels::Bgra(_) => {
+                        let format = TextureFormat::VecBGRAu8_32 { width: w, height: h, data: None, updated: TextureUpdated::Empty };
+                        (VideoTex::Bgra(Texture::new_with_format(cx, format)), 0)
+                    }
+                    calls::Pixels::I420 { .. } => (VideoTex::Yuv { y: plane(cx), u: plane(cx), v: plane(cx), width: w, height: h }, 0),
+                });
+                match (&mut entry.0, pixels) {
+                    (VideoTex::Bgra(t), calls::Pixels::Bgra(px)) => t.set_data_u32(cx, w, h, px),
+                    (VideoTex::Yuv { y: ty, u: tu, v: tv, width, height }, calls::Pixels::I420 { y, u, v, stride_y, stride_uv }) => {
+                        let (cw, ch) = (w.div_ceil(2), h.div_ceil(2));
+                        // A new size (or the first frame): new planes, made with
+                        // their row strides; otherwise the data is swapped in.
+                        if *width != w || *height != h || ty.get_format(cx).vec_width_height() != Some((w, h)) {
+                            let make = |cx: &mut Cx, data: Vec<u8>, pw: usize, ph: usize, stride: usize| {
+                                Texture::new_with_format(
+                                    cx,
+                                    TextureFormat::VecRu8 { width: pw, height: ph, data: Some(data), unpack_row_length: (stride != pw).then_some(stride), updated: TextureUpdated::Full },
+                                )
+                            };
+                            *ty = make(cx, y, w, h, stride_y);
+                            *tu = make(cx, u, cw, ch, stride_uv);
+                            *tv = make(cx, v, cw, ch, stride_uv);
+                            *width = w;
+                            *height = h;
+                        } else {
+                            // The old frame out (Makepad wants it taken first),
+                            // the new one in.
+                            for (tex, data) in [(&*ty, y), (&*tu, u), (&*tv, v)] {
+                                let _ = tex.take_vec_u8(cx);
+                                tex.put_back_vec_u8(cx, data, None);
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+                entry.1 = frame.seq;
+                changed = true;
+            }
+        }
+        let before = self.video_tex.len();
+        self.video_tex.retain(|k, _| fresh.contains(k));
+        changed |= before != self.video_tex.len();
+        // Who is sharing their screen (whether or not we watch).
+        let people: Vec<&backend::VoicePerson> = self.voice_people.values().flatten().collect();
+        let streamers: Vec<String> = calls::STREAMERS.lock().unwrap_or_else(|e| e.into_inner()).iter().flatten().cloned().collect();
+        let streams: Vec<voice_view::StreamTile> = people
+            .iter()
+            .filter(|p| streamers.iter().any(|id| p.pubkey.starts_with(id.as_str())))
+            // Our own stream: always shown to us (Rails' local preview).
+            .map(|p| voice_view::StreamTile { pubkey: p.pubkey.clone(), name: p.name.clone(), watching: p.me || self.watching.contains(&p.pubkey) })
+            .collect();
+        let streams_changed = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().is_some_and(|v| v.streams != streams);
+        if !changed && !streams_changed {
+            return;
+        }
+        // Identity (12 hex) → the person's card; their screen separately.
+        let by_kind = |kind: calls::VideoKind| -> std::collections::HashMap<String, VideoTex> {
+            self.video_tex
+                .iter()
+                .filter(|((_, k), _)| *k == kind)
+                .filter_map(|((id, _), (tex, _))| people.iter().find(|p| p.pubkey.starts_with(id.as_str())).map(|p| (p.pubkey.clone(), tex.clone())))
+                .collect()
+        };
+        let (videos, screens) = (by_kind(calls::VideoKind::Camera), by_kind(calls::VideoKind::Screen));
+        // A stream that ended can't stay large.
+        if self.stream_full.as_ref().is_some_and(|f| !streams.iter().any(|s| &s.pubkey == f)) {
+            self.set_stream_full(cx, None);
+        }
+        if let Some(full) = self.stream_full.clone() {
+            let img = self.ui.image(cx, ids!(stream_full.sf_img));
+            let yuv = self.ui.widget(cx, ids!(stream_full.sf_yuv));
+            voice_view::show_video(cx, &img, &yuv, screens.get(&full));
+            self.ui.view(cx, ids!(stream_full)).redraw(cx);
+        }
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            v.videos = videos;
+            v.stream_videos = screens;
+            v.streams = streams;
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+    }
+
+    /// Rails' Share Screen: the picker, or stop sharing when live.
+    fn toggle_share(&mut self, cx: &mut Cx) {
+        if self.sharing {
+            self.send(backend::Command::StopShare);
+            return;
+        }
+        let settings = voice_audio::VoicePrefs::load().share;
+        self.share_picker = share::Picker { settings, ..Default::default() };
+        self.send(backend::Command::ShareSources);
+        self.fill_share_picker(cx);
+        self.ui.modal(cx, ids!(share_dialog)).open(cx);
+    }
+
+    /// The picker as `share_picker` says.
+    fn fill_share_picker(&mut self, cx: &mut Cx) {
+        let windows = self.share_picker.windows;
+        let shown: Vec<share::Source> = self.share_picker.shown().into_iter().cloned().collect();
+        let note = match (self.share_picker.sources.is_none(), shown.is_empty(), windows) {
+            (true, ..) => "Looking for screens and windows…",
+            (false, true, false) => "No screens to share.",
+            (false, true, true) => "No windows to share.",
+            _ => "",
+        };
+        self.ui.label(cx, ids!(ss_loading)).set_text(cx, note);
+        self.ui.view(cx, ids!(ss_loading)).set_visible(cx, !note.is_empty());
+        for (path, on) in [(ids!(ss_tab_screens), !windows), (ids!(ss_tab_windows), windows)] {
+            let mut pill = self.ui.widget(cx, path);
+            let bg = if on { theme::tok("gray_600", 1.0) } else { lists::rgba(0, 0.0) };
+            script_apply_eval!(cx, pill, {draw_bg +: {color: #(bg)}});
+        }
+        // Pictures, made once per tab's list.
+        if self.share_picker.thumbs.len() != shown.len() {
+            self.share_picker.thumbs = shown
+                .iter()
+                .map(|s| {
+                    s.thumb.as_ref().map(|(w, h, px)| {
+                        let format = TextureFormat::VecBGRAu8_32 { width: *w, height: *h, data: Some(px.clone()), updated: TextureUpdated::Full };
+                        Texture::new_with_format(cx, format)
+                    })
+                })
+                .collect();
+        }
+        for i in 0..SHARE_SLOTS {
+            let path = [id!(ss_grid), LiveId::from_str(&format!("ss_src{i}"))];
+            let slot = self.ui.view(cx, &path);
+            let Some(src) = shown.get(i) else {
+                slot.set_visible(cx, false);
+                continue;
+            };
+            slot.set_visible(cx, true);
+            slot.label(cx, ids!(name)).set_text(cx, &src.title);
+            slot.image(cx, ids!(thumb)).set_texture(cx, self.share_picker.thumbs.get(i).cloned().flatten());
+            let on = if self.share_picker.pick == Some((src.window, src.id)) { 1.0 } else { 0.0 };
+            let mut w = self.ui.widget(cx, &path);
+            script_apply_eval!(cx, w, {draw_bg +: {on: #(on)}});
+        }
+        let st = self.share_picker.settings.clone();
+        // Rails' .ss-pill-active: the gradient, white text.
+        let mark = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId], on: bool| {
+            let mut w = ui.widget(cx, path);
+            let v = if on { 1.0 } else { 0.0 };
+            script_apply_eval!(cx, w, {draw_bg +: {on: #(v)}});
+            let mut label = ui.widget(cx, &[path, ids!(label)].concat());
+            let c = if on { lists::rgba(0xffffff, 1.0) } else { theme::tok("gray_200", 1.0) };
+            script_apply_eval!(cx, label, {draw_text +: {color: #(c)}});
+        };
+        for (path, h) in SHARE_HEIGHTS {
+            mark(&self.ui, cx, path, st.height == h);
+        }
+        for (path, f) in SHARE_FPS {
+            mark(&self.ui, cx, path, st.fps == f);
+        }
+        mark(&self.ui, cx, ids!(ss_smooth), !st.clarity);
+        mark(&self.ui, cx, ids!(ss_clear), st.clarity);
+        // Go Live once something is picked.
+        let mut go = self.ui.widget(cx, ids!(ss_go));
+        let ready = if self.share_picker.pick.is_some() { 1.0 } else { 0.0 };
+        script_apply_eval!(cx, go, {draw_bg +: {on: #(ready)}});
+        self.ui.redraw(cx);
+    }
+
+    /// The picker's clicks.
+    fn share_picker_actions(&mut self, cx: &mut Cx, actions: &Actions) {
+        let tapped = |ui: &WidgetRef, cx: &mut Cx, path: &[LiveId]| ui.view(cx, path).finger_up(actions).is_some_and(|e| !e.cancelled);
+        let mut changed = false;
+        if tapped(&self.ui, cx, ids!(ss_close)) || tapped(&self.ui, cx, ids!(ss_cancel)) {
+            self.ui.modal(cx, ids!(share_dialog)).close(cx);
+            self.share_picker = Default::default();
+            return;
+        }
+        for (path, windows) in [(ids!(ss_tab_screens), false), (ids!(ss_tab_windows), true)] {
+            if tapped(&self.ui, cx, path) && self.share_picker.windows != windows {
+                self.share_picker.windows = windows;
+                self.share_picker.thumbs.clear();
+                changed = true;
+            }
+        }
+        let shown: Vec<(bool, u64)> = self.share_picker.shown().iter().map(|s| (s.window, s.id)).collect();
+        for (i, key) in shown.iter().enumerate().take(SHARE_SLOTS) {
+            if tapped(&self.ui, cx, &[id!(ss_grid), LiveId::from_str(&format!("ss_src{i}"))]) {
+                self.share_picker.pick = Some(*key);
+                changed = true;
+            }
+        }
+        for (path, h) in SHARE_HEIGHTS {
+            if tapped(&self.ui, cx, path) {
+                self.share_picker.settings.height = h;
+                changed = true;
+            }
+        }
+        for (path, f) in SHARE_FPS {
+            if tapped(&self.ui, cx, path) {
+                self.share_picker.settings.fps = f;
+                changed = true;
+            }
+        }
+        for (path, clarity) in [(ids!(ss_smooth), false), (ids!(ss_clear), true)] {
+            if tapped(&self.ui, cx, path) {
+                self.share_picker.settings.clarity = clarity;
+                changed = true;
+            }
+        }
+        if tapped(&self.ui, cx, ids!(ss_go)) {
+            if let Some((window, id)) = self.share_picker.pick {
+                let settings = self.share_picker.settings.clone();
+                let mut prefs = voice_audio::VoicePrefs::load();
+                prefs.share = settings.clone();
+                prefs.save();
+                self.send(backend::Command::StartShare { window, id, settings });
+                self.ui.modal(cx, ids!(share_dialog)).close(cx);
+                self.share_picker = Default::default();
+                return;
+            }
+        }
+        if changed {
+            self.fill_share_picker(cx);
+        }
+    }
+
+    /// Starts or stops watching someone's stream.
+    fn watch_stream(&mut self, cx: &mut Cx, pubkey: &str, on: bool) {
+        if on {
+            self.watching.insert(pubkey.to_owned());
+        } else {
+            self.watching.remove(pubkey);
+            if self.stream_full.as_deref() == Some(pubkey) {
+                self.set_stream_full(cx, None);
+            }
+            let focused = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().is_some_and(|v| v.focus.as_deref() == Some(pubkey));
+            if focused {
+                if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+                    v.focus = None;
+                }
+            }
+        }
+        self.send(backend::Command::WatchStream { pubkey: pubkey.to_owned(), on });
+        // The tile updates on the next frame.
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            for s in v.streams.iter_mut().filter(|s| s.pubkey == pubkey) {
+                s.watching = on;
+            }
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+    }
+
+    /// A stream filling the window (and the screen, as the video player
+    /// does), or back.
+    fn set_stream_full(&mut self, cx: &mut Cx, pubkey: Option<String>) {
+        let on = pubkey.is_some();
+        self.stream_full = pubkey;
+        self.ui.view(cx, ids!(stream_full)).set_visible(cx, on);
+        let window = self.ui.window(cx, ids!(main_window));
+        let os = std::env::var_os("INFERNO_TEST_NO_OS_FULLSCREEN").is_none();
+        if os && on != window.is_fullscreen(cx) {
+            if on {
+                window.fullscreen(cx);
+            } else {
+                window.disable_fullscreen(cx);
+            }
+        }
+        if let Some(full) = self.stream_full.clone() {
+            let tex = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().and_then(|v| v.stream_videos.get(&full).cloned());
+            let img = self.ui.image(cx, ids!(stream_full.sf_img));
+            let yuv = self.ui.widget(cx, ids!(stream_full.sf_yuv));
+            voice_view::show_video(cx, &img, &yuv, tex.as_ref());
+        }
+        self.ui.redraw(cx);
+    }
+
+    /// One frame of the speaking indicator: where each level is heading
+    /// (ours from the microphone, everyone else's from the call), and a
+    /// spring that follows it: a quick rise with a little overshoot, a
+    /// softer fall, so it breathes with the voice instead of stepping.
+    fn sample_levels(&mut self, cx: &mut Cx) {
+        self.check_afk(cx);
+        let level = self.mic.sample();
+        if self.mic_test {
+            // Rails' test meter: a green bar across the track.
+            let track = self.ui.view(cx, ids!(vv_track)).area().rect(cx).size.x;
+            let w = ((level / 0.25).min(1.0) as f64 * track).round();
+            let mut bar = self.ui.widget(cx, ids!(vv_level));
+            script_apply_eval!(cx, bar, {width: #(w)});
+            self.ui.view(cx, ids!(vv_track)).redraw(cx);
+        }
+        let people: Vec<&backend::VoicePerson> = self.voice_people.values().flatten().collect();
+        let mut target = VoiceLevels::new();
+        if let (Some(me), Some(l)) = (people.iter().find(|p| p.me), voice_audio::speaking(level)) {
+            target.insert(me.pubkey.clone(), l);
+            // Talking counts as being here.
+            self.last_active = Some(std::time::Instant::now());
+        }
+        // Everyone else: their voice as we receive it, through the same
+        // curve as ours. A level not updated lately (muted, gone) is silence.
+        if let Some(remote) = calls::LEVELS.lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            for (identity, (l, at)) in remote {
+                let fresh = at.elapsed() < std::time::Duration::from_millis(200);
+                let Some(l) = voice_audio::speaking(*l).filter(|_| fresh) else { continue };
+                if let Some(p) = people.iter().find(|p| !p.me && p.pubkey.starts_with(identity.as_str())) {
+                    target.insert(p.pubkey.clone(), l);
+                }
+            }
+        }
+        for key in target.keys() {
+            self.voice_spring.entry(key.clone()).or_insert((0.0, 0.0));
+        }
+        let mut shown = VoiceLevels::new();
+        self.voice_spring.retain(|key, (x, v)| {
+            let t = target.get(key).copied().unwrap_or(0.0);
+            // Two 60 Hz steps per tick (the spring was tuned at 60 Hz).
+            for _ in 0..2 {
+                // Stiffer rising than falling.
+                let k = if t > *x { 0.22 } else { 0.08 };
+                *v = *v * 0.72 + (t - *x) * k;
+                *x = (*x + *v).clamp(0.0, 1.3);
+            }
+            if *x > 0.004 {
+                // Rounded to 1/40: changes too small to see aren't redrawn.
+                shown.insert(key.clone(), (*x * 40.0).round() / 40.0);
+            }
+            t > 0.0 || *x > 0.002 || v.abs() > 0.001
+        });
+        if shown != self.voice_levels {
+            self.voice_levels = shown;
+            self.push_levels(cx);
+        }
+    }
+
+    fn push_levels(&mut self, cx: &mut Cx) {
+        if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+            list.levels = self.voice_levels.clone();
+        }
+        lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
+        if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+            v.levels = self.voice_levels.clone();
+        }
+        self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+    }
+
     fn set_home(&mut self, cx: &mut Cx, home: bool) {
+        if home {
+            self.show_voice(cx, None);
+        }
         self.home = home;
         self.sync_composer_emojis(cx);
         self.ui.view(cx, ids!(server_side)).set_visible(cx, !home);
@@ -5204,7 +6979,7 @@ impl App {
         self.dm_with = Some(pubkey.clone());
         self.ui.view(cx, ids!(friends_page)).set_visible(cx, false);
         self.ui.view(cx, ids!(chat_col)).set_visible(cx, true);
-        self.send(backend::Command::OpenDm(pubkey));
+        self.navigate(cx, backend::Command::OpenDm(pubkey));
         self.fill_dm_sidebar(cx);
     }
 
@@ -5809,6 +7584,10 @@ impl App {
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(rail.list)));
             }
             Update::Server { gid, name, sidebar, members, perms, roles, categories, channels } => {
+                if self.server_gid != *gid {
+                    self.show_voice(cx, None);
+                    self.voice_people.clear();
+                }
                 self.server_gid = gid.clone();
                 self.sync_composer_emojis(cx);
                 self.perms = perms.clone();
@@ -5839,15 +7618,115 @@ impl App {
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(members.list)));
             }
+            Update::VoicePeople { gid, people } => {
+                if *gid == self.server_gid {
+                    self.voice_people = people.clone();
+                    let prefs = voice_audio::VoicePrefs::load();
+                    let muted: std::collections::HashSet<String> = prefs.people.iter().filter(|(_, p)| p.muted).map(|(k, _)| k.clone()).collect();
+                    if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+                        list.local_muted = muted;
+                    }
+                    if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
+                        list.voice = people.clone();
+                    }
+                    lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
+                    self.fill_voice_view(cx);
+                }
+            }
+            Update::SpeakRequest { pubkey, name, channel } => {
+                self.speak_requests.retain(|r| r.0 != *pubkey);
+                self.speak_requests.push((pubkey.clone(), name.clone(), channel.clone()));
+                self.show_speak_request(cx);
+            }
+            Update::ShareSources(list) => {
+                if self.ui.modal(cx, ids!(share_dialog)).is_open() {
+                    // Screens first; the first one picked to start with.
+                    self.share_picker.pick = self.share_picker.pick.or(list.iter().find(|s| !s.window).map(|s| (false, s.id)));
+                    self.share_picker.sources = Some(list.clone());
+                    self.share_picker.thumbs.clear();
+                    self.fill_share_picker(cx);
+                }
+            }
+            Update::Sharing(on) => {
+                self.sharing = *on;
+                self.fill_voice_bar(cx);
+            }
+            Update::ShareEnded => {
+                self.send(backend::Command::StopShare);
+                self.toast(cx, "Your stream ended: the window closed.", Toast::Error);
+            }
+            Update::CallState(state) => {
+                if *state == calls::CallState::Idle {
+                    self.sharing = false;
+                }
+                let was = std::mem::replace(&mut self.call_state, *state);
+                if *state != calls::CallState::Connecting {
+                    self.voice_joining = None;
+                }
+                // Dropped by the server (not by us): leave, as Rails does
+                // once failover gives up.
+                if *state == calls::CallState::Idle && was == calls::CallState::Connected && self.my_voice.is_some() && !self.voice_leaving {
+                    self.send(backend::Command::LeaveVoice);
+                    self.toast(cx, "Disconnected from voice.", Toast::Error);
+                }
+                self.voice_leaving = false;
+                self.fill_voice_view(cx);
+            }
+            Update::Livekit { url, api_key, has_secret } => {
+                self.livekit_set = *has_secret;
+                self.ui.text_input(cx, ids!(lk_url)).set_text(cx, url);
+                self.ui.text_input(cx, ids!(lk_key)).set_text(cx, api_key);
+                self.ui.text_input(cx, ids!(lk_secret)).set_text(cx, "");
+                self.ui.label(cx, ids!(lk_status)).set_text(cx, if *has_secret { "Saved. Leave the secret blank to keep it." } else { "Not set up." });
+            }
+            Update::MyVoice(mine) => {
+                // Moved (by a moderator, or the AFK move): the page we had
+                // open for our old channel follows us (Rails opens the new one).
+                let was = self.my_voice.as_ref().map(|v| (v.gid.clone(), v.channel_id.clone()));
+                if let (Some((gid, old)), Some(new)) = (was, mine.as_ref()) {
+                    if gid == new.gid && old != new.channel_id && self.voice_open.as_deref() == Some(old.as_str()) && self.server_gid == gid {
+                        self.my_voice = mine.clone();
+                        self.show_voice(cx, Some(new.channel_id.clone()));
+                    }
+                }
+                self.my_voice = mine.clone();
+                if mine.is_none() {
+                    // Out of voice: nothing is watched any more.
+                    self.watching.clear();
+                    if self.stream_full.is_some() {
+                        self.set_stream_full(cx, None);
+                    }
+                    if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+                        v.focus = None;
+                        v.streams.clear();
+                        v.stream_videos.clear();
+                        v.videos.clear();
+                    }
+                }
+                self.update_mic(cx);
+                self.fill_voice_view(cx);
+                self.fill_voice_bar(cx);
+            }
             Update::Channel { gid, channel_id, name, topic, encrypted } => {
+                let sidechat = self.sidechat_open && self.voice_open.as_deref().and_then(|v| self.sidechat_of(v)).as_deref() == Some(channel_id.as_str());
+                if !sidechat {
+                    self.text_channel = Some(channel_id.clone());
+                }
                 if let Some(mut list) = self.ui.widget(cx, ids!(channels)).borrow_mut::<lists::ChannelList>() {
-                    list.selected = Some(channel_id.clone());
+                    list.selected = Some(self.voice_open.clone().unwrap_or_else(|| channel_id.clone()));
                     list.refilter();
                 }
                 lists::redraw_items(cx, &self.ui.portal_list(cx, ids!(channels.list)));
                 self.ui.label(cx, ids!(channel_hash)).set_text(cx, if *encrypted { "🔒" } else { "#" });
-                self.ui.label(cx, ids!(channel_name)).set_text(cx, name);
-                self.ui.label(cx, ids!(channel_topic)).set_text(cx, topic);
+                self.ui.label(cx, ids!(channel_name)).set_text(cx, if sidechat { "Chat" } else { name });
+                // In the chat panel the topic is hidden; its empty space
+                // pushes the close button to the edge (Rails' flex-1).
+                self.ui.label(cx, ids!(channel_topic)).set_text(cx, if sidechat { "" } else { topic });
+                self.ui.widget(cx, ids!(channel_topic)).set_visible(cx, true);
+                // Rails' placeholder: "Message #channel".
+                if let Some(mut c) = self.ui.widget(cx, ids!(composer)).borrow_mut::<rich_input::RichInput>() {
+                    c.set_empty_text(cx, format!("Message #{name}"));
+                }
                 let _ = gid;
             }
             Update::Timeline { gid, channel_id, rows, can_pin, mentions } => {
@@ -5985,6 +7864,9 @@ impl App {
                 }
             }
             Update::DmHeader { person, request } => {
+                if let Some(mut c) = self.ui.widget(cx, ids!(composer)).borrow_mut::<rich_input::RichInput>() {
+                    c.set_empty_text(cx, format!("Message @{}", person.name));
+                }
                 if self.dm_with.as_deref() != Some(person.pubkey.as_str()) {
                     return;
                 }
@@ -6031,6 +7913,7 @@ impl App {
             }
             Update::ServerSettings(settings) => {
                 self.srv = settings.clone();
+                self.fill_voice_view(cx);
                 if self.ui.view(cx, ids!(srv_settings)).visible() {
                     // Keep unsaved role edits; refresh the rest.
                     let drafts = std::mem::take(&mut self.role_drafts);
@@ -6084,6 +7967,12 @@ impl MatchEvent for App {
     fn handle_actions(&mut self, cx: &mut Cx, actions: &Actions) {
         self.viewer_handle_actions(cx, actions);
         self.inline_handle_actions(cx, actions);
+        // A gap's placeholders are on screen: fetch its page.
+        for a in actions {
+            if let (Some(message_list::HistoryWanted(until)), Some((gid, channel_id))) = (a.downcast_ref::<message_list::HistoryWanted>(), self.showing.clone()) {
+                self.send(backend::Command::LoadHistory { gid, channel_id, until: *until });
+            }
+        }
         self.copy_image_handle_actions(cx, actions);
         self.attachments_handle_actions(cx, actions);
         if self.ui.view(cx, ids!(attach_btn)).finger_up(actions).is_some_and(|e| !e.cancelled && e.was_tap()) {
@@ -6100,7 +7989,7 @@ impl MatchEvent for App {
             if self.home {
                 self.set_home(cx, false);
             }
-            self.send(backend::Command::SelectServer(gid));
+            self.navigate(cx, backend::Command::SelectServer(gid));
         }
 
         // Links and mentions in message bodies.
@@ -6250,7 +8139,7 @@ impl MatchEvent for App {
         if tap(&self.ui, cx, ids!(home_btn)) || tap(&self.ui, cx, ids!(friends_link)) {
             self.set_home(cx, true);
             self.show_friends(cx, self.friends_tab);
-            self.send(backend::Command::Home);
+            self.navigate(cx, backend::Command::Home);
         }
         if tap(&self.ui, cx, ids!(dm_add_friend)) {
             self.set_home(cx, true);
@@ -6377,7 +8266,23 @@ impl MatchEvent for App {
             .borrow_mut::<lists::ChannelList>()
             .and_then(|mut c| c.handle_list_actions(cx, actions));
         match sidebar_action {
-            Some(lists::ChannelListAction::Select(id)) => self.send(backend::Command::SelectChannel(id)),
+            Some(lists::ChannelListAction::Select(id)) => {
+                self.show_voice(cx, None);
+                self.navigate(cx, backend::Command::SelectChannel(id));
+            }
+            Some(lists::ChannelListAction::OpenChat(id)) => {
+                self.sidechat_open = true;
+                self.show_voice(cx, Some(id));
+            }
+            Some(lists::ChannelListAction::VoicePerson { pubkey, at }) => {
+                let items = self.voice_menu(&pubkey);
+                self.open_menu(cx, items, dvec2(at.0, at.1));
+            }
+            // Rails: a voice channel opens its page and joins it.
+            Some(lists::ChannelListAction::JoinVoice(id)) => {
+                self.show_voice(cx, Some(id.clone()));
+                self.join_voice(id);
+            }
             Some(lists::ChannelListAction::CreateIn(cat)) => self.open_channel_page(cx, None, Some(cat)),
             Some(lists::ChannelListAction::Context { row, at }) => {
                 let items = self.sidebar_menu(row.as_ref());
@@ -6444,15 +8349,34 @@ impl MatchEvent for App {
             self.confirm(cx, Pending::Leave, "Leave Server", &body, "Leave Server", false);
         }
         // Context menu picks, and the confirm dialog
-        for (i, slot) in CTX_SLOTS.iter().enumerate() {
-            if tapped(&self.ui, cx, &[id!(ctx_menu), *slot, id!(item)]) {
-                if let Some(d) = self.ctx.get(i).cloned() {
-                    use ctxmenu::Action as A;
-                    let stays_open = matches!(d.action, A::Back | A::RolesFor(_) | A::TimeoutFor(_));
-                    if !stays_open {
-                        self.close_menu(cx);
+        if !self.ctx.is_empty() {
+            for (i, slot) in CTX_SLOTS.iter().enumerate().take(self.ctx.len()) {
+                // Hovering a row opens its flyout, or closes another's.
+                if self.ui.view(cx, &[id!(ctx_menu), *slot, id!(item)]).finger_hover_in(actions).is_some() {
+                    if matches!(self.ctx[i].kind, ctxmenu::Kind::Sub(_)) {
+                        self.open_flyout(cx, i);
+                    } else {
+                        self.close_flyout(cx);
                     }
-                    self.run_menu_action(cx, d.action);
+                }
+                if tapped(&self.ui, cx, &[id!(ctx_menu), *slot, id!(item)]) {
+                    self.pick_menu_row(cx, false, i);
+                }
+            }
+            for (i, slot) in CTX_SLOTS.iter().enumerate().take(self.ctx.len()) {
+                let Some(ctxmenu::Kind::Volume(pubkey, _)) = self.ctx.get(i).map(|s| s.kind.clone()) else { continue };
+                let slider = self.ui.slider(cx, &[id!(ctx_menu), *slot, id!(vol), id!(vol_slider)]);
+                let done = slider.end_slide(actions);
+                if let Some(v) = slider.slided(actions).or(done) {
+                    let percent = v.round().clamp(0.0, 200.0) as u32;
+                    self.ui.label(cx, &[id!(ctx_menu), *slot, id!(vol), id!(vol_pct)]).set_text(cx, &format!("{percent}%"));
+                    self.ctx[i].kind = ctxmenu::Kind::Volume(pubkey.clone(), percent);
+                    self.set_person_audio(cx, &pubkey, Some(percent), None);
+                }
+            }
+            for (i, slot) in SUB_SLOTS.iter().enumerate().take(self.ctx_sub.len()) {
+                if tapped(&self.ui, cx, &[id!(ctx_sub), *slot, id!(item)]) {
+                    self.pick_menu_row(cx, true, i);
                 }
             }
         }
@@ -6512,6 +8436,7 @@ impl MatchEvent for App {
                 voice_user_limit: self.ui.text_input(cx, ids!(ch_limit)).text().trim().parse::<u32>().unwrap_or(0).min(99),
                 video_enabled: self.ui.check_box(cx, ids!(ch_video)).active(cx),
                 depth: 0,
+                sidechat: existing.as_ref().and_then(|e| e.sidechat.clone()),
             };
             self.send(backend::Command::SaveChannel(form));
             self.close_pages(cx);
@@ -6580,7 +8505,7 @@ impl MatchEvent for App {
                 }
             } else {
                 self.pending_jump = Some((r.channel_id.clone(), r.id.clone()));
-                self.send(backend::Command::SelectChannel(r.channel_id));
+                self.navigate(cx, backend::Command::SelectChannel(r.channel_id));
             }
         }
 
@@ -6956,6 +8881,92 @@ impl MatchEvent for App {
             self.send(backend::Command::Unban(pk));
         }
 
+        // Voice page.
+        let card_menu = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().and_then(|v| v.context(cx, actions));
+        if let Some((pubkey, at)) = card_menu {
+            let items = self.voice_menu(&pubkey);
+            self.open_menu(cx, items, at);
+        }
+        let voice_click = self.ui.widget(cx, ids!(voice_col)).borrow::<voice_view::VoiceView>().map(|v| v.clicked(cx, actions));
+        match voice_click {
+            Some(voice_view::VoiceViewAction::Join) => {
+                if let Some(id) = self.voice_open.clone() {
+                    self.join_voice(id);
+                    self.fill_voice_view(cx);
+                }
+            }
+            Some(voice_view::VoiceViewAction::Watch(pk)) => self.watch_stream(cx, &pk, true),
+            // ✕ on our own stream ends it.
+            Some(voice_view::VoiceViewAction::StopWatching(pk)) if self.voice_people.values().flatten().any(|p| p.me && p.pubkey == pk) => {
+                self.send(backend::Command::StopShare);
+            }
+            Some(voice_view::VoiceViewAction::StopWatching(pk)) => self.watch_stream(cx, &pk, false),
+            Some(voice_view::VoiceViewAction::Focus(pk)) => {
+                if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+                    v.focus = Some(pk);
+                }
+                self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+            }
+            Some(voice_view::VoiceViewAction::Unfocus) => {
+                if let Some(mut v) = self.ui.widget(cx, ids!(voice_col)).borrow_mut::<voice_view::VoiceView>() {
+                    v.focus = None;
+                }
+                self.ui.widget(cx, ids!(voice_col)).redraw(cx);
+            }
+            Some(voice_view::VoiceViewAction::Fullscreen(pk)) => self.set_stream_full(cx, Some(pk)),
+            Some(voice_view::VoiceViewAction::ToggleChat) => {
+                let open = !self.sidechat_open;
+                self.set_sidechat(cx, open);
+            }
+            Some(voice_view::VoiceViewAction::OpenSettings) => {
+                self.open_srv_settings(cx);
+                self.show_srv_page(cx, 8);
+            }
+            _ => {}
+        }
+
+        if tapped(&self.ui, cx, ids!(sf_exit)) {
+            self.set_stream_full(cx, None);
+        }
+        if tapped(&self.ui, cx, ids!(sidechat_close)) {
+            self.set_sidechat(cx, false);
+        }
+
+        // Voice bar. Rails: deafening also mutes and undeafening unmutes;
+        // unmuting while deafened undeafens too.
+        if tapped(&self.ui, cx, ids!(voice_leave)) {
+            self.voice_leaving = true;
+            self.send(backend::Command::LeaveVoice);
+        }
+        if tapped(&self.ui, cx, ids!(vb_broadcast)) {
+            let on = !self.my_voice.as_ref().is_some_and(|v| v.broadcasting);
+            self.send(backend::Command::VoiceBroadcast(on));
+        }
+        if tapped(&self.ui, cx, ids!(vb_ask)) {
+            if self.my_voice.as_ref().is_some_and(|v| v.showcased) {
+                self.send(backend::Command::StopShowcase);
+            } else {
+                self.send(backend::Command::AskToSpeak);
+            }
+        }
+        if tapped(&self.ui, cx, ids!(vb_allow)) {
+            if let Some((pubkey, _, _)) = self.speak_requests.first().cloned() {
+                self.send(backend::Command::Showcase { target: pubkey, on: true });
+            }
+            self.next_speak_request(cx);
+        }
+        if tapped(&self.ui, cx, ids!(vb_dismiss)) {
+            self.next_speak_request(cx);
+        }
+        if tapped(&self.ui, cx, ids!(voice_mute)) {
+            self.toggle_voice(cx, false);
+        } else if tapped(&self.ui, cx, ids!(voice_deafen)) {
+            self.toggle_voice(cx, true);
+        } else if tapped(&self.ui, cx, ids!(voice_share)) {
+            self.toggle_share(cx);
+        }
+        self.share_picker_actions(cx, actions);
+
         // Settings overlay
         if tapped(&self.ui, cx, ids!(open_settings)) {
             self.set_settings_open(cx, true);
@@ -6980,6 +8991,51 @@ impl MatchEvent for App {
                 self.show_settings_page(cx, i);
             }
         }
+        // Voice & Video page.
+        if self.ui.button(cx, ids!(vv_test)).clicked(actions) {
+            let on = !self.mic_test;
+            self.set_mic_test(cx, on);
+        }
+        let mut prefs_changed = None;
+        for (path, input) in [(ids!(vv_input), true), (ids!(vv_output), false)] {
+            if let Some(i) = self.ui.drop_down(cx, path).changed(actions) {
+                let name = i.checked_sub(1).and_then(|i| self.mic.names(input).get(i).cloned());
+                let mut prefs = prefs_changed.take().unwrap_or_else(voice_audio::VoicePrefs::load);
+                if input {
+                    prefs.input = name.clone();
+                    self.mic.choose(cx, name);
+                } else {
+                    prefs.output = name;
+                }
+                prefs_changed = Some(prefs);
+            }
+        }
+        for path in [ids!(vv_ns), ids!(vv_ec), ids!(vv_agc), ids!(vv_gpu)] {
+            if let Some(on) = self.ui.check_box(cx, path).changed(actions) {
+                let mut prefs = prefs_changed.take().unwrap_or_else(voice_audio::VoicePrefs::load);
+                match path[0] {
+                    p if p == id!(vv_ns) => prefs.noise_suppression = on,
+                    p if p == id!(vv_ec) => prefs.echo_cancellation = on,
+                    p if p == id!(vv_gpu) => {
+                        prefs.gpu_video = on;
+                        calls::GPU_VIDEO.store(on, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    _ => prefs.auto_gain_control = on,
+                }
+                prefs_changed = Some(prefs);
+            }
+        }
+        if let Some(prefs) = prefs_changed {
+            prefs.save();
+        }
+        if self.ui.button(cx, ids!(lk_save)).clicked(actions) {
+            self.send(backend::Command::SaveLivekit {
+                url: self.ui.text_input(cx, ids!(lk_url)).text(),
+                api_key: self.ui.text_input(cx, ids!(lk_key)).text(),
+                api_secret: self.ui.text_input(cx, ids!(lk_secret)).text(),
+            });
+        }
+
         if self.ui.button(cx, ids!(copy_npub)).clicked(actions) {
             cx.copy_to_clipboard(&self.npub);
         }
@@ -7050,7 +9106,7 @@ impl MatchEvent for App {
             self.ui.modal(cx, ids!(dialog)).close(cx);
             self.set_home(cx, false);
             if l.joined {
-                self.send(backend::Command::SelectServer(l.gid));
+                self.navigate(cx, backend::Command::SelectServer(l.gid));
             } else if l.age_restricted || l.server_type == "adult" {
                 let body = format!("{} is age-restricted (18+). By joining, you confirm you are 18 years of age or older.", l.name);
                 self.confirm(cx, Pending::JoinPublic(l.gid, l.owner.to_hex()), "Age-restricted server", &body, "I am 18 or older — Join", false);
@@ -7150,6 +9206,14 @@ impl AppMain for App {
         if std::env::var_os("INFERNO_VIDEO_ZERO_COPY").is_none() && std::env::var_os("MAKEPAD_GST_NO_DMABUF").is_none() {
             std::env::set_var("MAKEPAD_GST_NO_DMABUF", "1");
         }
+        // Video on the GPU (Voice & Video): H.264 goes to VA-API when we
+        // publish it; incoming frames are converted by a shader.
+        calls::init_webrtc_log();
+        let gpu = voice_audio::VoicePrefs::load().gpu_video;
+        calls::GPU_VIDEO.store(gpu, std::sync::atomic::Ordering::Relaxed);
+        if std::env::var_os("LIVEKIT_PREFERRED_HW_ENCODER").is_none() {
+            std::env::set_var("LIVEKIT_PREFERRED_HW_ENCODER", "vaapi");
+        }
         crate::makepad_widgets::script_mod(vm);
         rich_input::script_mod(vm);
         message_text::script_mod(vm);
@@ -7157,6 +9221,25 @@ impl AppMain for App {
     }
 
     fn handle_event(&mut self, cx: &mut Cx, event: &Event) {
+        if matches!(event, Event::KeyDown(_) | Event::MouseDown(_) | Event::MouseMove(_) | Event::Scroll(_)) {
+            self.last_active = Some(std::time::Instant::now());
+        }
+        self.mic.handle_event(cx, event);
+        if self.mic.devices_changed && self.settings_page == VOICE_PAGE && self.ui.view(cx, ids!(settings)).visible() {
+            self.fill_voice_settings(cx);
+        }
+        if self.voice_timer.is_event(event).is_some() {
+            self.sample_levels(cx);
+        }
+        if self.video_timer.is_event(event).is_some() {
+            self.sample_video(cx);
+        }
+        if let Event::Shutdown = event {
+            // Others stop seeing us in voice (briefly waited for).
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.send(backend::Command::Shutdown(tx));
+            let _ = rx.recv_timeout(std::time::Duration::from_secs(2));
+        }
         media_cache::handle_event(event);
         self.preserve_handle_event(cx, event);
         // Pasting pictures and copied files into the composer (clipboard_image.rs).
@@ -7293,7 +9376,9 @@ impl AppMain for App {
         // Esc closes the settings overlay (spec) and open dropdowns.
         if let Event::KeyDown(k) = event {
             if k.key_code == KeyCode::Escape {
-                if self.inline_is_fullscreen() {
+                if self.stream_full.is_some() {
+                    self.set_stream_full(cx, None);
+                } else if self.inline_is_fullscreen() {
                     self.inline_fullscreen(cx, false);
                 } else if self.ui.view(cx, ids!(composer_picker)).visible() || self.ui.view(cx, ids!(status_layer)).visible() {
                     self.close_pickers(cx);
@@ -7345,7 +9430,8 @@ impl AppMain for App {
             if self.ui.view(cx, ids!(card_layer)).visible() && !self.ui.view(cx, ids!(card)).area().rect(cx).contains(m.abs) {
                 self.close_card(cx);
             }
-            if self.ui.view(cx, ids!(ctx_layer)).visible() && !self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).contains(m.abs) {
+            let in_flyout = self.ui.view(cx, ids!(ctx_sub)).visible() && self.ui.view(cx, ids!(ctx_sub)).area().rect(cx).contains(m.abs);
+            if self.ui.view(cx, ids!(ctx_layer)).visible() && !in_flyout && !self.ui.view(cx, ids!(ctx_menu)).area().rect(cx).contains(m.abs) {
                 self.close_menu(cx);
             }
             let menu = self.ui.view(cx, ids!(server_menu));

@@ -1,0 +1,8 @@
+# LiveKit's prebuilt libwebrtc is built against Chromium's libc++, which
+# needs clang 21 or newer (webrtc-sys checks). Install it from apt.llvm.org:
+#   wget -qO /tmp/llvm.sh https://apt.llvm.org/llvm.sh && sudo bash /tmp/llvm.sh 21
+[target.x86_64-unknown-linux-gnu]
+
+[env]
+CC = "clang-21"
+CXX = "clang++-21"

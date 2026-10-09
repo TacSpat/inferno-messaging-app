@@ -23,6 +23,11 @@ use crate::sync::{config::ConfigSync, profile::{self, ProfileUpdate}, relays};
 use crate::{dtag, kinds};
 use crate::social::{self, DmMessage, Friendship, Payload, Response, Rumor};
 
+mod history;
+mod voice;
+pub use voice::{VoiceModeration, VoiceState, VoiceTicket};
+pub use history::{Coverage, PAGE as HISTORY_PAGE};
+
 
 /// Authors per profile filter: relays cap filter sizes, and a server can
 /// have thousands of members.
@@ -160,6 +165,14 @@ pub enum Update {
     Social,
     /// A profile we were waiting for arrived.
     Profile(PublicKey),
+    /// Who is in this server's voice channels changed.
+    Voice(String),
+    /// Someone above let us be heard in their channel (or stopped it).
+    Showcased { gid: String, on: bool, by: PublicKey },
+    /// Someone in an ember below asks to be heard (Rails' Ask to Speak).
+    SpeakRequest { gid: String, channel_id: String, from: PublicKey },
+    /// A moderator muted, deafened, moved or disconnected us in voice.
+    VoiceModerated { gid: String, action: VoiceModeration, by: PublicKey },
 }
 
 /// A public server, as discovery lists it.
@@ -246,6 +259,16 @@ pub struct Session {
     /// relays refuse search filters. Connected the first time it's needed.
     gif_relays: Vec<String>,
     gif_pool: tokio::sync::OnceCell<Option<Arc<RelayPool>>>,
+    /// Channel history fetched a page at a time (session/history.rs).
+    history: Mutex<history::History>,
+    history_wake: Arc<tokio::sync::Notify>,
+    /// Servers whose state changed and haven't been announced yet: a burst
+    /// (a relay replaying state, several relays with different versions) is
+    /// announced once it settles, so the UI only sees where it ends up.
+    server_dirty: Arc<Mutex<std::collections::BTreeSet<String>>>,
+    server_wake: Arc<tokio::sync::Notify>,
+    /// Who is in which voice channel (session/voice.rs).
+    voice: Mutex<voice::Voice>,
 }
 
 /// Public relays known to answer NIP-50 searches over GIF metadata.
@@ -256,6 +279,8 @@ impl Drop for Session {
     fn drop(&mut self) {
         self.refresh.notify_one();
         self.config_dirty.notify_one();
+        self.history_wake.notify_one();
+        self.server_wake.notify_one();
     }
 }
 
@@ -263,8 +288,10 @@ impl Drop for Session {
 /// how long config changes settle before one push (Flutter used 5s).
 const REFRESH_SETTLE: std::time::Duration = std::time::Duration::from_millis(500);
 const CONFIG_SETTLE: std::time::Duration = std::time::Duration::from_secs(5);
-/// Messages fetched for a server's channels when we first join it.
-const JOIN_BACKFILL: usize = 500;
+/// Server state changes are announced after this long without another,
+/// and at most this long after the first.
+const SERVER_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
+const SERVER_SETTLE_MAX: std::time::Duration = std::time::Duration::from_secs(2);
 /// Overlap when resuming a subscription from the newest cached event, for
 /// clock skew between relays.
 const RESUME_OVERLAP_SECS: u64 = 60;
@@ -344,6 +371,11 @@ impl Session {
             },
             gif_pool: tokio::sync::OnceCell::new(),
             config_dirty: Arc::new(tokio::sync::Notify::new()),
+            history: Mutex::new(Default::default()),
+            history_wake: Arc::new(tokio::sync::Notify::new()),
+            server_dirty: Arc::new(Mutex::new(Default::default())),
+            server_wake: Arc::new(tokio::sync::Notify::new()),
+            voice: Mutex::new(Default::default()),
         });
         session.rebuild_channel_keys()?;
         session.open_stored_dms()?;
@@ -352,6 +384,8 @@ impl Session {
         session.catch_up_people();
         session.catch_up_servers();
         session.spawn_batchers();
+        session.spawn_history();
+        session.spawn_voice();
         Ok(session)
     }
 
@@ -455,7 +489,26 @@ impl Session {
         }
     }
 
+    /// Marks `gid` changed; announced once the burst it's part of settles.
+    fn server_changed(&self, gid: String) {
+        self.server_dirty.lock().unwrap_or_else(|e| e.into_inner()).insert(gid);
+        self.server_wake.notify_one();
+    }
+
     fn spawn_batchers(self: &Arc<Self>) {
+        let (me, wake, dirty) = (Arc::downgrade(self), self.server_wake.clone(), self.server_dirty.clone());
+        tokio::spawn(async move {
+            loop {
+                wake.notified().await;
+                let first = tokio::time::Instant::now();
+                while first.elapsed() < SERVER_SETTLE_MAX && tokio::time::timeout(SERVER_SETTLE, wake.notified()).await.is_ok() {}
+                let Some(s) = me.upgrade() else { break };
+                let gids = std::mem::take(&mut *dirty.lock().unwrap_or_else(|e| e.into_inner()));
+                for gid in gids {
+                    let _ = s.updates.send(Update::Server(gid));
+                }
+            }
+        });
         let (me, refresh) = (Arc::downgrade(self), self.refresh.clone());
         tokio::spawn(async move {
             loop {
@@ -714,8 +767,9 @@ impl Session {
         self.publish(&publish::join(&self.keys, &state.gid, "", &me, now_secs(), invite, &[])?).await?;
         self.store.set_server_membership(&state.gid, true)?;
         self.push_config();
-        self.backfill(state).await?;
         self.resubscribe().await?;
+        // Its history comes a page at a time, its channels first.
+        self.prefer_server(&state.gid)?;
         let _ = self.updates.send(Update::Server(state.gid.clone()));
         Ok(())
     }
@@ -1835,23 +1889,6 @@ impl Session {
         Ok(kept)
     }
 
-    /// One bounded fetch of recent history for a server we just joined; the
-    /// live subscription only covers what's new from here on.
-    async fn backfill(&self, state: &ServerState) -> Result<()> {
-        let groups: Vec<String> = state.structure.channels.iter().filter_map(|c| c.group_id.clone()).collect();
-        if groups.is_empty() {
-            return Ok(());
-        }
-        let filter = Filter::new()
-            .kinds(CHANNEL_KINDS.map(Kind::Custom))
-            .custom_tags(SingleLetterTag::from_char('h').expect("h"), groups)
-            .limit(JOIN_BACKFILL);
-        for e in self.pool.fetch(vec![filter]).await? {
-            self.store.put_event(&e)?;
-        }
-        Ok(())
-    }
-
     fn resume_from(&self, newest: Option<i64>) -> Option<Timestamp> {
         newest.map(|at| Timestamp::from((at.max(0) as u64).saturating_sub(RESUME_OVERLAP_SECS)))
     }
@@ -1898,6 +1935,7 @@ impl Session {
         }
         if gids.is_empty() {
             self.pool.unsubscribe_keyed("servers").await;
+            self.pool.unsubscribe_keyed("voice").await;
         } else {
             let exact: Vec<String> = gids
                 .iter()
@@ -1912,6 +1950,13 @@ impl Session {
                         .since(self.started_at),
                 ])
                 .await?;
+            // Who is in voice: everyone's newest state (replaceable), expired
+            // ones dropped as they come.
+            self.pool
+                .subscribe_keyed("voice", vec![Filter::new()
+                    .kind(Kind::Custom(kinds::VOICE_STATE))
+                    .custom_tags(SingleLetterTag::from_char('h').expect("h"), gids.clone())])
+                .await?;
         }
         if groups.is_empty() {
             self.pool.unsubscribe_keyed("channels").await;
@@ -1920,13 +1965,13 @@ impl Session {
             let mut filter = Filter::new()
                 .kinds(CHANNEL_KINDS.map(Kind::Custom))
                 .custom_tags(SingleLetterTag::from_char('h').expect("h"), group_ids.clone());
-            // Resume from what's cached; new servers get `backfill` instead.
-            // The start point is pinned per session so the filter stays equal
-            // across refreshes and re-subscribing stays a no-op.
-            let newest = self.store.newest_tagged(&CHANNEL_KINDS, 'h', &group_ids)?;
-            let since = self.resume_from(newest).map_or(self.started_at, |t| t.min(self.started_at));
+            // Only what's new from the session's start: history comes a page
+            // at a time (session/history.rs), never all at once. The start is
+            // pinned per session so re-subscribing stays a no-op.
+            let since = Timestamp::from(self.started_at.as_secs().saturating_sub(RESUME_OVERLAP_SECS));
             filter = filter.since(since);
             self.pool.subscribe_keyed("channels", vec![filter]).await?;
+            self.history_live(&group_ids, since.as_secs() as i64)?;
         }
         *self.groups.lock().unwrap_or_else(|e| e.into_inner()) = groups;
         Ok(())
@@ -1964,6 +2009,13 @@ impl Session {
         match kind {
             _ if event.kind == Kind::GiftWrap || event.kind == Kind::PrivateDirectMessage => {
                 if let Ok(msg) = dm::open(&self.keys, event) {
+                    // Voice tokens ride kind 14 (Rails' RPC); not DMs.
+                    if event.kind == Kind::PrivateDirectMessage && msg.sender != self.keys.public_key() && self.voice_rpc(msg.sender, &msg.body, event.created_at).await? {
+                        return Ok(());
+                    }
+                    if event.kind == Kind::PrivateDirectMessage && (msg.body.contains("\"voice_token_") || msg.body.contains("\"voice_state_sync\"") || msg.body.contains("\"voice_moderation\"") || msg.body.contains("\"voice_speak_request\"") || msg.body.contains("\"voice_showcase\"")) {
+                        return Ok(());
+                    }
                     self.store.put_event(event)?;
                     let new = self.keep_dm(&event.id, &msg)?;
                     if new && !self.blocked()?.contains(&msg.sender) {
@@ -2000,7 +2052,10 @@ impl Session {
                     && wire::target(event).is_some_and(|p| {
                         self.server(&gid).ok().flatten().is_some_and(|s| s.is_member(&p))
                     });
-                self.store.put_event(event)?;
+                // A copy we have, or an older one than ours: nothing changed.
+                if !matches!(self.store.put_event(event)?, crate::store::PutOutcome::Inserted) {
+                    return Ok(());
+                }
                 if kind == kinds::SERVER_MEMBER && !was_member {
                     if let Some(p) = wire::target(event) {
                         if self.server(&gid)?.is_some_and(|s| s.is_member(&p)) {
@@ -2019,8 +2074,9 @@ impl Session {
                     // batched so a burst of member events is one refresh.
                     self.refresh.notify_one();
                 }
-                let _ = self.updates.send(Update::Server(gid));
+                self.server_changed(gid);
             }
+            kinds::VOICE_STATE => self.voice_event(event).await?,
             _ if CHANNEL_KINDS.contains(&kind) => {
                 let group = event.tags.iter().find_map(|t| {
                     let s = t.as_slice();

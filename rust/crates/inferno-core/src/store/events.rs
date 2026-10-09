@@ -239,6 +239,27 @@ impl Store {
         Ok(newest)
     }
 
+    /// Oldest `created_at` among cached events of `kinds` tagged `name` with
+    /// any of `values`.
+    pub fn oldest_tagged(&self, kinds: &[u16], name: char, values: &[String]) -> Result<Option<i64>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT min(e.created_at) FROM events e JOIN event_tags t ON t.event_id = e.id
+             WHERE t.name = ?1 AND t.value = ?2 AND e.kind = ?3",
+        )?;
+        let mut oldest: Option<i64> = None;
+        for value in values {
+            for kind in kinds {
+                let at: Option<i64> = stmt.query_row(params![name.to_string(), value, kind], |r| r.get(0))?;
+                oldest = match (oldest, at) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+            }
+        }
+        Ok(oldest)
+    }
+
     /// Of `authors`, those with a stored event of `kind`, and the newest such
     /// event's time: the point a catch-up fetch can resume from.
     pub fn authors_with(&self, kind: u16, authors: &[String]) -> Result<(std::collections::HashSet<String>, Option<i64>)> {

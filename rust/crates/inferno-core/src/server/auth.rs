@@ -44,6 +44,9 @@ pub enum Permission {
     SendGifs,
     SendCustomEmojis,
     SendCustomStickers,
+    /// Let someone in a nested voice channel be heard here (on by default,
+    /// like sending GIFs).
+    ElevateVoice,
 }
 
 impl Permission {
@@ -79,6 +82,7 @@ impl Permission {
             SendGifs => "send_gifs",
             SendCustomEmojis => "send_custom_emojis",
             SendCustomStickers => "send_custom_stickers",
+            ElevateVoice => "elevate_voice",
         }
     }
 }
@@ -87,7 +91,7 @@ impl Permission {
 /// everything (as in Rails); `owner` grants nothing extra.
 pub fn grants(permissions: &Map<String, Value>, p: Permission) -> bool {
     let on = |k: &str| permissions.get(k) == Some(&Value::Bool(true));
-    let default_on = matches!(p, Permission::SendGifs | Permission::SendCustomEmojis | Permission::SendCustomStickers);
+    let default_on = matches!(p, Permission::SendGifs | Permission::SendCustomEmojis | Permission::SendCustomStickers | Permission::ElevateVoice);
     on(Permission::Administrator.key()) || on(p.key()) || (default_on && permissions.get(p.key()) != Some(&Value::Bool(false)))
 }
 

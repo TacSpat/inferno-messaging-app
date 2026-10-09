@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use makepad_widgets::*;
 
-use crate::backend::{MemberRow, ServerItem, SidebarRow};
+use crate::backend::{MemberRow, ServerItem, SidebarRow, VoicePerson};
 
 pub(crate) fn rgba(hex: u32, alpha: f32) -> Vec4 {
     let [r, g, b, _] = crate::theme::Rgb(hex).vec4(1.0);
@@ -81,6 +81,12 @@ impl Widget for RailList {
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChannelListAction {
     Select(String),
+    /// A voice channel was clicked: join it (Rails' auto-join).
+    JoinVoice(String),
+    /// A voice channel's "Open chat": its page and chat, without joining.
+    OpenChat(String),
+    /// Right-click on someone listed under a voice channel.
+    VoicePerson { pubkey: String, at: (f64, f64) },
     /// The category's hover "+": create a channel in it.
     CreateIn(String),
     /// Right-click on a row (`None` = empty sidebar space) at window `at`.
@@ -127,6 +133,15 @@ pub struct ChannelList {
     collapsed: Option<HashSet<String>>,
     #[rust]
     pub selected: Option<String>,
+    /// Who is in each voice channel, by channel id.
+    #[rust]
+    pub voice: HashMap<String, Vec<VoicePerson>>,
+    /// Who is speaking (pubkey hex) and how loud (0..1).
+    #[rust]
+    pub levels: HashMap<String, f32>,
+    /// Muted just for us (pubkey hex).
+    #[rust]
+    pub local_muted: HashSet<String>,
     /// manage_channels: gears and drag-to-reorder.
     #[rust]
     pub can_manage: bool,
@@ -393,6 +408,21 @@ impl ChannelList {
                 redraw_items(cx, &list);
             }
             let row = self.rows.get(i).cloned();
+            // Someone in a voice channel (the channel's own row otherwise).
+            if let Some(SidebarRow::Channel { id, voice: true, .. }) = &row {
+                let people = self.voice.get(id).cloned().unwrap_or_default();
+                let slots = [ids!(p0), ids!(p1), ids!(p2), ids!(p3), ids!(p4), ids!(p5), ids!(p6), ids!(p7), ids!(p8), ids!(p9), ids!(p10), ids!(p11)];
+                let hit = slots.iter().enumerate().find_map(|(k, path)| {
+                    item.view(cx, &[id!(people), path[0]]).finger_down(actions).filter(|e| !e.device.is_primary_hit()).map(|e| (k, e))
+                });
+                if let Some((k, e)) = hit {
+                    if let Some(p) = people.get(k) {
+                        out = Some(ChannelListAction::VoicePerson { pubkey: p.pubkey.clone(), at: (e.abs.x, e.abs.y) });
+                        self.drag = None;
+                        continue;
+                    }
+                }
+            }
             if item.view(cx, ids!(add)).finger_up(actions).is_some_and(|e| !e.cancelled) {
                 if let Some(SidebarRow::Category { id, .. }) = row {
                     out = Some(ChannelListAction::CreateIn(id));
@@ -480,8 +510,16 @@ impl ChannelList {
                     (_, Some(SidebarRow::Category { id, .. })) if !e.cancelled && e.device.is_primary_hit() => {
                         self.toggle_category(cx, &id);
                     }
-                    (_, Some(SidebarRow::Channel { id, voice: false, .. })) if !e.cancelled && e.device.is_primary_hit() => {
-                        out = Some(ChannelListAction::Select(id));
+                    (_, Some(SidebarRow::Channel { id, voice, .. })) if !e.cancelled && e.device.is_primary_hit() => {
+                        let chat = item.view(cx, ids!(item.chat));
+                        let on_chat = voice && chat.visible() && chat.area().rect(cx).contains(e.abs);
+                        out = Some(if on_chat {
+                            ChannelListAction::OpenChat(id)
+                        } else if voice {
+                            ChannelListAction::JoinVoice(id)
+                        } else {
+                            ChannelListAction::Select(id)
+                        });
                     }
                     _ => {}
                 }
@@ -539,7 +577,7 @@ impl Widget for ChannelList {
                         row.view(cx, ids!(add)).set_visible(cx, hovered && self.can_manage);
                         row.draw_all(cx, &mut Scope::empty());
                     }
-                    SidebarRow::Channel { id, name, voice, encrypted, depth, last, guides, .. } => {
+                    SidebarRow::Channel { id, name, voice, encrypted, depth, last, guides, afk, .. } => {
                         let active = self.selected.as_deref() == Some(id.as_str());
                         let row = list.item(cx, i, if active { id!(ActiveChannel) } else { id!(Channel) });
                         let nesting = self.nest == Some((i, true));
@@ -549,15 +587,23 @@ impl Widget for ChannelList {
                             script_apply_eval!(cx, item, {draw_bg +: {color: #(bg)}});
                         }
                         row.widget(cx, ids!(item.nest_hint)).set_visible(cx, nesting);
-                        if !active {
+                        {
                             let mut tree = row.widget(cx, ids!(tree));
                             let (w, d) = (*depth as f64 * 26.0, *depth as f64);
                             let l = if *last { 1.0 } else { 0.0 };
                             let g0 = if guides.first().copied().unwrap_or(false) { 1.0 } else { 0.0 };
                             script_apply_eval!(cx, tree, {width: #(w) draw_bg +: {depth: #(d) last: #(l) g0: #(g0)}});
                         }
-                        let glyph = if *voice { "🔊" } else if *encrypted { "🔒" } else { "#" };
-                        row.label(cx, ids!(item.hash)).set_text(cx, glyph);
+                        row.view(cx, ids!(item.i_voice)).set_visible(cx, *voice && !*afk);
+                        row.view(cx, ids!(item.i_afk)).set_visible(cx, *voice && *afk);
+                        row.view(cx, ids!(item.chat)).set_visible(cx, *voice && !*afk && hovered);
+                        let hash = row.label(cx, ids!(item.hash));
+                        hash.set_visible(cx, !*voice);
+                        hash.set_text(cx, if *encrypted { "🔒" } else { "#" });
+                        {
+                            let g0 = guides.first().copied().unwrap_or(false);
+                            draw_people(cx, &row, self.voice.get(id).map(Vec::as_slice).unwrap_or(&[]), &self.levels, &self.local_muted, *depth, *last, g0);
+                        }
                         row.label(cx, ids!(item.name)).set_text(cx, name);
                         row.draw_all(cx, &mut Scope::empty());
                     }
@@ -570,6 +616,54 @@ impl Widget for ChannelList {
     fn handle_event(&mut self, cx: &mut Cx, event: &Event, scope: &mut Scope) {
         self.handle_timers(cx, event);
         self.view.handle_event(cx, event, scope);
+    }
+}
+
+/// Rails' participant rows under a voice channel: the first `SLOTS`, then
+/// "+N more".
+#[allow(clippy::too_many_arguments)]
+fn draw_people(cx: &mut Cx2d, row: &WidgetRef, people: &[VoicePerson], levels: &HashMap<String, f32>, local_muted: &HashSet<String>, depth: u8, last: bool, g0: bool) {
+    const SLOTS: usize = 12;
+    let mut area = row.widget(cx, ids!(people));
+    area.set_visible(cx, !people.is_empty());
+    if people.is_empty() {
+        return;
+    }
+    let (d, l, g) = (depth as f64, if last { 1.0 } else { 0.0 }, if g0 { 1.0 } else { 0.0 });
+    let indent = depth as f64 * 26.0;
+    script_apply_eval!(cx, area, {padding: mod.prelude.widgets.Inset{left: #(indent)} draw_bg +: {depth: #(d) last: #(l) g0: #(g)}});
+    let slots = [ids!(p0), ids!(p1), ids!(p2), ids!(p3), ids!(p4), ids!(p5), ids!(p6), ids!(p7), ids!(p8), ids!(p9), ids!(p10), ids!(p11)];
+    for (i, path) in slots.into_iter().enumerate() {
+        let slot = area.view(cx, path);
+        let Some(p) = people.get(i) else {
+            slot.set_visible(cx, false);
+            continue;
+        };
+        slot.set_visible(cx, true);
+        let (speak, level) = levels.get(&p.pubkey).map_or((0.0, 0.0), |l| (((*l / 0.12).min(1.0)) as f64, l.min(1.0) as f64));
+        let mut bg = area.widget(cx, path);
+        script_apply_eval!(cx, bg, {draw_bg +: {speak: #(speak) level: #(level)}});
+        slot.label(cx, ids!(name)).set_text(cx, &p.name);
+        slot.label(cx, ids!(avatar.initial)).set_text(cx, &p.initial);
+        let mut face = slot.widget(cx, ids!(avatar));
+        let a = rgba(p.avatar, 1.0);
+        script_apply_eval!(cx, face, {draw_bg +: {color: #(a)}});
+        let pic = slot.image(cx, ids!(avatar.pic));
+        crate::images::show(cx, &pic, p.picture.as_deref());
+        // Rails: deafened shows the ban icon; muted (and not deafened) the speaker-x.
+        // Rails: our own mute and deafen in gray-500, a moderator's in red.
+        slot.view(cx, ids!(muted)).set_visible(cx, p.self_mute && !p.self_deaf && !p.server_mute);
+        slot.view(cx, ids!(deaf)).set_visible(cx, p.self_deaf && !p.server_deaf);
+        slot.view(cx, ids!(smute)).set_visible(cx, p.server_mute);
+        slot.view(cx, ids!(lmute)).set_visible(cx, local_muted.contains(&p.pubkey));
+        slot.view(cx, ids!(sdeaf)).set_visible(cx, p.server_deaf);
+        slot.view(cx, ids!(bcast)).set_visible(cx, p.broadcasting);
+        slot.view(cx, ids!(lifted)).set_visible(cx, p.showcased && !p.broadcasting);
+    }
+    let more = area.label(cx, ids!(more));
+    more.set_visible(cx, people.len() > SLOTS);
+    if people.len() > SLOTS {
+        more.set_text(cx, &format!("+{} more", people.len() - SLOTS));
     }
 }
 
@@ -857,6 +951,7 @@ pub const PERMISSION_GROUPS: &[(&str, &[(&str, &str)])] = &[
         ("speak", "Speak in voice channels"),
         ("video", "Send video in voice channels"),
         ("screen_share", "Share their screen in voice channels"),
+        ("elevate_voice", "Let members in nested voice channels be heard here"),
         ("mute_members", "Server-mute other members in voice"),
         ("deafen_members", "Server-deafen other members in voice"),
         ("move_members", "Move members between voice channels"),

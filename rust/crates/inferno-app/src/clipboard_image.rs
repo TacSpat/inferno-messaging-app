@@ -123,7 +123,19 @@ impl App {
     /// Ctrl+V (or Shift+Insert) in the composer. True when the paste is
     /// files: the text paste on its way (their paths) is to be dropped.
     pub(crate) fn paste_into_composer(&mut self) -> bool {
-        let files = copied_files();
+        // Asked off the UI thread, and only briefly waited for: when we own
+        // the clipboard ourselves (a link we just copied), only this thread's
+        // event loop can answer, so waiting here would freeze the app.
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let files = copied_files();
+            let text = files.is_empty() && has_text();
+            let _ = tx.send((files, text));
+        });
+        let Ok((files, text)) = rx.recv_timeout(std::time::Duration::from_millis(250)) else {
+            // No answer yet: it's text (ours), which Makepad pastes itself.
+            return false;
+        };
         if !files.is_empty() {
             std::thread::spawn(move || {
                 let read: Result<Vec<_>, String> = files
@@ -138,7 +150,7 @@ impl App {
             return true;
         }
         // Rails: text on the clipboard is a text paste.
-        if has_text() {
+        if text {
             return false;
         }
         std::thread::spawn(|| {

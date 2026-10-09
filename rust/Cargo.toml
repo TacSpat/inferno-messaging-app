@@ -12,7 +12,7 @@ inferno-core = { path = "crates/inferno-core" }
 # Our fork, branch `inferno-fixes`: makepad dev @ 44a01c5 (2026-10-05) plus our
 # fixes (Linux video volume stays inside the app; a PortalList scroll-bar
 # drag keeps following the mouse). Moving the pin = rebasing that branch.
-makepad-widgets = { git = "https://github.com/TacSpat/makepad.git", rev = "28207791a22b95de2a420eca730005bc2516907a", default-features = false, features = ["rich_text"] }
+makepad-widgets = { git = "https://github.com/TacSpat/makepad.git", rev = "b2e9c253fbc87b2ccca05222e7455628dbbcccf9", default-features = false, features = ["rich_text"] }
 
 # scrypt (NIP-49 key backups) takes ~11s per call unoptimized; keep the
 # hashing crates fast in dev builds too.
@@ -24,3 +24,10 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.sha2]
 opt-level = 3
+
+# LiveKit's WebRTC bindings with one addition: a remote audio track's
+# playout volume (per-person volume in voice). Copies of webrtc-sys 0.3.48
+# and libwebrtc 0.3.51; drop when upstream exposes it.
+[patch.crates-io]
+webrtc-sys = { path = "vendor/webrtc-sys" }
+libwebrtc = { path = "vendor/libwebrtc" }

@@ -61,7 +61,11 @@ async fn create_invite_join_chat_dm_and_restart() {
 
     // Alice talks; the owner's timeline gets it live.
     alice.send(&gid, &general, &Outgoing { content: "hello from alice", ..Default::default() }).await.unwrap();
-    wait_for(&mut owner_rx, "alice's message", |u| matches!(u, Update::Channel { gid: g, .. } if *g == gid)).await;
+    // (History pages say the channel changed too: wait for the message itself.)
+    let owner_has = || owner.timeline(&gid, &general).unwrap().last().and_then(|m| m.content.clone()).as_deref() == Some("hello from alice");
+    while !owner_has() {
+        wait_for(&mut owner_rx, "alice's message", |u| matches!(u, Update::Channel { gid: g, .. } if *g == gid)).await;
+    }
     let tl = owner.timeline(&gid, &general).unwrap();
     assert_eq!(tl.last().unwrap().content.as_deref(), Some("hello from alice"));
     assert_eq!(tl.last().unwrap().author, alice_keys.public_key());
@@ -131,7 +135,11 @@ async fn encrypted_channel_keys_reach_members_who_join_later() {
     wait_for(&mut alice_rx, "the key share", |u| matches!(u, Update::Channel { channel_id, .. } if *channel_id == vault)).await;
 
     owner.send(&gid, &vault, &Outgoing { content: "welcome in", ..Default::default() }).await.unwrap();
-    wait_for(&mut alice_rx, "the sealed message", |u| matches!(u, Update::Channel { channel_id, .. } if *channel_id == vault)).await;
+    // (History pages say the channel changed too: wait for the message itself.)
+    let has = || alice.timeline(&gid, &vault).unwrap().iter().any(|m| m.content.as_deref() == Some("welcome in"));
+    while !has() {
+        wait_for(&mut alice_rx, "the sealed message", |u| matches!(u, Update::Channel { channel_id, .. } if *channel_id == vault)).await;
+    }
     let tl = alice.timeline(&gid, &vault).unwrap();
     assert!(tl.iter().any(|m| m.content.as_deref() == Some("welcome in")), "{tl:?}");
 }
@@ -711,4 +719,153 @@ async fn onboarding_rules_and_self_assignable_roles() {
     let _ = wait_for(&mut rx, "anything", |_| true).await;
     // A forged self_roles tag can't reach admin either.
     assert!(!s.has(&alice_keys.public_key(), inferno_core::server::Permission::Administrator));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn history_comes_a_page_at_a_time() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("Long history").await.unwrap();
+    let general = owner.server(&gid).unwrap().unwrap().structure.channels[0].id.clone();
+    // An hour old (the live subscription only reaches a minute back).
+    let state = owner.server(&gid).unwrap().unwrap();
+    let channel = state.channel(&general).unwrap();
+    let client = Client::default();
+    client.add_relay(&url).await.unwrap();
+    client.connect().await;
+    let hour_ago = inferno_core::store::now_secs() - 3600;
+    for i in 0..60 {
+        let text = format!("m{i}");
+        let e = EventBuilder::new(Kind::Custom(9), text)
+            .tags([Tag::parse(["h", channel.group_id.as_deref().unwrap()]).unwrap()])
+            .custom_created_at(Timestamp::from((hour_ago + i) as u64))
+            .finalize(&owner_keys)
+            .unwrap();
+        client.send_event(&e).await.unwrap();
+    }
+    let link = owner.create_invite(&gid, 0, 0).await.unwrap();
+
+    let alice_keys = Keys::generate();
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    let mut rx = alice.updates();
+    alice.join(&link).await.unwrap();
+    let page = inferno_core::session::HISTORY_PAGE;
+    let count = || alice.timeline(&gid, &general).unwrap().iter().filter(|m| m.content.as_deref().is_some_and(|c| c.starts_with('m'))).count();
+    // The newest page only, and a gap above it.
+    // Done once the page's span is written down (its events land first).
+    let before = alice.history_gaps(&gid, &general).unwrap();
+    while count() < page || alice.history_gaps(&gid, &general).unwrap() == before {
+        wait_for(&mut rx, "the newest page", |u| matches!(u, Update::Channel { .. })).await;
+    }
+    assert_eq!(count(), page);
+    let gaps = alice.history_gaps(&gid, &general).unwrap();
+    assert_eq!(gaps.len(), 1, "older history is still missing: {gaps:?}");
+    // Asked for (its placeholders came into view): the rest, and no gap.
+    alice.want_history(&gid, &general, gaps[0]).unwrap();
+    while count() < 60 {
+        wait_for(&mut rx, "the older page", |u| matches!(u, Update::Channel { .. })).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(alice.history_gaps(&gid, &general).unwrap().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn joining_and_leaving_voice_reaches_everyone() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let dir = tempfile::tempdir().unwrap();
+    let alice_keys = Keys::generate();
+    let alice_db = dir.path().join("alice.sqlite3");
+    let owner = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    let lounge = owner.create_channel(&gid, &ChannelSpec { name: "lounge".into(), voice: true, ..Default::default() }).await.unwrap();
+    let den = owner.create_channel(&gid, &ChannelSpec { name: "den".into(), voice: true, ..Default::default() }).await.unwrap();
+    let link = owner.create_invite(&gid, 0, 0).await.unwrap();
+    let alice = session(&alice_keys, Store::open(&alice_db).unwrap(), &url).await;
+    alice.join(&link).await.unwrap();
+    let mut owner_rx = owner.updates();
+    let in_voice = |s: &Session, who: &Keys| s.voice_states(&gid).into_iter().find(|v| v.pubkey == who.public_key());
+
+    alice.join_voice(&gid, &lounge).await.unwrap();
+    assert_eq!(alice.my_voice().unwrap().channel_id, lounge);
+    wait_for(&mut owner_rx, "alice in voice", |u| matches!(u, Update::Voice(g) if *g == gid) && in_voice(&owner, &alice_keys).is_some()).await;
+    assert_eq!(in_voice(&owner, &alice_keys).unwrap().channel_id, lounge);
+
+    // Mute shows; moving keeps one state.
+    alice.set_voice_flags(true, false).await.unwrap();
+    wait_for(&mut owner_rx, "alice muted", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.self_mute)).await;
+    alice.join_voice(&gid, &den).await.unwrap();
+    wait_for(&mut owner_rx, "alice moved", |_| in_voice(&owner, &alice_keys).is_some_and(|v| v.channel_id == den)).await;
+    assert_eq!(owner.voice_states(&gid).len(), 1);
+
+    // Someone arriving later sees who is there.
+    let late = session(&Keys::generate(), Store::open_in_memory().unwrap(), &url).await;
+    late.join(&link).await.unwrap();
+    let mut late_rx = late.updates();
+    if in_voice(&late, &alice_keys).is_none() {
+        wait_for(&mut late_rx, "alice seen late", |_| in_voice(&late, &alice_keys).is_some()).await;
+    }
+
+    alice.leave_voice().await.unwrap();
+    wait_for(&mut owner_rx, "alice left", |_| in_voice(&owner, &alice_keys).is_none()).await;
+
+    // Killed while in voice: the next start says we left.
+    alice.join_voice(&gid, &lounge).await.unwrap();
+    wait_for(&mut owner_rx, "alice back", |_| in_voice(&owner, &alice_keys).is_some()).await;
+    drop(alice);
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    let _alice = session(&alice_keys, Store::open(&alice_db).unwrap(), &url).await;
+    wait_for(&mut owner_rx, "alice's ghost cleared", |_| in_voice(&owner, &alice_keys).is_none()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn old_voice_requests_are_not_answered() {
+    let relay = MockRelay::run().await.unwrap();
+    let url = relay.url().await.to_string();
+    let owner_keys = Keys::generate();
+    let owner = session(&owner_keys, Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    let lounge = owner.create_channel(&gid, &ChannelSpec { name: "lounge".into(), voice: true, ..Default::default() }).await.unwrap();
+    owner
+        .update_metadata(&gid, |m| {
+            m.voice_enabled = true;
+            m.voice_providers = vec![owner_keys.public_key()];
+        })
+        .await
+        .unwrap();
+    let creds = inferno_core::livekit_token::Credentials { url: "ws://lk".into(), api_key: "k".into(), api_secret: "s".into() };
+    owner.set_livekit_credentials(Some(&creds)).unwrap();
+    let link = owner.create_invite(&gid, 0, 0).await.unwrap();
+    let alice_keys = Keys::generate();
+    let alice = session(&alice_keys, Store::open_in_memory().unwrap(), &url).await;
+    alice.join(&link).await.unwrap();
+
+    // A request from five minutes ago (as a restart catching up meets it).
+    let body = serde_json::json!({
+        "type": "voice_token_request", "request_id": "old", "server_nostr_group_id": gid,
+        "channel_id": lounge, "user_pubkey": alice_keys.public_key().to_hex(),
+    });
+    let content = nip44::encrypt(alice_keys.secret_key(), &owner_keys.public_key(), body.to_string(), nip44::Version::V2).unwrap();
+    let old = EventBuilder::new(Kind::PrivateDirectMessage, content)
+        .tags([Tag::public_key(owner_keys.public_key())])
+        .custom_created_at(Timestamp::now() - Duration::from_secs(300))
+        .finalize(&alice_keys)
+        .unwrap();
+    let client = Client::default();
+    client.add_relay(&url).await.unwrap();
+    client.connect().await;
+    client.send_event(&old).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let answers = || async {
+        let filter = Filter::new().author(owner_keys.public_key()).kind(Kind::PrivateDirectMessage).pubkey(alice_keys.public_key());
+        client.fetch_events(filter).timeout(Duration::from_secs(2)).await.unwrap().len()
+    };
+    assert_eq!(answers().await, 0, "an old request was answered");
+
+    // A fresh one still is.
+    let ticket = alice.voice_ticket(&gid, &lounge).await.unwrap();
+    assert!(!ticket.token.is_empty());
+    assert_eq!(answers().await, 1);
 }
