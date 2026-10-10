@@ -31,10 +31,6 @@ impl Camera {
         }
     }
 
-    pub fn has_camera(&self) -> bool {
-        !self.devices.is_empty()
-    }
-
     /// Opens or closes the camera (a test run never opens one: its frames
     /// come from a pattern).
     pub fn set_on(&mut self, cx: &mut Cx, on: bool) {

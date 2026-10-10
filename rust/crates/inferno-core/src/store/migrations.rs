@@ -93,6 +93,24 @@ const MIGRATIONS: &[&str] = &[
         wrap_id TEXT PRIMARY KEY
     );
     "#,
+    // Events no relay has taken yet (or that some relays still lack), kept
+    // whole so they go out after a restart. `relays`: a JSON list of the
+    // relays still to reach, empty for any one of ours. `shows_as`: the id
+    // the UI knows it by (a DM's message, not its gift wrap). `address`: a
+    // replaceable event's kind:pubkey:d, so a newer copy replaces it here.
+    r#"
+    CREATE TABLE outbox (
+        event_id TEXT PRIMARY KEY,
+        json     TEXT NOT NULL,
+        shows_as TEXT NOT NULL,
+        address  TEXT,
+        relays   TEXT NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_at  INTEGER NOT NULL,
+        added_at INTEGER NOT NULL
+    );
+    CREATE INDEX outbox_next ON outbox (next_at);
+    "#,
 ];
 
 pub fn run(conn: &mut Connection) -> rusqlite::Result<()> {

@@ -13,6 +13,7 @@ pub(crate) mod events;
 mod dms;
 mod local;
 mod migrations;
+mod outbox;
 
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
@@ -21,6 +22,7 @@ use rusqlite::Connection;
 
 pub use events::PutOutcome;
 pub use local::{RelayRow, RelaySource};
+pub use outbox::Queued;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

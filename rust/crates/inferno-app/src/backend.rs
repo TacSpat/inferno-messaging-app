@@ -402,6 +402,8 @@ pub struct MessageRow {
     /// A placeholder where history is still missing: the `until` of the
     /// page that fills it (session/history.rs). Drawn as a grey message.
     pub gap: Option<i64>,
+    /// No relay has taken it yet: it waits in the outbox ("Sending…").
+    pub pending: bool,
 }
 
 /// Placeholders per gap in the history.
@@ -425,6 +427,7 @@ impl MessageRow {
             edited: false,
             pinned: false,
             grouped: false,
+            pending: false,
             system: false,
             invite: None,
             emojis: HashMap::new(),
@@ -1919,6 +1922,8 @@ impl Backend {
         let Some(with) = self.dm else { return };
         let me = self.session.keys().public_key();
         let messages = self.session.dm_messages(&with).unwrap_or_default();
+        // Not taken by any relay yet: "Sending…".
+        let queued = self.session.queued();
         let person = self.person(&with);
         let me_person = self.person(&me);
         let my_name = if with == me {
@@ -1974,13 +1979,14 @@ impl Backend {
                 reply: None,
                 edited: m.edited,
                 pinned: false,
-                grouped,
+                grouped: grouped && !queued.contains(&m.id.to_hex()),
                 system: false,
                 invite,
                 emojis: all_emojis.clone(),
                 files: Vec::new(),
                 spoiler: m.spoiler,
                 gap: None,
+                pending: queued.contains(&m.id.to_hex()),
             });
         }
         Cx::post_action(Update::DmHeader { person, request });
@@ -2218,6 +2224,8 @@ impl Backend {
             SessionUpdate::Profile(_) => self.refresh_people(),
             SessionUpdate::Voice(_) => self.publish_voice(),
             SessionUpdate::VoiceModerated { .. } => {}
+            // Something was queued or went out: "Sending…" comes or goes.
+            SessionUpdate::Outbox => self.republish_messages(),
             SessionUpdate::SpeakRequest { gid, channel_id, from } => {
                 if let Ok(Some(state)) = self.session.server(&gid) {
                     let name = display(&state, &from, &People::new(&self.session)).name;
@@ -2817,6 +2825,7 @@ impl Backend {
         let (Some(gid), Some(ch)) = (self.server.clone(), self.channel.clone()) else { return };
         let Ok(Some(state)) = self.session.server(&gid) else { return };
         let Ok(timeline) = self.session.timeline(&gid, &ch) else { return };
+        let queued = self.session.queued();
         let mut invites: Vec<_> = timeline.iter().map(|m| m.content.as_deref().and_then(|c| self.invite_card(c))).collect();
         let server_emojis: HashMap<String, String> = state.emojis.iter().map(|e| (e.name.clone(), e.url.clone())).collect();
         let people = People::new(&self.session);
@@ -2847,7 +2856,7 @@ impl Backend {
                 reply,
                 edited: m.edited_at.is_some(),
                 pinned: m.pinned,
-                grouped,
+                grouped: grouped && !queued.contains(&m.id.to_hex()),
                 system: false,
                 invite,
                 emojis: {
@@ -2858,6 +2867,7 @@ impl Backend {
                 files: m.files.clone(),
                 spoiler: m.spoiler,
                 gap: None,
+                pending: queued.contains(&m.id.to_hex()),
             });
         }
         // Where history is still missing, placeholders: above the first

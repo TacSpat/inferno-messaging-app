@@ -146,6 +146,7 @@ pub fn demo_rows() -> Vec<MessageRow> {
                 files: Vec::new(),
                 spoiler: false,
                 gap: None,
+                pending: false,
                 grouped: demo::grouped(i.checked_sub(1).map(|p| &history[p]), m),
                 system: m.system,
             }
@@ -482,7 +483,9 @@ impl Widget for MessageList {
                 name.set_text(cx, &msg.author);
                 let edited = if msg.edited { "  (edited)" } else { "" };
                 let pinned = if msg.pinned { "  📌" } else { "" };
-                row.label(cx, ids!(content.head.time)).set_text(cx, &format!("{}{edited}{pinned}", clock(msg.at)));
+                // No relay has it yet; it goes out on its own when one does.
+                let sending = if msg.pending { "  · Sending…" } else { "" };
+                row.label(cx, ids!(content.head.time)).set_text(cx, &format!("{}{edited}{pinned}{sending}", clock(msg.at)));
                 row.view(cx, ids!(content.reply)).set_visible(cx, msg.reply.is_some());
                 row.label(cx, ids!(content.reply.text)).set_text(cx, msg.reply.as_deref().unwrap_or(""));
                 item.draw_all(cx, &mut Scope::empty());

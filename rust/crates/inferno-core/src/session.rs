@@ -24,6 +24,7 @@ use crate::{dtag, kinds};
 use crate::social::{self, DmMessage, Friendship, Payload, Response, Rumor};
 
 mod history;
+mod outbox;
 mod voice;
 pub use voice::{VoiceModeration, VoiceState, VoiceTicket};
 pub use history::{Coverage, PAGE as HISTORY_PAGE};
@@ -173,6 +174,8 @@ pub enum Update {
     SpeakRequest { gid: String, channel_id: String, from: PublicKey },
     /// A moderator muted, deafened, moved or disconnected us in voice.
     VoiceModerated { gid: String, action: VoiceModeration, by: PublicKey },
+    /// What's waiting to be sent changed (see `Session::queued`).
+    Outbox,
 }
 
 /// A public server, as discovery lists it.
@@ -252,6 +255,8 @@ pub struct Session {
     refresh: Arc<tokio::sync::Notify>,
     /// Wakes the background task that debounces config pushes.
     config_dirty: Arc<tokio::sync::Notify>,
+    /// Something was queued: the outbox sends it without waiting its turn.
+    outbox_wake: Arc<tokio::sync::Notify>,
     /// GIFs shared on Nostr, fetched at most every few minutes; searches
     /// filter this locally (relays rate-limit).
     gif_cache: Mutex<Option<(std::time::Instant, Vec<Event>)>>,
@@ -371,6 +376,7 @@ impl Session {
             },
             gif_pool: tokio::sync::OnceCell::new(),
             config_dirty: Arc::new(tokio::sync::Notify::new()),
+            outbox_wake: Arc::new(tokio::sync::Notify::new()),
             history: Mutex::new(Default::default()),
             history_wake: Arc::new(tokio::sync::Notify::new()),
             server_dirty: Arc::new(Mutex::new(Default::default())),
@@ -386,6 +392,7 @@ impl Session {
         session.spawn_batchers();
         session.spawn_history();
         session.spawn_voice();
+        session.spawn_outbox();
         Ok(session)
     }
 
@@ -454,15 +461,12 @@ impl Session {
             .map_err(|e| SessionError::Other(e.to_string()))
     }
 
+    /// Keeps `event` and sends it out; if no relay takes it now, it waits
+    /// in the outbox and goes out when one does.
     async fn publish(&self, event: &Event) -> Result<PublishReport> {
         let event = &self.fresh(event.clone())?;
         self.store.put_event(event)?;
-        let report = self.pool.publish(event).await?;
-        if !report.any_accepted() {
-            tracing::warn!("rejected {}: {:?}", event.id, report.rejected);
-            return Err(SessionError::NotPublished);
-        }
-        Ok(report)
+        self.send_out(event, None).await
     }
 
     /// Queues a config push; changes within a few seconds go out as one.
@@ -485,7 +489,14 @@ impl Session {
     /// Pushes queued config now (e.g. before shutting down).
     pub async fn flush_config(&self) {
         if let Err(e) = (ConfigSync { keys: &self.keys, pool: &self.pool, store: &self.store }).push().await {
-            tracing::warn!("config push failed: {e}");
+            // Pushed again in a minute (it pulls and merges first, so a
+            // retry never overwrites what changed meanwhile).
+            tracing::warn!("config push failed, retrying: {e}");
+            let dirty = self.config_dirty.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                dirty.notify_one();
+            });
         }
     }
 
@@ -787,9 +798,7 @@ impl Session {
         let state = self.server(gid)?.ok_or(SessionError::Unknown)?;
         let event = self.fresh(publish::structure(&self.keys, &state, structure)?)?;
         self.store.put_event(&event)?;
-        if !self.pool.publish(&event).await?.any_accepted() {
-            return Err(SessionError::NotPublished);
-        }
+        self.send_out(&event, None).await?;
         Ok(event)
     }
 
@@ -853,7 +862,7 @@ impl Session {
             let wraps = channel_keys::share(&self.keys, gid, &id, &key, channel_keys::readers(&preview, &channel))
                 .map_err(SessionError::Other)?;
             for w in &wraps {
-                self.pool.publish(w).await?;
+                self.send_out(w, None).await?;
             }
             self.channel_keys.lock().unwrap_or_else(|e| e.into_inner()).entry(gid.into()).or_default().insert(key);
         }
@@ -928,7 +937,7 @@ impl Session {
             });
             if let (Some(key), false) = (key, added.is_empty()) {
                 for w in channel_keys::share(&self.keys, gid, id, &key, added).map_err(SessionError::Other)? {
-                    self.pool.publish(&w).await?;
+                    self.send_out(&w, None).await?;
                 }
             }
         }
@@ -1101,12 +1110,11 @@ impl Session {
         }
         self.keep_dm(&own.id, &msg)?;
         let _ = self.updates.send(Update::Social);
-        let mut accepted = false;
+        // Theirs and our own copy; either waits in the outbox if need be
+        // (the conversation shows it "Sending…" meanwhile).
+        let shows = msg.id.to_hex();
         for e in &events {
-            accepted |= self.pool.publish(e).await?.any_accepted();
-        }
-        if !accepted {
-            return Err(SessionError::NotPublished);
+            self.send_out(e, Some(&shows)).await?;
         }
         Ok(msg.id)
     }
@@ -1675,7 +1683,7 @@ impl Session {
             }
         }
         for w in &wraps {
-            self.pool.publish(w).await?;
+            self.send_out(w, None).await?;
         }
         Ok(())
     }

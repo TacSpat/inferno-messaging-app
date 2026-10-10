@@ -67,6 +67,13 @@ impl PublishReport {
     }
 }
 
+/// A refusal that trying again won't change (NIP-01's machine-readable
+/// prefixes: the relay won't take this event from us, ever).
+pub fn is_permanent(reason: &str) -> bool {
+    let r = reason.to_ascii_lowercase();
+    ["blocked:", "invalid:", "pow:", "restricted:", "mute:"].iter().any(|p| r.starts_with(p))
+}
+
 fn is_rate_limit(reason: &str) -> bool {
     let r = reason.to_ascii_lowercase();
     r.starts_with("rate-limited") || r.contains("rate limit") || r.contains("too fast") || r.contains("slow down")
@@ -136,6 +143,24 @@ impl RelayPool {
             }
         }
         Ok(report)
+    }
+
+    /// Publishes to these relays only (a retry, or a repair).
+    pub async fn publish_to(&self, event: &Event, urls: &[RelayUrl]) -> Result<PublishReport, Error> {
+        let output = self.client.send_event(event).to(urls.iter().cloned()).await?;
+        Ok(PublishReport { accepted: output.success.into_keys().collect(), rejected: output.failed.into_iter().collect() })
+    }
+
+    /// The relays we publish to (all of ours).
+    pub async fn write_relays(&self) -> Vec<RelayUrl> {
+        self.client.relays().await.into_keys().collect()
+    }
+
+    /// Which of `ids` one relay holds.
+    pub async fn held_by(&self, url: &RelayUrl, ids: Vec<EventId>) -> Result<std::collections::HashSet<EventId>, Error> {
+        let filter = Filter::new().ids(ids);
+        let events = self.client.fetch_events(ReqTarget::single(url.clone(), [filter])).timeout(FETCH_TIMEOUT).await?;
+        Ok(events.into_iter().map(|e| e.id).collect())
     }
 
     /// Opens (or replaces) the long-lived subscription named `key`. Events

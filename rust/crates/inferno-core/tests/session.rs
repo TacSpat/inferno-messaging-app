@@ -874,3 +874,53 @@ async fn old_voice_requests_are_not_answered() {
     assert!(!ticket.token.is_empty());
     assert_eq!(answers().await, 1);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn what_no_relay_took_goes_out_when_one_comes_back() {
+    // A relay that isn't up yet.
+    let port = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let url = format!("ws://127.0.0.1:{port}");
+    let keys = Keys::generate();
+    let owner = session(&keys, Store::open_in_memory().unwrap(), &url).await;
+    let gid = owner.create_server("x").await.unwrap();
+    let general = owner.create_channel(&gid, &ChannelSpec { name: "general".into(), ..Default::default() }).await.unwrap();
+    let sent = owner.send(&gid, &general, &Outgoing { content: "written offline", ..Default::default() }).await.unwrap();
+    assert!(owner.queued().contains(&sent.id.to_hex()), "waiting to be sent");
+
+    // The relay comes up: everything waiting goes out, nothing is lost.
+    let relay = nostr_sdk::prelude::LocalRelay::builder().addr(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)).port(port).build();
+    relay.run().await.unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    while !owner.queued().is_empty() {
+        assert!(std::time::Instant::now() < deadline, "still queued: {:?}", owner.queued());
+        owner.send_queued_now();
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let client = Client::default();
+    client.add_relay(&url).await.unwrap();
+    client.connect().await;
+    let got = client.fetch_events(Filter::new().id(sent.id)).timeout(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(got.len(), 1, "the message reached the relay");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn healing_restores_a_server_on_a_relay_that_lost_it() {
+    let first = MockRelay::run().await.unwrap();
+    let keys = Keys::generate();
+    let owner = session(&keys, Store::open_in_memory().unwrap(), &first.url().await.to_string()).await;
+    let gid = owner.create_server("x").await.unwrap();
+    // A relay that never had the server (or wiped it).
+    let empty = MockRelay::run().await.unwrap();
+    let empty_url = empty.url().await.to_string();
+    owner.add_relay(&empty_url).await.unwrap();
+    let repaired = owner.heal().await.unwrap();
+    assert!(repaired > 0, "something was sent again");
+    let client = Client::default();
+    client.add_relay(&empty_url).await.unwrap();
+    client.connect().await;
+    let filter = Filter::new().author(keys.public_key()).kind(Kind::Custom(inferno_core::kinds::SERVER_METADATA)).identifier(inferno_core::dtag::metadata(&gid));
+    let got = client.fetch_events(filter).timeout(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(got.len(), 1, "the server's metadata is back on the relay that lacked it");
+    // A second pass finds nothing missing.
+    assert_eq!(owner.heal().await.unwrap(), 0);
+}
